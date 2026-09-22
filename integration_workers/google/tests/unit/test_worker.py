@@ -10,6 +10,7 @@ import asyncio
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -901,6 +902,137 @@ class TestGoogleAPIClient:
             # No refetch, no retry.
             assert mock_google_service.people().get.call_count == 0
             assert mock_google_service.people().updateContact.call_count == 1
+
+    @staticmethod
+    def _http_error(status: int, message: str, reason: str) -> Any:
+        """An ``HttpError`` with the given status and Google error body."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = status
+        body = (
+            f'{{"error": {{"code": {status}, "message": "{message}", '
+            f'"status": "{reason}"}}}}'
+        )
+        return HttpError(resp=mock_response, content=body.encode())
+
+    def _client(self, mock_auth_service: Any) -> Any:
+        from google_client import GoogleAPIClient
+
+        return GoogleAPIClient(
+            auth_service=mock_auth_service,
+            google_account_email="test@example.com",
+            google_client_id="client_id",
+            google_client_secret="client_secret",
+            user_id=1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_contact_404_raises_contact_not_found(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """A contact deleted on Google's side surfaces as a typed not-found."""
+        from google_client import GoogleContactNotFoundError
+
+        not_found = self._http_error(
+            404, "Requested entity was not found.", "NOT_FOUND"
+        )
+        mock_google_service.people().updateContact().execute.side_effect = not_found
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            mock_google_service.people().get.reset_mock()
+            with pytest.raises(GoogleContactNotFoundError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/cGONE",
+                    contact_data={"names": [{"givenName": "Gone"}]},
+                    etag="some_etag",
+                )
+
+        assert exc_info.value.resource_name == "people/cGONE"
+        assert exc_info.value.__cause__ is not_found
+        assert mock_google_service.people().get.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_update_contact_404_on_conflict_refetch_raises_contact_not_found(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """A contact deleted between the etag conflict and its refetch is not-found."""
+        from google_client import GoogleContactNotFoundError
+
+        mock_google_service.people().updateContact().execute.side_effect = (
+            self._http_error(400, "Request etag is different", "FAILED_PRECONDITION")
+        )
+        mock_google_service.people().get().execute.side_effect = self._http_error(
+            404, "Requested entity was not found.", "NOT_FOUND"
+        )
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            with pytest.raises(GoogleContactNotFoundError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/cGONE",
+                    contact_data={"names": [{"givenName": "Gone"}]},
+                    etag="stale_etag",
+                )
+
+        assert exc_info.value.resource_name == "people/cGONE"
+
+    @pytest.mark.asyncio
+    async def test_update_contact_404_on_conflict_retry_raises_contact_not_found(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """A contact deleted between the refetch and the retried update is not-found."""
+        from google_client import GoogleContactNotFoundError
+
+        mock_google_service.people().updateContact().execute.side_effect = [
+            self._http_error(400, "Request etag is different", "FAILED_PRECONDITION"),
+            self._http_error(404, "Requested entity was not found.", "NOT_FOUND"),
+        ]
+        mock_google_service.people().get().execute.return_value = {
+            "resourceName": "people/cGONE",
+            "etag": "fresh_etag",
+        }
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            with pytest.raises(GoogleContactNotFoundError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/cGONE",
+                    contact_data={"names": [{"givenName": "Gone"}]},
+                    etag="stale_etag",
+                )
+
+        assert exc_info.value.resource_name == "people/cGONE"
+
+    @pytest.mark.asyncio
+    async def test_update_contact_server_error_still_raises_http_error(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """Only a 404 becomes not-found; other failures keep their HttpError."""
+        from googleapiclient.errors import HttpError
+
+        mock_google_service.people().updateContact().execute.side_effect = (
+            self._http_error(500, "Internal error", "INTERNAL")
+        )
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            with pytest.raises(HttpError) as exc_info:
+                await client.update_contact(
+                    resource_name="people/c123",
+                    contact_data={"names": [{"givenName": "John"}]},
+                )
+
+        assert exc_info.value.resp.status == 500
 
     @pytest.mark.asyncio
     async def test_update_contact_empty_fields_raises_error(
