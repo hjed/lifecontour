@@ -40,6 +40,11 @@ from core_shared.models.outbox_events import (
     JournalStatusEventData,
     JournalSyncEventData,
 )
+from core_shared.models.participant_email import (
+    MAX_PARTICIPANT_DISPLAY_NAME_LENGTH,
+    MAX_PARTICIPANT_EMAIL_LENGTH,
+    normalise_participant_email,
+)
 from core_shared.models.route import Route
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
@@ -198,7 +203,7 @@ class ContactResolver:
         self.connection = connection
 
     async def resolve_by_email(self, email: str) -> int | None:
-        """Resolve a contact by email address.
+        """Resolve a contact by email address, ignoring case and whitespace.
 
         Args:
             email: Email address to search for
@@ -212,10 +217,10 @@ class ContactResolver:
                 FROM contacts c
                 JOIN contact_methods cm ON c.id = cm.contact_id
                 WHERE cm.method_type = 'email'
-                  AND cm.value = :email
+                  AND LOWER(BTRIM(cm.value)) = :email
                 LIMIT 1
             """),
-            {"email": email},
+            {"email": normalise_participant_email(email)},
         )
         row = result.fetchone()
         return row.id if row else None
@@ -2389,12 +2394,17 @@ class JournalOutboxEventProcessor:
         """The payloads' emails that resolved to no contact, as unmatched rows.
 
         The account owner's own address (``is_self``) is never a participant
-        worth suggesting, so it is left out.
+        worth suggesting, so it is left out, as is an address too long to be
+        one. The integration's display name is external text of any length,
+        so it is truncated to what the column holds rather than failing the
+        sync.
         """
         entries: list[UnmatchedParticipantEmail] = []
         for payload in payloads:
-            email = payload["email"]
-            if email in resolved_contact_ids or payload.get("is_self"):
+            if payload["email"] in resolved_contact_ids or payload.get("is_self"):
+                continue
+            email = normalise_participant_email(payload["email"])
+            if not email or len(email) > MAX_PARTICIPANT_EMAIL_LENGTH:
                 continue
             status = self._parse_inbound_status(payload.get("status"), journal_id)
             role = self._parse_inbound_role(payload.get("role"), journal_id)
@@ -2402,9 +2412,9 @@ class JournalOutboxEventProcessor:
             entries.append(
                 UnmatchedParticipantEmail(
                     journal_id=journal_id,
-                    email=email.lower(),
+                    email=email,
                     relationship_type=rel_type,
-                    display_name=display_name
+                    display_name=display_name[:MAX_PARTICIPANT_DISPLAY_NAME_LENGTH]
                     if isinstance(display_name, str)
                     else None,
                     status=AttendeeStatus(status) if status else None,

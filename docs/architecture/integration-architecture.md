@@ -708,8 +708,12 @@ Google-specific, so a new integration gets suggestions by sending:
 | `display_name` | no | Prefills the name of a contact created from a suggestion |
 | `is_self` | no | The account owner's own address, which is never recorded |
 
-Each sync replaces the journal's unmatched rows, so emails that leave the
-event, or start resolving to a contact, drop out. Leave out participants that
+Emails are compared in one canonical form -- trimmed and lower-cased
+(`core_shared.models.participant_email.normalise_participant_email`) -- when
+resolving, recording and suggesting. Addresses longer than 320 characters are
+not recorded and display names are truncated to 255, so odd provider data
+never fails a sync. Each sync replaces the journal's unmatched rows, so emails
+that leave the event, or start resolving to a contact, drop out. Leave out participants that
 are not people (the Google worker skips attendees marked `resource`, such as
 meeting rooms).
 

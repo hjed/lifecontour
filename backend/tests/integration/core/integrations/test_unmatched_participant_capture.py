@@ -182,3 +182,46 @@ class TestUnmatchedParticipantCapture:
 
         assert await _unmatched_rows(async_connection, journal_id) == {}
         assert await _linked_contact_ids(async_connection, journal_id) == {contact_id}
+
+    async def test_email_resolves_ignoring_case_and_whitespace(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        contact_id = await _create_contact_with_email(async_connection, "Jane@X.com")
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="evt-capture-4",
+                contact_relationships=[_invitee(" jane@x.com ")],
+            )
+        )
+
+        journal_id = result["journal_id"]
+        assert await _linked_contact_ids(async_connection, journal_id) == {contact_id}
+        assert await _unmatched_rows(async_connection, journal_id) == {}
+
+    async def test_oversized_participant_details_do_not_fail_the_sync(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        too_long_email = f"{'a' * 320}@x.com"
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="evt-capture-5",
+                contact_relationships=[
+                    _invitee("named@x.com", display_name="N" * 300),
+                    _invitee(too_long_email),
+                ],
+            )
+        )
+
+        rows = await _unmatched_rows(async_connection, result["journal_id"])
+        assert set(rows) == {"named@x.com"}
+        assert rows["named@x.com"]["display_name"] == "N" * 255

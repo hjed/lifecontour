@@ -202,3 +202,37 @@ class TestUnmatchedParticipantBackfill:
         )
 
         assert await _updated_journal_ids(db_session) == []
+
+    async def test_recorded_email_that_gained_a_contact_promotes(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A contact added after the email was recorded gets linked on the
+        next sync, whatever case either side spells the address in."""
+        journal_id = await _seed_synced_event(db_session)
+        await db_session.execute(
+            text("""
+                INSERT INTO journal_unmatched_participant_emails
+                    (journal_id, email, relationship_type)
+                VALUES (:journal_id, 'stranger@example.com', 'INVITEE')
+            """),
+            {"journal_id": journal_id},
+        )
+        contact_id = (
+            await db_session.execute(
+                text("INSERT INTO contacts (first_name) VALUES ('New') RETURNING id")
+            )
+        ).scalar_one()
+        await db_session.execute(
+            text("""
+                INSERT INTO contact_methods (contact_id, method_type, value)
+                VALUES (:contact_id, 'email', 'Stranger@Example.com')
+            """),
+            {"contact_id": contact_id},
+        )
+        await db_session.commit()
+
+        await _run_sync(
+            db_session, [_unchanged_event([{"email": "stranger@example.com"}])]
+        )
+
+        assert await _updated_journal_ids(db_session) == [journal_id]

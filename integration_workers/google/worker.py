@@ -42,6 +42,7 @@ from core_shared.models.journal_external_event_link import (
 )
 from core_shared.models.journals import CalendarInfo
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.participant_email import normalise_participant_email
 from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories import (
     ActiveCalendarChannel,
@@ -3902,24 +3903,33 @@ async def _find_journal_by_event_identity(
     return int(row.journal_id) if row else None
 
 
-async def _has_unrecorded_unmatched_participant(
+async def _participants_need_resync(
     session: Any,
     user_id: str,
     journal_id: int,
     contact_relationships: list[dict[str, Any]],
 ) -> bool:
-    """Whether an attendee email matches no contact and is not yet recorded.
+    """Whether syncing the event again would change its journal's participants.
 
-    The backend records a journal's unmatched attendee emails when it syncs the
-    event, so this is true only for events last synced before it did -- or
-    since a contact holding the email was removed. The account owner's own
-    address is never recorded, so it never counts.
+    True when an attendee now matches a contact the journal is not linked to,
+    or has an address that matches no contact and is not yet recorded as
+    unmatched. The account owner's own address is never recorded, so it counts
+    only towards the first. Emails compare in their canonical form.
     """
-    emails = sorted(
-        {r["email"].lower() for r in contact_relationships if not r.get("is_self")}
+    all_emails = sorted(
+        {normalise_participant_email(r["email"]) for r in contact_relationships}
+    )
+    other_emails = sorted(
+        {
+            normalise_participant_email(r["email"])
+            for r in contact_relationships
+            if not r.get("is_self")
+        }
     )
     repo = UnmatchedParticipantRepository(await session.connection())
-    return await repo.has_unrecorded_unmatched_email(user_id, journal_id, emails)
+    return await repo.has_unlinked_contact_email(
+        user_id, journal_id, all_emails
+    ) or await repo.has_unrecorded_unmatched_email(user_id, journal_id, other_emails)
 
 
 async def _fetch_calendar_access_roles(client: GoogleAPIClient) -> dict[str, str]:
@@ -4416,41 +4426,23 @@ async def sync_calendar_events(
                                     metrics.get("events_deduplicated", 0) + 1
                                 )
 
-                        if action == InboundSyncAction.SKIP_UNCHANGED:
-                            contact_relationships = (
-                                transformer.extract_contact_relationships(google_event)
+                        # An unchanged event is skipped on its ETag, so its
+                        # participants are re-synced once when that would
+                        # change something: an attendee now matches a contact
+                        # the journal is not linked to, or has an address the
+                        # backend has not yet recorded as matching no contact
+                        # (events synced before it recorded them).
+                        if (
+                            action == InboundSyncAction.SKIP_UNCHANGED
+                            and existing_link is not None
+                            and await _participants_need_resync(
+                                session,
+                                str(user_id),
+                                existing_link.journal_id,
+                                transformer.extract_contact_relationships(google_event),
                             )
-                            attendee_emails = [
-                                r["email"] for r in contact_relationships
-                            ]
-                            if attendee_emails:
-                                existing_journal_id = (
-                                    existing_link.journal_id if existing_link else None
-                                )
-                                if existing_journal_id:
-                                    check_stmt = text("""
-                                        SELECT 1
-                                        FROM contact_methods cm
-                                        JOIN contacts c ON cm.contact_id = c.id
-                                        WHERE cm.method_type = 'email'
-                                          AND cm.value = ANY(:emails)
-                                          AND NOT EXISTS (
-                                              SELECT 1
-                                              FROM journal_contact_relationships jc
-                                              WHERE jc.contact_id = cm.contact_id
-                                                AND jc.journal_id = :journal_id
-                                          )
-                                        LIMIT 1
-                                    """)
-                                    check_result = await session.execute(
-                                        check_stmt,
-                                        {
-                                            "emails": attendee_emails,
-                                            "journal_id": existing_journal_id,
-                                        },
-                                    )
-                                    if check_result.fetchone():
-                                        action = InboundSyncAction.UPDATE_JOURNAL
+                        ):
+                            action = InboundSyncAction.UPDATE_JOURNAL
 
                         # Backfill promotion: an unchanged recurring instance
                         # whose link predates the series feature (no stored
@@ -4476,22 +4468,6 @@ async def sync_calendar_events(
                             and external_identity
                             and existing_link is not None
                             and existing_link.external_identity is None
-                        ):
-                            action = InboundSyncAction.UPDATE_JOURNAL
-
-                        # Same, for events synced before the backend recorded
-                        # attendee emails that match no contact (the source of
-                        # contact suggestions). Once it has recorded them the
-                        # event stops qualifying.
-                        if (
-                            action == InboundSyncAction.SKIP_UNCHANGED
-                            and existing_link is not None
-                            and await _has_unrecorded_unmatched_participant(
-                                session,
-                                str(user_id),
-                                existing_link.journal_id,
-                                transformer.extract_contact_relationships(google_event),
-                            )
                         ):
                             action = InboundSyncAction.UPDATE_JOURNAL
 
