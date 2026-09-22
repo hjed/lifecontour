@@ -51,6 +51,7 @@ Snipe-IT "Assets" map directly to the system's `gear_items` entity.
   - A **Periodic Sync** acts as a backup (similar to the Strava integration) to catch missed webhook events, and is the only path for asset creation, edits and maintenance changes, which Snipe-IT does not send as webhooks.
     - When periodic sync is enabled on the Snipe-IT worker (`ENABLE_PERIODIC_SYNC`), every `SYNC_INTERVAL_HOURS` (default 6) it syncs the assets and maintenance records of every user whose Snipe-IT connection works. Each sync appears in the user's sync history.
     - Each run currently re-imports everything. Unchanged assets and maintenance records are skipped, so a run creates no duplicates and does not undo a local edit that Snipe-IT has not changed.
+    - Assets and maintenance records sync side by side, so a maintenance record logged on an asset that is new in the same run can arrive one run later, once its asset exists in the app.
 - **Text Encoding**: Snipe-IT HTML-escapes text in API responses but stores what it is sent, so asset names, models, manufacturers, serials and asset tags are decoded once on import and sent unescaped.
 
 ---

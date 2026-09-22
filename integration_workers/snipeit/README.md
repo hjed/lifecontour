@@ -76,17 +76,22 @@ sites read the raw value via `.get_secret_value()`.
 Periodic sync is **disabled by default**. The worker inherits
 `ENABLE_PERIODIC_SYNC`/`SYNC_INTERVAL_HOURS` from `BaseWorkerSettings`; enable it
 by setting `ENABLE_PERIODIC_SYNC=true` and a `SYNC_INTERVAL_HOURS` cadence. Two
-cron jobs then run at the top of every `SYNC_INTERVAL_HOURS`-th hour:
+cron jobs then run every `SYNC_INTERVAL_HOURS`-th hour, half an hour apart so
+their Snipe-IT traffic does not compete for the rate limit (each job has its own
+limiter):
 
-- `periodic_sync_all_snipeit_accounts` — for every user with Snipe-IT settings
+- `periodic_sync_all_snipeit_accounts` (at `:30`) — for every user with Snipe-IT settings
   and working auth (`needs_reauth = FALSE`), enqueues `sync_snipeit_assets` and
   `sync_snipeit_maintenances` with sync type `smart`, and records a `sync_jobs`
   row for each. Snipe-IT sends no webhooks for asset creation, asset edits or
   maintenance records, so this is the only way those changes arrive without a
   manual sync. Neither orchestrator honours `smart` yet (#1560), so each run is a
   full re-import; unchanged assets and maintenance records are skipped by
-  version hash.
-- `periodic_checkin_all_snipeit_accounts` — checks in assets whose usage period
+  version hash. The asset and maintenance syncs run concurrently, so a
+  maintenance record on an asset new in this run can be skipped as "gear item
+  not yet synced"; it is imported by the next run (#1563). The `sync_jobs` rows
+  stay `queued`, as a manual sync's do (#1562).
+- `periodic_checkin_all_snipeit_accounts` (at `:00`) — checks in assets whose usage period
   has ended.
 
 Batch job ids include the orchestrator's own job id

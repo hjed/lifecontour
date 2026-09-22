@@ -629,12 +629,16 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     ]
 
     # Cron schedule: the periodic asset/maintenance import and the check-in
-    # sweep (shared helper; both empty when periodic sync is disabled).
+    # sweep (shared helper; both empty when periodic sync is disabled). The
+    # import runs half an hour after the sweep: each job has its own rate
+    # limiter, so running together they could exceed Snipe-IT's limit, and a
+    # rate-limited check-in waits for the next sweep.
     cron_jobs = [
         *generate_cron_jobs(
             periodic_sync_all_snipeit_accounts,
             enable_periodic_sync=settings.enable_periodic_sync,
             sync_interval_hours=settings.sync_interval_hours,
+            minute=30,
         ),
         *generate_cron_jobs(
             periodic_checkin_all_snipeit_accounts,

@@ -146,6 +146,9 @@ class TestSnipeItWorkerSettings:
             "periodic_checkin_all_snipeit_accounts",
         ]
         assert [job.hour for job in cron_jobs] == [{0, 6, 12, 18}, {0, 6, 12, 18}]
+        # Half an hour apart, so the import's traffic does not compete with the
+        # sweep's check-ins for the Snipe-IT rate limit.
+        assert [job.minute for job in cron_jobs] == [30, 0]
 
     def test_schedules_nothing_when_periodic_sync_disabled(self) -> None:
         """With periodic sync disabled (the default), no cron jobs are scheduled."""
