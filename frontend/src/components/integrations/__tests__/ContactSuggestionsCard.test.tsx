@@ -27,10 +27,19 @@ jest.mock('@/lib/api/contact-suggestions', () => ({
 jest.mock('@/components/contacts/ContactSearchCombobox', () => ({
   ContactSearchCombobox: ({
     onSelect,
+    disabled,
+    inputId,
   }: {
     onSelect: (contact: { id: string }) => void;
+    disabled?: boolean;
+    inputId?: string;
   }) => (
-    <button type='button' onClick={() => onSelect({ id: '42' })}>
+    <button
+      type='button'
+      id={inputId}
+      disabled={disabled}
+      onClick={() => onSelect({ id: '42' })}
+    >
       Pick Jane Doe
     </button>
   ),
@@ -186,9 +195,7 @@ describe('ContactSuggestionsCard', () => {
       })
     );
     await user.click(
-      within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Pick Jane Doe',
-      })
+      within(screen.getByRole('dialog')).getByLabelText('Contact')
     );
 
     expect(acceptMutate).toHaveBeenCalledWith(
@@ -245,6 +252,25 @@ describe('ContactSuggestionsCard', () => {
       screen.getByText('Error loading ignored suggestions')
     ).toBeInTheDocument();
     expect(screen.getByText('Server unavailable')).toBeInTheDocument();
+  });
+
+  it('names the contact search and stops a second pick while saving', async () => {
+    const user = userEvent.setup();
+    mockLists([suggestion('jane@x.com', 'Jane Smith', 6)]);
+    (useAcceptContactSuggestion as jest.Mock).mockReturnValue({
+      mutate: acceptMutate,
+      isPending: true,
+    });
+
+    render(<ContactSuggestionsCard />);
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Add jane@x.com to an existing contact',
+      })
+    );
+
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Contact')).toBeDisabled();
   });
 
   it('restores an ignored email', async () => {

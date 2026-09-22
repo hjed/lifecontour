@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AlertCircle, ChevronDown, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import {
   Card,
   CardContent,
@@ -185,8 +186,14 @@ export function ContactSuggestionsCard() {
                 to. It will be linked to every event the email was seen on.
               </DialogDescription>
             </DialogHeader>
+            <Label htmlFor='contact-suggestion-contact-search'>Contact</Label>
             <ContactSearchCombobox
+              inputId='contact-suggestion-contact-search'
               placeholder='Search contacts...'
+              // One accept per suggestion: while it is in flight a second
+              // pick would race the first for an email only one contact can
+              // hold.
+              disabled={accept.isPending}
               onSelect={contact =>
                 acceptAndClose({
                   email: pending.suggestion.attributes.email,
