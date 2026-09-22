@@ -21,6 +21,9 @@ from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.integrations.services.contact_suggestion_service import (
+    ContactSuggestionService,
+)
 from app.core.journal.models.repositories import ActivityStatsRepository
 from app.core.journal.services.activity_template_service import (
     ActivityTemplateService,
@@ -252,6 +255,14 @@ async def get_calendar_service() -> CalendarService:
 async def get_review_item_service() -> ReviewItemService:
     """Resolve the review item service for the current MCP request."""
     return cast(ReviewItemService, await _resolve_dependency(ReviewItemService))
+
+
+async def get_contact_suggestion_service() -> ContactSuggestionService:
+    """Resolve the contact suggestion service for the current MCP request."""
+    return cast(
+        ContactSuggestionService,
+        await _resolve_dependency(ContactSuggestionService),
+    )
 
 
 async def get_incomplete_outdoor_activity_service() -> IncompleteOutdoorActivityService:
