@@ -42,6 +42,17 @@ class GoogleEventAttendee(BaseModel):
         description="The attendee's response status (needsAction, declined, tentative, accepted)",
     )
     organizer: bool = Field(False, description="Whether the attendee is the organizer")
+    display_name: str | None = Field(
+        None, alias="displayName", description="The attendee's name, if available"
+    )
+    is_self: bool = Field(
+        False,
+        alias="self",
+        description="Whether this attendee is the owner of the calendar being read",
+    )
+    resource: bool = Field(
+        False, description="Whether the attendee is a resource such as a meeting room"
+    )
 
 
 class GoogleEvent(BaseModel):

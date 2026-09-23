@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.services.contact_service import ContactService
+from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
+    SqlContactSuggestionIgnoreRepository,
+)
 from app.core.integrations.adapters.sql.journal_unmatched_strava_athlete_repository import (
     SqlJournalUnmatchedStravaAthleteRepository,
 )
@@ -26,6 +29,9 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 )
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
+)
+from app.core.integrations.adapters.sql.unmatched_participant_email_repository import (
+    SqlUnmatchedParticipantEmailRepository,
 )
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.encryption import EncryptionService
@@ -47,6 +53,9 @@ from app.core.integrations.registry.immich_provider import ImmichIntegrationProv
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.registry.snipeit_provider import SnipeItIntegrationProvider
 from app.core.integrations.registry.strava_provider import StravaIntegrationProvider
+from app.core.integrations.services.contact_suggestion_service import (
+    ContactSuggestionService,
+)
 from app.core.integrations.services.snipeit_settings_service import (
     SnipeItSettingsService,
 )
@@ -56,6 +65,7 @@ from app.core.integrations.strava.athlete_mapping_service import (
 from app.core.integrations.task_queue import get_redis_pool, get_redis_settings
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.core.journal.services.journal_contact_service import JournalContactService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.snipeit_token_service import SnipeItTokenService
 from app.infrastructure.auth.strava_token_service import StravaTokenService
@@ -461,4 +471,34 @@ class IntegrationProvider(Provider):
             unmatched_repo=unmatched_repo,
             contact_repo=contact_repo,
             contact_relationship_repo=contact_relationship_repo,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_unmatched_participant_email_repository(
+        self, connection: AsyncConnection
+    ) -> SqlUnmatchedParticipantEmailRepository:
+        """Provide repository for participant emails that matched no contact."""
+        return SqlUnmatchedParticipantEmailRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_contact_suggestion_ignore_repository(
+        self, connection: AsyncConnection
+    ) -> SqlContactSuggestionIgnoreRepository:
+        """Provide repository for the contact-suggestion ignore list."""
+        return SqlContactSuggestionIgnoreRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def provide_contact_suggestion_service(
+        self,
+        unmatched_repo: SqlUnmatchedParticipantEmailRepository,
+        ignore_repo: SqlContactSuggestionIgnoreRepository,
+        contact_service: ContactService,
+        journal_contact_service: JournalContactService,
+    ) -> ContactSuggestionService:
+        """Provide the contact-suggestion service."""
+        return ContactSuggestionService(
+            unmatched_repo=unmatched_repo,
+            ignore_repo=ignore_repo,
+            contact_service=contact_service,
+            journal_contact_service=journal_contact_service,
         )

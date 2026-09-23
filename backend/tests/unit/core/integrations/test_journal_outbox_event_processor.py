@@ -8,6 +8,7 @@ InboundFieldMerger protected-edit logic.
 
 import inspect
 import re
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +35,22 @@ from app.core.journal.adapters.sql.calendar_info_repository import _FIND_CANCELL
 
 CALENDAR_ID = "12345678-1234-5678-1234-567812345678"
 SERIES_ID = uuid4()
+
+
+@pytest.fixture(autouse=True)
+def _unmatched_participant_repo() -> Iterator[MagicMock]:
+    """Keep unmatched-participant recording off the scripted connection.
+
+    These tests script ``connection.execute`` call by call; recording unmatched
+    emails is covered against a real database in
+    ``test_unmatched_participant_capture.py``.
+    """
+    with patch(
+        "app.core.integrations.journal_outbox_event_processor"
+        ".SqlUnmatchedParticipantEmailRepository",
+        return_value=AsyncMock(),
+    ) as repo_class:
+        yield repo_class
 
 
 def _mock(obj: object) -> AsyncMock:

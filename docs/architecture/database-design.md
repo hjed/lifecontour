@@ -674,6 +674,29 @@ own `sync_jobs` rows (replacing the previous synthetic, non-persisted batch IDs)
 Migration: `backend/app/migrations/versions/0088_add_sync_job_fanout_hierarchy.py`
 (additive; existing rows backfill counters to `0` and keep `parent_job_id` NULL).
 
+#### Unmatched Participant Emails
+
+`journal_unmatched_participant_emails` holds, per journal, the participant
+emails inbound sync could not resolve to a contact: the source of contact
+suggestions. Written only by `JournalOutboxEventProcessor`, which replaces a
+journal's rows on every sync.
+
+| Column | Type | Notes |
+|---|---|---|
+| `journal_id` | `INTEGER` | PK part; FK → `journals.id` (`ON DELETE CASCADE`) |
+| `email` | `VARCHAR(320)` | PK part; always lower-case (check constraint); indexed |
+| `display_name` | `VARCHAR(255)` NULL | As the integration reported it |
+| `relationship_type` | `VARCHAR(50)` | `JournalContactRelationshipType` |
+| `status` / `role` | `VARCHAR(50)` NULL | `AttendeeStatus` / `ContactEventRole`, reused when a contact is later linked |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+Migration: `backend/app/migrations/versions/0116_create_journal_unmatched_participant_emails.py`.
+
+`contact_suggestion_ignores` is each user's persistent list of emails never to
+suggest as contacts. PK `(user_id, email)`; `email` is lower-case (check
+constraint); `provenance` records where the ignore came from (`ui` / `mcp`).
+Migration: `backend/app/migrations/versions/0117_create_contact_suggestion_ignores.py`.
+
 ## MeiliSearch Integration
 
 ### Search Engine Architecture

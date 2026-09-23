@@ -876,6 +876,60 @@ class TestGoogleEventTransformerContactRelationships:
         assert len(rels) == 1
         assert rels[0]["email"] == "valid@example.com"
 
+    def test_extract_contact_relationships_carries_display_name_and_self(
+        self,
+    ) -> None:
+        """The attendee's name and Google's `self` flag reach the backend.
+
+        The name prefills a suggested contact; `is_self` keeps the calendar
+        owner's own address out of contact suggestions.
+        """
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_names",
+                "summary": "Names",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {"email": "me@example.com", "self": True},
+                    {"email": "jane@example.com", "displayName": "Jane Smith"},
+                ],
+            }
+        )
+        transformer = GoogleEventTransformer()
+        rels = transformer.extract_contact_relationships(google_event)
+
+        rel_by_email = {r["email"]: r for r in rels}
+        assert rel_by_email["me@example.com"]["is_self"] is True
+        assert rel_by_email["me@example.com"]["display_name"] is None
+        assert rel_by_email["jane@example.com"]["is_self"] is False
+        assert rel_by_email["jane@example.com"]["display_name"] == "Jane Smith"
+
+    def test_extract_contact_relationships_skips_resources(self) -> None:
+        """Meeting rooms and other resources are not participants."""
+        google_event = GoogleEvent.model_validate(
+            {
+                "id": "event_room",
+                "summary": "Room booked",
+                "start": {"dateTime": "2023-10-27T10:00:00Z"},
+                "end": {"dateTime": "2023-10-27T11:00:00Z"},
+                "status": "confirmed",
+                "attendees": [
+                    {
+                        "email": "room-4a@resource.calendar.google.com",
+                        "displayName": "Room 4A",
+                        "resource": True,
+                    },
+                    {"email": "jane@example.com"},
+                ],
+            }
+        )
+        transformer = GoogleEventTransformer()
+        rels = transformer.extract_contact_relationships(google_event)
+
+        assert [r["email"] for r in rels] == ["jane@example.com"]
+
 
 class TestGoogleEventTransformerPrivateDescription:
     """Tests for private_description flag on outbound Google Calendar payloads."""

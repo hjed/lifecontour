@@ -40,6 +40,11 @@ from core_shared.models.outbox_events import (
     JournalStatusEventData,
     JournalSyncEventData,
 )
+from core_shared.models.participant_email import (
+    MAX_PARTICIPANT_DISPLAY_NAME_LENGTH,
+    is_recordable_participant_email,
+    normalise_participant_email,
+)
 from core_shared.models.route import Route
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
 from pydantic import BaseModel, Field, ValidationError
@@ -56,6 +61,12 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 )
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
+)
+from app.core.integrations.adapters.sql.unmatched_participant_email_repository import (
+    SqlUnmatchedParticipantEmailRepository,
+)
+from app.core.integrations.models.unmatched_participant import (
+    UnmatchedParticipantEmail,
 )
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
@@ -192,7 +203,7 @@ class ContactResolver:
         self.connection = connection
 
     async def resolve_by_email(self, email: str) -> int | None:
-        """Resolve a contact by email address.
+        """Resolve a contact by email address, ignoring case and whitespace.
 
         Args:
             email: Email address to search for
@@ -206,10 +217,10 @@ class ContactResolver:
                 FROM contacts c
                 JOIN contact_methods cm ON c.id = cm.contact_id
                 WHERE cm.method_type = 'email'
-                  AND cm.value = :email
+                  AND LOWER(BTRIM(cm.value)) = :email
                 LIMIT 1
             """),
-            {"email": email},
+            {"email": normalise_participant_email(email)},
         )
         row = result.fetchone()
         return row.id if row else None
@@ -251,6 +262,9 @@ class JournalOutboxEventProcessor:
         self.link_repo = SqlJournalEventLinkRepository(connection)
         self.series_repo = SqlJournalSeriesRepository(connection)
         self.review_item_repo = SqlReviewItemRepository(connection)
+        self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
+            connection
+        )
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -2277,11 +2291,17 @@ class JournalOutboxEventProcessor:
         journal_id: int,
         contact_relationships: list[dict[str, Any]],
     ) -> None:
-        """Sync contact relationships for a journal from inbound data."""
+        """Sync contact relationships for a journal from inbound data.
+
+        Emails that resolve to no contact are recorded as the journal's
+        unmatched participants (see ``_unmatched_entries``), replacing whatever
+        the previous sync recorded.
+        """
         if contact_relationships is None:
             return
 
         by_type = self._group_relationships_by_type(contact_relationships)
+        unmatched: dict[str, UnmatchedParticipantEmail] = {}
 
         for rel_type_str, payloads in by_type.items():
             try:
@@ -2298,6 +2318,10 @@ class JournalOutboxEventProcessor:
             resolved_contact_ids = await self._resolve_emails_to_contact_ids(
                 emails, journal_id
             )
+            for entry in self._unmatched_entries(
+                journal_id, rel_type, payloads, resolved_contact_ids
+            ):
+                unmatched.setdefault(entry.email, entry)
 
             existing = await self._get_relationships_by_type(journal_id, rel_type)
             existing_by_contact_id = {r.contact_id: r for r in existing}
@@ -2355,6 +2379,49 @@ class JournalOutboxEventProcessor:
                     updated=len(to_update),
                     deleted=len(to_delete),
                 )
+
+        await self.unmatched_participant_repo.replace_for_journal(
+            journal_id, list(unmatched.values())
+        )
+
+    def _unmatched_entries(
+        self,
+        journal_id: int,
+        rel_type: JournalContactRelationshipType,
+        payloads: list[dict[str, Any]],
+        resolved_contact_ids: dict[str, int],
+    ) -> list[UnmatchedParticipantEmail]:
+        """The payloads' emails that resolved to no contact, as unmatched rows.
+
+        The account owner's own address (``is_self``) is never a participant
+        worth suggesting, so it is left out, as is an address too long to be
+        one. The integration's display name is external text of any length,
+        so it is truncated to what the column holds rather than failing the
+        sync.
+        """
+        entries: list[UnmatchedParticipantEmail] = []
+        for payload in payloads:
+            if payload["email"] in resolved_contact_ids or payload.get("is_self"):
+                continue
+            email = normalise_participant_email(payload["email"])
+            if not is_recordable_participant_email(email):
+                continue
+            status = self._parse_inbound_status(payload.get("status"), journal_id)
+            role = self._parse_inbound_role(payload.get("role"), journal_id)
+            display_name = payload.get("display_name")
+            entries.append(
+                UnmatchedParticipantEmail(
+                    journal_id=journal_id,
+                    email=email,
+                    relationship_type=rel_type,
+                    display_name=display_name[:MAX_PARTICIPANT_DISPLAY_NAME_LENGTH]
+                    if isinstance(display_name, str)
+                    else None,
+                    status=AttendeeStatus(status) if status else None,
+                    role=ContactEventRole(role) if role else None,
+                )
+            )
+        return entries
 
     async def _get_relationships_by_type(
         self,

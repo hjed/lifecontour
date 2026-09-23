@@ -87,6 +87,7 @@ def sync_event(
     recurring_event_id: str | None = None,
     external_identity: str | None = None,
     timezone: str | None = None,
+    contact_relationships: list[dict[str, Any]] | None = None,
 ) -> OutboxEvent:
     """A `journal_event.created` / `.updated` / `.cancelled` outbox event.
 
@@ -117,7 +118,7 @@ def sync_event(
         "sync_action": event_type.split(".")[1],
         "etag": etag,
         "existing_journal_id": existing_journal_id,
-        "contact_relationships": [],
+        "contact_relationships": contact_relationships or [],
         "recurring_event_id": recurring_event_id,
         "external_identity": external_identity,
     }
