@@ -112,7 +112,7 @@ function parseLocationLine(line: string, result: AddressData) {
 /**
  * Format address data for display
  */
-function formatAddressForDisplay(
+export function formatAddressForDisplay(
   address: AddressData | string | null | undefined
 ): string {
   if (!address) return '';

@@ -34,13 +34,17 @@ CREATE TABLE contact_methods (
     value TEXT NOT NULL,
     label VARCHAR(50), -- e.g., 'work', 'home', 'mobile'
     is_primary BOOLEAN DEFAULT FALSE,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE, -- no longer in use, kept for reference
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(contact_id, method_type, is_primary) WHERE is_primary = TRUE
+    UNIQUE(contact_id, method_type, is_primary) WHERE is_primary = TRUE,
+    CONSTRAINT ck_contact_methods_archived_not_primary CHECK (NOT (is_primary AND is_archived))
 );
 ```
 
 **Note:** In the application layer, `method_type` is represented as a Python enum (`MethodType.EMAIL`, `MethodType.PHONE`) for type safety, but stored as strings in the database.
+
+**Archived values** (`is_archived`, on methods and addresses alike) are ones the person no longer uses — an old number, a childhood home. They are never primary (the CHECK constraint), never pushed to an integration, and still count wherever a value is matched: search, calendar attendee resolution, contact suggestions and the system-wide email uniqueness index. See [Integration Architecture](integration-architecture.md#archived-contact-values).
 
 #### Contact Addresses Table
 ```sql
@@ -55,9 +59,11 @@ CREATE TABLE contact_addresses (
     postal_code VARCHAR(20),
     country_code VARCHAR(2) NOT NULL, -- ISO 3166-1 alpha-2
     is_primary BOOLEAN DEFAULT FALSE,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE, -- see contact_methods
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(contact_id, is_primary) WHERE is_primary = TRUE
+    UNIQUE(contact_id, is_primary) WHERE is_primary = TRUE,
+    CONSTRAINT ck_contact_addresses_archived_not_primary CHECK (NOT (is_primary AND is_archived))
 );
 ```
 

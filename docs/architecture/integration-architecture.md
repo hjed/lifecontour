@@ -517,6 +517,24 @@ class WorkerSettings:
 4. Update the stale side and record new hash
 5. Handle conflicts with user-defined rules
 
+### Archived contact values
+
+A contact's archived emails, phones and addresses (`is_archived`) are kept for
+reference and matching but are never synced out:
+
+- **Outbound (Google worker):** `_transform_contact_methods` and
+  `_transform_addresses` leave archived rows out of the Person payload. The
+  payload replaces Google's lists whole, so archiving a value that was already
+  synced removes it from Google on the next push — the archive `touch`es the
+  contact, which queues that push.
+- **Inbound (`OutboxEventProcessor`):** a provider's whole-list payload never
+  holds archived values, so both the `contact.updated` path and the
+  reconcile-by-email branch of `contact.created` pass it through
+  `keep_archived` before saving. Archived rows are kept under their ids; an
+  incoming value matching an archived one (emails case-insensitively, phones on
+  their digits, addresses on every line) restores that row rather than adding a
+  second one — the provider holding it again means it is back in use.
+
 ### 2. External Data References (Immich)
 
 **Challenge**: Large binary data should stay external

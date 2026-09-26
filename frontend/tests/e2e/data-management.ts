@@ -632,6 +632,44 @@ export class TestDataManager {
   }
 
   /**
+   * Add an email or phone to a contact, optionally already archived.
+   *
+   * Emails are unique across every contact, so callers pass a value made
+   * unique per test.
+   */
+  async addContactMethod(
+    contactId: string,
+    method: {
+      method_type: 'email' | 'phone';
+      value: string;
+      is_primary?: boolean;
+      is_archived?: boolean;
+    }
+  ): Promise<void> {
+    const response = await this.page.request.post(
+      `/api/contacts/${contactId}/methods`,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({
+          data: {
+            type: 'contact_methods',
+            attributes: {
+              is_primary: false,
+              is_archived: false,
+              ...method,
+            },
+          },
+        }),
+      }
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to add contact method: ${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
+  /**
    * Set contact as favourite
    */
   async setContactFavourite(

@@ -12,6 +12,7 @@ import * as contactsApi from '@/lib/api/contacts';
 jest.mock('@/lib/api/contacts', () => ({
   useAddContactAddress: jest.fn(),
   useDeleteContactAddress: jest.fn(),
+  useSetContactValueArchived: jest.fn(),
   updateContactAddressField: jest.fn(),
 }));
 
@@ -71,9 +72,15 @@ describe('ContactAddressesList', () => {
   const mockAddAddress = jest.fn();
   const mockDeleteAddress = jest.fn();
   const mockUpdateField = jest.fn();
+  const mockSetArchived = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    (contactsApi.useSetContactValueArchived as jest.Mock).mockReturnValue({
+      mutateAsync: mockSetArchived,
+      isPending: false,
+    });
 
     (contactsApi.useAddContactAddress as jest.Mock).mockReturnValue({
       mutateAsync: mockAddAddress,
@@ -201,5 +208,61 @@ describe('ContactAddressesList', () => {
 
     expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Work')).toBeInTheDocument();
+  });
+
+  describe('archived addresses', () => {
+    const withArchived: readonly ContactAddressResource[] = [
+      ...mockAddresses,
+      {
+        id: '3',
+        type: 'contact_addresses',
+        attributes: {
+          label: 'Childhood home',
+          street_line_1: '1 Old Farm Road',
+          locality: 'Bathurst',
+          country_code: 'AU',
+          is_primary: false,
+          is_archived: true,
+        },
+      },
+    ];
+
+    it('keeps archived addresses behind a collapsed section', () => {
+      render(
+        <ContactAddressesList contactId='123' addresses={withArchived} />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(screen.queryByText(/1 Old Farm Road/)).not.toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived addresses (1)' })
+      );
+
+      expect(screen.getByText(/1 Old Farm Road/)).toBeInTheDocument();
+      expect(screen.getByText('Childhood home')).toBeInTheDocument();
+    });
+
+    it('archives an active address and restores an archived one', async () => {
+      render(
+        <ContactAddressesList contactId='123' addresses={withArchived} />,
+        { wrapper: createWrapper() }
+      );
+
+      fireEvent.click(
+        screen.getAllByRole('button', { name: /^Archive address/ })[1]
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived addresses (1)' })
+      );
+      fireEvent.click(screen.getByRole('button', { name: /^Restore address/ }));
+
+      await waitFor(() => {
+        expect(mockSetArchived.mock.calls).toEqual([
+          [{ contactId: '123', kind: 'address', id: '2', archived: true }],
+          [{ contactId: '123', kind: 'address', id: '3', archived: false }],
+        ]);
+      });
+    });
   });
 });

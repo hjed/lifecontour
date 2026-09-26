@@ -193,12 +193,14 @@ function ContactDetailPageContent() {
             <ContactMethodsList
               contactId={contact.id}
               methods={contact.attributes.contact_methods || []}
+              data-testid='contact-methods-list'
             />
 
             {/* Addresses */}
             <ContactAddressesList
               contactId={contact.id}
               addresses={contact.attributes.addresses || []}
+              data-testid='contact-addresses-list'
             />
 
             {/* Important Dates */}

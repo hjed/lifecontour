@@ -246,6 +246,16 @@ describe('ContactForm', () => {
             is_primary: true,
           },
         },
+        {
+          type: 'contact_methods',
+          id: '2',
+          attributes: {
+            method_type: 'email' as never,
+            value: 'john@oldjob.com',
+            is_primary: false,
+            is_archived: true,
+          },
+        },
       ],
       addresses: [
         {

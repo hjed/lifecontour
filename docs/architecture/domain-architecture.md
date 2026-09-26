@@ -83,6 +83,11 @@ domain/
   - Maximum 25 tags per contact
   - Primary contact method enforcement (one primary per type)
   - Primary address enforcement (one primary per contact)
+  - Archived methods and addresses are never primary: archiving the primary
+    demotes it in the same write (both changes reach the history), and an
+    archived value cannot be made primary. Archived values still match
+    (search, attendee resolution, suggestions, email uniqueness) but are never
+    synced to an integration
   - Address validation (street_line_1 and country_code required)
   - Country code validation (ISO 3166-1 alpha-2 format)
   - Contact history tracking for all changes

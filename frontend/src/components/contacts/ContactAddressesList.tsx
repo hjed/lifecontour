@@ -5,13 +5,14 @@
  * - Edit individual address fields inline
  * - Add new addresses
  * - Remove existing addresses
+ * - Archive addresses no longer in use, and restore them
  * - Manage primary designation constraints
  */
 
 'use client';
 
 import { useState } from 'react';
-import { Plus, Trash2, MapPin } from 'lucide-react';
+import { Archive, ArchiveRestore, Plus, Trash2, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -32,13 +33,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { InlineEditAddressField } from './InlineEditAddressField';
+import {
+  InlineEditAddressField,
+  formatAddressForDisplay,
+} from './InlineEditAddressField';
 import { InlineEditField } from './InlineEditField';
+import { ArchivedValuesSection } from './ArchivedValuesSection';
 import {
   useAddContactAddress,
   useDeleteContactAddress,
+  useSetContactValueArchived,
   updateContactAddressField,
 } from '@/lib/api/contacts';
+import { partitionArchived } from '@/lib/archived-values';
 import {
   ContactAddressResource,
   ContactAddressAttributes,
@@ -103,6 +110,22 @@ export function ContactAddressesList({
 
   const addAddressMutation = useAddContactAddress();
   const deleteAddressMutation = useDeleteContactAddress();
+  const archiveMutation = useSetContactValueArchived();
+  const [inUse, archived] = partitionArchived(addresses);
+
+  const setArchived = async (addressId: string, isArchived: boolean) => {
+    try {
+      await archiveMutation.mutateAsync({
+        contactId,
+        kind: 'address',
+        id: addressId,
+        archived: isArchived,
+      });
+    } catch (error) {
+      // Error handling is done by the mutation hook
+      console.error('Failed to archive address:', error);
+    }
+  };
 
   const resetAddForm = () => {
     setNewAddress(initialAddressState);
@@ -204,7 +227,7 @@ export function ContactAddressesList({
         </Button>
       </CardHeader>
       <CardContent className='space-y-3'>
-        {addresses.map(address => (
+        {inUse.map(address => (
           <div
             key={address.id}
             className='flex items-start justify-between space-x-3 rounded-md border p-3'
@@ -251,6 +274,19 @@ export function ContactAddressesList({
             <Button
               variant='ghost'
               size='sm'
+              onClick={() => setArchived(address.id?.toString() || '', true)}
+              disabled={disabled || archiveMutation.isPending}
+              aria-label={`Archive address ${formatAddressForDisplay(address.attributes)}`}
+              title='Archive: no longer in use, kept for reference'
+            >
+              <Archive
+                className='text-muted-foreground h-4 w-4'
+                aria-hidden='true'
+              />
+            </Button>
+            <Button
+              variant='ghost'
+              size='sm'
               onClick={() => handleDeleteClick(address.id?.toString() || '')}
               disabled={disabled || deleteAddressMutation.isPending}
               aria-label='Delete address'
@@ -260,9 +296,11 @@ export function ContactAddressesList({
           </div>
         ))}
 
-        {addresses.length === 0 && !isAddingAddress && (
+        {inUse.length === 0 && !isAddingAddress && (
           <p className='text-muted-foreground py-4 text-center text-sm'>
-            No addresses yet. Click the + button to add one.
+            {archived.length > 0
+              ? 'No addresses in use.'
+              : 'No addresses yet. Click the + button to add one.'}
           </p>
         )}
 
@@ -413,6 +451,62 @@ export function ContactAddressesList({
             </div>
           </div>
         )}
+
+        <ArchivedValuesSection
+          noun='addresses'
+          count={archived.length}
+          data-testid='archived-contact-addresses'
+        >
+          {archived.map(address => {
+            const display = formatAddressForDisplay(address.attributes);
+            return (
+              <div
+                key={address.id}
+                className='flex items-start justify-between space-x-3 rounded-md border border-dashed p-3'
+                data-testid={`archived-contact-address-${address.id}`}
+              >
+                <div className='text-muted-foreground flex min-w-0 flex-1 items-start space-x-2 text-sm'>
+                  <MapPin
+                    className='mt-0.5 h-4 w-4 flex-shrink-0'
+                    aria-hidden='true'
+                  />
+                  <div className='min-w-0 flex-1'>
+                    <p className='break-words whitespace-pre-line'>{display}</p>
+                    {address.attributes.label && (
+                      <p className='text-xs'>{address.attributes.label}</p>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() =>
+                    setArchived(address.id?.toString() || '', false)
+                  }
+                  disabled={disabled || archiveMutation.isPending}
+                  aria-label={`Restore address ${display}`}
+                  title='Restore: back in use'
+                >
+                  <ArchiveRestore className='h-4 w-4' aria-hidden='true' />
+                </Button>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() =>
+                    handleDeleteClick(address.id?.toString() || '')
+                  }
+                  disabled={disabled || deleteAddressMutation.isPending}
+                  aria-label='Delete address'
+                >
+                  <Trash2
+                    className='text-destructive h-4 w-4'
+                    aria-hidden='true'
+                  />
+                </Button>
+              </div>
+            );
+          })}
+        </ArchivedValuesSection>
       </CardContent>
 
       {/* Delete Confirmation Dialog */}
