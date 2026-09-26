@@ -1768,6 +1768,105 @@ class TestSameDayUsagesIntegration:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("posting", "age", "deferred"),
+        [
+            (True, 0, True),
+            # Not yet posting: no entry of its own can be among the candidates.
+            (False, 0, False),
+            # Its worker died mid-post; the in-flight window has passed.
+            (True, 3600, False),
+        ],
+        ids=["posting", "not-yet-posting", "stale"],
+    )
+    async def test_link_waits_for_a_checkout_being_posted_on_the_asset(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        posting: bool,
+        age: int,
+        deferred: bool,
+    ) -> None:
+        """The entry found may be the one the other journal is posting.
+
+        Until that journal claims its entry, it cannot be told apart from an
+        entry made by hand, so the link is retried rather than taken.
+        """
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        first = await _sydney_trip(async_connection)
+        second = await _usage_of_the_same_gear(
+            async_connection,
+            first,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=first,
+            reference_data={"posting": True} if posting else {},
+            sync_status="pending",
+        )
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata
+                SET updated_at = now() - make_interval(secs => :age)
+                WHERE integration_source = 'snipeit_checkout'
+                  AND internal_uuid = :journal_id
+            """),
+            {"age": age, "journal_id": str(first)},
+        )
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+
+        if deferred:
+            with pytest.raises(SnipeItSyncInProgress):
+                await snipeit_sync_service.push_checkout_create(
+                    journal_id=second,
+                    session_factory=lambda: _session_factory(async_connection),
+                )
+            assert _posts(mock_transport) == []
+            assert (await _sync_statuses(async_connection, second))[
+                "snipeit_checkout"
+            ] == "failed"
+        else:
+            mock_transport.add_response(
+                "/hardware/42/checkin",
+                json_data={"status": "success", "messages": "Checked in."},
+                method="POST",
+            )
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=second,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+            checkout_reference = await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=second
+            )
+            assert checkout_reference["snipeit_log_id"] == 100
+
+    @pytest.mark.asyncio
+    async def test_checkout_is_marked_posting_before_it_is_posted(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        _queue_asset_dates(mock_transport)
+        # No checkout response is queued, so the POST fails as if it were lost.
+        with pytest.raises(ValueError, match="No mock response"):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["posting"] is True
+
+    @pytest.mark.asyncio
     async def test_reconcile_records_a_usage_linked_to_another_usages_entry(
         self,
         snipeit_sync_service: Any,

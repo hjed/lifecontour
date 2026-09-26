@@ -92,6 +92,10 @@ _SNIPEIT_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # ``reference_data`` key of the asset dates read before a checkout.
 _ASSET_DATES_BEFORE = "asset_dates_before"
 
+# ``reference_data`` key marking a checkout whose POST may have reached Snipe-IT
+# before its log entry was claimed.
+_POSTING = "posting"
+
 
 def _snipeit_zone(row: Any) -> str | None:
     """Return the zone every date and time sent to Snipe-IT is read in.
@@ -2598,11 +2602,11 @@ class SnipeItSyncService:
                     asset_dates_before = AssetUsageDates.from_asset(
                         await self._api_client.get_asset(snipeit_asset_id)
                     )
-                    # Kept before posting: a checkout whose response is lost is
-                    # linked on retry, when the asset already shows its date.
-                    await self._keep_asset_dates_before(
-                        journal_id, external_id, asset_dates_before, session_factory
-                    )
+                # Kept before posting: a checkout whose response is lost is
+                # linked on retry, when the asset already shows its date.
+                await self._mark_checkout_posting(
+                    journal_id, external_id, asset_dates_before, session_factory
+                )
                 await self._api_client.checkout_asset(
                     asset_id=snipeit_asset_id,
                     payload=payload,
@@ -2769,14 +2773,19 @@ class SnipeItSyncService:
             snipeit_asset_id=asset_id,
         )
 
-    async def _keep_asset_dates_before(
+    async def _mark_checkout_posting(
         self,
         journal_id: int,
         external_id: str,
         asset_dates: AssetUsageDates,
         session_factory: Any,
     ) -> None:
-        """Record the asset dates read before posting on the in-progress checkout row."""
+        """Mark the in-progress checkout row as posting, with the asset's dates before.
+
+        Until the posted entry is claimed, another journal's link waits for it
+        (see :meth:`_claim_activity_log`): that entry cannot be told apart from
+        one made by hand.
+        """
         async with session_factory() as session:
             async with session.begin():
                 await session.execute(
@@ -2791,7 +2800,10 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "reference_data": json.dumps(
-                            {_ASSET_DATES_BEFORE: asset_dates.to_reference()}
+                            {
+                                _ASSET_DATES_BEFORE: asset_dates.to_reference(),
+                                _POSTING: True,
+                            }
                         ),
                     },
                 )
@@ -2855,6 +2867,7 @@ class SnipeItSyncService:
             journal_id=journal_id,
             external_id=external_id,
             session_factory=session_factory,
+            defer_to_posting=not exact,
         )
 
     async def _activity_candidates(
@@ -2947,6 +2960,7 @@ class SnipeItSyncService:
         journal_id: int,
         external_id: str,
         session_factory: Any,
+        defer_to_posting: bool = False,
     ) -> int | None:
         """Claim the first candidate no other journal holds, or return ``None``.
 
@@ -2955,6 +2969,13 @@ class SnipeItSyncService:
         other's claims and cannot both link one Snipe-IT entry. A claim left on a
         failed row is stale and ignored. Only this user's journals count: log ids
         are unique within one Snipe-IT instance, and each user has their own.
+
+        With ``defer_to_posting``, a claim waits while another journal is posting
+        on the asset: a candidate may be its entry, not yet claimed.
+
+        Raises:
+            SnipeItSyncInProgress: ``defer_to_posting`` met another journal's
+                in-flight post on this asset.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -2962,6 +2983,12 @@ class SnipeItSyncService:
                     text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                     {"lock_key": f"{source}:{asset_id}"},
                 )
+                if defer_to_posting and await self._posting_elsewhere(
+                    session, source=source, asset_id=asset_id, journal_id=journal_id
+                ):
+                    raise SnipeItSyncInProgress(
+                        f"Another checkout of asset {asset_id} is being posted"
+                    )
                 result = await session.execute(
                     text("""
                         SELECT sm.reference_data::jsonb ->> 'snipeit_log_id' AS log_id
@@ -3011,6 +3038,37 @@ class SnipeItSyncService:
                     },
                 )
         return log_id
+
+    async def _posting_elsewhere(
+        self, session: Any, *, source: str, asset_id: int, journal_id: int
+    ) -> bool:
+        """Whether another of the user's journals is posting on this asset now."""
+        result = await session.execute(
+            text("""
+                SELECT 1
+                FROM sync_metadata sm
+                JOIN journals j ON j.id::text = sm.internal_uuid
+                WHERE sm.integration_source = :source
+                  AND sm.external_id LIKE :asset_prefix
+                  AND sm.internal_uuid <> :journal_id
+                  AND sm.sync_status = 'pending'
+                  AND sm.updated_at > now() - make_interval(secs => :in_flight)
+                  AND sm.reference_data LIKE :posting_pattern
+                  AND (sm.reference_data::jsonb ->> :posting) = 'true'
+                  AND j.user_id = :user_id
+                LIMIT 1
+            """),
+            {
+                "source": source,
+                "asset_prefix": f"{source}:{asset_id}:%",
+                "journal_id": str(journal_id),
+                "in_flight": IN_FLIGHT_LOCK_SECONDS,
+                "posting_pattern": f'%"{_POSTING}"%',
+                "posting": _POSTING,
+                "user_id": self._user_id,
+            },
+        )
+        return result.fetchone() is not None
 
     async def _unlock_pending_checkout(
         self,
