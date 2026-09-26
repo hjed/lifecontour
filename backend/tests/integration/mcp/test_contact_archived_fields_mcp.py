@@ -52,8 +52,9 @@ async def _insert_contact(conn: AsyncConnection) -> dict[str, int]:
     }
 
 
-def _by_id(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
-    return {field["id"]: field for field in payload["contact_fields"]}
+def _by_id(payload: dict[str, Any]) -> dict[tuple[str, int], dict[str, Any]]:
+    """Fields keyed by ``(kind, id)``: methods and addresses number separately."""
+    return {(field["kind"], field["id"]): field for field in payload["contact_fields"]}
 
 
 class TestContactFieldsMcp:
@@ -69,7 +70,7 @@ class TestContactFieldsMcp:
             )
 
         assert _by_id(payload) == {
-            ids["email"]: {
+            ("email", ids["email"]): {
                 "id": ids["email"],
                 "kind": "email",
                 "value": "ada@example.com",
@@ -93,11 +94,10 @@ class TestContactFieldsMcp:
             )
 
         fields = _by_id(payload)
-        assert fields[ids["phone"]]["kind"] == "phone"
-        assert fields[ids["phone"]]["is_archived"] is True
-        assert fields[ids["address"]]["kind"] == "address"
-        assert fields[ids["address"]]["value"] == "1 Childhood Rd, Bathurst, AU"
-        assert fields[ids["address"]]["is_archived"] is True
+        assert fields["phone", ids["phone"]]["is_archived"] is True
+        address = fields["address", ids["address"]]
+        assert address["value"] == "1 Childhood Rd, Bathurst, AU"
+        assert address["is_archived"] is True
 
     @pytest.mark.asyncio
     async def test_archiving_the_primary_email_demotes_it(
@@ -117,7 +117,7 @@ class TestContactFieldsMcp:
                 },
             )
 
-        email = _by_id(payload)[ids["email"]]
+        email = _by_id(payload)["email", ids["email"]]
         assert email["is_archived"] is True
         assert email["is_primary"] is False
         assert payload["email"] is None
@@ -140,7 +140,7 @@ class TestContactFieldsMcp:
                 },
             )
 
-        assert _by_id(payload)[ids["address"]]["is_archived"] is False
+        assert _by_id(payload)["address", ids["address"]]["is_archived"] is False
         row = (
             await clean_database.execute(
                 text("SELECT is_archived FROM contact_addresses WHERE id = :id"),
