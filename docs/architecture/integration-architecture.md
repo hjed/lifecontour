@@ -696,8 +696,12 @@ Any integration that publishes `journal_event.*` events can report a journal's
 participants in `contact_relationships`. The backend
 (`JournalOutboxEventProcessor._sync_contact_relationships`) links each email
 that resolves to a contact, and records the rest in
-`journal_unmatched_participant_emails`. Emails seen on enough journals become
-contact suggestions on the Integrations page. Nothing in that path is
+`journal_unmatched_participant_emails`. Emails seen on at least five of a
+user's journals become contact suggestions on the Integrations page
+(`ContactSuggestionService`; REST under `/api/integrations/contact-suggestions`,
+and the `*_contact_suggestion(s)` MCP tools). Accepting one creates a contact,
+or adds the email to an existing one, and links it to every journal the email
+was recorded on; ignoring one hides it for that user until restored. Nothing in that path is
 Google-specific, so a new integration gets suggestions by sending:
 
 | Key | Required | Meaning |

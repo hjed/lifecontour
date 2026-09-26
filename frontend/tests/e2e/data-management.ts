@@ -161,6 +161,14 @@ export class TestDataManager {
   }
 
   /**
+   * Delete a contact the test created some other way (e.g. through the UI)
+   * during cleanup, as if this manager had created it.
+   */
+  trackContact(contactId: string): void {
+    this.createdContactIds.push(contactId);
+  }
+
+  /**
    * Create a test contact via API
    */
   async createContact(contactData: ContactCreateRequest): Promise<TestContact> {

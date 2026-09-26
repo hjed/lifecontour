@@ -181,6 +181,36 @@ Paginated contact list with summaries, pagination metadata, and overall context.
 }
 ```
 
+### list_contact_suggestions
+
+Lists people who keep appearing on the user's events but are not contacts:
+participant emails seen on at least five of the user's journals (e.g. Google
+Calendar invites) that match no contact, most-seen first. Also returns the
+emails the user has ignored.
+
+**Parameters:** none
+
+### accept_contact_suggestion
+
+Makes a suggested email a contact's and links that contact to every journal
+the email was seen on, with the attendance the integration reported.
+
+**Parameters:**
+- `email` (string, required): The suggested email
+- `contact_id` (integer, optional): Add the email to this existing contact
+- `first_name` (string, optional): Create a new contact with this first name
+- `last_name` (string, optional): Last name for the new contact
+
+Pass exactly one of `contact_id` or `first_name`.
+
+### ignore_contact_suggestion / unignore_contact_suggestion
+
+Adds an email to, or removes it from, the user's persistent list of emails
+never to suggest. Both are idempotent.
+
+**Parameters:**
+- `email` (string, required)
+
 ## Error Handling
 
 All tools include comprehensive error handling with AI-friendly error messages:
