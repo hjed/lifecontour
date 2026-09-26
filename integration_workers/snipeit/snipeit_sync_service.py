@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import html
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal
@@ -1063,6 +1063,157 @@ class SnipeItSyncService:
             failed=failed,
         )
         return {"synced": synced, "skipped": skipped, "failed": failed}
+
+    async def reconcile_deleted_maintenances(
+        self, listed_ids: Collection[int], session_factory: Any
+    ) -> int:
+        """Forget the maintenance records Snipe-IT no longer has.
+
+        A record deleted in Snipe-IT is simply missing from the next listing,
+        so its sync row would stay behind for ever. The rows the full listing
+        ``listed_ids`` did not return are the candidates. Each is looked up
+        before it is forgotten, because a listing paged by offset can skip a
+        record created or deleted while it ran.
+
+        A gone record's row is deleted, except a push row of a live journal
+        that was not itself imported. That row is what makes the journal's
+        next edit update its record (and log the 404) rather than post a new
+        one, bringing back a record somebody deleted. An imported journal's
+        link is kept for the same reason. An echo row, a push row naming an
+        imported journal, is deleted: the import's link names its record.
+
+        Sync rows record no user, and each user's sync asks their own Snipe-IT.
+        A row another user's live journal holds, by its push or its import
+        link, is left to that user's sync. A row no journal holds belongs to
+        nobody: every user's inbound sync would import its record as a new
+        journal anyway, so forgetting it changes nothing for anyone.
+
+        Only reads are sent to Snipe-IT, so running this again is harmless.
+
+        Args:
+            listed_ids: Every maintenance id a completed listing returned.
+            session_factory: Factory for database sessions.
+
+        Returns:
+            How many sync rows were deleted.
+
+        Raises:
+            SnipeItAPIError: If Snipe-IT rejected the API key.
+            SnipeItRateLimitError: If Snipe-IT rate limited a lookup.
+        """
+        listed = set(listed_ids)
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT m.external_id
+                    FROM sync_metadata m
+                    WHERE m.integration_source = 'snipeit_maintenance'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM journals j
+                          WHERE j.user_id <> :user_id
+                            AND (
+                                j.id = CASE
+                                    WHEN m.internal_uuid ~ '^[0-9]+$'
+                                    THEN CAST(m.internal_uuid AS bigint)
+                                END
+                                OR EXISTS (
+                                    SELECT 1
+                                    FROM journal_external_event_links l
+                                    WHERE l.journal_id = j.id
+                                      AND l.calendar_id = :calendar_id
+                                      AND l.external_event_id = m.external_id
+                                )
+                            )
+                      )
+                """),
+                {
+                    "user_id": self._user_id,
+                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                },
+            )
+            candidates = [
+                (row.external_id, maintenance_id)
+                for row in result.fetchall()
+                if (maintenance_id := _snipeit_maintenance_id(row.external_id))
+                is not None
+                and maintenance_id not in listed
+            ]
+
+        deleted = 0
+        for external_id, maintenance_id in candidates:
+            try:
+                exists = await self._api_client.maintenance_exists(maintenance_id)
+            except SnipeItAPIError as exc:
+                if exc.status_code == 401:
+                    raise
+                logger.warning(
+                    "Could not check a Snipe-IT maintenance missing from the listing",
+                    maintenance_id=maintenance_id,
+                    status_code=exc.status_code,
+                )
+                continue
+            except httpx.HTTPError:
+                logger.warning(
+                    "Could not check a Snipe-IT maintenance missing from the listing",
+                    maintenance_id=maintenance_id,
+                    exc_info=True,
+                )
+                continue
+            if exists:
+                continue
+            if await self._forget_deleted_maintenance(external_id, session_factory):
+                deleted += 1
+
+        logger.info(
+            "Reconciled Snipe-IT maintenances missing from the listing",
+            checked=len(candidates),
+            deleted=deleted,
+        )
+        return deleted
+
+    async def _forget_deleted_maintenance(
+        self, external_id: str, session_factory: Any
+    ) -> bool:
+        """Delete a gone record's sync row unless a user's journal pushed it.
+
+        Returns whether a row was deleted.
+        """
+        async with session_factory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    text("""
+                        DELETE FROM sync_metadata m
+                        WHERE m.integration_source = 'snipeit_maintenance'
+                          AND m.external_id = :external_id
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM journals j
+                              WHERE j.id = CASE
+                                      WHEN m.internal_uuid ~ '^[0-9]+$'
+                                      THEN CAST(m.internal_uuid AS bigint)
+                                  END
+                                AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM journal_external_event_links l
+                                    WHERE l.journal_id = j.id
+                                      AND l.calendar_id = :calendar_id
+                                )
+                          )
+                        RETURNING m.id
+                    """),
+                    {
+                        "external_id": external_id,
+                        "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    },
+                )
+                forgotten = result.fetchone() is not None
+        if forgotten:
+            logger.info(
+                "Forgot a Snipe-IT maintenance deleted in Snipe-IT",
+                external_id=external_id,
+            )
+        return forgotten
 
     async def _sync_single_maintenance(
         self,

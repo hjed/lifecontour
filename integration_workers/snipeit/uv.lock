@@ -240,7 +240,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "redis" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
 ]
 
@@ -266,7 +266,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "redis", specifier = ">=8.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.1" },
-    { name = "sqlalchemy", specifier = ">=2.0.52" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.52,<2.1" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "types-psycopg2", marker = "extra == 'dev'", specifier = ">=2.9.21.20260724" },
 ]

@@ -496,6 +496,62 @@ class TestSnipeItAPIClientGetMaintenance:
         assert path == "maintenances/101"
 
 
+class TestSnipeItAPIClientMaintenanceExists:
+    """Tests for maintenance_exists method."""
+
+    @pytest.mark.asyncio
+    async def test_a_record_exists(self, client_no_refresh: SnipeItAPIClient) -> None:
+        resp = _ok_response(_maintenance_get_json(17))
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            assert await client_no_refresh.maintenance_exists(17) is True
+
+        assert mock_get.call_args.args[0] == "maintenances/17"
+
+    @pytest.mark.asyncio
+    async def test_a_404_is_no_record(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+        with patch.object(client_no_refresh._client, "get", return_value=mock_404):
+            assert await client_no_refresh.maintenance_exists(20) is False
+
+    @pytest.mark.asyncio
+    async def test_a_not_found_body_is_no_record(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """Snipe-IT answers a missing model with HTTP 200 and an error body."""
+        resp = _ok_response(
+            {"status": "error", "messages": "Maintenance not found", "payload": None}
+        )
+        with patch.object(client_no_refresh._client, "get", return_value=resp):
+            assert await client_no_refresh.maintenance_exists(20) is False
+
+    @pytest.mark.asyncio
+    async def test_any_other_error_body_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """An error that does not say the record is missing proves nothing."""
+        resp = _ok_response({"status": "error", "messages": "Unauthorized"})
+        with patch.object(client_no_refresh._client, "get", return_value=resp):
+            with pytest.raises(SnipeItAPIError):
+                await client_no_refresh.maintenance_exists(20)
+
+    @pytest.mark.asyncio
+    async def test_a_server_error_raises(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        mock_500 = MagicMock()
+        mock_500.status_code = 500
+        with patch.object(client_no_refresh._client, "get", return_value=mock_500):
+            with pytest.raises(SnipeItAPIError) as exc_info:
+                await client_no_refresh.maintenance_exists(20)
+
+        assert exc_info.value.status_code == 500
+
+
 class TestSnipeItAPIClientCreateMaintenance:
     """Tests for create_maintenance method."""
 

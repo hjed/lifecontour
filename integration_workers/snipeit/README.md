@@ -91,6 +91,12 @@ limiter):
   maintenance record on an asset new in this run can be skipped as "gear item
   not yet synced"; it is imported by the next run (#1563). The `sync_jobs` rows
   stay `queued`, as a manual sync's do (#1562).
+  Once the maintenance listing has run to the end, the sync rows of records it
+  did not return are reconciled (`reconcile_deleted_maintenances`): each record
+  is looked up, and the row of one Snipe-IT no longer has is deleted, except the
+  push row of a live journal a user wrote. A listing that fails part-way
+  reconciles nothing, and a smart sync that stops listing everything (#1560)
+  must skip this step too.
 - `periodic_checkin_all_snipeit_accounts` (at `:00`) — checks in assets whose usage period
   has ended.
 

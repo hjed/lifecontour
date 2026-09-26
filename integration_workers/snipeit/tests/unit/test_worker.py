@@ -13,6 +13,7 @@ delegation, alongside the task-orchestration tests.
 
 import importlib
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +27,7 @@ os.environ["ENCRYPTION_KEY"] = "testkey"
 import pytest
 from core_shared.testing import make_arq_ctx
 
+from snipeit_api_client import SnipeItAPIError
 from worker import (
     sync_snipeit_asset_batch,
     sync_snipeit_assets,
@@ -384,6 +386,7 @@ async def test_sync_snipeit_maintenances_orchestrator(mock_ctx):
             yield [30]
 
         mock_sync_service.list_maintenance_batches.return_value = mock_batches()
+        mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
         mock_sync_service._api_client.close = AsyncMock()
         mock_create_service.return_value = mock_sync_service
 
@@ -435,6 +438,7 @@ async def test_sync_snipeit_maintenances_accepts_sync_type_and_otel_carrier(mock
             yield []
 
         mock_sync_service.list_maintenance_batches.return_value = mock_batches()
+        mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
         mock_sync_service._api_client.close = AsyncMock()
         mock_create_service.return_value = mock_sync_service
 
@@ -444,6 +448,78 @@ async def test_sync_snipeit_maintenances_accepts_sync_type_and_otel_carrier(mock
         )
 
         mock_sync_service._api_client.close.assert_called_once()
+
+
+def _maintenance_orchestrator_service(
+    mock_ctx: dict[str, Any], mock_create_service: MagicMock, batches: Any
+) -> MagicMock:
+    """Wire the orchestrator's settings read and a sync service listing ``batches``."""
+    mock_result = MagicMock()
+    mock_result.fetchone.return_value = type(
+        "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
+    )()
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = mock_result
+    mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
+
+    mock_sync_service = MagicMock()
+    mock_sync_service.list_maintenance_batches.return_value = batches
+    mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
+    mock_sync_service._api_client.close = AsyncMock()
+    mock_create_service.return_value = mock_sync_service
+    return mock_sync_service
+
+
+@pytest.mark.asyncio
+async def test_maintenance_orchestrator_reconciles_every_listed_id(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """A complete listing is what tells a deleted record from a listed one."""
+
+    async def batches() -> AsyncIterator[list[int]]:
+        yield [10, 20]
+        yield [30]
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
+        service = _maintenance_orchestrator_service(
+            mock_ctx, mock_create_service, batches()
+        )
+
+        await sync_snipeit_maintenances(mock_ctx, "user-123")
+
+    service.reconcile_deleted_maintenances.assert_awaited_once_with(
+        {10, 20, 30}, mock_ctx["session_factory"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_maintenance_orchestrator_does_not_reconcile_a_partial_listing(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """Every record after a failed page would look deleted."""
+
+    async def batches() -> AsyncIterator[list[int]]:
+        yield [10, 20]
+        raise SnipeItAPIError("Snipe-IT API error: 502", status_code=502)
+
+    with (
+        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
+        patch("worker._create_sync_service") as mock_create_service,
+    ):
+        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
+        service = _maintenance_orchestrator_service(
+            mock_ctx, mock_create_service, batches()
+        )
+
+        with pytest.raises(SnipeItAPIError):
+            await sync_snipeit_maintenances(mock_ctx, "user-123")
+
+    service.reconcile_deleted_maintenances.assert_not_awaited()
+    service._api_client.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

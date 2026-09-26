@@ -293,9 +293,11 @@ async def sync_snipeit_maintenances(
 
         # Fetch all maintenance IDs and enqueue batch jobs
         batch_count = 0
+        listed_ids: set[int] = set()
         async for maintenance_ids in sync_service.list_maintenance_batches():
             if not maintenance_ids:
                 continue
+            listed_ids.update(maintenance_ids)
 
             job_id = _batch_job_id("snipeit_maint_batch", ctx, user_id, batch_count)
             await redis.enqueue_job(
@@ -312,6 +314,10 @@ async def sync_snipeit_maintenances(
             user_id=user_id,
             batch_count=batch_count,
         )
+
+        # Only a listing that ran to the end says which records are gone: one
+        # that raised part-way never gets here.
+        await sync_service.reconcile_deleted_maintenances(listed_ids, session_factory)
 
     finally:
         await sync_service._api_client.close()

@@ -2549,3 +2549,248 @@ class TestARecordNoJournalHoldsIsImported:
 
         assert result == {"synced": 0, "skipped": 1, "failed": 0}
         assert await _journal_events(async_connection) == ["journal_event.created"]
+
+
+async def _maintenance_rows(async_connection: AsyncConnection) -> list[str]:
+    """Every ``snipeit_maintenance`` sync row's external id, in id order."""
+    result = await async_connection.execute(
+        text("""
+            SELECT external_id
+            FROM sync_metadata
+            WHERE integration_source = 'snipeit_maintenance'
+            ORDER BY CAST(split_part(external_id, ':', 2) AS integer)
+        """)
+    )
+    return [row.external_id for row in result.fetchall()]
+
+
+def _queue_gone(mock_transport: Any, *maintenance_ids: int) -> None:
+    """Snipe-IT has none of these records: a 404, or its HTTP 200 not-found body."""
+    for maintenance_id in maintenance_ids:
+        if maintenance_id % 2:
+            mock_transport.add_response(
+                f"/maintenances/{maintenance_id}", status_code=404, method="GET"
+            )
+        else:
+            mock_transport.add_response(
+                f"/maintenances/{maintenance_id}",
+                json_data={
+                    "status": "error",
+                    "messages": "Maintenance not found",
+                    "payload": None,
+                },
+                method="GET",
+            )
+
+
+def _queue_existing(mock_transport: Any, *maintenance_ids: int) -> None:
+    for maintenance_id in maintenance_ids:
+        mock_transport.add_response(
+            f"/maintenances/{maintenance_id}",
+            json_data={**_SNIPEIT_MAINTENANCE_17, "id": maintenance_id},
+            method="GET",
+        )
+
+
+class TestDeletedMaintenanceReconcile:
+    """A full sync forgets the records Snipe-IT no longer has.
+
+    Seeded as production stood after the LOCAL-161 clean-up: the originals 8 and
+    15-19 are still in Snipe-IT; the June retry duplicates 9-12 and the echoes
+    20-29 were deleted there, but their sync rows were left behind.
+    """
+
+    async def _seed_production_shape(
+        self, async_connection: AsyncConnection
+    ) -> dict[str, int]:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journals: dict[str, int] = {}
+        # Imports of 15 and 17 that were echoed, as 24 and 20, before #1468
+        for original, echo in ((15, 24), (17, 20)):
+            journal_id = await _seed_maintenance_journal(
+                async_connection,
+                gear_item_id=gear_item_id,
+                title=f"Import of {original}",
+                imported_from=original,
+            )
+            await _seed_import_record(
+                async_connection, maintenance_id=original, version_hash="h"
+            )
+            await _seed_push_record(
+                async_connection, journal_id=journal_id, maintenance_id=echo
+            )
+            journals[f"import_{original}"] = journal_id
+        # 8 is held by the user's journal it was merged into
+        journals["merged_8"] = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Retire Harness",
+            imported_from=8,
+        )
+        await _seed_import_record(async_connection, maintenance_id=8, version_hash="h")
+        # A retry duplicate imported into a journal that has since been deleted
+        await _seed_import_record(
+            async_connection, maintenance_id=9, version_hash="h", age_seconds=86400
+        )
+        # An echo whose import journal has since been deleted
+        deleted_import = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Import of 8"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=deleted_import, maintenance_id=25
+        )
+        await _delete_journal(async_connection, deleted_import)
+        # A user's journal whose pushed record was deleted in Snipe-IT
+        journals["pushed_31"] = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Rewaterproofing"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journals["pushed_31"], maintenance_id=31
+        )
+        await _seed_claim(
+            async_connection, journal_id=journals["pushed_31"], status="failed"
+        )
+        # A record the listing skipped, but which Snipe-IT still has
+        await _seed_import_record(async_connection, maintenance_id=13, version_hash="h")
+        return journals
+
+    @pytest.mark.asyncio
+    async def test_rows_of_deleted_records_are_removed(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journals = await self._seed_production_shape(async_connection)
+        _queue_gone(mock_transport, 9, 20, 24, 25, 31)
+        _queue_existing(mock_transport, 13)
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            {8, 15, 17}, _joined_session_factory(async_connection)
+        )
+
+        assert deleted == 4
+        assert await _maintenance_rows(async_connection) == [
+            "snipeit_maint:8",
+            "snipeit_maint:13",
+            "snipeit_maint:15",
+            "snipeit_maint:17",
+            # Kept so an edit of its journal is not posted as a new record
+            "snipeit_maint:31",
+        ]
+        links = await async_connection.execute(
+            text("""
+                SELECT journal_id, external_event_id
+                FROM journal_external_event_links
+                ORDER BY journal_id
+            """)
+        )
+        assert sorted((row.journal_id, row.external_event_id) for row in links) == (
+            sorted(
+                [
+                    (journals["import_15"], "snipeit_maint:15"),
+                    (journals["import_17"], "snipeit_maint:17"),
+                    (journals["merged_8"], "snipeit_maint:8"),
+                ]
+            )
+        )
+        assert await _claim_row(async_connection, journals["pushed_31"]) is not None
+        assert _snipeit_writes(mock_transport) == []
+
+    @pytest.mark.asyncio
+    async def test_a_listed_record_is_never_looked_up(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await self._seed_production_shape(async_connection)
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            {8, 9, 13, 15, 17, 20, 24, 25, 31},
+            _joined_session_factory(async_connection),
+        )
+
+        assert deleted == 0
+        assert mock_transport.requests == []
+
+    @pytest.mark.asyncio
+    async def test_a_second_run_changes_nothing(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await self._seed_production_shape(async_connection)
+        session_factory = _joined_session_factory(async_connection)
+        _queue_gone(mock_transport, 9, 20, 24, 25, 31)
+        _queue_existing(mock_transport, 13)
+        await snipeit_sync_service.reconcile_deleted_maintenances(
+            {8, 15, 17}, session_factory
+        )
+        rows_after_first_run = await _maintenance_rows(async_connection)
+        _queue_gone(mock_transport, 31)
+        _queue_existing(mock_transport, 13)
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            {8, 15, 17}, session_factory
+        )
+
+        assert deleted == 0
+        assert await _maintenance_rows(async_connection) == rows_after_first_run
+        assert _snipeit_writes(mock_transport) == []
+
+    @pytest.mark.asyncio
+    async def test_a_failed_lookup_keeps_the_row_and_carries_on(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Only a record Snipe-IT says it does not have is forgotten."""
+        await _seed_import_record(async_connection, maintenance_id=9, version_hash="h")
+        await _seed_import_record(async_connection, maintenance_id=10, version_hash="h")
+        mock_transport.add_response("/maintenances/9", status_code=500, method="GET")
+        _queue_gone(mock_transport, 10)
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            set(), _joined_session_factory(async_connection)
+        )
+
+        assert deleted == 1
+        assert await _maintenance_rows(async_connection) == ["snipeit_maint:9"]
+
+    @pytest.mark.asyncio
+    async def test_a_record_another_users_journal_holds_is_left_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Another user's Snipe-IT is not this sync's to judge."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        their_import = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Their import",
+            imported_from=40,
+        )
+        await _seed_import_record(async_connection, maintenance_id=40, version_hash="h")
+        await _seed_push_record(
+            async_connection, journal_id=their_import, maintenance_id=41
+        )
+        await async_connection.execute(
+            text("UPDATE journals SET user_id = 'user-456' WHERE id = :journal_id"),
+            {"journal_id": their_import},
+        )
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            set(), _joined_session_factory(async_connection)
+        )
+
+        assert deleted == 0
+        assert await _maintenance_rows(async_connection) == [
+            "snipeit_maint:40",
+            "snipeit_maint:41",
+        ]
+        assert mock_transport.requests == []
