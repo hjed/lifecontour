@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import html
 import json
-from collections.abc import AsyncIterator, Collection, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal
@@ -26,7 +26,7 @@ from sqlalchemy import text
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
-from snipeit_models import SnipeItAsset, SnipeItMaintenance
+from snipeit_models import SnipeItActivity, SnipeItAsset, SnipeItMaintenance
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 logger = structlog.get_logger(__name__)
@@ -141,6 +141,26 @@ def _parse_wall_clock(value: object) -> datetime | None:
 def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | None:
     """Format ``value`` as the naive ``Y-m-d H:i:s`` wall-clock time in ``zone``."""
     return _format_wall_clock(_snipeit_wall_clock(value, zone))
+
+
+def _activity_matches_time(
+    activity: SnipeItActivity, at: str | None, *, exact: bool = False
+) -> bool:
+    """Whether ``activity`` may be the log entry of an action at wall-clock ``at``.
+
+    A checkout the worker posts carries its time of day, so an entry at another
+    time is another usage of the asset that day. An entry at midnight was
+    entered as a date (by hand, or posted before times were sent) and matches
+    any time of that day, unless ``exact`` asks for the entry of one checkout.
+    An entry with no action time (dated today) and a lookup with no ``at``
+    (check-ins keep no time of day) are not constrained.
+    """
+    wall_clock = activity.action_wall_clock
+    if at is None or wall_clock is None:
+        return True
+    if wall_clock == at:
+        return True
+    return not exact and wall_clock.endswith(" 00:00:00")
 
 
 async def _fetch_journal_row(session: Any, journal_id: int) -> Any:
@@ -2551,6 +2571,7 @@ class SnipeItSyncService:
         # Link a checkout already in Snipe-IT (e.g. entered by hand before an
         # import) instead of recording it twice; otherwise POST a new one.
         linked_log_id: int | None = None
+        snipeit_log_id: int | None = None
         try:
             if previous_asset_id not in (None, snipeit_asset_id):
                 await self._return_previous_asset(
@@ -2569,7 +2590,9 @@ class SnipeItSyncService:
                 journal_id=journal_id,
                 external_id=external_id,
                 session_factory=session_factory,
+                at=payload["checkout_at"],
             )
+            snipeit_log_id = linked_log_id
             if linked_log_id is None:
                 if asset_dates_before is None:
                     asset_dates_before = AssetUsageDates.from_asset(
@@ -2583,6 +2606,19 @@ class SnipeItSyncService:
                 await self._api_client.checkout_asset(
                     asset_id=snipeit_asset_id,
                     payload=payload,
+                )
+                # Keep the posted entry's id too, so another usage of the asset
+                # that day cannot link it as its own.
+                snipeit_log_id = await self._find_unlinked_activity(
+                    asset_id=snipeit_asset_id,
+                    action_type="checkout",
+                    day=checkout_at,
+                    source="snipeit_checkout",
+                    journal_id=journal_id,
+                    external_id=external_id,
+                    session_factory=session_factory,
+                    at=payload["checkout_at"],
+                    exact=True,
                 )
         except SnipeItAPIError as exc:
             # Handle 403/404 specific errors gracefully
@@ -2615,8 +2651,8 @@ class SnipeItSyncService:
             "checkout_at": checkout_at,
             "expected_checkin": expected_checkin,
         }
-        if linked_log_id is not None:
-            checkout_reference["snipeit_log_id"] = linked_log_id
+        if snipeit_log_id is not None:
+            checkout_reference["snipeit_log_id"] = snipeit_log_id
         if asset_dates_before is not None:
             checkout_reference[_ASSET_DATES_BEFORE] = asset_dates_before.to_reference()
 
@@ -2654,6 +2690,7 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_asset_id=snipeit_asset_id,
             linked_snipeit_log_id=linked_log_id,
+            snipeit_log_id=snipeit_log_id,
         )
 
         # If the usage period is already over (e.g. logging a past trip), the
@@ -2786,12 +2823,15 @@ class SnipeItSyncService:
         external_id: str,
         session_factory: Any,
         after_log_id: int | None = None,
+        at: str | None = None,
+        exact: bool = False,
     ) -> int | None:
         """Claim an existing Snipe-IT log entry this journal can link to, if any.
 
         Candidates are entries dated ``day`` (Snipe-IT's server date) that involve
-        the mapped Snipe-IT user and, when ``after_log_id`` is given, were logged
-        after it; one no other journal holds is claimed on this journal's
+        the mapped Snipe-IT user, match the wall-clock time ``at`` (see
+        :func:`_activity_matches_time`) and, when ``after_log_id`` is given, were
+        logged after it; one no other journal holds is claimed on this journal's
         ``source`` row (``external_id``). Linking is best-effort: when the
         activity report cannot be read, nothing is linked and the caller records
         the history as usual.
@@ -2803,6 +2843,8 @@ class SnipeItSyncService:
             action_type=action_type,
             day=day,
             after_log_id=after_log_id,
+            at=at,
+            exact=exact,
         )
         if not candidates:
             return None
@@ -2822,27 +2864,50 @@ class SnipeItSyncService:
         action_type: str,
         day: str,
         after_log_id: int | None,
+        at: str | None,
+        exact: bool,
     ) -> list[int]:
         """Page the asset's ``action_type`` activity, newest first, for matches."""
-        candidates: list[int] = []
+        matches = await self._matching_activity(
+            asset_id=asset_id,
+            action_type=action_type,
+            matches=lambda activity: (
+                activity.action_day == day
+                and activity.item is not None
+                and activity.item.id == asset_id
+                and activity.target is not None
+                and activity.target.type == "user"
+                and str(activity.target.id) == str(self._snipeit_user_id)
+                and (after_log_id is None or activity.id > after_log_id)
+                and _activity_matches_time(activity, at, exact=exact)
+            ),
+        )
+        return [activity.id for activity in matches]
+
+    async def _matching_activity(
+        self,
+        *,
+        asset_id: int,
+        action_type: str,
+        matches: Callable[[SnipeItActivity], bool],
+    ) -> list[SnipeItActivity]:
+        """Page the asset's ``action_type`` activity, newest first, keeping ``matches``.
+
+        Returns nothing when the report is unavailable or unreadable, so callers
+        treat it as best-effort.
+        """
+        found: list[SnipeItActivity] = []
         try:
             for page in range(1, _ACTIVITY_MAX_PAGES + 1):
                 response = await self._api_client.list_asset_activity(
                     asset_id, action_type=action_type, page=page, per_page=_PAGE_SIZE
                 )
-                candidates.extend(
-                    activity.id
+                found.extend(
+                    activity
                     for activity in response.rows
-                    if activity.action_day == day
                     # Checked here too: some Snipe-IT versions (e.g. 6.3.1)
                     # ignore the report's action_type filter.
-                    and activity.action_type == action_type
-                    and activity.item is not None
-                    and activity.item.id == asset_id
-                    and activity.target is not None
-                    and activity.target.type == "user"
-                    and str(activity.target.id) == str(self._snipeit_user_id)
-                    and (after_log_id is None or activity.id > after_log_id)
+                    if activity.action_type == action_type and matches(activity)
                 )
                 if len(response.rows) < _PAGE_SIZE:
                     break
@@ -2871,7 +2936,7 @@ class SnipeItSyncService:
                 snipeit_asset_id=asset_id,
             )
             return []
-        return candidates
+        return found
 
     async def _claim_activity_log(
         self,
@@ -3365,6 +3430,9 @@ class SnipeItSyncService:
           back in when the period is already past).
         - The checkout date changed after the asset was checked in: supersede
           the recorded pair and record a new checkout and check-in.
+        - The checkout was linked to another usage's log entry (one at another
+          time of that day) and the asset is back: release the linked pair and
+          record the journal's own.
         - Otherwise: check the asset in once the period has ended. This is a
           no-op when already checked in, so a changed check-in date alone is not
           re-recorded. If the check-in closes a checkout recorded on an older
@@ -3377,7 +3445,7 @@ class SnipeItSyncService:
         async with session_factory() as session:
             checkout_result = await session.execute(
                 text("""
-                    SELECT co.sync_status, co.reference_data,
+                    SELECT co.sync_status, co.external_id, co.reference_data,
                            ci.sync_status AS checkin_status,
                            ci.error_message AS checkin_error
                     FROM sync_metadata co
@@ -3428,6 +3496,29 @@ class SnipeItSyncService:
                 journal_id=journal_id,
                 recorded_reference=checkout_row.reference_data,
                 session_factory=session_factory,
+                reason="checkout date changed",
+            ):
+                await self.push_checkout_create(
+                    journal_id=journal_id,
+                    session_factory=session_factory,
+                )
+            return
+
+        if (
+            not checkout_date_changed
+            and checkout_row.checkin_status == "success"
+            and checkout_row.checkin_error is None
+            and await self._linked_to_another_checkout(
+                checkout_row.external_id,
+                checkout_row.reference_data,
+                at=_snipeit_datetime(checkout_date, zone),
+            )
+        ):
+            if await self._supersede_checkout(
+                journal_id=journal_id,
+                recorded_reference=checkout_row.reference_data,
+                session_factory=session_factory,
+                reason="linked log entry belongs to another checkout",
             ):
                 await self.push_checkout_create(
                     journal_id=journal_id,
@@ -3460,6 +3551,7 @@ class SnipeItSyncService:
         journal_id: int,
         recorded_reference: str,
         session_factory: Any,
+        reason: str,
     ) -> bool:
         """Release a journal's recorded checkout and check-in so a new pair is made.
 
@@ -3475,7 +3567,7 @@ class SnipeItSyncService:
                     text("""
                         UPDATE sync_metadata
                         SET sync_status = 'failed',
-                            error_message = 'Superseded: checkout date changed',
+                            error_message = :error_message,
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkout'
                           AND internal_uuid = :journal_id
@@ -3486,6 +3578,7 @@ class SnipeItSyncService:
                     {
                         "journal_id": str(journal_id),
                         "recorded_reference": recorded_reference,
+                        "error_message": f"Superseded: {reason}",
                     },
                 )
                 if result.fetchone() is None:
@@ -3504,10 +3597,35 @@ class SnipeItSyncService:
                 )
 
         logger.info(
-            "Superseded Snipe-IT checkout after its checkout date changed",
+            "Superseded Snipe-IT checkout",
             journal_id=journal_id,
+            reason=reason,
         )
         return True
+
+    async def _linked_to_another_checkout(
+        self, external_id: object, reference_data: object, *, at: str | None
+    ) -> bool:
+        """Whether a linked checkout's log entry is another checkout's, not this one's.
+
+        Only a checkout linked without reading the asset first is checked: one
+        the worker read the asset for was posted by it and linked only because
+        the response was lost. Such an entry with a time of day other than
+        ``at`` is another usage of the asset that day, which a checkout used to
+        link before posted entries were kept.
+        """
+        log_id = self._recorded_log_id(reference_data)
+        if log_id is None or AssetUsageDates.from_reference(reference_data) is not None:
+            return False
+        asset_id = _checkout_asset_id(external_id)
+        if asset_id is None:
+            return False
+        linked = await self._matching_activity(
+            asset_id=asset_id,
+            action_type="checkout",
+            matches=lambda activity: activity.id == log_id,
+        )
+        return any(not _activity_matches_time(activity, at) for activity in linked)
 
     @staticmethod
     def _recorded_reference(reference_data: object) -> dict[str, Any]:

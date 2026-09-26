@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_models import SnipeItAsset, SnipeItMaintenance
+from snipeit_models import SnipeItActivity, SnipeItAsset, SnipeItMaintenance
 from snipeit_sync_service import (
     AssetUsageDates,
     MaintenanceClaim,
     MaintenancePushContext,
     SnipeItSyncService,
+    _activity_matches_time,
     _format_date_for_snipeit,
     _local_date,
     _resolve_zone,
@@ -126,6 +127,58 @@ class TestSnipeitDatetime:
 
     def test_none_is_none(self) -> None:
         assert _snipeit_datetime(None, SYDNEY) is None
+
+
+def _activity_at(action_date: str | None) -> SnipeItActivity:
+    return SnipeItActivity.model_validate(
+        {
+            "id": 1,
+            "action_date": {"datetime": action_date} if action_date else None,
+            "created_at": {"datetime": "2026-09-13 09:00:00"},
+        }
+    )
+
+
+class TestActivityMatchesTime:
+    """Only a checkout at that time of day can be the entry a checkout links."""
+
+    AT = "2024-10-26 12:43:00"
+
+    @pytest.mark.parametrize(
+        ("action_date", "at", "matches"),
+        [
+            ("2024-10-26 12:43:00", AT, True),
+            # Another usage of the asset earlier that day.
+            ("2024-10-26 08:30:00", AT, False),
+            # Entered by hand as a date, or posted before times were sent.
+            ("2024-10-26 00:00:00", AT, True),
+            # Dated today: Snipe-IT reports no action time at all.
+            (None, AT, True),
+            # Check-ins keep no time of day, so none is required.
+            ("2024-10-26 08:30:00", None, True),
+        ],
+        ids=["same-time", "other-time", "midnight", "no-action-date", "no-time"],
+    )
+    def test_day_level_match(
+        self, action_date: str | None, at: str | None, matches: bool
+    ) -> None:
+        assert _activity_matches_time(_activity_at(action_date), at) is matches
+
+    @pytest.mark.parametrize(
+        ("action_date", "at", "matches"),
+        [
+            ("2024-10-26 12:43:00", AT, True),
+            ("2024-10-26 00:00:00", AT, False),
+            ("2024-10-26 00:00:00", "2024-10-26 00:00:00", True),
+            (None, AT, True),
+        ],
+        ids=["same-time", "midnight", "both-midnight", "no-action-date"],
+    )
+    def test_exact_match_finds_only_the_posted_checkout(
+        self, action_date: str | None, at: str, matches: bool
+    ) -> None:
+        activity = _activity_at(action_date)
+        assert _activity_matches_time(activity, at, exact=True) is matches
 
 
 class TestAssetUsageDates:
