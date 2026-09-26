@@ -266,7 +266,13 @@ NOTE_PREFIX = "note"
 
 # The fields a user can edit on each sub-entity — everything else on the
 # dataclass is an id, a timestamp or a value derived from a foreign key.
-METHOD_FIELDS: Sequence[str] = ("method_type", "value", "label", "is_primary")
+METHOD_FIELDS: Sequence[str] = (
+    "method_type",
+    "value",
+    "label",
+    "is_primary",
+    "is_archived",
+)
 ADDRESS_FIELDS: Sequence[str] = (
     "label",
     "street_line_1",
@@ -276,6 +282,7 @@ ADDRESS_FIELDS: Sequence[str] = (
     "postal_code",
     "country_code",
     "is_primary",
+    "is_archived",
 )
 NOTE_FIELDS: Sequence[str] = ("content",)
 IMPORTANT_DATE_FIELDS: Sequence[str] = (
@@ -421,11 +428,12 @@ def with_primary_method(
 
     Edits the primary method of that type in place - a copy keeping its id, so
     the save can report what the value was - or, when none is primary,
-    promotes the first method of the type, or adds one. Every other method is
+    promotes the first active method of the type, or adds one. Every other method is
     returned as it is, and the ones passed in are not modified: they are the
     before-image the reconcile diffs against.
     """
-    of_type = [m for m in methods if m.method_type == method_type]
+    # An archived method is out of use: it is never the one made primary.
+    of_type = [m for m in methods if m.method_type == method_type and not m.is_archived]
     target = next((m for m in of_type if m.is_primary), None) or next(
         iter(of_type), None
     )

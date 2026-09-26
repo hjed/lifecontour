@@ -5,7 +5,13 @@ Tests round-trip serialize/deserialize for contact important dates,
 ensuring the outbox pipeline correctly preserves date data.
 """
 
-from core_shared.models.contacts.entities import Contact, ImportantDate
+from core_shared.models.contacts.entities import (
+    Contact,
+    ContactAddress,
+    ContactMethod,
+    ImportantDate,
+    MethodType,
+)
 from core_shared.models.contacts.important_date_types import (
     DatePrecision,
     ImportantDateType,
@@ -304,3 +310,54 @@ class TestPhotoUrlSerialization:
         assert restored.photo_url == "/api/contacts/1/avatar"
         assert restored.first_name == "Round"
         assert restored.last_name == "Trip"
+
+
+class TestArchivedSerialization:
+    """``is_archived`` survives the outbox round trip on methods and addresses."""
+
+    def test_round_trip_preserves_is_archived(self) -> None:
+        original = Contact(
+            first_name="Arch",
+            methods=[
+                ContactMethod(
+                    method_type=MethodType.EMAIL,
+                    value="old@example.com",
+                    contact_id=1,
+                    is_archived=True,
+                ),
+                ContactMethod(
+                    method_type=MethodType.PHONE,
+                    value="+61 2 1234 5678",
+                    contact_id=1,
+                ),
+            ],
+            addresses=[
+                ContactAddress(
+                    street_line_1="1 Childhood Rd",
+                    country_code="AU",
+                    contact_id=1,
+                    is_archived=True,
+                )
+            ],
+        )
+
+        restored = deserialize_contact(serialize_contact(original))
+
+        assert restored.methods is not None
+        assert [m.is_archived for m in restored.methods] == [True, False]
+        assert restored.addresses is not None
+        assert restored.addresses[0].is_archived is True
+
+    def test_deserialize_without_is_archived_defaults_to_active(self) -> None:
+        restored = deserialize_contact(
+            {
+                "first_name": "Legacy",
+                "methods": [{"method_type": "email", "value": "a@example.com"}],
+                "addresses": [{"street_line_1": "1 Main St", "country_code": "AU"}],
+            }
+        )
+
+        assert restored.methods is not None
+        assert restored.methods[0].is_archived is False
+        assert restored.addresses is not None
+        assert restored.addresses[0].is_archived is False

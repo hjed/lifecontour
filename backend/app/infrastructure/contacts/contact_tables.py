@@ -64,6 +64,7 @@ contact_methods_table = Table(
     Column("value", Text, nullable=False),
     Column("label", String(50), nullable=True),
     Column("is_primary", Boolean, server_default=text("false"), nullable=False),
+    Column("is_archived", Boolean, server_default=text("false"), nullable=False),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -78,6 +79,10 @@ contact_methods_table = Table(
     ),
     CheckConstraint(
         "method_type IN ('email', 'phone')", name="ck_contact_methods_method_type"
+    ),
+    CheckConstraint(
+        "NOT (is_primary AND is_archived)",
+        name="ck_contact_methods_archived_not_primary",
     ),
 )
 
@@ -100,6 +105,7 @@ contact_addresses_table = Table(
     Column("postal_code", String(20), nullable=True),
     Column("country_code", String(2), nullable=False),
     Column("is_primary", Boolean, server_default=text("false"), nullable=False),
+    Column("is_archived", Boolean, server_default=text("false"), nullable=False),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -111,6 +117,10 @@ contact_addresses_table = Table(
         DateTime(timezone=True),
         server_default=text("now()"),
         nullable=False,
+    ),
+    CheckConstraint(
+        "NOT (is_primary AND is_archived)",
+        name="ck_contact_addresses_archived_not_primary",
     ),
 )
 

@@ -98,7 +98,7 @@ class SqlContactRepository(ContactRepository):
         # Load contact methods
         methods_query = text(
             """
-            SELECT id, method_type, value, label, is_primary, created_at, updated_at
+            SELECT id, method_type, value, label, is_primary, is_archived, created_at, updated_at
             FROM contact_methods WHERE contact_id = :contact_id
             ORDER BY is_primary DESC, created_at ASC
         """
@@ -117,6 +117,7 @@ class SqlContactRepository(ContactRepository):
                 ),
                 label=method_row.label,
                 is_primary=method_row.is_primary,
+                is_archived=method_row.is_archived,
                 created_at=method_row.created_at,
                 updated_at=method_row.updated_at,
             )
@@ -127,7 +128,7 @@ class SqlContactRepository(ContactRepository):
         addresses_query = text(
             """
             SELECT id, label, street_line_1, street_line_2, locality, region,
-                   postal_code, country_code, is_primary, created_at, updated_at
+                   postal_code, country_code, is_primary, is_archived, created_at, updated_at
             FROM contact_addresses WHERE contact_id = :contact_id
             ORDER BY is_primary DESC, created_at ASC
         """
@@ -147,6 +148,7 @@ class SqlContactRepository(ContactRepository):
                 postal_code=address_row.postal_code,
                 country_code=address_row.country_code,
                 is_primary=address_row.is_primary,
+                is_archived=address_row.is_archived,
                 created_at=address_row.created_at,
                 updated_at=address_row.updated_at,
             )
@@ -901,8 +903,10 @@ class SqlContactRepository(ContactRepository):
         try:
             query = text(
                 """
-                INSERT INTO contact_methods (contact_id, method_type, value, label, is_primary)
-                VALUES (:contact_id, :method_type, :value, :label, :is_primary)
+                INSERT INTO contact_methods
+                (contact_id, method_type, value, label, is_primary, is_archived)
+                VALUES (:contact_id, :method_type, :value, :label, :is_primary,
+                        :is_archived)
                 RETURNING id, created_at, updated_at
             """
             )
@@ -914,6 +918,7 @@ class SqlContactRepository(ContactRepository):
                     "value": method.value,
                     "label": method.label,
                     "is_primary": method.is_primary,
+                    "is_archived": method.is_archived,
                 },
             )
             row = result.fetchone()
@@ -948,7 +953,8 @@ class SqlContactRepository(ContactRepository):
                 """
                 UPDATE contact_methods
                 SET method_type = :method_type, value = :value, label = :label,
-                    is_primary = :is_primary, updated_at = NOW()
+                    is_primary = :is_primary, is_archived = :is_archived,
+                    updated_at = NOW()
                 WHERE id = :id
                 RETURNING updated_at
             """
@@ -961,6 +967,7 @@ class SqlContactRepository(ContactRepository):
                     "value": method.value,
                     "label": method.label,
                     "is_primary": method.is_primary,
+                    "is_archived": method.is_archived,
                 },
             )
             row = result.fetchone()
@@ -989,7 +996,7 @@ class SqlContactRepository(ContactRepository):
         """Find a contact method by ID."""
         query = text(
             """
-            SELECT id, contact_id, method_type, value, label, is_primary, created_at, updated_at
+            SELECT id, contact_id, method_type, value, label, is_primary, is_archived, created_at, updated_at
             FROM contact_methods
             WHERE id = :method_id
         """
@@ -1009,6 +1016,7 @@ class SqlContactRepository(ContactRepository):
             value=self._normalize_contact_method_value(method_type, row.value),
             label=row.label,
             is_primary=row.is_primary,
+            is_archived=row.is_archived,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1035,9 +1043,10 @@ class SqlContactRepository(ContactRepository):
                 """
                 INSERT INTO contact_addresses
                 (contact_id, label, street_line_1, street_line_2, locality, region,
-                 postal_code, country_code, is_primary)
+                 postal_code, country_code, is_primary, is_archived)
                 VALUES (:contact_id, :label, :street_line_1, :street_line_2, :locality,
-                        :region, :postal_code, :country_code, :is_primary)
+                        :region, :postal_code, :country_code, :is_primary,
+                        :is_archived)
                 RETURNING id, created_at, updated_at
             """
             )
@@ -1053,6 +1062,7 @@ class SqlContactRepository(ContactRepository):
                     "postal_code": address.postal_code,
                     "country_code": address.country_code,
                     "is_primary": address.is_primary,
+                    "is_archived": address.is_archived,
                 },
             )
             row = result.fetchone()
@@ -1077,7 +1087,8 @@ class SqlContactRepository(ContactRepository):
                 UPDATE contact_addresses
                 SET label = :label, street_line_1 = :street_line_1, street_line_2 = :street_line_2,
                     locality = :locality, region = :region, postal_code = :postal_code,
-                    country_code = :country_code, is_primary = :is_primary, updated_at = NOW()
+                    country_code = :country_code, is_primary = :is_primary, is_archived = :is_archived,
+                    updated_at = NOW()
                 WHERE id = :id
                 RETURNING updated_at
             """
@@ -1094,6 +1105,7 @@ class SqlContactRepository(ContactRepository):
                     "postal_code": address.postal_code,
                     "country_code": address.country_code,
                     "is_primary": address.is_primary,
+                    "is_archived": address.is_archived,
                 },
             )
             row = result.fetchone()
@@ -1112,7 +1124,7 @@ class SqlContactRepository(ContactRepository):
         query = text(
             """
             SELECT id, contact_id, label, street_line_1, street_line_2, locality,
-                   region, postal_code, country_code, is_primary, created_at, updated_at
+                   region, postal_code, country_code, is_primary, is_archived, created_at, updated_at
             FROM contact_addresses
             WHERE id = :address_id
         """
@@ -1134,6 +1146,7 @@ class SqlContactRepository(ContactRepository):
             postal_code=row.postal_code,
             country_code=row.country_code,
             is_primary=row.is_primary,
+            is_archived=row.is_archived,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1561,7 +1574,7 @@ class SqlContactRepository(ContactRepository):
         # Batch load contact methods
         methods_query = text(
             """
-            SELECT contact_id, id, method_type, value, label, is_primary, created_at, updated_at
+            SELECT contact_id, id, method_type, value, label, is_primary, is_archived, created_at, updated_at
             FROM contact_methods
             WHERE contact_id = ANY(:contact_ids)
             ORDER BY contact_id, is_primary DESC, created_at ASC
@@ -1577,6 +1590,7 @@ class SqlContactRepository(ContactRepository):
                 id=row.id,
                 label=row.label,
                 is_primary=row.is_primary,
+                is_archived=row.is_archived,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1586,7 +1600,7 @@ class SqlContactRepository(ContactRepository):
         addresses_query = text(
             """
             SELECT contact_id, id, label, street_line_1, street_line_2, locality, region,
-                   postal_code, country_code, is_primary, created_at, updated_at
+                   postal_code, country_code, is_primary, is_archived, created_at, updated_at
             FROM contact_addresses
             WHERE contact_id = ANY(:contact_ids)
             ORDER BY contact_id, is_primary DESC, created_at ASC
@@ -1605,6 +1619,7 @@ class SqlContactRepository(ContactRepository):
                 region=row.region,
                 postal_code=row.postal_code,
                 is_primary=row.is_primary,
+                is_archived=row.is_archived,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )

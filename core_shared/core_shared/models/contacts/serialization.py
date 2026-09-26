@@ -58,6 +58,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "value": method.value,
                 "label": method.label,
                 "is_primary": method.is_primary,
+                "is_archived": method.is_archived,
             }
             for method in contact.methods
         ]
@@ -75,6 +76,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
                 "country_code": address.country_code,
                 "label": address.label,
                 "is_primary": address.is_primary,
+                "is_archived": address.is_archived,
             }
             for address in contact.addresses
         ]
@@ -150,6 +152,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                     value=method_data["value"],
                     label=method_data.get("label"),
                     is_primary=method_data.get("is_primary", False),
+                    is_archived=method_data.get("is_archived", False),
                     contact_id=0,
                 )
                 for method_data in methods_data
@@ -170,6 +173,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
                     postal_code=addr_data.get("postal_code"),
                     label=addr_data.get("label"),
                     is_primary=addr_data.get("is_primary", False),
+                    is_archived=addr_data.get("is_archived", False),
                     contact_id=0,
                 )
                 for addr_data in addresses_data

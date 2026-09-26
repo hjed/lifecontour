@@ -87,6 +87,7 @@ class ContactConverter:
                 value=method.value,
                 label=method.label,
                 is_primary=method.is_primary,
+                is_archived=method.is_archived,
             ),
         )
 
@@ -104,6 +105,7 @@ class ContactConverter:
                 postal_code=address.postal_code,
                 country_code=address.country_code,
                 is_primary=address.is_primary,
+                is_archived=address.is_archived,
             ),
         )
 
@@ -285,6 +287,7 @@ class ContactRequestConverter:
             value=method_resource.attributes.value,
             label=method_resource.attributes.label,
             is_primary=method_resource.attributes.is_primary,
+            is_archived=method_resource.attributes.is_archived,
         )
 
     @staticmethod
@@ -303,6 +306,7 @@ class ContactRequestConverter:
             postal_code=address_resource.attributes.postal_code,
             country_code=address_resource.attributes.country_code,
             is_primary=address_resource.attributes.is_primary,
+            is_archived=address_resource.attributes.is_archived,
         )
 
     @staticmethod

@@ -318,6 +318,110 @@ class TestContactRepositoryIntegration:
         assert saved_address.label == "Home"
 
     @pytest.mark.asyncio
+    async def test_archived_method_and_address_round_trip(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """is_archived is written on insert and update, and read back."""
+        contact = await contact_repo.save(Contact(first_name="Arch"))
+        assert contact.id is not None
+        method = await contact_repo.add_method(
+            contact.id,
+            ContactMethod(
+                method_type=MethodType.PHONE,
+                value="+61 2 1234 5678",
+                contact_id=contact.id,
+                is_archived=True,
+            ),
+        )
+        address = await contact_repo.add_address(
+            contact.id,
+            ContactAddress(
+                street_line_1="1 Childhood Rd",
+                country_code="AU",
+                contact_id=contact.id,
+                is_archived=True,
+            ),
+        )
+
+        loaded = await contact_repo.find_by_id(contact.id)
+        assert loaded is not None
+        assert [m.is_archived for m in loaded.methods or []] == [True]
+        assert [a.is_archived for a in loaded.addresses or []] == [True]
+
+        method.is_archived = False
+        address.is_archived = False
+        await contact_repo.update_method(method)
+        await contact_repo.update_address(address)
+
+        assert method.id is not None
+        assert address.id is not None
+        reloaded_method = await contact_repo.find_method_by_id(method.id)
+        reloaded_address = await contact_repo.find_address_by_id(address.id)
+        assert reloaded_method is not None
+        assert reloaded_method.is_archived is False
+        assert reloaded_address is not None
+        assert reloaded_address.is_archived is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("table", "columns", "values"),
+        [
+            (
+                "contact_methods",
+                "contact_id, method_type, value",
+                ":contact_id, 'phone', '+61 2 1234 5678'",
+            ),
+            (
+                "contact_addresses",
+                "contact_id, street_line_1, country_code",
+                ":contact_id, '1 Main St', 'AU'",
+            ),
+        ],
+    )
+    async def test_database_refuses_archived_primary(
+        self,
+        contact_repo: SqlContactRepository,
+        clean_database: AsyncConnection,
+        table: str,
+        columns: str,
+        values: str,
+    ) -> None:
+        """The CHECK constraint backs the entity invariant."""
+        contact = await contact_repo.save(Contact(first_name="Check"))
+
+        with pytest.raises(IntegrityError, match="archived_not_primary"):
+            async with clean_database.begin_nested():
+                await clean_database.execute(
+                    text(
+                        f"INSERT INTO {table} ({columns}, is_primary, is_archived) "  # noqa: S608
+                        f"VALUES ({values}, true, true)"
+                    ),
+                    {"contact_id": contact.id},
+                )
+
+    @pytest.mark.asyncio
+    async def test_find_by_email_matches_archived_email(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """An archived email still identifies its contact."""
+        contact = await contact_repo.save(Contact(first_name="Old"))
+        assert contact.id is not None
+        await contact_repo.add_method(
+            contact.id,
+            ContactMethod(
+                method_type=MethodType.EMAIL,
+                value="old.address@example.com",
+                contact_id=contact.id,
+                is_archived=True,
+            ),
+        )
+
+        found = await contact_repo.find_by_email("old.address@example.com")
+
+        assert found is not None
+        assert found.id == contact.id
+
+    @pytest.mark.asyncio
     async def test_add_note_success(self, contact_repo):
         """Test adding a contact note."""
         # Arrange

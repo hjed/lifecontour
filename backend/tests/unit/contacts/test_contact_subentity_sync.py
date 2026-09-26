@@ -56,6 +56,7 @@ def _method(
     method_type: MethodType = MethodType.EMAIL,
     label: str | None = None,
     is_primary: bool = False,
+    is_archived: bool = False,
 ) -> ContactMethod:
     return ContactMethod(
         method_type=method_type,
@@ -64,6 +65,7 @@ def _method(
         id=id,
         label=label,
         is_primary=is_primary,
+        is_archived=is_archived,
     )
 
 
@@ -619,6 +621,33 @@ class TestWithPrimaryMethod:
             None,
             MethodType.PHONE,
             "+61412345678",
+            True,
+        )
+
+    def test_never_promotes_an_archived_method(self) -> None:
+        archived = _method("old@example.com", id=1, is_archived=True)
+        active = _method("work@example.com", id=2)
+
+        result = with_primary_method(
+            [archived, active], MethodType.EMAIL, "new@example.com", CONTACT_ID
+        )
+
+        assert [(m.id, m.value, m.is_primary, m.is_archived) for m in result] == [
+            (1, "old@example.com", False, True),
+            (2, "new@example.com", True, False),
+        ]
+
+    def test_adds_a_primary_beside_archived_methods_of_the_type(self) -> None:
+        archived = _method("old@example.com", id=1, is_archived=True)
+
+        result = with_primary_method(
+            [archived], MethodType.EMAIL, "new@example.com", CONTACT_ID
+        )
+
+        assert result[0] is archived
+        assert (result[1].id, result[1].value, result[1].is_primary) == (
+            None,
+            "new@example.com",
             True,
         )
 
