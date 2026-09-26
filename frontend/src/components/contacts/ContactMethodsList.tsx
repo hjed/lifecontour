@@ -364,10 +364,12 @@ export function ContactMethodsList({
               className='flex items-center justify-between space-x-3 rounded-md border border-dashed p-2'
               data-testid={`archived-contact-method-${method.id}`}
             >
-              <div className='text-muted-foreground min-w-0 flex-1 text-sm'>
-                <p className='break-words'>{method.attributes.value}</p>
+              {/* The same editor as a method in use, so an archived value can
+                  be corrected without restoring it (and so syncing it) first. */}
+              <div className='text-muted-foreground min-w-0 flex-1'>
+                {renderMethodField(method)}
                 {method.attributes.label && (
-                  <p className='text-xs'>{method.attributes.label}</p>
+                  <p className='px-1 text-xs'>{method.attributes.label}</p>
                 )}
               </div>
               <Button

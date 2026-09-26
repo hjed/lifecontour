@@ -2,7 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactAddressesList } from '../ContactAddressesList';
 import { ContactAddressResource } from '@/types/contacts';
@@ -241,6 +247,24 @@ describe('ContactAddressesList', () => {
 
       expect(screen.getByText(/1 Old Farm Road/)).toBeInTheDocument();
       expect(screen.getByText('Childhood home')).toBeInTheDocument();
+    });
+
+    it('offers the address editor on an archived address', () => {
+      render(
+        <ContactAddressesList contactId='123' addresses={withArchived} />,
+        { wrapper: createWrapper() }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived addresses (1)' })
+      );
+
+      expect(
+        within(screen.getByTestId('archived-contact-address-3')).getByRole(
+          'button',
+          { name: 'Address (Childhood home)' }
+        )
+      ).toBeInTheDocument();
     });
 
     it('archives an active address and restores an archived one', async () => {

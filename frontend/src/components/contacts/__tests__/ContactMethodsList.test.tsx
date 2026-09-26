@@ -2,7 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactMethodsList } from '../ContactMethodsList';
 import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
@@ -277,6 +284,67 @@ describe('ContactMethodsList', () => {
           archived: false,
         });
       });
+    });
+
+    it('edits an archived method in place, without restoring it', async () => {
+      const user = userEvent.setup();
+      render(<ContactMethodsList contactId='123' methods={withArchived} />, {
+        wrapper: createWrapper(),
+      });
+
+      await user.click(
+        screen.getByRole('button', { name: 'Archived contact methods (1)' })
+      );
+      const row = screen.getByTestId('archived-contact-method-3');
+      await user.click(
+        within(row).getByRole('button', { name: 'Email address (School)' })
+      );
+      const input = within(row).getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, 'older@example.com');
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => {
+        expect(mockUpdateField).toHaveBeenCalledWith(
+          '123',
+          '3',
+          'value',
+          'older@example.com'
+        );
+      });
+      expect(mockSetArchived).not.toHaveBeenCalled();
+    });
+
+    it('formats an archived phone like one in use', () => {
+      render(
+        <ContactMethodsList
+          contactId='123'
+          methods={[
+            {
+              id: '4',
+              type: 'contact_methods',
+              attributes: {
+                method_type: ContactMethodType.PHONE,
+                value: '+61-2-9999-0000',
+                is_primary: false,
+                is_archived: true,
+              },
+            },
+          ]}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived contact methods (1)' })
+      );
+
+      expect(
+        within(screen.getByTestId('archived-contact-method-4')).getByRole(
+          'button',
+          { name: 'Phone number' }
+        )
+      ).toHaveTextContent('+61 2 9999 0000');
     });
 
     it('says nothing is in use when every method is archived', () => {

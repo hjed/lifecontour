@@ -471,9 +471,22 @@ export function ContactAddressesList({
                     aria-hidden='true'
                   />
                   <div className='min-w-0 flex-1'>
-                    <p className='break-words whitespace-pre-line'>{display}</p>
+                    {/* Editable in place, like an address in use, so a
+                        correction does not need a restore (and a sync) first. */}
+                    <InlineEditAddressField
+                      value={address.attributes}
+                      onSave={addressData =>
+                        handleAddressUpdate(
+                          address.id?.toString() || '',
+                          addressData
+                        )
+                      }
+                      placeholder='Add address'
+                      disabled={disabled}
+                      aria-label={`Address${address.attributes.label ? ` (${address.attributes.label})` : ''}`}
+                    />
                     {address.attributes.label && (
-                      <p className='text-xs'>{address.attributes.label}</p>
+                      <p className='mt-1 text-xs'>{address.attributes.label}</p>
                     )}
                   </div>
                 </div>
