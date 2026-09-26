@@ -116,6 +116,10 @@ import {
   GearMaintenanceTypeEditor,
   GearUsageTypeEditor,
 } from './type-editors';
+import {
+  gearUsageItems,
+  gearUsageItemsError,
+} from './type-editors/gearUsageItems';
 import { countAbseils } from './type-editors/pitchUtils';
 import {
   templateTypeFieldUpdates,
@@ -400,20 +404,11 @@ function hasRequiredTypeData(
   }
 
   if (type === JournalType.GEAR_USAGE) {
-    const gearData = data as GearUsageData | undefined;
-    if (!gearData?.gear_item_id || !gearData.gear_item_id.trim()) {
-      setTypesError(
-        setError,
-        'Gear Usage requires a Gear Item to be selected.'
-      );
-      return false;
-    }
-    if (
-      gearData?.checkout_date &&
-      gearData?.checkin_date &&
-      new Date(gearData.checkin_date) < new Date(gearData.checkout_date)
-    ) {
-      setTypesError(setError, 'Checkin date cannot be before checkout date.');
+    const error = gearUsageItemsError(
+      gearUsageItems(data as GearUsageData | undefined)
+    );
+    if (error) {
+      setTypesError(setError, error);
       return false;
     }
   }

@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { GearUsageTypeEditor } from '../type-editors/GearUsageTypeEditor';
 import { renderWithProviders } from '@/test-utils';
 import * as gearItemsApi from '@/lib/api/gearItems';
@@ -15,6 +16,10 @@ jest.mock('@/lib/api/gearItems', () => ({
 
 jest.mock('@/lib/api/integrations', () => ({
   useIntegrations: jest.fn(),
+}));
+
+jest.mock('sonner', () => ({
+  toast: { error: jest.fn(), success: jest.fn() },
 }));
 
 const mockGetGearItems = gearItemsApi.getGearItems as jest.Mock;
@@ -47,41 +52,157 @@ function integrationsResponse(status: 'connected' | 'disconnected') {
   };
 }
 
-describe('GearUsageTypeEditor — Snipe-IT buffer dates', () => {
+const GEAR = [
+  { id: 'g1', name: 'Test Climbing Rope' },
+  { id: 'g2', name: 'Harness' },
+  { id: 'g3', name: 'Helmet' },
+];
+
+async function addGearItem(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string
+) {
+  await user.click(screen.getByTestId('gear-item-selector'));
+  await user.click(await screen.findByRole('option', { name }));
+}
+
+function rows() {
+  return screen.queryAllByTestId('gear-usage-item-row');
+}
+
+describe('GearUsageTypeEditor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetGearItems.mockResolvedValue([
-      { id: 'g1', name: 'Test Climbing Rope' },
-    ]);
-  });
-
-  it('shows the buffer date inputs when Snipe-IT is connected', async () => {
-    mockUseIntegrations.mockReturnValue(integrationsResponse('connected'));
-
-    renderWithProviders(<GearUsageTypeEditor createMode />);
-
-    expect(
-      await screen.findByTestId('gear-usage-type-editor')
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('gear-item-selector')).toBeInTheDocument();
-    expect(screen.getByTestId('checkout-date-input')).toBeInTheDocument();
-    expect(screen.getByTestId('checkin-date-input')).toBeInTheDocument();
-    expect(screen.getByLabelText('Checkout Date (Buffer)')).toBeEnabled();
-    expect(screen.getByLabelText('Checkin Date (Buffer)')).toBeEnabled();
-  });
-
-  it('hides the buffer date inputs when Snipe-IT is disconnected', async () => {
+    mockGetGearItems.mockResolvedValue(GEAR);
     mockUseIntegrations.mockReturnValue(integrationsResponse('disconnected'));
+  });
 
-    renderWithProviders(<GearUsageTypeEditor createMode />);
+  describe('Snipe-IT buffer dates', () => {
+    it('shows each item its own buffer dates when Snipe-IT is connected', async () => {
+      mockUseIntegrations.mockReturnValue(integrationsResponse('connected'));
+      const user = userEvent.setup();
+
+      renderWithProviders(<GearUsageTypeEditor createMode />);
+      await addGearItem(user, 'Harness');
+      await addGearItem(user, 'Helmet');
+
+      expect(rows()).toHaveLength(2);
+      for (const row of rows()) {
+        expect(within(row).getByTestId('checkout-date-input')).toBeEnabled();
+        expect(within(row).getByTestId('checkin-date-input')).toBeEnabled();
+      }
+    });
+
+    it('hides the buffer dates when Snipe-IT is disconnected', async () => {
+      const user = userEvent.setup();
+
+      renderWithProviders(<GearUsageTypeEditor createMode />);
+      await addGearItem(user, 'Harness');
+
+      // The gear is still listed — only the Snipe-IT-backed dates are withheld.
+      expect(rows()).toHaveLength(1);
+      expect(
+        screen.queryByTestId('checkout-date-input')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('checkin-date-input')
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('saves every gear item added, in order', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn().mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <GearUsageTypeEditor data={{ items: [] }} onSave={onSave} />
+    );
+    await user.click(screen.getByRole('button', { name: /edit/i }));
+    await addGearItem(user, 'Harness');
+    await addGearItem(user, 'Test Climbing Rope');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      items: [{ gear_item_id: 'g2' }, { gear_item_id: 'g1' }],
+    });
+  });
+
+  it('offers only gear not already listed', async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <GearUsageTypeEditor
+        createMode
+        data={{ items: [{ gear_item_id: 'g1' }] }}
+      />
+    );
+    await user.click(await screen.findByTestId('gear-item-selector'));
 
     expect(
-      await screen.findByTestId('gear-usage-type-editor')
+      await screen.findByRole('option', { name: 'Harness' })
     ).toBeInTheDocument();
-    // The gear selector is still offered — only the Snipe-IT-backed buffer
-    // dates are withheld.
-    expect(screen.getByTestId('gear-item-selector')).toBeInTheDocument();
-    expect(screen.queryByTestId('checkout-date-input')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('checkin-date-input')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Test Climbing Rope' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('removes one item and keeps the others', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn().mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <GearUsageTypeEditor
+        data={{
+          items: [
+            { gear_item_id: 'g1', checkin_date: '2026-05-03T08:00:00.000Z' },
+            { gear_item_id: 'g2' },
+          ],
+        }}
+        onSave={onSave}
+      />
+    );
+    await user.click(await screen.findByRole('button', { name: /edit/i }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove Harness' })
+    );
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      items: [{ gear_item_id: 'g1', checkin_date: '2026-05-03T08:00:00.000Z' }],
+    });
+  });
+
+  it('refuses to save with no gear item', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+
+    renderWithProviders(
+      <GearUsageTypeEditor data={{ items: [] }} onSave={onSave} />
+    );
+    await user.click(screen.getByRole('button', { name: /edit/i }));
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('lists every gear item used when not editing', async () => {
+    renderWithProviders(
+      <GearUsageTypeEditor
+        data={{ items: [{ gear_item_id: 'g1' }, { gear_item_id: 'g3' }] }}
+      />
+    );
+
+    const summary = await screen.findByTestId('gear-usage-summary');
+    expect(
+      await within(summary).findByText('Test Climbing Rope')
+    ).toBeVisible();
+    expect(within(summary).getByText('Helmet')).toBeVisible();
+  });
+
+  it('reads the older single-item shape as one item', async () => {
+    renderWithProviders(<GearUsageTypeEditor data={{ gear_item_id: 'g2' }} />);
+
+    const summary = await screen.findByTestId('gear-usage-summary');
+    expect(await within(summary).findByText('Harness')).toBeVisible();
   });
 });

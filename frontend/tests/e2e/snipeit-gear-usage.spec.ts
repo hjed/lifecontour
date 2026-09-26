@@ -13,6 +13,11 @@ test.describe('Gear Usage Editor', () => {
               type: 'gear-items',
               attributes: { name: 'Test Climbing Rope' },
             },
+            {
+              id: 'g2',
+              type: 'gear-items',
+              attributes: { name: 'Test Harness' },
+            },
           ],
         },
       });
@@ -84,20 +89,22 @@ test.describe('Gear Usage Editor', () => {
     await page.getByLabel(/title/i).fill('Testing Gear Usage');
     await page.getByLabel(/content/i).fill('Used the climbing rope today.');
 
-    // Select a gear item
+    // Add two gear items; each gets its own buffer dates
+    const rows = page.getByTestId('gear-usage-item-row');
     await page.getByTestId('gear-item-selector').click();
-    await page.getByText('Test Climbing Rope').click();
-    await expect(page.getByTestId('gear-item-selector')).toContainText(
-      'Test Climbing Rope'
-    );
+    await page.getByRole('option', { name: 'Test Climbing Rope' }).click();
+    await expect(rows).toHaveCount(1);
+    await page.getByTestId('gear-item-selector').click();
+    await page.getByRole('option', { name: 'Test Harness' }).click();
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText('Test Climbing Rope');
+    await expect(rows.nth(1)).toContainText('Test Harness');
 
-    // Fill buffer dates
-    await page.getByTestId('checkout-date-input').fill('2026-05-21T10:00');
-    await page.getByTestId('checkin-date-input').fill('2026-05-21T18:00');
-
-    // Verify buffer dates are visible because Snipe-IT is connected
-    await expect(page.getByTestId('checkout-date-input')).toBeVisible();
-    await expect(page.getByTestId('checkin-date-input')).toBeVisible();
+    // Buffer dates are offered because Snipe-IT is connected
+    const rope = rows.nth(0);
+    await rope.getByTestId('checkout-date-input').fill('2026-05-21T10:00');
+    await rope.getByTestId('checkin-date-input').fill('2026-05-21T18:00');
+    await expect(rows.nth(1).getByTestId('checkout-date-input')).toBeVisible();
 
     // Submit
     const [request] = await Promise.all([
@@ -112,13 +119,13 @@ test.describe('Gear Usage Editor', () => {
     expect(requestPayload?.data?.attributes).toBeDefined();
     const attrs = requestPayload.data.attributes;
     expect(attrs.types).toContain('gear_usage');
-    expect(attrs.type_data['gear_usage'].gear_item_id).toBe('g1');
-    expect(attrs.type_data['gear_usage'].checkout_date).toContain(
-      '2026-05-21T10:00'
-    );
-    expect(attrs.type_data['gear_usage'].checkin_date).toContain(
-      '2026-05-21T18:00'
-    );
+    const items = attrs.type_data['gear_usage'].items;
+    expect(
+      items.map((item: { gear_item_id: string }) => item.gear_item_id)
+    ).toEqual(['g1', 'g2']);
+    expect(items[0].checkout_date).toContain('2026-05-21T10:00');
+    expect(items[0].checkin_date).toContain('2026-05-21T18:00');
+    expect(items[1].checkout_date ?? null).toBeNull();
   });
 
   // Note: the disconnected case — buffer date inputs withheld while the gear

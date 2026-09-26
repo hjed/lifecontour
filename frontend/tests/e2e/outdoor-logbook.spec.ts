@@ -365,13 +365,13 @@ test.describe('Outdoor Logbook — dashboard widgets', () => {
     const returnedGear = await dataManager.createGearItem('Descender');
     await dataManager.createGearUsageJournal({
       title: 'Rope out for the season',
-      gearItemId: openGear.id,
+      gearItemIds: [openGear.id],
       start: noonOffsetDays(-2),
       end: noonOffsetDays(2),
     });
     await dataManager.createGearUsageJournal({
       title: 'Descender returned',
-      gearItemId: returnedGear.id,
+      gearItemIds: [returnedGear.id],
       start: noonOffsetDays(-20),
       end: noonOffsetDays(-18),
     });
