@@ -20,6 +20,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
+from snipeit_sync_service import GearUsagePair
+
 # ``MockTransport``, ``mock_transport``, ``integration_client`` and
 # ``snipeit_sync_service`` are shared fixtures defined in ``conftest.py``.
 
@@ -121,9 +123,15 @@ async def _insert_gear_usage_journal(
     )
     await async_connection.execute(
         text("""
-            INSERT INTO journal_gear_usage_data
+            WITH entry AS (
+                INSERT INTO journal_gear_usage_data
+                    (journal_id, gear_item_id, checkout_date, checkin_date)
+                VALUES (:journal_id, :gear_item_id, NULL, NULL)
+                RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+            )
+            INSERT INTO journal_gear_usage_items
                 (journal_id, gear_item_id, checkout_date, checkin_date)
-            VALUES (:journal_id, :gear_item_id, NULL, NULL)
+            SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
         """),
         {"journal_id": journal_id, "gear_item_id": gear_item_id},
     )
@@ -457,7 +465,7 @@ class TestHistoricalDatesIntegration:
         ],
         ids=["old-asset-still-out", "old-asset-returned", "old-asset-with-other-user"],
     )
-    async def test_retried_checkout_follows_a_changed_gear_item(
+    async def test_a_changed_gear_item_is_checked_out_in_place_of_a_failed_one(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
@@ -465,10 +473,10 @@ class TestHistoricalDatesIntegration:
         previous_assignee: dict[str, Any] | None,
         posts: list[str],
     ) -> None:
-        """A failed checkout recorded against the old asset is retried on the new one.
+        """A failed checkout of a gear item no longer listed is dropped for the new one.
 
         The failure may have been a lost response after Snipe-IT checked the old
-        asset out, so the old asset is returned before it loses its association.
+        asset out, so the old asset is returned before its pair is forgotten.
         """
         journal_id = await _insert_gear_usage_journal(
             async_connection,
@@ -491,7 +499,7 @@ class TestHistoricalDatesIntegration:
         )
         _queue_checkout_and_checkin(mock_transport)
 
-        await snipeit_sync_service.push_checkout_create(
+        await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
             session_factory=lambda: _session_factory(async_connection),
         )
@@ -549,7 +557,7 @@ class TestCheckinSyncIntegration:
             return _session_factory(async_connection)
 
         await snipeit_sync_service.push_checkin_create(
-            journal_id=journal_id,
+            GearUsagePair(journal_id, 42),
             session_factory=factory,
             note="Returned after trip",
         )
@@ -604,7 +612,7 @@ class TestCheckinSyncIntegration:
             return _session_factory(async_connection)
 
         await snipeit_sync_service.push_checkin_create(
-            journal_id=deleted_journal_id,
+            GearUsagePair(deleted_journal_id, 77),
             session_factory=factory,
             note="Gear usage journal deleted",
         )
@@ -625,7 +633,7 @@ class TestCheckinSyncIntegration:
             return _session_factory(async_connection)
 
         await snipeit_sync_service.push_checkin_create(
-            journal_id=555,
+            GearUsagePair(555, 42),
             session_factory=factory,
         )
 
@@ -664,7 +672,7 @@ class TestCheckinSyncIntegration:
             return _session_factory(async_connection)
 
         await snipeit_sync_service.push_checkin_create(
-            journal_id=journal_id,
+            GearUsagePair(journal_id, 42),
             session_factory=factory,
         )
 
@@ -764,7 +772,7 @@ class TestCheckinSyncIntegration:
                      now(), 'CHECKED_IN', 'success', NULL, 0, now(), now())
             """),
             {
-                "external_id": f"snipeit_checkin:{done_id}:{done_id}",
+                "external_id": f"snipeit_checkin:43:{done_id}",
                 "journal_id": str(done_id),
             },
         )
@@ -776,6 +784,7 @@ class TestCheckinSyncIntegration:
         assert overdue == [
             OverdueGearUsage(
                 journal_id=overdue_id,
+                asset_id=41,
                 checkout_at=date(2025, 3, 8),
                 checkin_at=date(2025, 3, 9),
                 usage_dates=AssetUsageDates(
@@ -931,7 +940,7 @@ class TestAssetDatesSnapshotIntegration:
             last_checkin=None,
         )
 
-        await snipeit_sync_service.push_checkout_create(
+        await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
             session_factory=lambda: _session_factory(async_connection),
         )
@@ -1053,7 +1062,7 @@ class TestAssetDatesSnapshotIntegration:
         )
 
         checked_in = await snipeit_sync_service.push_checkin_create(
-            journal_id=journal_id,
+            GearUsagePair(journal_id, 42),
             session_factory=lambda: _session_factory(async_connection),
         )
 
@@ -1274,7 +1283,7 @@ class TestReconcileGearUsageIntegration:
         )
 
         superseded = await snipeit_sync_service._supersede_checkout(
-            journal_id=journal_id,
+            GearUsagePair(journal_id, 42),
             recorded_reference=json.dumps(
                 {"checkout_at": "2025-03-01", "expected_checkin": "2025-03-02"}
             ),
@@ -1601,11 +1610,17 @@ async def _usage_of_the_same_gear(
     )
     await async_connection.execute(
         text("""
-            INSERT INTO journal_gear_usage_data
+            WITH entry AS (
+                INSERT INTO journal_gear_usage_data
+                    (journal_id, gear_item_id, checkout_date, checkin_date)
+                SELECT :new_journal_id, gear_item_id, NULL, NULL
+                FROM journal_gear_usage_data
+                WHERE journal_id = :journal_id
+                RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+            )
+            INSERT INTO journal_gear_usage_items
                 (journal_id, gear_item_id, checkout_date, checkin_date)
-            SELECT :new_journal_id, gear_item_id, NULL, NULL
-            FROM journal_gear_usage_data
-            WHERE journal_id = :journal_id
+            SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
         """),
         {"new_journal_id": new_journal_id, "journal_id": journal_id},
     )
@@ -2090,11 +2105,16 @@ class TestInFlightCheckoutIntegration:
             sync_status="pending",
         )
 
+        factory = lambda: _session_factory(async_connection)  # noqa: E731
         with pytest.raises(SnipeItSyncInProgress):
-            await getattr(snipeit_sync_service, operation)(
-                journal_id=journal_id,
-                session_factory=lambda: _session_factory(async_connection),
-            )
+            if operation == "push_checkin_create":
+                await snipeit_sync_service.push_checkin_create(
+                    GearUsagePair(journal_id, 42), session_factory=factory
+                )
+            else:
+                await snipeit_sync_service.reconcile_gear_usage(
+                    journal_id=journal_id, session_factory=factory
+                )
 
         assert mock_transport.requests == []
 
@@ -2245,19 +2265,19 @@ class TestActivityClaimsIntegration:
 
 
 class TestSupersededAssetRetryIntegration:
-    """A failed return of the previous asset is retried against that asset."""
+    """A failed return of a removed item's asset is retried against that asset."""
 
     @pytest.mark.asyncio
-    async def test_failed_return_keeps_the_row_on_the_previous_asset(
+    async def test_failed_return_keeps_the_abandoned_pairs_row(
         self,
         snipeit_sync_service: Any,
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
-        """The row must not forget the old asset until that asset is returned.
+        """The pair must not be forgotten until its asset is returned.
 
-        Re-keying it first would make the next retry derive the new asset and
-        never return the old one.
+        Forgetting it first would leave the next retry nothing to return the old
+        asset from.
         """
         from snipeit_api_client import SnipeItAPIError
 
@@ -2284,7 +2304,7 @@ class TestSupersededAssetRetryIntegration:
         )
 
         with pytest.raises(SnipeItAPIError):
-            await snipeit_sync_service.push_checkout_create(
+            await snipeit_sync_service.reconcile_gear_usage(
                 journal_id=journal_id,
                 session_factory=lambda: _session_factory(async_connection),
             )
@@ -2357,11 +2377,16 @@ class TestInFlightCheckinIntegration:
             },
         )
 
+        factory = lambda: _session_factory(async_connection)  # noqa: E731
         with pytest.raises(SnipeItSyncInProgress):
-            await getattr(snipeit_sync_service, operation)(
-                journal_id=journal_id,
-                session_factory=lambda: _session_factory(async_connection),
-            )
+            if operation == "push_checkin_create":
+                await snipeit_sync_service.push_checkin_create(
+                    GearUsagePair(journal_id, 42), session_factory=factory
+                )
+            else:
+                await snipeit_sync_service.reconcile_gear_usage(
+                    journal_id=journal_id, session_factory=factory
+                )
 
         assert mock_transport.requests == []
 
@@ -2443,7 +2468,7 @@ class TestLateCheckinRerecordIntegration:
 
 
 class TestPreviousAssetHeldElsewhereIntegration:
-    """A superseded asset is only returned when no other journal may be using it."""
+    """A removed item's asset is only returned when no other pair may be using it."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -2538,7 +2563,7 @@ class TestPreviousAssetHeldElsewhereIntegration:
         )
         _queue_checkout_and_checkin(mock_transport)
 
-        await snipeit_sync_service.push_checkout_create(
+        await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
             session_factory=lambda: _session_factory(async_connection),
         )

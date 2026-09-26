@@ -82,10 +82,16 @@ class TestCheckoutSyncIntegration:
         # Journal gear usage data with buffer dates (future, so no immediate checkin)
         await async_connection.execute(
             text("""
-                INSERT INTO journal_gear_usage_data
+                WITH entry AS (
+                    INSERT INTO journal_gear_usage_data
+                        (journal_id, gear_item_id, checkout_date, checkin_date)
+                    VALUES (:journal_id, :gear_item_id,
+                        '2099-06-01 08:00:00+00', '2099-06-02 18:00:00+00')
+                    RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+                )
+                INSERT INTO journal_gear_usage_items
                     (journal_id, gear_item_id, checkout_date, checkin_date)
-                VALUES (:journal_id, :gear_item_id,
-                    '2099-06-01 08:00:00+00', '2099-06-02 18:00:00+00')
+                SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
             """),
             {"journal_id": journal_id, "gear_item_id": gear_item_id},
         )
@@ -209,9 +215,15 @@ class TestCheckoutSyncIntegration:
         # Gear usage data
         await async_connection.execute(
             text("""
-                INSERT INTO journal_gear_usage_data
+                WITH entry AS (
+                    INSERT INTO journal_gear_usage_data
+                        (journal_id, gear_item_id, checkout_date, checkin_date)
+                    VALUES (:journal_id, :gear_item_id, NULL, NULL)
+                    RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+                )
+                INSERT INTO journal_gear_usage_items
                     (journal_id, gear_item_id, checkout_date, checkin_date)
-                VALUES (:journal_id, :gear_item_id, NULL, NULL)
+                SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
             """),
             {"journal_id": journal_id, "gear_item_id": gear_item_id},
         )
@@ -310,9 +322,15 @@ class TestCheckoutSyncIntegration:
         # Gear usage data with NULL buffer dates
         await async_connection.execute(
             text("""
-                INSERT INTO journal_gear_usage_data
+                WITH entry AS (
+                    INSERT INTO journal_gear_usage_data
+                        (journal_id, gear_item_id, checkout_date, checkin_date)
+                    VALUES (:journal_id, :gear_item_id, NULL, NULL)
+                    RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+                )
+                INSERT INTO journal_gear_usage_items
                     (journal_id, gear_item_id, checkout_date, checkin_date)
-                VALUES (:journal_id, :gear_item_id, NULL, NULL)
+                SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
             """),
             {"journal_id": journal_id, "gear_item_id": gear_item_id},
         )

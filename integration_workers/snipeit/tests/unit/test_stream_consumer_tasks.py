@@ -16,6 +16,7 @@ if "DATABASE_URL" not in os.environ:
 if "ENCRYPTION_KEY" not in os.environ:
     os.environ["ENCRYPTION_KEY"] = "testkey"
 
+from snipeit_sync_service import GearUsagePair
 from stream_consumer_tasks import SnipeItWorkerStreamConsumer
 
 
@@ -871,7 +872,7 @@ async def test_handle_journal_deleted_checks_in_asset(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """JournalDeleted for a journal with a checkout triggers a check-in."""
+    """JournalDeleted checks in every (journal, asset) pair the journal held."""
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -888,8 +889,13 @@ async def test_handle_journal_deleted_checks_in_asset(
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
 
+    checkout_rows = MagicMock()
+    checkout_rows.__iter__.return_value = [
+        MagicMock(external_id="snipeit_checkout:42:100"),
+        MagicMock(external_id="snipeit_checkout:43:100"),
+    ]
     mock_session.execute = AsyncMock(
-        side_effect=[_sync_rows("snipeit_checkout"), _settings_row()]
+        side_effect=[_sync_rows("snipeit_checkout"), _settings_row(), checkout_rows]
     )
 
     mock_sync_service = AsyncMock()
@@ -901,8 +907,9 @@ async def test_handle_journal_deleted_checks_in_asset(
     ):
         await consumer._handle_event(event)
 
-    mock_sync_service.push_checkin_create.assert_called_once()
-    assert mock_sync_service.push_checkin_create.call_args.kwargs["journal_id"] == 100
+    assert [
+        call.args[0] for call in mock_sync_service.push_checkin_create.await_args_list
+    ] == [GearUsagePair(100, 42), GearUsagePair(100, 43)]
     mock_sync_service.delete_pushed_maintenance.assert_not_called()
     mock_sync_service._api_client.close.assert_called_once()
 

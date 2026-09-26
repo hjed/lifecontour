@@ -15,7 +15,7 @@ import json
 from collections.abc import AsyncIterator, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -209,6 +209,51 @@ def _checkout_asset_id(external_id: object) -> int | None:
         return int(str(external_id).split(":")[1])
     except (ValueError, IndexError):
         return None
+
+
+def _asset_id(external_id: object) -> int | None:
+    """An asset's Snipe-IT id from its ``snipeit`` sync row, if it is one."""
+    try:
+        return int(str(external_id)) if external_id is not None else None
+    except ValueError:
+        return None
+
+
+class GearUsagePair(NamedTuple):
+    """One gear item's use on a journal, as Snipe-IT records it.
+
+    A GEAR_USAGE journal lists many gear items; Snipe-IT gets one checkout and
+    check-in per (journal, asset). The pair's sync rows are keyed by these ids.
+    """
+
+    journal_id: int
+    asset_id: int
+
+    @property
+    def checkout_external_id(self) -> str:
+        return f"snipeit_checkout:{self.asset_id}:{self.journal_id}"
+
+    @property
+    def checkin_external_id(self) -> str:
+        return f"snipeit_checkin:{self.asset_id}:{self.journal_id}"
+
+
+@dataclass(frozen=True)
+class _GearUsage:
+    """A gear item listed on a journal, with the Snipe-IT asset it syncs to."""
+
+    gear_item_id: str
+    checkout_date: datetime | None
+    checkin_date: datetime | None
+    asset_id: int | None
+
+
+# The check-in row of a checkout row, matched on the same (asset, journal).
+_CHECKIN_OF_CHECKOUT = (
+    "ci.integration_source = 'snipeit_checkin' "
+    "AND ci.external_id = replace(co.external_id, 'snipeit_checkout:', "
+    "'snipeit_checkin:')"
+)
 
 
 def _usage_period_has_ended(
@@ -2353,87 +2398,70 @@ class SnipeItSyncService:
 
     # -- Outbound Checkout Sync Methods -------------------------------------
 
-    async def _fetch_journal_and_gear_usage_data(
+    async def _fetch_journal_and_gear_usages(
         self,
         journal_id: int,
         session_factory: Any,
-    ) -> tuple[Any, Any, Any] | None:
-        """Fetch journal, gear-usage, and asset-sync data for outbound checkout.
+    ) -> tuple[Any, list[_GearUsage]] | None:
+        """Fetch a journal and the gear items it lists, with their Snipe-IT assets.
 
-        Returns a ``(journal_row, usage_data_row, asset_sync_meta_row)``
-        tuple, or ``None`` if any prerequisite is missing (logged and skipped).
+        Returns ``None`` when the journal is gone. An item whose gear item is not
+        synced to Snipe-IT carries no ``asset_id``.
         """
         async with session_factory() as session:
-            # 1. Get journal data
             journal_row = await _fetch_journal_row(session, journal_id)
             if not journal_row:
                 logger.debug(
-                    "Skipping outbound checkout push: journal not found",
+                    "Skipping gear usage sync: journal not found",
                     journal_id=journal_id,
                 )
                 return None
 
-            # 2. Get gear usage data
-            usage_result = await session.execute(
+            result = await session.execute(
                 text("""
-                    SELECT gear_item_id, checkout_date, checkin_date
-                    FROM journal_gear_usage_data
-                    WHERE journal_id = :journal_id
+                    SELECT u.gear_item_id, u.checkout_date, u.checkin_date,
+                           asset.external_id AS asset_external_id
+                    FROM journal_gear_usage_items u
+                    LEFT JOIN sync_metadata asset
+                        ON asset.integration_source = 'snipeit'
+                        AND asset.internal_uuid = CAST(u.gear_item_id AS TEXT)
+                    WHERE u.journal_id = :journal_id
+                    ORDER BY u.position, u.gear_item_id
                 """),
                 {"journal_id": journal_id},
             )
-            usage_data_row = usage_result.fetchone()
-            if not usage_data_row:
-                logger.debug(
-                    "Skipping outbound checkout push: no gear usage data",
-                    journal_id=journal_id,
+            usages = [
+                _GearUsage(
+                    gear_item_id=str(row.gear_item_id),
+                    checkout_date=row.checkout_date,
+                    checkin_date=row.checkin_date,
+                    asset_id=_asset_id(row.asset_external_id),
                 )
-                return None
-
-            # 3. Get asset sync metadata (gear_item → Snipe-IT asset ID)
-            gear_item_id = str(usage_data_row.gear_item_id)
-            asset_meta_result = await session.execute(
-                text("""
-                    SELECT external_id
-                    FROM sync_metadata
-                    WHERE integration_source = 'snipeit'
-                      AND internal_uuid = :gear_item_id
-                """),
-                {"gear_item_id": gear_item_id},
-            )
-            asset_sync_meta_row = asset_meta_result.fetchone()
-            if not asset_sync_meta_row:
-                logger.debug(
-                    "Skipping outbound checkout push: gear item not synced to Snipe-IT",
-                    journal_id=journal_id,
-                    gear_item_id=gear_item_id,
-                )
-                return None
-
-        return journal_row, usage_data_row, asset_sync_meta_row
+                for row in result.fetchall()
+            ]
+        return journal_row, usages
 
     async def push_checkout_create(
         self,
         journal_id: int,
         session_factory: Any,
+        *,
+        asset_id: int | None = None,
     ) -> None:
-        """Push a new GEAR_USAGE journal to Snipe-IT as an asset checkout.
+        """Check out, in Snipe-IT, each gear item a GEAR_USAGE journal lists.
 
-        Args:
-            journal_id: Internal journal ID.
-            session_factory: Async session factory for DB queries.
+        One checkout per (journal, asset) pair; a pair already checked out is
+        left alone, so a repeated event writes nothing. ``asset_id`` limits this
+        to that pair. A gear item not synced to Snipe-IT is skipped.
 
         Raises:
-            SnipeItSyncInProgress: Another worker holds this journal's checkout;
-                the event must be retried once that checkout finishes.
+            SnipeItSyncInProgress: Another worker holds a pair's checkout; the
+                event must be retried once that checkout finishes.
         """
-        data = await self._fetch_journal_and_gear_usage_data(
-            journal_id, session_factory
-        )
+        data = await self._fetch_journal_and_gear_usages(journal_id, session_factory)
         if not data:
             return
-
-        journal_row, usage_data_row, asset_sync_meta_row = data
+        journal_row, usages = data
 
         if not self._snipeit_user_id:
             logger.warning(
@@ -2442,19 +2470,34 @@ class SnipeItSyncService:
             )
             return
 
-        try:
-            snipeit_asset_id = int(asset_sync_meta_row.external_id)
-        except (ValueError, TypeError):
-            logger.warning(
-                "Invalid asset sync metadata external_id",
-                external_id=asset_sync_meta_row.external_id,
-                journal_id=journal_id,
+        for usage in usages:
+            if usage.asset_id is None:
+                logger.debug(
+                    "Skipping checkout of a gear item not synced to Snipe-IT",
+                    journal_id=journal_id,
+                    gear_item_id=usage.gear_item_id,
+                )
+                continue
+            if asset_id is not None and usage.asset_id != asset_id:
+                continue
+            await self._push_pair_checkout(
+                GearUsagePair(journal_id, usage.asset_id),
+                journal_row,
+                usage,
+                session_factory,
             )
-            return
 
-        external_id = f"snipeit_checkout:{snipeit_asset_id}:{journal_id}"
-
-        previous_asset_id: int | None = None
+    async def _push_pair_checkout(
+        self,
+        pair: GearUsagePair,
+        journal_row: Any,
+        usage: _GearUsage,
+        session_factory: Any,
+    ) -> None:
+        """Record one (journal, asset) pair's checkout in Snipe-IT, if not already."""
+        journal_id = pair.journal_id
+        snipeit_asset_id = pair.asset_id
+        external_id = pair.checkout_external_id
         asset_dates_before: AssetUsageDates | None = None
 
         # Check if already synced and acquire a distributed lock by marking as pending
@@ -2462,14 +2505,14 @@ class SnipeItSyncService:
             async with session.begin():
                 checkout_meta_result = await session.execute(
                     text("""
-                        SELECT sync_status, external_id, reference_data,
+                        SELECT sync_status, reference_data,
                                extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
                         WHERE integration_source = 'snipeit_checkout'
-                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
                         FOR UPDATE SKIP LOCKED
                     """),
-                    {"journal_id": str(journal_id)},
+                    {"external_id": external_id},
                 )
                 row = checkout_meta_result.fetchone()
                 if row:
@@ -2477,6 +2520,7 @@ class SnipeItSyncService:
                         logger.debug(
                             "Skipping checkout create: already synced to Snipe-IT",
                             journal_id=journal_id,
+                            snipeit_asset_id=snipeit_asset_id,
                         )
                         return
                     if (
@@ -2485,26 +2529,23 @@ class SnipeItSyncService:
                         and row.age_seconds < IN_FLIGHT_LOCK_SECONDS
                     ):
                         raise SnipeItSyncInProgress(
-                            f"Checkout of journal {journal_id} is in flight"
+                            f"Checkout of {external_id} is in flight"
                         )
 
-                    previous_asset_id = _checkout_asset_id(row.external_id)
-                    if previous_asset_id == snipeit_asset_id:
-                        # A superseded pair on this asset keeps the dates read
-                        # before its first checkout: the asset now carries that
-                        # pair's dates, not the ones it had before this journal.
-                        asset_dates_before = AssetUsageDates.from_reference(
-                            row.reference_data
-                        )
+                    # A superseded pair keeps the dates read before its first
+                    # checkout: the asset now carries that pair's dates, not the
+                    # ones it had before this journal.
+                    asset_dates_before = AssetUsageDates.from_reference(
+                        row.reference_data
+                    )
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
                             SET sync_status = 'pending', updated_at = now()
-                            WHERE integration_source = 'snipeit_checkout' AND internal_uuid = :journal_id
+                            WHERE integration_source = 'snipeit_checkout'
+                              AND external_id = :external_id
                         """),
-                        # The row keeps the previous attempt's asset until that
-                        # asset has been dealt with (see below).
-                        {"journal_id": str(journal_id)},
+                        {"external_id": external_id},
                     )
                 else:
                     insert_result = await session.execute(
@@ -2526,14 +2567,12 @@ class SnipeItSyncService:
                     )
                     if not insert_result.fetchone():
                         raise SnipeItSyncInProgress(
-                            f"Checkout of journal {journal_id} is locked by another worker"
+                            f"Checkout of {external_id} is locked by another worker"
                         )
 
         # Resolve dates: buffer dates take precedence, fall back to journal range
-        checkout_date = (
-            usage_data_row.checkout_date or journal_row.event_date_range_start
-        )
-        checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
+        checkout_date = usage.checkout_date or journal_row.event_date_range_start
+        checkin_date = usage.checkin_date or journal_row.event_date_range_end
 
         if not checkout_date or not checkin_date:
             logger.warning(
@@ -2544,7 +2583,7 @@ class SnipeItSyncService:
             )
             # Unlock the pending status so it can be retried when data is fixed
             await self._unlock_pending_checkout(
-                journal_id, session_factory, "Missing required dates"
+                pair, session_factory, "Missing required dates"
             )
             return
 
@@ -2556,7 +2595,7 @@ class SnipeItSyncService:
                 checkin_date=str(checkin_date),
             )
             await self._unlock_pending_checkout(
-                journal_id, session_factory, "Invalid date range"
+                pair, session_factory, "Invalid date range"
             )
             return
 
@@ -2580,15 +2619,6 @@ class SnipeItSyncService:
         linked_log_id: int | None = None
         snipeit_log_id: int | None = None
         try:
-            if previous_asset_id not in (None, snipeit_asset_id):
-                await self._return_previous_asset(
-                    previous_asset_id,
-                    journal_id=journal_id,
-                    session_factory=session_factory,
-                )
-                # Only now may the row forget the previous asset: had the return
-                # failed, the retry must still derive it from the row.
-                await self._rekey_checkout(journal_id, external_id, session_factory)
             linked_log_id = await self._find_unlinked_activity(
                 asset_id=snipeit_asset_id,
                 action_type="checkout",
@@ -2637,21 +2667,17 @@ class SnipeItSyncService:
                     status_code=exc.status_code,
                 )
                 await self._unlock_pending_checkout(
-                    journal_id,
+                    pair,
                     session_factory,
                     f"API Error {exc.status_code}",
                 )
                 return
 
             # For 500s or other errors, unlock and raise so it retries
-            await self._unlock_pending_checkout(
-                journal_id, session_factory, str(exc)[:255]
-            )
+            await self._unlock_pending_checkout(pair, session_factory, str(exc)[:255])
             raise
         except Exception as exc:
-            await self._unlock_pending_checkout(
-                journal_id, session_factory, str(exc)[:255]
-            )
+            await self._unlock_pending_checkout(pair, session_factory, str(exc)[:255])
             raise
 
         checkout_reference: dict[str, Any] = {
@@ -2704,7 +2730,7 @@ class SnipeItSyncService:
         # asset must not stay checked out — immediately record the check-in.
         if _usage_period_has_ended(checkin_date):
             await self.push_checkin_create(
-                journal_id=journal_id,
+                pair,
                 session_factory=session_factory,
                 note=f"Usage period {checkout_at} to {expected_checkin}",
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
@@ -2713,22 +2739,21 @@ class SnipeItSyncService:
                 ),
             )
 
-    async def _return_previous_asset(
-        self, asset_id: int | None, *, journal_id: int, session_factory: Any
+    async def _return_abandoned_asset(
+        self, pair: GearUsagePair, *, session_factory: Any
     ) -> None:
-        """Check in an asset an earlier, failed checkout attempt may have checked out.
+        """Check in the asset of a failed checkout attempt whose item was removed.
 
         A checkout whose response was lost is recorded as failed even though
-        Snipe-IT may have checked the asset out. Once the journal moves to another
-        gear item that asset would stay out with no sync row left to return it,
-        so it is returned first — but only while Snipe-IT shows it checked out to
-        the mapped user and no other journal may hold it. A pending or failed
-        attempt by another journal counts as holding it, since that attempt may
-        have checked the asset out too; leaving it out is recoverable, returning
-        an asset still in use is not.
+        Snipe-IT may have checked the asset out. Once the journal no longer lists
+        the gear item that asset would stay out with no sync row left to return
+        it, so it is returned first — but only while Snipe-IT shows it checked
+        out to the mapped user and no other pair may hold it. A pending or failed
+        attempt by another pair counts as holding it, since that attempt may have
+        checked the asset out too; leaving it out is recoverable, returning an
+        asset still in use is not.
         """
-        if asset_id is None:
-            return
+        asset_id = pair.asset_id
         try:
             asset = await self._api_client.get_asset(asset_id)
         except SnipeItAPIError as exc:
@@ -2745,22 +2770,21 @@ class SnipeItSyncService:
 
         async with session_factory() as session:
             held_elsewhere = await session.execute(
-                text("""
+                text(f"""
                     SELECT 1
                     FROM sync_metadata co
                     LEFT JOIN sync_metadata ci
-                        ON ci.integration_source = 'snipeit_checkin'
-                        AND ci.internal_uuid = co.internal_uuid
+                        ON {_CHECKIN_OF_CHECKOUT}
                         AND ci.sync_status = 'success'
                     WHERE co.integration_source = 'snipeit_checkout'
                       AND co.external_id LIKE :asset_prefix
-                      AND co.internal_uuid <> :journal_id
+                      AND co.external_id <> :external_id
                       AND (co.sync_status <> 'success' OR ci.id IS NULL)
                     LIMIT 1
                 """),
                 {
                     "asset_prefix": f"snipeit_checkout:{asset_id}:%",
-                    "journal_id": str(journal_id),
+                    "external_id": pair.checkout_external_id,
                 },
             )
             if held_elsewhere.fetchone():
@@ -2768,11 +2792,11 @@ class SnipeItSyncService:
 
         await self._api_client.checkin_asset(
             asset_id=asset_id,
-            payload={"note": "Gear usage journal moved to another gear item"},
+            payload={"note": "Gear item removed from its gear usage journal"},
         )
         logger.info(
-            "Returned the asset of a superseded checkout attempt",
-            journal_id=journal_id,
+            "Returned the asset of an abandoned checkout attempt",
+            journal_id=pair.journal_id,
             snipeit_asset_id=asset_id,
         )
 
@@ -2809,22 +2833,6 @@ class SnipeItSyncService:
                             }
                         ),
                     },
-                )
-
-    async def _rekey_checkout(
-        self, journal_id: int, external_id: str, session_factory: Any
-    ) -> None:
-        """Point a journal's checkout row at the asset now being checked out."""
-        async with session_factory() as session:
-            async with session.begin():
-                await session.execute(
-                    text("""
-                        UPDATE sync_metadata
-                        SET external_id = :external_id, updated_at = now()
-                        WHERE integration_source = 'snipeit_checkout'
-                          AND internal_uuid = :internal_uuid
-                    """),
-                    {"internal_uuid": str(journal_id), "external_id": external_id},
                 )
 
     async def _find_unlinked_activity(
@@ -2965,7 +2973,7 @@ class SnipeItSyncService:
         session_factory: Any,
         defer_to_posting: bool = False,
     ) -> int | None:
-        """Claim the first candidate no other journal holds, or return ``None``.
+        """Claim the first candidate no other pair holds, or return ``None``.
 
         The claim is merged into this journal's in-progress ``source`` row while
         a per-asset advisory lock is held, so journals processed at once see each
@@ -2998,14 +3006,14 @@ class SnipeItSyncService:
                         FROM sync_metadata sm
                         JOIN journals j ON j.id::text = sm.internal_uuid
                         WHERE sm.integration_source = :source
-                          AND sm.internal_uuid <> :journal_id
+                          AND sm.external_id <> :external_id
                           AND sm.sync_status <> 'failed'
                           AND sm.reference_data LIKE :linked_pattern
                           AND j.user_id = :user_id
                     """),
                     {
                         "source": source,
-                        "journal_id": str(journal_id),
+                        "external_id": external_id,
                         "linked_pattern": '%"snipeit_log_id"%',
                         "user_id": self._user_id,
                     },
@@ -3075,15 +3083,11 @@ class SnipeItSyncService:
 
     async def _unlock_pending_checkout(
         self,
-        journal_id: int,
+        pair: GearUsagePair,
         session_factory: Any,
         error_message: str,
     ) -> None:
-        """Mark a pending checkout sync as failed to release the lock for future retries.
-
-        The row is found by journal, not external id: it may still be keyed to a
-        previous attempt's asset.
-        """
+        """Mark a pending checkout sync as failed to release the lock for future retries."""
         try:
             async with session_factory() as session:
                 async with session.begin():
@@ -3094,17 +3098,18 @@ class SnipeItSyncService:
                                 updated_at = now(),
                                 error_message = :error_message
                             WHERE integration_source = 'snipeit_checkout'
-                              AND internal_uuid = :internal_uuid
+                              AND external_id = :external_id
                         """),
                         {
-                            "internal_uuid": str(journal_id),
+                            "external_id": pair.checkout_external_id,
                             "error_message": error_message,
                         },
                     )
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Failed to unlock pending checkout",
-                journal_id=journal_id,
+                journal_id=pair.journal_id,
+                snipeit_asset_id=pair.asset_id,
                 error=str(exc),
             )
 
@@ -3112,23 +3117,23 @@ class SnipeItSyncService:
 
     async def push_checkin_create(
         self,
-        journal_id: int,
+        pair: GearUsagePair,
         session_factory: Any,
         note: str | None = None,
         checkin_at: date | None = None,
         usage_dates: AssetUsageDates | None = None,
     ) -> bool:
-        """Return (check in) the asset previously checked out for a GEAR_USAGE journal.
+        """Return (check in) the asset a (journal, asset) pair checked out.
 
-        The asset is resolved from the existing ``snipeit_checkout`` sync metadata
-        row for ``journal_id`` rather than the journal/gear-usage tables, so this
-        still works after the journal (and its cascade-deleted usage data) is gone
-        — e.g. when triggered by ``JournalDeleted``. A no-op when no successful
-        checkout was recorded. Idempotency is enforced via a ``snipeit_checkin``
-        sync metadata row, mirroring :meth:`push_checkout_create`.
+        Works from the pair's ``snipeit_checkout`` sync metadata row rather than
+        the journal/gear-usage tables, so this still works after the journal (and
+        its cascade-deleted usage data) is gone — e.g. when triggered by
+        ``JournalDeleted``. A no-op when no successful checkout was recorded.
+        Idempotency is enforced via a ``snipeit_checkin`` sync metadata row,
+        mirroring :meth:`push_checkout_create`.
 
         Args:
-            journal_id: Internal journal ID whose checkout should be reversed.
+            pair: The (journal, asset) pair whose checkout should be reversed.
             session_factory: Async session factory for DB queries.
             note: Optional note recorded on the Snipe-IT check-in (the usage
                 window, when known).
@@ -3153,36 +3158,30 @@ class SnipeItSyncService:
                 checkout-date change arriving now could otherwise never supersede
                 the check-in once it lands.
         """
-        # 1. Resolve the asset and confirm a successful checkout exists.
+        journal_id = pair.journal_id
+        snipeit_asset_id = pair.asset_id
+        # 1. Confirm a successful checkout exists.
         async with session_factory() as session:
             checkout_result = await session.execute(
                 text("""
-                    SELECT external_id, sync_status, reference_data
+                    SELECT sync_status, reference_data
                     FROM sync_metadata
                     WHERE integration_source = 'snipeit_checkout'
-                      AND internal_uuid = :journal_id
+                      AND external_id = :external_id
                 """),
-                {"journal_id": str(journal_id)},
+                {"external_id": pair.checkout_external_id},
             )
             checkout_row = checkout_result.fetchone()
 
         if not checkout_row or checkout_row.sync_status != "success":
             logger.debug(
-                "Skipping checkin: no successful checkout recorded for journal",
+                "Skipping checkin: no successful checkout recorded for the pair",
                 journal_id=journal_id,
+                snipeit_asset_id=snipeit_asset_id,
             )
             return False
 
-        snipeit_asset_id = _checkout_asset_id(checkout_row.external_id)
-        if snipeit_asset_id is None:
-            logger.warning(
-                "Invalid checkout sync metadata external_id; cannot derive asset",
-                external_id=checkout_row.external_id,
-                journal_id=journal_id,
-            )
-            return False
-
-        external_id = f"snipeit_checkin:{snipeit_asset_id}:{journal_id}"
+        external_id = pair.checkin_external_id
 
         # 2. Acquire a distributed lock by marking the checkin as pending.
         async with session_factory() as session:
@@ -3213,7 +3212,7 @@ class SnipeItSyncService:
                         and row.age_seconds < IN_FLIGHT_LOCK_SECONDS
                     ):
                         raise SnipeItSyncInProgress(
-                            f"Check-in of journal {journal_id} is in flight"
+                            f"Check-in of {external_id} is in flight"
                         )
 
                     await session.execute(
@@ -3244,7 +3243,7 @@ class SnipeItSyncService:
                     )
                     if not insert_result.fetchone():
                         raise SnipeItSyncInProgress(
-                            f"Check-in of journal {journal_id} is locked by another worker"
+                            f"Check-in of {external_id} is locked by another worker"
                         )
 
         # 3. Build the checkin payload and POST to Snipe-IT.
@@ -3479,13 +3478,87 @@ class SnipeItSyncService:
         self,
         journal_id: int,
         session_factory: Any,
+        *,
+        asset_id: int | None = None,
     ) -> None:
         """Reconcile a GEAR_USAGE journal's Snipe-IT state after an update.
 
-        Desired state: the asset is checked out on the journal's local checkout
-        date and, once the usage period has ended, checked in on its local
-        check-in date. Snipe-IT's activity log cannot be edited, so history is
-        only added where it is missing:
+        Each gear item the journal lists is reconciled as its own (journal,
+        asset) pair (see :meth:`_reconcile_pair`). A pair recorded for a gear
+        item the journal no longer lists — removed, or the whole GEAR_USAGE type
+        dropped — is released (see :meth:`_release_removed_pair`). ``asset_id``
+        limits this to that one pair and releases nothing.
+        """
+        data = await self._fetch_journal_and_gear_usages(journal_id, session_factory)
+        if not data:
+            return
+        journal_row, usages = data
+        recorded = await self._recorded_checkouts(journal_id, session_factory)
+
+        # Removed items first: an asset leaves before its replacement is taken.
+        if asset_id is None:
+            listed = {usage.asset_id for usage in usages}
+            for recorded_asset_id, checkout_row in recorded.items():
+                if recorded_asset_id not in listed:
+                    await self._release_removed_pair(
+                        GearUsagePair(journal_id, recorded_asset_id),
+                        checkout_row,
+                        session_factory,
+                    )
+
+        for usage in usages:
+            if usage.asset_id is None:
+                continue
+            if asset_id is not None and usage.asset_id != asset_id:
+                continue
+            await self._reconcile_pair(
+                GearUsagePair(journal_id, usage.asset_id),
+                journal_row,
+                usage,
+                recorded.get(usage.asset_id),
+                session_factory,
+            )
+
+    async def _recorded_checkouts(
+        self, journal_id: int, session_factory: Any
+    ) -> dict[int, Any]:
+        """The journal's checkout rows, with their check-ins, by asset id."""
+        async with session_factory() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT co.sync_status, co.external_id, co.reference_data,
+                           extract(epoch from (now() - co.updated_at)) AS age_seconds,
+                           ci.sync_status AS checkin_status,
+                           ci.error_message AS checkin_error
+                    FROM sync_metadata co
+                    LEFT JOIN sync_metadata ci ON {_CHECKIN_OF_CHECKOUT}
+                    WHERE co.integration_source = 'snipeit_checkout'
+                      AND co.internal_uuid = :journal_id
+                """),
+                {"journal_id": str(journal_id)},
+            )
+            rows = result.fetchall()
+        recorded: dict[int, Any] = {}
+        for row in rows:
+            recorded_asset_id = _checkout_asset_id(row.external_id)
+            if recorded_asset_id is not None:
+                recorded[recorded_asset_id] = row
+        return recorded
+
+    async def _reconcile_pair(
+        self,
+        pair: GearUsagePair,
+        journal_row: Any,
+        usage: _GearUsage,
+        checkout_row: Any,
+        session_factory: Any,
+    ) -> None:
+        """Reconcile one (journal, asset) pair's Snipe-IT state.
+
+        Desired state: the asset is checked out on the local checkout date and,
+        once the usage period has ended, checked in on its local check-in date.
+        Snipe-IT's activity log cannot be edited, so history is only added where
+        it is missing:
 
         - No successful checkout: create it (which checks the asset straight
           back in when the period is already past).
@@ -3493,7 +3566,7 @@ class SnipeItSyncService:
           the recorded pair and record a new checkout and check-in.
         - The checkout was linked to another usage's log entry (one at another
           time of that day) and the asset is back: release the linked pair and
-          record the journal's own.
+          record the item's own.
         - Otherwise: check the asset in once the period has ended. This is a
           no-op when already checked in, so a changed check-in date alone is not
           re-recorded. If the check-in closes a checkout recorded on an older
@@ -3503,43 +3576,18 @@ class SnipeItSyncService:
         ended in a terminal 403/404 (the asset may still be out), is never
         superseded.
         """
-        async with session_factory() as session:
-            checkout_result = await session.execute(
-                text("""
-                    SELECT co.sync_status, co.external_id, co.reference_data,
-                           ci.sync_status AS checkin_status,
-                           ci.error_message AS checkin_error
-                    FROM sync_metadata co
-                    LEFT JOIN sync_metadata ci
-                        ON ci.integration_source = 'snipeit_checkin'
-                        AND ci.internal_uuid = co.internal_uuid
-                    WHERE co.integration_source = 'snipeit_checkout'
-                      AND co.internal_uuid = :journal_id
-                """),
-                {"journal_id": str(journal_id)},
-            )
-            checkout_row = checkout_result.fetchone()
-
+        journal_id = pair.journal_id
         if not checkout_row or checkout_row.sync_status != "success":
             # No successful checkout yet — create it (handles immediate checkin).
-            await self.push_checkout_create(
-                journal_id=journal_id,
-                session_factory=session_factory,
-            )
+            if self._snipeit_user_id:
+                await self._push_pair_checkout(
+                    pair, journal_row, usage, session_factory
+                )
             return
 
-        data = await self._fetch_journal_and_gear_usage_data(
-            journal_id, session_factory
-        )
-        if not data:
-            return
-
-        journal_row, usage_data_row, _ = data
         zone = _snipeit_zone(journal_row)
-        checkout_date = (
-            usage_data_row.checkout_date or journal_row.event_date_range_start
-        )
-        checkin_date = usage_data_row.checkin_date or journal_row.event_date_range_end
+        checkout_date = usage.checkout_date or journal_row.event_date_range_start
+        checkin_date = usage.checkin_date or journal_row.event_date_range_end
 
         recorded_checkout_at = self._recorded_checkout_at(checkout_row.reference_data)
         checkout_at = _format_date_for_snipeit(checkout_date, zone)
@@ -3556,14 +3604,13 @@ class SnipeItSyncService:
             if await self._asset_is_free(
                 checkout_row.external_id, journal_id=journal_id
             ) and await self._supersede_checkout(
-                journal_id=journal_id,
+                pair,
                 recorded_reference=checkout_row.reference_data,
                 session_factory=session_factory,
                 reason="checkout date changed",
             ):
-                await self.push_checkout_create(
-                    journal_id=journal_id,
-                    session_factory=session_factory,
+                await self._push_pair_checkout(
+                    pair, journal_row, usage, session_factory
                 )
             return
 
@@ -3580,14 +3627,13 @@ class SnipeItSyncService:
             if await self._asset_is_free(
                 checkout_row.external_id, journal_id=journal_id
             ) and await self._supersede_checkout(
-                journal_id=journal_id,
+                pair,
                 recorded_reference=checkout_row.reference_data,
                 session_factory=session_factory,
                 reason="linked log entry belongs to another checkout",
             ):
-                await self.push_checkout_create(
-                    journal_id=journal_id,
-                    session_factory=session_factory,
+                await self._push_pair_checkout(
+                    pair, journal_row, usage, session_factory
                 )
             return
 
@@ -3597,7 +3643,7 @@ class SnipeItSyncService:
                 f"to {_format_date_for_snipeit(checkin_date, zone)}"
             )
             checked_in = await self.push_checkin_create(
-                journal_id=journal_id,
+                pair,
                 session_factory=session_factory,
                 note=note,
                 checkin_at=_snipeit_checkin_at(_local_date(checkin_date, zone)),
@@ -3608,7 +3654,67 @@ class SnipeItSyncService:
             if checked_in and checkout_date_changed:
                 # That check-in closed a checkout recorded on the old date; with
                 # the asset back, the pass above now records the corrected pair.
-                await self.reconcile_gear_usage(journal_id, session_factory)
+                await self.reconcile_gear_usage(
+                    journal_id, session_factory, asset_id=pair.asset_id
+                )
+
+    async def _release_removed_pair(
+        self, pair: GearUsagePair, checkout_row: Any, session_factory: Any
+    ) -> None:
+        """Undo what Snipe-IT holds for a gear item the journal no longer lists.
+
+        A pair whose checkout and check-in are both recorded is history, and
+        Snipe-IT's log cannot be edited, so it is kept. A pair still checked out
+        is checked in now and then forgotten, so adding the item back records a
+        new pair. A failed attempt may still have checked the asset out, so it
+        is returned if nothing else may hold it, then forgotten.
+
+        Raises:
+            SnipeItSyncInProgress: The pair's checkout is being posted now.
+        """
+        if checkout_row.sync_status == "success":
+            if checkout_row.checkin_status == "success":
+                return
+            if await self.push_checkin_create(
+                pair,
+                session_factory=session_factory,
+                note="Removed from the gear usage journal",
+            ):
+                await self._forget_pair(pair, session_factory)
+            return
+        if (
+            checkout_row.sync_status == "pending"
+            and checkout_row.age_seconds is not None
+            and checkout_row.age_seconds < IN_FLIGHT_LOCK_SECONDS
+        ):
+            raise SnipeItSyncInProgress(
+                f"Checkout of {pair.checkout_external_id} is in flight"
+            )
+        await self._return_abandoned_asset(pair, session_factory=session_factory)
+        await self._forget_pair(pair, session_factory)
+
+    async def _forget_pair(self, pair: GearUsagePair, session_factory: Any) -> None:
+        """Delete a (journal, asset) pair's checkout and check-in sync rows."""
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        DELETE FROM sync_metadata
+                        WHERE (integration_source = 'snipeit_checkout'
+                               AND external_id = :checkout_external_id)
+                           OR (integration_source = 'snipeit_checkin'
+                               AND external_id = :checkin_external_id)
+                    """),
+                    {
+                        "checkout_external_id": pair.checkout_external_id,
+                        "checkin_external_id": pair.checkin_external_id,
+                    },
+                )
+        logger.info(
+            "Released the Snipe-IT pair of a removed gear item",
+            journal_id=pair.journal_id,
+            snipeit_asset_id=pair.asset_id,
+        )
 
     async def _asset_is_free(self, external_id: object, *, journal_id: int) -> bool:
         """Whether a checkout row's asset is checked in, so a new pair can be recorded.
@@ -3637,15 +3743,15 @@ class SnipeItSyncService:
 
     async def _supersede_checkout(
         self,
+        pair: GearUsagePair,
         *,
-        journal_id: int,
         recorded_reference: str,
         session_factory: Any,
         reason: str,
     ) -> bool:
-        """Release a journal's recorded checkout and check-in so a new pair is made.
+        """Release a pair's recorded checkout and check-in so a new pair is made.
 
-        The checkout row is reset to ``failed``, which :meth:`push_checkout_create`
+        The checkout row is reset to ``failed``, which :meth:`_push_pair_checkout`
         retries, and the check-in row is removed. The reset only matches while
         the row still holds ``recorded_reference``, so a concurrent update that
         read the same dates matches nothing and returns ``False`` instead of
@@ -3660,13 +3766,13 @@ class SnipeItSyncService:
                             error_message = :error_message,
                             updated_at = now()
                         WHERE integration_source = 'snipeit_checkout'
-                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
                           AND sync_status = 'success'
                           AND reference_data = :recorded_reference
                         RETURNING id
                     """),
                     {
-                        "journal_id": str(journal_id),
+                        "external_id": pair.checkout_external_id,
                         "recorded_reference": recorded_reference,
                         "error_message": f"Superseded: {reason}",
                     },
@@ -3674,21 +3780,23 @@ class SnipeItSyncService:
                 if result.fetchone() is None:
                     logger.debug(
                         "Skipping checkout supersede: already superseded",
-                        journal_id=journal_id,
+                        journal_id=pair.journal_id,
+                        snipeit_asset_id=pair.asset_id,
                     )
                     return False
                 await session.execute(
                     text("""
                         DELETE FROM sync_metadata
                         WHERE integration_source = 'snipeit_checkin'
-                          AND internal_uuid = :journal_id
+                          AND external_id = :external_id
                     """),
-                    {"journal_id": str(journal_id)},
+                    {"external_id": pair.checkin_external_id},
                 )
 
         logger.info(
             "Superseded Snipe-IT checkout",
-            journal_id=journal_id,
+            journal_id=pair.journal_id,
+            snipeit_asset_id=pair.asset_id,
             reason=reason,
         )
         return True
@@ -3827,16 +3935,22 @@ class AssetUsageDates:
 
 @dataclass(frozen=True)
 class OverdueGearUsage:
-    """A checked-out GEAR_USAGE journal whose usage period has ended.
+    """A checked-out gear item whose usage period on its journal has ended.
 
     Dates are the local calendar dates the usage ran over, read in the user's
     configured timezone (see :func:`_snipeit_zone`).
     """
 
     journal_id: int
+    asset_id: int
     checkout_at: date | None
     checkin_at: date
     usage_dates: AssetUsageDates | None = None
+
+    @property
+    def pair(self) -> GearUsagePair:
+        """The (journal, asset) pair to check in."""
+        return GearUsagePair(self.journal_id, self.asset_id)
 
     @property
     def note(self) -> str:
@@ -3852,7 +3966,10 @@ class OverdueGearUsage:
 async def fetch_overdue_gear_usage(
     session_factory: Any, user_id: str
 ) -> list[OverdueGearUsage]:
-    """Return a user's successful checkouts with no check-in whose period has ended.
+    """Return a user's checked-out gear items with no check-in whose period has ended.
+
+    One entry per (journal, asset) pair, so a trip's items are returned one by
+    one.
 
     Drives the periodic check-in sweep. The resolved check-in instant is compared
     against ``now()``, matching :func:`_usage_period_has_ended`; the returned
@@ -3860,25 +3977,30 @@ async def fetch_overdue_gear_usage(
     """
     async with session_factory() as session:
         result = await session.execute(
-            text("""
+            text(f"""
                 SELECT j.id AS journal_id,
+                       asset.external_id AS asset_external_id,
                        COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
                        COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
                        us.timezone AS user_timezone
                 FROM sync_metadata co
                 JOIN journals j ON j.id = co.internal_uuid::integer
-                JOIN journal_gear_usage_data u ON u.journal_id = j.id
+                JOIN journal_gear_usage_items u ON u.journal_id = j.id
+                JOIN sync_metadata asset
+                    ON asset.integration_source = 'snipeit'
+                    AND asset.internal_uuid = CAST(u.gear_item_id AS TEXT)
+                    AND co.external_id
+                        = 'snipeit_checkout:' || asset.external_id || ':' || j.id
                 LEFT JOIN user_settings us ON us.user_id = j.user_id
                 LEFT JOIN sync_metadata ci
-                    ON ci.integration_source = 'snipeit_checkin'
-                    AND ci.internal_uuid = co.internal_uuid
+                    ON {_CHECKIN_OF_CHECKOUT}
                     AND ci.sync_status = 'success'
                 WHERE co.integration_source = 'snipeit_checkout'
                   AND co.sync_status = 'success'
                   AND j.user_id = :user_id
                   AND ci.id IS NULL
                   AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
-                ORDER BY j.id
+                ORDER BY j.id, u.position, u.gear_item_id
             """),
             {"user_id": user_id},
         )
@@ -3890,9 +4012,13 @@ async def fetch_overdue_gear_usage(
         checkin_at = _local_date(row.checkin_date, zone)
         if checkin_at is None:
             continue
+        asset_id = _asset_id(row.asset_external_id)
+        if asset_id is None:
+            continue
         overdue.append(
             OverdueGearUsage(
                 journal_id=row.journal_id,
+                asset_id=asset_id,
                 checkout_at=_local_date(row.checkout_date, zone),
                 checkin_at=checkin_at,
                 usage_dates=AssetUsageDates.from_instants(

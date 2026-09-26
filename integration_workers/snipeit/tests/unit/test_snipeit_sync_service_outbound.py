@@ -11,6 +11,7 @@ from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_models import SnipeItActivity, SnipeItAsset, SnipeItMaintenance
 from snipeit_sync_service import (
     AssetUsageDates,
+    GearUsagePair,
     MaintenanceClaim,
     MaintenancePushContext,
     SnipeItSyncService,
@@ -923,6 +924,13 @@ class TestPushMaintenanceOfImportedJournals:
         assert api_client.update_maintenance.call_args.args[0] == 17
 
 
+def _items_result(*usages: MagicMock, asset_id: str | None = "42") -> MagicMock:
+    """The journal's gear items query result, each row carrying its asset's id."""
+    for usage in usages:
+        usage.asset_external_id = asset_id
+    return MagicMock(fetchall=MagicMock(return_value=list(usages)))
+
+
 class TestPushCheckoutCreate:
     """Tests for push_checkout_create method."""
 
@@ -948,9 +956,8 @@ class TestPushCheckoutCreate:
             checkout_date=datetime(2099, 6, 1, 8, 0, tzinfo=UTC),
             checkin_date=datetime(2099, 6, 2, 18, 0, tzinfo=UTC),
         )
-        asset_sync_meta_row = MagicMock(external_id="42")
 
-        # First session_factory() call: _fetch_journal_and_gear_usage_data (3 queries)
+        # First session_factory() call: _fetch_journal_and_gear_usage (2 queries)
         first_session = AsyncMock()
         first_session_ctx = MagicMock()
         first_session_ctx.__aenter__ = AsyncMock(return_value=first_session)
@@ -958,8 +965,7 @@ class TestPushCheckoutCreate:
 
         fetch_results = [
             MagicMock(fetchone=MagicMock(return_value=journal_row)),
-            MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
-            MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+            _items_result(usage_data_row),
         ]
         first_session.execute = AsyncMock(side_effect=fetch_results)
 
@@ -1069,7 +1075,7 @@ class TestPushCheckoutCreate:
         first_session.execute = AsyncMock(
             side_effect=[
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
-                MagicMock(fetchone=MagicMock(return_value=None)),
+                _items_result(),
             ]
         )
 
@@ -1112,8 +1118,7 @@ class TestPushCheckoutCreate:
         first_session.execute = AsyncMock(
             side_effect=[
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
-                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
-                MagicMock(fetchone=MagicMock(return_value=None)),
+                _items_result(usage_data_row, asset_id=None),
             ]
         )
 
@@ -1149,7 +1154,6 @@ class TestPushCheckoutCreate:
             checkout_date=None,
             checkin_date=None,
         )
-        asset_sync_meta_row = MagicMock(external_id="42")
 
         first_session = AsyncMock()
         first_session_ctx = MagicMock()
@@ -1158,8 +1162,7 @@ class TestPushCheckoutCreate:
         first_session.execute = AsyncMock(
             side_effect=[
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
-                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
-                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+                _items_result(usage_data_row),
             ]
         )
 
@@ -1234,7 +1237,6 @@ class TestPushCheckoutCreate:
             checkout_date=None,
             checkin_date=None,
         )
-        asset_sync_meta_row = MagicMock(external_id="42")
 
         first_session = AsyncMock()
         first_session_ctx = MagicMock()
@@ -1243,8 +1245,7 @@ class TestPushCheckoutCreate:
         first_session.execute = AsyncMock(
             side_effect=[
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
-                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
-                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+                _items_result(usage_data_row),
             ]
         )
 
@@ -1347,7 +1348,9 @@ class TestPushCheckinCreate:
         )
 
         result = await service.push_checkin_create(
-            journal_id=100, session_factory=session_factory, note="Returned from trip"
+            GearUsagePair(100, 42),
+            session_factory=session_factory,
+            note="Returned from trip",
         )
 
         assert result is True  # an actual check-in was performed
@@ -1382,7 +1385,7 @@ class TestPushCheckinCreate:
         )
 
         await service.push_checkin_create(
-            journal_id=100,
+            GearUsagePair(100, 42),
             session_factory=session_factory,
             note="Usage period 2019-05-01 to 2019-05-04",
             checkin_at=date(2019, 5, 4),
@@ -1404,7 +1407,7 @@ class TestPushCheckinCreate:
         )
 
         result = await service.push_checkin_create(
-            journal_id=100, session_factory=session_factory
+            GearUsagePair(100, 42), session_factory=session_factory
         )
 
         assert result is False  # no-op
@@ -1424,7 +1427,7 @@ class TestPushCheckinCreate:
         )
 
         await service.push_checkin_create(
-            journal_id=100, session_factory=session_factory
+            GearUsagePair(100, 42), session_factory=session_factory
         )
 
         api_client.checkin_asset.assert_not_called()
@@ -1450,7 +1453,7 @@ class TestPushCheckinCreate:
         )
 
         await service.push_checkin_create(
-            journal_id=100, session_factory=session_factory
+            GearUsagePair(100, 42), session_factory=session_factory
         )
 
         api_client.checkin_asset.assert_not_called()
@@ -1484,7 +1487,7 @@ class TestPushCheckinCreate:
 
         # Should not raise; 404 is a terminal no-op.
         result = await service.push_checkin_create(
-            journal_id=100, session_factory=session_factory
+            GearUsagePair(100, 42), session_factory=session_factory
         )
 
         assert result is False
@@ -1509,7 +1512,6 @@ class TestPushCheckinCreate:
             checkout_date=datetime(2000, 1, 1, tzinfo=UTC),
             checkin_date=datetime(2000, 1, 2, tzinfo=UTC),
         )
-        asset_sync_meta_row = MagicMock(external_id="42")
 
         # Checkout: fetch (3 queries) → lock (begin) → mark success (begin).
         fetch_session = AsyncMock()
@@ -1519,8 +1521,7 @@ class TestPushCheckinCreate:
         fetch_session.execute = AsyncMock(
             side_effect=[
                 MagicMock(fetchone=MagicMock(return_value=journal_row)),
-                MagicMock(fetchone=MagicMock(return_value=usage_data_row)),
-                MagicMock(fetchone=MagicMock(return_value=asset_sync_meta_row)),
+                _items_result(usage_data_row),
             ]
         )
         checkout_lock_ctx = _begin_session_ctx(
@@ -1561,7 +1562,7 @@ class TestPushCheckinCreate:
         )
 
         await service.push_checkout_create(
-            journal_id=100, session_factory=session_factory
+            GearUsagePair(100, 42), session_factory=session_factory
         )
 
         api_client.checkout_asset.assert_called_once()

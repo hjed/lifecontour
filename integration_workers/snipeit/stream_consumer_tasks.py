@@ -372,14 +372,22 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
             if maint_result.fetchone():
                 journal_type = "GEAR_MAINTENANCE"
             else:
-                # Check if journal has GEAR_USAGE type data
+                # A GEAR_USAGE journal, or one that was: a journal whose gear
+                # items (or whole GEAR_USAGE type) were removed still has pairs
+                # recorded in Snipe-IT to release.
                 usage_result = await session.execute(
                     text("""
-                        SELECT journal_id
+                        SELECT 1
                         FROM journal_gear_usage_data
                         WHERE journal_id = :journal_id
+                        UNION ALL
+                        SELECT 1
+                        FROM sync_metadata
+                        WHERE integration_source = 'snipeit_checkout'
+                          AND internal_uuid = :journal_uuid
+                        LIMIT 1
                     """),
-                    {"journal_id": journal_id},
+                    {"journal_id": journal_id, "journal_uuid": str(journal_id)},
                 )
                 if usage_result.fetchone():
                     journal_type = "GEAR_USAGE"
@@ -602,22 +610,48 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
     async def _checkin_deleted_journal(
         self, sync_service: Any, journal_id: int
     ) -> None:
-        """Check in the asset a deleted gear-usage journal held."""
-        checked_in = await sync_service.push_checkin_create(
-            journal_id=journal_id,
-            session_factory=self._session_factory,
-            note="Gear usage journal deleted",
-        )
-        if checked_in:
-            logger.info(
-                "Checked in asset on journal deletion",
-                journal_id=journal_id,
+        """Check in every asset a deleted gear-usage journal held.
+
+        The journal's gear items are gone with it, so its (journal, asset) pairs
+        are read from the checkout sync rows.
+        """
+        from sqlalchemy import text
+
+        from snipeit_sync_service import GearUsagePair, _checkout_asset_id
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT external_id
+                    FROM sync_metadata
+                    WHERE integration_source = 'snipeit_checkout'
+                      AND internal_uuid = :journal_uuid
+                    ORDER BY external_id
+                """),
+                {"journal_uuid": str(journal_id)},
             )
-        else:
-            logger.debug(
-                "Journal deletion checkin was a no-op",
-                journal_id=journal_id,
+            asset_ids = [_checkout_asset_id(row.external_id) for row in result]
+
+        for asset_id in asset_ids:
+            if asset_id is None:
+                continue
+            checked_in = await sync_service.push_checkin_create(
+                GearUsagePair(journal_id, asset_id),
+                session_factory=self._session_factory,
+                note="Gear usage journal deleted",
             )
+            if checked_in:
+                logger.info(
+                    "Checked in asset on journal deletion",
+                    journal_id=journal_id,
+                    snipeit_asset_id=asset_id,
+                )
+            else:
+                logger.debug(
+                    "Journal deletion checkin was a no-op",
+                    journal_id=journal_id,
+                    snipeit_asset_id=asset_id,
+                )
 
 
 async def run_snipeit_stream_consumer(
