@@ -13,7 +13,11 @@ from core_shared.models.journals import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.link_sources import JOURNAL_LINK_SOURCES
+from app.core.integrations.link_sources import (
+    JOURNAL_LINK_SOURCES,
+    SNIPEIT_MAINTENANCE_IMPORT_LINK,
+    SNIPEIT_MAINTENANCE_NOT_IMPORTED,
+)
 from app.core.journal.adapters.sql.journal_touch import touch_journal
 from app.core.journal.models.repositories import JournalRepository
 
@@ -1212,18 +1216,30 @@ class SqlJournalRepository(JournalRepository):
         """Get Snipe-IT external links for a journal."""
         snipeit_links = []
 
-        # Maintenance links
+        # Maintenance links: an imported journal's import link, otherwise the
+        # push rows of a journal a user wrote (see SNIPEIT_MAINTENANCE_NOT_IMPORTED)
         snipeit_maintenance_query = await self.conn.execute(
             text(
-                """
+                f"""
+                SELECT 'snipeit_maintenance' AS integration_source, l.external_event_id, s.base_url
+                FROM {SNIPEIT_MAINTENANCE_IMPORT_LINK}
+                JOIN snipeit_settings s ON s.user_id = :user_id
+                WHERE l.journal_id = :journal_id
+                UNION ALL
                 SELECT 'snipeit_maintenance' AS integration_source, m.external_id, s.base_url
                 FROM sync_metadata m
+                JOIN journals j ON j.id = :journal_id
                 JOIN snipeit_settings s ON s.user_id = :user_id
                 WHERE m.internal_uuid = :journal_uuid
                 AND m.integration_source = 'snipeit_maintenance'
-                """
+                AND {SNIPEIT_MAINTENANCE_NOT_IMPORTED}
+                """  # noqa: S608 - interpolates only a module constant
             ),
-            {"journal_uuid": str(journal_id), "user_id": user_id},
+            {
+                "journal_id": journal_id,
+                "journal_uuid": str(journal_id),
+                "user_id": user_id,
+            },
         )
         for row in snipeit_maintenance_query.fetchall():
             snipeit_links.append(

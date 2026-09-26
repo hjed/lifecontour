@@ -58,6 +58,23 @@ _SNIPEIT_JOURNAL_ROW = (
 )
 _SNIPEIT_JOURNAL_ROW_WHERE = "m.internal_uuid ~ '^[0-9]+$' AND m.integration_source = "
 
+# The link from an imported journal to the Snipe-IT maintenance it was imported
+# from, as ``l``. An import's sync row names no journal; the backend links the
+# journal to the record on the synthetic maintenance calendar instead.
+SNIPEIT_MAINTENANCE_IMPORT_LINK = (
+    "journal_external_event_links l "
+    "JOIN calendars c ON c.id = l.calendar_id "
+    "AND c.integration_source = 'snipeit_maintenance'"
+)
+# True for the journal ``j`` unless it was imported from Snipe-IT. An imported
+# journal is the record its import link names, so a push row naming it can only
+# be an echo an old push created before imports stopped being pushed back: it
+# is neither shown nor matched.
+SNIPEIT_MAINTENANCE_NOT_IMPORTED = (
+    f"NOT EXISTS (SELECT 1 FROM {SNIPEIT_MAINTENANCE_IMPORT_LINK} "
+    "WHERE l.journal_id = j.id)"
+)
+
 JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
     IntegrationSource.STRAVA: JournalLinkSource(
         name=IntegrationSource.STRAVA,
@@ -157,7 +174,19 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 from_sql=_SNIPEIT_JOURNAL_ROW,
                 journal_id_sql="j.id",
                 external_id_sql="m.external_id",
-                where_sql=f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_maintenance'",
+                where_sql=(
+                    f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_maintenance' "
+                    f"AND {SNIPEIT_MAINTENANCE_NOT_IMPORTED}"
+                ),
+            ),
+            # Journals imported from Snipe-IT
+            JournalLinkStore(
+                from_sql=(
+                    f"{SNIPEIT_MAINTENANCE_IMPORT_LINK} "
+                    "JOIN journals j ON j.id = l.journal_id"
+                ),
+                journal_id_sql="l.journal_id",
+                external_id_sql="l.external_event_id",
             ),
         ),
     ),

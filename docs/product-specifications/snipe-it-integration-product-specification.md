@@ -184,3 +184,6 @@ Snipe-IT will be added to the generic integrations dashboard API (`GET /api/inte
 ### Journal Details & External Links
 
 Like Google Calendar and Strava, journals linked to Snipe-IT maintenance or checkouts will display external system links on the detail page, directing the user to the specific asset or maintenance record in their Snipe-IT instance.
+
+- A journal imported from Snipe-IT links to the maintenance record it was imported from (the record its external event link names). A journal a user wrote links to the record its push created. An imported journal never shows a push row of its own: that can only be an echo created before imports stopped being pushed back.
+- Maintenance links are Snipe-IT links only. The synthetic maintenance calendar is not a Google calendar, so its events are never shown as Google Calendar links. The journal page and the MCP journal tools report the same links.
