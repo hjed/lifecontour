@@ -58,6 +58,7 @@ from app.mcp.domains.contacts.schemas import (
     AddContactRelationshipRequest,
     ContactActionResponse,
     ContactCreateRequest,
+    ContactFieldKind,
     ContactListResponse,
     ContactRelationshipListResponse,
     ContactSearchResponse,
@@ -73,6 +74,7 @@ from app.mcp.shared.annotations import (
     IDEMPOTENT_WRITE,
     READ_ONLY,
 )
+from app.mcp.shared.arguments import JsonBool
 from app.mcp.shared.converters import (
     ContactConverter,
     ContactRelationshipConverter,
@@ -186,6 +188,7 @@ async def _build_contact_response(
     contact_service: ContactService,
     *,
     include_history: bool,
+    include_archived: bool = False,
 ) -> str:
     """Full contact payload (links, summary, optional history) for get_contact*."""
     from app.core.integrations.external_link_helpers import (
@@ -216,7 +219,7 @@ async def _build_contact_response(
 
     # Convert to AI-friendly response using converter
     response = ContactConverter.to_contact_response(
-        contact, external_links=external_links
+        contact, external_links=external_links, include_archived=include_archived
     )
 
     # Add history context if requested
@@ -279,6 +282,29 @@ def _upcoming_dates_summary(upcoming: UpcomingContactDates) -> str:
     )
 
 
+_INCLUDE_ARCHIVED_DESC = (
+    "Optional: also list archived emails, phones and addresses in "
+    "contact_fields - values the person no longer uses, kept for reference"
+)
+
+
+def _require_contact_field(
+    contact: Contact, kind: ContactFieldKind, field_id: int
+) -> None:
+    """Refuse an id that is not one of this contact's values of that kind."""
+    if kind == "address":
+        found = any(a.id == field_id for a in contact.addresses or [])
+    else:
+        found = any(
+            m.id == field_id and m.method_type.value == kind
+            for m in contact.methods or []
+        )
+    if not found:
+        raise ContactValidationError(
+            "field_id", f"No {kind} with id {field_id} found on contact {contact.id}"
+        )
+
+
 def register_contact_tools(mcp: FastMCP[None]) -> None:
     """
     Register contact-related MCP tools with the FastMCP server.
@@ -299,6 +325,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 default=False,
                 description="Optional: Include field change history for the contact",
             ),
+        ] = False,
+        include_archived: Annotated[
+            JsonBool, Field(description=_INCLUDE_ARCHIVED_DESC)
         ] = False,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -334,7 +363,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise ContactNotFoundError(contact_id)
 
         return await _build_contact_response(
-            contact_id, contact, contact_service, include_history=include_history
+            contact_id,
+            contact,
+            contact_service,
+            include_history=include_history,
+            include_archived=include_archived,
         )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -359,6 +392,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         include_history: Annotated[
             bool,
             Field(default=False, description="Optional: Include field history"),
+        ] = False,
+        include_archived: Annotated[
+            JsonBool, Field(description=_INCLUDE_ARCHIVED_DESC)
         ] = False,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
@@ -391,7 +427,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 context={"source": normalized_source, "external_id": normalized_id},
             )
         return await _build_contact_response(
-            contact.id, contact, contact_service, include_history=include_history
+            contact.id,
+            contact,
+            contact_service,
+            include_history=include_history,
+            include_archived=include_archived,
         )
 
     @mcp.tool(annotations=DESTRUCTIVE_WRITE)
@@ -1033,6 +1073,70 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise ContactValidationError(
                 "contact_id", f"Contact with ID {contact_id} not found"
             ) from e
+
+    @mcp.tool(annotations=IDEMPOTENT_WRITE)
+    @mcp_unified_error_handler("set_contact_field_archived", "management")
+    async def set_contact_field_archived(
+        contact_id: Annotated[int, Field(description="ID of the contact")],
+        kind: Annotated[
+            ContactFieldKind,
+            Field(description="Which kind of value field_id names"),
+        ],
+        field_id: Annotated[
+            int,
+            Field(
+                description="The value's id, as get_contact's contact_fields lists it"
+            ),
+        ],
+        archived: Annotated[
+            JsonBool,
+            Field(description="true to archive the value, false to restore it"),
+        ],
+        contact_service: ContactService = mcp_depends(get_contact_service),
+        connection: AsyncConnection = mcp_depends(get_async_connection),
+    ) -> str:
+        """
+        Archive or restore one of a contact's emails, phones or addresses.
+
+        Archive a value the person no longer uses - an old number, a childhood
+        home - rather than deleting it: it is kept for reference and still
+        matches the contact (e.g. calendar attendees, search), but it is removed
+        from synced providers such as Google Contacts. Archiving the primary
+        value also makes it no longer primary; restoring does not make it
+        primary again. The change is recorded in the contact's history.
+
+        Returns the contact as get_contact does with include_archived.
+        """
+        contact = await contact_service.get_contact_by_id(contact_id)
+        if contact is None:
+            raise ContactNotFoundError(contact_id)
+        _require_contact_field(contact, kind, field_id)
+
+        update_field = (
+            contact_service.update_contact_address_field
+            if kind == "address"
+            else contact_service.update_contact_method_field
+        )
+        await update_field(
+            contact_id,
+            field_id,
+            "is_archived",
+            archived,
+            connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+        )
+
+        updated = await contact_service.get_contact_by_id(contact_id)
+        if updated is None:
+            raise ContactNotFoundError(contact_id)
+        return await _build_contact_response(
+            contact_id,
+            updated,
+            contact_service,
+            include_history=False,
+            include_archived=True,
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_contact_relationships", "relationship")

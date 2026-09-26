@@ -6,7 +6,7 @@ structured, contextual data for AI analysis and decision making.
 """
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -15,6 +15,29 @@ from app.mcp.domains.journals.schemas import ExternalLinkSchema
 # Constants for field descriptions
 _COMPANY_DESC = "Company or organization name"
 _JOB_TITLE_DESC = "Job title or position"
+
+
+type ContactFieldKind = Literal["email", "phone", "address"]
+
+
+class ContactFieldInfo(BaseModel):
+    """One of a contact's emails, phones or addresses, addressable by id."""
+
+    id: int = Field(
+        description="Id of the value; pass it as field_id to set_contact_field_archived"
+    )
+    kind: ContactFieldKind = Field(description="email, phone or address")
+    value: str = Field(
+        description="The email or phone number, or the address's lines comma separated"
+    )
+    label: str | None = Field(default=None, description="e.g. 'work', 'home'")
+    is_primary: bool = Field(description="Whether this is the primary of its kind")
+    is_archived: bool = Field(
+        description=(
+            "No longer in use, but kept for matching and reference. Archived "
+            "values are never primary and never synced to external providers"
+        )
+    )
 
 
 class ImportantDateInfo(BaseModel):
@@ -112,6 +135,14 @@ class ContactResponse(BaseModel):
     important_dates: list[ImportantDateInfo] = Field(
         default_factory=list,
         description="List of important dates like birthdays and anniversaries associated with the contact",
+    )
+
+    contact_fields: list[ContactFieldInfo] = Field(
+        default_factory=list,
+        description=(
+            "Every email, phone and address of the contact with its id. Archived "
+            "values are listed only when requested with include_archived"
+        ),
     )
 
     summary: str = Field(

@@ -8,7 +8,10 @@ from datetime import datetime
 
 from core_shared.models.contacts.entities import (
     Contact,
+    ContactAddress,
+    ContactMethod,
     ContactSummary,
+    MethodType,
     SummaryStatus,
     Tag,
 )
@@ -373,3 +376,69 @@ class TestContactConverterAISummary:
         assert response.follow_up_suggestions == ["Send follow-up email"]
         # Override text should appear in metadata summary
         assert "Manually written summary about Diana" in response.summary
+
+
+class TestContactFields:
+    """Every email, phone and address, by id; archived ones only on request."""
+
+    @staticmethod
+    def _contact() -> Contact:
+        return Contact(
+            id=1,
+            first_name="Ada",
+            methods=[
+                ContactMethod(
+                    id=10,
+                    method_type=MethodType.EMAIL,
+                    value="ada@example.com",
+                    contact_id=1,
+                    label="work",
+                    is_primary=True,
+                ),
+                ContactMethod(
+                    id=11,
+                    method_type=MethodType.PHONE,
+                    value="+44 20 7946 0000",
+                    contact_id=1,
+                    is_archived=True,
+                ),
+            ],
+            addresses=[
+                ContactAddress(
+                    id=20,
+                    street_line_1="1 Childhood Rd",
+                    locality="Bathurst",
+                    country_code="AU",
+                    contact_id=1,
+                    is_archived=True,
+                )
+            ],
+        )
+
+    def test_archived_values_are_left_out_by_default(self) -> None:
+        response = ContactConverter.to_contact_response(self._contact())
+
+        assert [f.model_dump() for f in response.contact_fields] == [
+            {
+                "id": 10,
+                "kind": "email",
+                "value": "ada@example.com",
+                "label": "work",
+                "is_primary": True,
+                "is_archived": False,
+            }
+        ]
+        assert "+44 20 7946 0000" not in response.summary
+
+    def test_include_archived_adds_them(self) -> None:
+        response = ContactConverter.to_contact_response(
+            self._contact(), include_archived=True
+        )
+
+        assert [
+            (f.id, f.kind, f.value, f.is_archived) for f in response.contact_fields
+        ] == [
+            (10, "email", "ada@example.com", False),
+            (11, "phone", "+44 20 7946 0000", True),
+            (20, "address", "1 Childhood Rd, Bathurst, AU", True),
+        ]
