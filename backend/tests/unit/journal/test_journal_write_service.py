@@ -8,7 +8,7 @@ unit of work would roll the whole journal back) without running later steps.
 """
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -359,8 +359,8 @@ class TestUpdateTypeData:
 
     @pytest.mark.asyncio
     async def test_adding_an_undated_gear_item_is_recorded(
-        self, write_service, mock_transaction
-    ):
+        self, write_service: Any, mock_transaction: AsyncMock
+    ) -> None:
         """An item with no dates still changes the entry: its gear item is diffed."""
         gear_item_id = uuid4()
         write_service.gear_usage_data_repo.find_by_journal_id.side_effect = [
@@ -639,8 +639,11 @@ class TestUpdateJournalComposite:
 
     @pytest.mark.asyncio
     async def test_types_replace_reports_discarded_gear_items(
-        self, write_service, mock_journal_service, mock_transaction
-    ):
+        self,
+        write_service: Any,
+        mock_journal_service: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
         """Dropping GEAR_USAGE names the items it held rather than nothing."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(
