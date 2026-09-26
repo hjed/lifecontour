@@ -337,3 +337,52 @@ class TestLoadTagNamesForContactsBatchIntegration:
         result = await _load_tag_names_for_contacts_batch(db_session, [])
 
         assert result == {}
+
+
+@pytest.mark.asyncio
+class TestLoadFullContactArchived:
+    """Archived values are loaded with their flag, so the push can leave them out."""
+
+    async def test_archived_values_carry_is_archived(
+        self, db_session: AsyncSession
+    ) -> None:
+        from worker import _transform_contact_to_google_person
+
+        contact_id = (
+            await db_session.execute(
+                text("INSERT INTO contacts (first_name) VALUES ('Arch') RETURNING id")
+            )
+        ).scalar_one()
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO contact_methods
+                    (contact_id, method_type, value, is_primary, is_archived)
+                VALUES (:cid, 'email', 'now@example.com', true, false),
+                       (:cid, 'email', 'then@example.com', false, true)
+                """
+            ),
+            {"cid": contact_id},
+        )
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO contact_addresses
+                    (contact_id, street_line_1, country_code, is_archived)
+                VALUES (:cid, '1 Childhood Rd', 'AU', true)
+                """
+            ),
+            {"cid": contact_id},
+        )
+
+        loaded = await _load_full_contact(db_session, contact_id)
+
+        assert {m["value"]: m["is_archived"] for m in loaded["methods"]} == {
+            "now@example.com": False,
+            "then@example.com": True,
+        }
+        assert [a["is_archived"] for a in loaded["addresses"]] == [True]
+
+        person = _transform_contact_to_google_person(loaded)
+        assert [e["value"] for e in person["emailAddresses"]] == ["now@example.com"]
+        assert person["addresses"] == []

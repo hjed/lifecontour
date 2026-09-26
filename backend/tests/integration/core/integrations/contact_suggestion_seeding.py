@@ -109,9 +109,16 @@ async def seed_participant(
 
 
 async def create_contact(
-    connection: AsyncConnection, *, first_name: str = "Known", email: str | None = None
+    connection: AsyncConnection,
+    *,
+    first_name: str = "Known",
+    email: str | None = None,
+    archived: bool = False,
 ) -> int:
-    """A contact, optionally holding ``email`` as its primary, returning its id."""
+    """A contact, optionally holding ``email``, returning its id.
+
+    The email is the primary one, or - with ``archived`` - an archived one.
+    """
     contact_id = int(
         (
             await connection.execute(
@@ -128,11 +135,16 @@ async def create_contact(
             text(
                 """
                 INSERT INTO contact_methods
-                    (contact_id, method_type, value, is_primary)
-                VALUES (:contact_id, 'email', :email, true)
+                    (contact_id, method_type, value, is_primary, is_archived)
+                VALUES (:contact_id, 'email', :email, :is_primary, :is_archived)
                 """
             ),
-            {"contact_id": contact_id, "email": email},
+            {
+                "contact_id": contact_id,
+                "email": email,
+                "is_primary": not archived,
+                "is_archived": archived,
+            },
         )
     return contact_id
 

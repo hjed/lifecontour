@@ -230,6 +230,51 @@ class TestAcceptIntoExistingContact:
 
         assert await _emails_of(async_connection, contact_id) == ["Jane@Work.com"]
 
+    async def test_email_becomes_primary_when_the_only_email_is_archived(
+        self, service: ContactSuggestionService, async_connection: AsyncConnection
+    ) -> None:
+        contact_id = await create_contact(
+            async_connection, first_name="Jane", email="old@home.com", archived=True
+        )
+
+        contact = (
+            await service.accept(
+                USER_ID,
+                "jane@new.com",
+                ExistingContactTarget(contact_id=contact_id),
+                transaction=async_connection,
+                provenance=Provenance.UI,
+            )
+        ).contact
+
+        primary = [
+            m.value
+            for m in contact.methods or []
+            if m.method_type == MethodType.EMAIL and m.is_primary
+        ]
+        assert primary == ["jane@new.com"]
+
+    async def test_email_held_as_an_archived_value_is_left_archived(
+        self, service: ContactSuggestionService, async_connection: AsyncConnection
+    ) -> None:
+        contact_id = await create_contact(
+            async_connection, first_name="Jane", email="old@home.com", archived=True
+        )
+
+        contact = (
+            await service.accept(
+                USER_ID,
+                "old@home.com",
+                ExistingContactTarget(contact_id=contact_id),
+                transaction=async_connection,
+                provenance=Provenance.UI,
+            )
+        ).contact
+
+        assert [(m.value, m.is_archived) for m in contact.methods or []] == [
+            ("old@home.com", True)
+        ]
+
     async def test_journal_already_linked_to_the_contact_is_kept(
         self, service: ContactSuggestionService, async_connection: AsyncConnection
     ) -> None:

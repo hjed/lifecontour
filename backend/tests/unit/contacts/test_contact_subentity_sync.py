@@ -34,6 +34,7 @@ from app.core.contacts.services.contact_subentity_sync import (
     diff_fields,
     important_date_key,
     important_date_unique_claims,
+    keep_archived,
     method_unique_claims,
     prefixed,
     reconcile,
@@ -658,3 +659,88 @@ class TestWithPrimaryMethod:
         with_primary_method([primary], MethodType.EMAIL, "new@example.com", CONTACT_ID)
 
         assert primary.value == "old@example.com"
+
+
+def _archived_address(
+    street: str,
+    *,
+    id: int | None = None,
+    locality: str | None = None,
+    is_archived: bool = False,
+) -> ContactAddress:
+    return ContactAddress(
+        street_line_1=street,
+        country_code="AU",
+        contact_id=CONTACT_ID,
+        id=id,
+        locality=locality,
+        is_archived=is_archived,
+    )
+
+
+class TestKeepArchived:
+    """An integration's list never holds archived values; keep them anyway."""
+
+    def test_nothing_submitted_leaves_the_list_alone(self) -> None:
+        assert keep_archived([_method("a@example.com", id=1)], None) is None
+
+    def test_stored_archived_rows_are_kept_with_their_ids(self) -> None:
+        archived = _method("old@example.com", id=1, is_archived=True)
+        active = _method("now@example.com", id=2, is_primary=True)
+        incoming = _method("now@example.com", is_primary=True)
+
+        result = keep_archived([archived, active], [incoming])
+
+        assert result == [incoming, archived]
+
+    def test_a_returning_value_un_archives_its_row(self) -> None:
+        """Google sent the archived value back: the row is restored, in place."""
+        archived = _method("Old@Example.com", id=1, is_archived=True)
+        incoming = _method("old@EXAMPLE.com", label="home", is_primary=True)
+
+        result = keep_archived([archived], [incoming])
+
+        assert result is not None
+        [restored] = result
+        assert (restored.id, restored.value, restored.label) == (
+            1,
+            "old@EXAMPLE.com",
+            "home",
+        )
+        assert (restored.is_archived, restored.is_primary) == (False, True)
+        assert incoming.id is None  # the submission itself is not modified
+
+    def test_phones_match_on_their_digits(self) -> None:
+        archived = _method(
+            "+61 2 1234 5678", id=1, method_type=MethodType.PHONE, is_archived=True
+        )
+        incoming = _method("+61212345678", method_type=MethodType.PHONE)
+
+        result = keep_archived([archived], [incoming])
+
+        assert result is not None
+        assert [(m.id, m.is_archived) for m in result] == [(1, False)]
+
+    def test_an_email_does_not_match_a_phone(self) -> None:
+        archived = _method(
+            "+61 2 1234 5678", id=1, method_type=MethodType.PHONE, is_archived=True
+        )
+        incoming = _method("a@example.com")
+
+        result = keep_archived([archived], [incoming])
+
+        assert result == [incoming, archived]
+
+    def test_addresses_match_on_every_line(self) -> None:
+        archived = _archived_address(
+            "1 Childhood Rd", id=1, locality="Bathurst", is_archived=True
+        )
+        same = _archived_address("1 childhood rd ", locality="BATHURST")
+        other = _archived_address("1 Childhood Rd", locality="Orange")
+
+        restored = keep_archived([archived], [same])
+        unmatched = keep_archived([archived], [other])
+
+        assert restored is not None
+        assert [(a.id, a.is_archived) for a in restored] == [(1, False)]
+        assert unmatched == [other, archived]

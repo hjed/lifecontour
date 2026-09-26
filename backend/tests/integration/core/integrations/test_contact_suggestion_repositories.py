@@ -105,6 +105,19 @@ class TestListCandidates:
 
         assert candidates == []
 
+    async def test_email_held_as_an_archived_value_is_excluded(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """An archived email still belongs to its contact: nothing to suggest."""
+        await seed_participant(async_connection, "old@x.com", 5)
+        await create_contact(async_connection, email="old@x.com", archived=True)
+
+        candidates = await SqlUnmatchedParticipantEmailRepository(
+            async_connection
+        ).list_candidates(USER_ID, MIN_JOURNALS)
+
+        assert candidates == []
+
     async def test_ignored_email_is_excluded_for_that_user_only(
         self, async_connection: AsyncConnection
     ) -> None:
