@@ -6,24 +6,11 @@ function validDate(value?: string | null): string | null | undefined {
 }
 
 /**
- * The gear items a GEAR_USAGE entry lists.
- *
- * Reads `items`, or the older single-item shape as a one-item list, and drops a
- * buffer date that does not parse rather than show it as "Invalid Date".
+ * The gear items a GEAR_USAGE entry lists, dropping a buffer date that does not
+ * parse rather than show it as "Invalid Date".
  */
 export function gearUsageItems(data?: GearUsageData | null): GearUsageItem[] {
-  const items =
-    data?.items ??
-    (data?.gear_item_id
-      ? [
-          {
-            gear_item_id: data.gear_item_id,
-            checkout_date: data.checkout_date,
-            checkin_date: data.checkin_date,
-          },
-        ]
-      : []);
-  return items.map(item => {
+  return (data?.items ?? []).map(item => {
     const cleaned: GearUsageItem = { gear_item_id: item.gear_item_id };
     const checkout = validDate(item.checkout_date);
     const checkin = validDate(item.checkin_date);

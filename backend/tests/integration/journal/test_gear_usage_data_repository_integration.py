@@ -98,21 +98,6 @@ def _journal_id(journal: Journal) -> int:
     return journal.id
 
 
-async def _mirror(connection: AsyncConnection, journal_id: int) -> tuple[object, ...]:
-    """The legacy single-item columns of the entry: the first item, or NULLs."""
-    row = (
-        await connection.execute(
-            text(
-                "SELECT gear_item_id, checkout_date, checkin_date "
-                "FROM journal_gear_usage_data WHERE journal_id = :id"
-            ),
-            {"id": journal_id},
-        )
-    ).fetchone()
-    assert row is not None
-    return (row.gear_item_id, row.checkout_date, row.checkin_date)
-
-
 _CHECKOUT = datetime(2023, 1, 1, tzinfo=UTC)
 _CHECKIN = datetime(2023, 1, 2, tzinfo=UTC)
 
@@ -277,43 +262,6 @@ class TestSqlGearUsageDataRepository:
         found = await gear_usage_repository.find_by_journal_id(journal_id)
         assert found is not None
         assert found.items == ()
-
-    async def test_the_legacy_columns_mirror_the_first_item(
-        self,
-        gear_usage_repository: SqlGearUsageDataRepository,
-        async_connection: AsyncConnection,
-        test_journal: Journal,
-        test_gear_item: GearItem,
-        second_gear_item: GearItem,
-    ) -> None:
-        """Readers not yet moved to the items table see the first item."""
-        journal_id = _journal_id(test_journal)
-        harness = GearUsageItem(
-            gear_item_id=_uuid(test_gear_item),
-            checkout_date=_CHECKOUT,
-            checkin_date=_CHECKIN,
-        )
-        rope = GearUsageItem(gear_item_id=_uuid(second_gear_item))
-        saved = await gear_usage_repository.save(
-            GearUsageData(journal_id=journal_id, items=(harness, rope))
-        )
-        assert await _mirror(async_connection, journal_id) == (
-            harness.gear_item_id,
-            _CHECKOUT,
-            _CHECKIN,
-        )
-
-        saved = await gear_usage_repository.save(
-            saved.without_item(harness.gear_item_id)
-        )
-        assert await _mirror(async_connection, journal_id) == (
-            rope.gear_item_id,
-            None,
-            None,
-        )
-
-        await gear_usage_repository.save(saved.without_item(rope.gear_item_id))
-        assert await _mirror(async_connection, journal_id) == (None, None, None)
 
     async def test_find_returns_none_if_not_found(
         self, gear_usage_repository: SqlGearUsageDataRepository

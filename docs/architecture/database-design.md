@@ -399,11 +399,9 @@ pitches, so the gear used on a trip lives on the trip's own journal:
   `checkout_date` / `checkin_date` buffers, timestamps. `journal_id` → the entry, `ON DELETE CASCADE`
   and `ON UPDATE CASCADE` (a merge moves an entry by rewriting its `journal_id`); `gear_item_id` →
   `gear_items.id`, `ON DELETE CASCADE` (deleting a gear item removes only its item).
-- **Transition (migration `0119`)**: every existing entry's gear item and dates were copied into one
-  item. The entry's own `gear_item_id` / `checkout_date` / `checkin_date` are kept for now as a
-  **mirror of its first item** (NULL when it holds none; the gear-item FK is `ON DELETE SET NULL`),
-  written by the repository on every save, so readers not yet moved to the items table keep working.
-  A later migration drops them.
+- **Migrations**: `0119` copied every existing entry's gear item and dates into one item (writing no
+  events, so nothing was pushed to Snipe-IT); the entry kept them as a mirror of its first item while
+  readers moved to the items table, and `0120` dropped them.
 
 #### Gear checkout state — the "checked out" definition (ITER16-003)
 

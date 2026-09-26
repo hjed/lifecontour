@@ -199,11 +199,4 @@ describe('GearUsageTypeEditor', () => {
     ).toBeVisible();
     expect(within(summary).getByText('Helmet')).toBeVisible();
   });
-
-  it('reads the older single-item shape as one item', async () => {
-    renderWithProviders(<GearUsageTypeEditor data={{ gear_item_id: 'g2' }} />);
-
-    const summary = await screen.findByTestId('gear-usage-summary');
-    expect(await within(summary).findByText('Harness')).toBeVisible();
-  });
 });

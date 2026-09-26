@@ -61,11 +61,11 @@ async def test_get_journal_surfaces_existing_gear_usage(
     await async_connection.execute(
         text(
             """
-            INSERT INTO journal_gear_usage_data (journal_id, gear_item_id)
-            VALUES (:journal_id, :gear_item_id)
+            INSERT INTO journal_gear_usage_data (journal_id)
+            VALUES (:journal_id)
             """
         ),
-        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+        {"journal_id": journal_id},
     )
     await async_connection.execute(
         text(
@@ -82,7 +82,9 @@ async def test_get_journal_surfaces_existing_gear_usage(
     assert response.status_code == 200
     attributes = response.json()["data"]["attributes"]
     assert "gear_usage" in attributes["types"]
-    assert attributes["type_data"]["gear_usage"]["gear_item_id"] == gear_item_id
+    assert attributes["type_data"]["gear_usage"]["items"] == [
+        {"gear_item_id": gear_item_id}
+    ]
 
 
 @pytest.mark.asyncio
@@ -108,7 +110,9 @@ async def test_add_gear_usage_type_with_data_persists_and_returns(
     assert response.status_code == 200
     attributes = response.json()["data"]["attributes"]
     assert "gear_usage" in attributes["types"]
-    assert attributes["type_data"]["gear_usage"]["gear_item_id"] == gear_item_id
+    assert attributes["type_data"]["gear_usage"]["items"] == [
+        {"gear_item_id": gear_item_id}
+    ]
 
 
 @pytest.mark.asyncio
@@ -208,8 +212,6 @@ async def test_a_journal_records_several_gear_items(
     assert add.status_code == 200, add.text
     gear_usage = add.json()["data"]["attributes"]["type_data"]["gear_usage"]
     assert _gear_ids(gear_usage) == [gear_item_id, harness]
-    # The single-item fields still carry the first item for older readers.
-    assert gear_usage["gear_item_id"] == gear_item_id
 
     # The older single-item form adds a third item and keeps the others.
     gear_usage = await _put_gear_usage(

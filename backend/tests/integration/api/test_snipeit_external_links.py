@@ -178,11 +178,11 @@ async def checkout_journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO journal_gear_usage_data (journal_id, gear_item_id)
-            VALUES (:journal_id, :gear_item_id)
+            INSERT INTO journal_gear_usage_data (journal_id)
+            VALUES (:journal_id)
             """
         ),
-        {"journal_id": journal_id, "gear_item_id": str(gear_id)},
+        {"journal_id": journal_id},
     )
     await async_connection.execute(
         text(

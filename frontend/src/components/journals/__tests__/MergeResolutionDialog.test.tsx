@@ -138,10 +138,7 @@ describe('MergeResolutionDialog', () => {
     const withGear = (gearItemId: string) => {
       const journal = JSON.parse(JSON.stringify(mockTarget));
       journal.attributes.type_data = {
-        gear_usage: {
-          items: [{ gear_item_id: gearItemId }],
-          gear_item_id: gearItemId,
-        },
+        gear_usage: { items: [{ gear_item_id: gearItemId }] },
       };
       return journal;
     };

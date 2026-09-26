@@ -124,14 +124,13 @@ async def _insert_gear_usage_journal(
     await async_connection.execute(
         text("""
             WITH entry AS (
-                INSERT INTO journal_gear_usage_data
-                    (journal_id, gear_item_id, checkout_date, checkin_date)
-                VALUES (:journal_id, :gear_item_id, NULL, NULL)
-                RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+                INSERT INTO journal_gear_usage_data (journal_id)
+                VALUES (:journal_id)
+                RETURNING journal_id
             )
             INSERT INTO journal_gear_usage_items
                 (journal_id, gear_item_id, checkout_date, checkin_date)
-            SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
+            SELECT journal_id, CAST(:gear_item_id AS uuid), NULL, NULL FROM entry
         """),
         {"journal_id": journal_id, "gear_item_id": gear_item_id},
     )
@@ -1611,16 +1610,15 @@ async def _usage_of_the_same_gear(
     await async_connection.execute(
         text("""
             WITH entry AS (
-                INSERT INTO journal_gear_usage_data
-                    (journal_id, gear_item_id, checkout_date, checkin_date)
-                SELECT :new_journal_id, gear_item_id, NULL, NULL
-                FROM journal_gear_usage_data
-                WHERE journal_id = :journal_id
-                RETURNING journal_id, gear_item_id, checkout_date, checkin_date
+                INSERT INTO journal_gear_usage_data (journal_id)
+                VALUES (:new_journal_id)
+                RETURNING journal_id
             )
             INSERT INTO journal_gear_usage_items
                 (journal_id, gear_item_id, checkout_date, checkin_date)
-            SELECT journal_id, gear_item_id, checkout_date, checkin_date FROM entry
+            SELECT entry.journal_id, u.gear_item_id, NULL, NULL
+            FROM entry, journal_gear_usage_items u
+            WHERE u.journal_id = :journal_id
         """),
         {"new_journal_id": new_journal_id, "journal_id": journal_id},
     )

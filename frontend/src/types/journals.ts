@@ -363,12 +363,6 @@ export interface GearUsageItem {
 export interface GearUsageData {
   /** Every gear item used, in order. Saving replaces the whole list. */
   items?: GearUsageItem[];
-  /** @deprecated The first item's gear item; read `items`. */
-  gear_item_id?: string | null;
-  /** @deprecated The first item's checkout; read `items`. */
-  checkout_date?: string | null;
-  /** @deprecated The first item's check-in; read `items`. */
-  checkin_date?: string | null;
 }
 
 // Type data union type
