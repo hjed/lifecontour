@@ -16,6 +16,7 @@ from app.mcp.domains.journals.tools.calendars import register_calendar_tools
 from app.mcp.domains.journals.tools.contacts import register_journal_contact_tools
 from app.mcp.domains.journals.tools.daily_summary import register_daily_summary_tools
 from app.mcp.domains.journals.tools.gear import register_gear_tools
+from app.mcp.domains.journals.tools.gear_usage import register_gear_usage_tools
 from app.mcp.domains.journals.tools.hierarchy import register_journal_hierarchy_tools
 from app.mcp.domains.journals.tools.history import register_journal_history_tools
 from app.mcp.domains.journals.tools.journal_entries import register_journal_entry_tools
@@ -46,6 +47,7 @@ def register_journal_tools(mcp: FastMCP[None]) -> None:
     register_daily_summary_tools(mcp)
     register_template_tools(mcp)
     register_gear_tools(mcp)
+    register_gear_usage_tools(mcp)
     register_journal_tag_tools(mcp)
     register_journal_series_tools(mcp)
     register_journal_route_tools(mcp)
