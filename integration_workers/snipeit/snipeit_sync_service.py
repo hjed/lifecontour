@@ -3550,7 +3550,9 @@ class SnipeItSyncService:
             and checkout_row.checkin_status == "success"
             and checkout_row.checkin_error is None
         ):
-            if await self._supersede_checkout(
+            if await self._asset_is_free(
+                checkout_row.external_id, journal_id=journal_id
+            ) and await self._supersede_checkout(
                 journal_id=journal_id,
                 recorded_reference=checkout_row.reference_data,
                 session_factory=session_factory,
@@ -3572,7 +3574,9 @@ class SnipeItSyncService:
                 at=_snipeit_datetime(checkout_date, zone),
             )
         ):
-            if await self._supersede_checkout(
+            if await self._asset_is_free(
+                checkout_row.external_id, journal_id=journal_id
+            ) and await self._supersede_checkout(
                 journal_id=journal_id,
                 recorded_reference=checkout_row.reference_data,
                 session_factory=session_factory,
@@ -3602,6 +3606,31 @@ class SnipeItSyncService:
                 # That check-in closed a checkout recorded on the old date; with
                 # the asset back, the pass above now records the corrected pair.
                 await self.reconcile_gear_usage(journal_id, session_factory)
+
+    async def _asset_is_free(self, external_id: object, *, journal_id: int) -> bool:
+        """Whether a checkout row's asset is checked in, so a new pair can be recorded.
+
+        This journal's check-in does not mean the asset is free now: another
+        usage may have it out, and Snipe-IT refuses to check out an asset that
+        is. The recorded pair is then kept, to be re-recorded by a later update.
+        """
+        asset_id = _checkout_asset_id(external_id)
+        if asset_id is None:
+            return False
+        try:
+            asset = await self._api_client.get_asset(asset_id)
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                return False
+            raise
+        if asset.assigned_to is not None:
+            logger.info(
+                "Keeping recorded Snipe-IT pair while the asset is checked out",
+                journal_id=journal_id,
+                snipeit_asset_id=asset_id,
+            )
+            return False
+        return True
 
     async def _supersede_checkout(
         self,
