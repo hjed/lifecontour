@@ -122,9 +122,37 @@ def _convert_contact_field_value(field_name: str, field_value: Any) -> Any:
         return str(field_value) if field_value is not None else None
 
 
+# The sub-entity flags a field update accepts as booleans.
+_SUBENTITY_FLAGS = frozenset({"is_primary", "is_archived"})
+
+
+def _apply_subentity_field(
+    entity: ContactMethod | ContactAddress,
+    field_name: str,
+    new_value: Any,
+    kind: str,
+) -> ChangedFields:
+    """Set one field on a method or address, keeping "archived is never primary".
+
+    Archiving the primary value demotes it in the same write, and both changes
+    are returned so the feed shows why the primary went; an archived value
+    cannot be made primary.
+    """
+    if field_name == "is_primary" and new_value and entity.is_archived:
+        raise ContactValidationError(
+            "is_primary", f"An archived {kind} cannot be primary"
+        )
+    changed: ChangedFields = {field_name: (getattr(entity, field_name), new_value)}
+    setattr(entity, field_name, new_value)
+    if field_name == "is_archived" and new_value and entity.is_primary:
+        entity.is_primary = False
+        changed["is_primary"] = (True, False)
+    return changed
+
+
 def _validate_method_field_name(field_name: str) -> None:
     """Validate that the field name is allowed for method updates."""
-    valid_fields = {"value", "label", "is_primary"}
+    valid_fields = {"value", "label", *_SUBENTITY_FLAGS}
     if field_name not in valid_fields:
         raise ContactValidationError(
             "field_name",
@@ -134,7 +162,7 @@ def _validate_method_field_name(field_name: str) -> None:
 
 def _convert_method_field_value(field_name: str, field_value: Any) -> Any:
     """Convert method field value to appropriate type based on field name."""
-    if field_name == "is_primary":
+    if field_name in _SUBENTITY_FLAGS:
         if isinstance(field_value, str):
             return field_value.lower() in ("true", "1", "yes")
         else:
@@ -153,7 +181,7 @@ def _validate_address_field_name(field_name: str) -> None:
         "region",
         "postal_code",
         "country_code",
-        "is_primary",
+        *_SUBENTITY_FLAGS,
     }
     if field_name not in valid_fields:
         raise ContactValidationError(
@@ -164,7 +192,7 @@ def _validate_address_field_name(field_name: str) -> None:
 
 def _convert_address_field_value(field_name: str, field_value: Any) -> Any:
     """Convert address field value to appropriate type based on field name."""
-    if field_name == "is_primary":
+    if field_name in _SUBENTITY_FLAGS:
         if isinstance(field_value, str):
             return field_value.lower() in ("true", "1", "yes")
         else:
@@ -674,8 +702,9 @@ class ContactService:
                     str(new_value) if new_value is not None else None,
                 )
 
-            # Update the method field
-            setattr(method_to_update, field_name, new_value)
+            changed = _apply_subentity_field(
+                method_to_update, field_name, new_value, "contact method"
+            )
 
             # Validate the updated method
             if field_name == "value":
@@ -690,9 +719,7 @@ class ContactService:
             # the "method_{id}_{field}" key back to the contact_method row.
             event = ContactUpdated(
                 contact_id,
-                prefixed(
-                    METHOD_PREFIX, method_id, {field_name: (old_value, new_value)}
-                ),
+                prefixed(METHOD_PREFIX, method_id, changed),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
@@ -769,8 +796,9 @@ class ContactService:
                     str(new_value) if new_value is not None else None,
                 )
 
-            # Update the address field
-            setattr(address_to_update, field_name, new_value)
+            changed = _apply_subentity_field(
+                address_to_update, field_name, new_value, "contact address"
+            )
 
             # Validate the updated address
             address_to_update.__post_init__()
@@ -782,9 +810,7 @@ class ContactService:
             # decodes "address_{id}_{field}" to the contact_address row.
             event = ContactUpdated(
                 contact_id,
-                prefixed(
-                    ADDRESS_PREFIX, address_id, {field_name: (old_value, new_value)}
-                ),
+                prefixed(ADDRESS_PREFIX, address_id, changed),
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,

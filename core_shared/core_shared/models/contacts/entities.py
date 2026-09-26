@@ -77,6 +77,12 @@ class Tag:
             )
 
 
+def _reject_archived_primary(is_primary: bool, is_archived: bool, kind: str) -> None:
+    """An archived value is out of use, so it can never be the primary one."""
+    if is_primary and is_archived:
+        raise ValueError(f"An archived {kind} cannot be primary")
+
+
 @dataclass
 class ContactMethod:
     """Contact method entity for email and phone."""
@@ -87,11 +93,15 @@ class ContactMethod:
     id: int | None = None
     label: str | None = None  # 'work', 'home', 'mobile'
     is_primary: bool = False
+    # No longer in use, but kept for matching and reference. Never primary and
+    # never synced out to a provider.
+    is_archived: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Validate contact method."""
+        _reject_archived_primary(self.is_primary, self.is_archived, "contact method")
         if not isinstance(self.method_type, MethodType):
             raise ValueError(f"Invalid method type: {self.method_type}")
 
@@ -119,11 +129,14 @@ class ContactAddress:
     region: str | None = None
     postal_code: str | None = None
     is_primary: bool = False
+    # See ContactMethod.is_archived.
+    is_archived: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Validate contact address."""
+        _reject_archived_primary(self.is_primary, self.is_archived, "contact address")
         # Create Address value object to validate
         from .value_objects import CountryCode
 

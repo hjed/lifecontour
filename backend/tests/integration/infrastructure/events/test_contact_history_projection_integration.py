@@ -534,6 +534,51 @@ class TestContactProjectionEndToEnd:
         assert ("value", "old@example.com", "new@example.com", "ui", "ui") in rows
 
     @pytest.mark.asyncio
+    async def test_archiving_a_primary_method_projects_both_changes(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Archiving demotes the primary; the feed records both, as one edit."""
+        service = self._service(async_connection)
+        created = await service.create_contact(
+            Contact(
+                first_name="Ari",
+                methods=[
+                    ContactMethod(
+                        method_type=MethodType.EMAIL,
+                        value="old@example.com",
+                        contact_id=0,
+                        is_primary=True,
+                    )
+                ],
+            ),
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        assert created.id is not None and created.methods is not None
+        method_id = created.methods[0].id
+        assert method_id is not None
+        await service.update_contact_method_field(
+            created.id,
+            method_id,
+            "is_archived",
+            True,
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
+        await self._drain(stream_client, test_stream_name, async_connection)
+
+        rows = await _rows_for(
+            async_connection, entity_type="contact_method", entity_id=method_id
+        )
+        assert ("is_archived", "False", "True", "ui", "ui") in rows
+        assert ("is_primary", "True", "False", "ui", "ui") in rows
+
+    @pytest.mark.asyncio
     async def test_tag_assign_projected(
         self,
         test_stream_name: str,

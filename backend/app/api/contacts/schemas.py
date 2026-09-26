@@ -19,6 +19,16 @@ from app.api.common.schemas import (
     JsonApiUpdateRequest,
 )
 
+_ARCHIVED_DESC = (
+    "No longer in use, but kept for matching and reference. Never primary, "
+    "and never synced out to an external provider"
+)
+
+
+def _reject_archived_primary(is_primary: bool, is_archived: bool) -> None:
+    if is_primary and is_archived:
+        raise ValueError("An archived value cannot be primary")
+
 
 # Contact Method Schemas (embedded in contact)
 class ContactMethodAttributes(BaseModel):
@@ -30,6 +40,12 @@ class ContactMethodAttributes(BaseModel):
     is_primary: bool = Field(
         default=False, description="Whether this is the primary method of its type"
     )
+    is_archived: bool = Field(default=False, description=_ARCHIVED_DESC)
+
+    @model_validator(mode="after")
+    def _archived_is_never_primary(self) -> ContactMethodAttributes:
+        _reject_archived_primary(self.is_primary, self.is_archived)
+        return self
 
 
 class ContactMethodResource(BaseModel):
@@ -57,6 +73,12 @@ class ContactAddressAttributes(BaseModel):
     is_primary: bool = Field(
         default=False, description="Whether this is the primary address"
     )
+    is_archived: bool = Field(default=False, description=_ARCHIVED_DESC)
+
+    @model_validator(mode="after")
+    def _archived_is_never_primary(self) -> ContactAddressAttributes:
+        _reject_archived_primary(self.is_primary, self.is_archived)
+        return self
 
 
 class ContactAddressResource(BaseModel):

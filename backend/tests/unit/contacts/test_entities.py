@@ -126,6 +126,22 @@ class TestContactMethod:
                 label="x" * 51,
             )
 
+    def test_method_is_not_archived_by_default(self) -> None:
+        method = ContactMethod(
+            method_type=MethodType.EMAIL, value="test@example.com", contact_id=1
+        )
+        assert method.is_archived is False
+
+    def test_archived_method_cannot_be_primary(self) -> None:
+        with pytest.raises(ValueError, match="archived .* cannot be primary"):
+            ContactMethod(
+                method_type=MethodType.EMAIL,
+                value="test@example.com",
+                contact_id=1,
+                is_primary=True,
+                is_archived=True,
+            )
+
 
 @pytest.mark.unit
 class TestContactAddress:
@@ -190,6 +206,22 @@ class TestContactAddress:
                 country_code="AU",
                 contact_id=1,
                 label="x" * 51,
+            )
+
+    def test_address_is_not_archived_by_default(self) -> None:
+        address = ContactAddress(
+            street_line_1="1 Main St", country_code="AU", contact_id=1
+        )
+        assert address.is_archived is False
+
+    def test_archived_address_cannot_be_primary(self) -> None:
+        with pytest.raises(ValueError, match="archived .* cannot be primary"):
+            ContactAddress(
+                street_line_1="1 Main St",
+                country_code="AU",
+                contact_id=1,
+                is_primary=True,
+                is_archived=True,
             )
 
     def test_to_address_value_object(self):
