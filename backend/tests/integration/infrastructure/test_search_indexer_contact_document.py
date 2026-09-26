@@ -368,3 +368,40 @@ async def test_last_activity_date_follows_the_latest_recorded_change(
 
     assert document is not None
     assert document["last_activity_date"] == stored.isoformat()
+
+
+async def test_archived_emails_and_phones_are_searchable(
+    async_connection: AsyncConnection,
+) -> None:
+    """An archived value still finds its contact, but never stands as its email.
+
+    With no primary of a type the document falls back to the first value; an
+    archived one is out of use, so it is skipped for that.
+    """
+    now = datetime.now(UTC)
+    await async_connection.execute(
+        text("""
+            INSERT INTO contacts (id, first_name, created_at, updated_at)
+            VALUES (:id, 'Ada', :now, :now)
+        """),
+        {"id": CONTACT_ID, "now": now},
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO contact_methods
+                (id, contact_id, method_type, value, is_archived)
+            VALUES (91, :id, 'email', 'ada@oldmail.com', true),
+                   (92, :id, 'phone', '+441234567890', true),
+                   (93, :id, 'phone', '+61400000000', false)
+        """),
+        {"id": CONTACT_ID},
+    )
+
+    indexer = SearchIndexer(db_connection=async_connection)
+    document = await indexer._fetch_complete_contact_data(CONTACT_ID)
+
+    assert document is not None
+    assert document["emails"] == ["ada@oldmail.com"]
+    assert document["email"] is None
+    assert sorted(document["phones"]) == ["+441234567890", "+61400000000"]
+    assert document["phone"] == "+61400000000"

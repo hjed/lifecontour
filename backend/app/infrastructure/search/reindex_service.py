@@ -23,6 +23,7 @@ from app.infrastructure.search.meilisearch_client import (
     get_index_name,
     get_meilisearch_client,
 )
+from app.infrastructure.search.search_indexer import primary_or_first_in_use
 
 logger = structlog.get_logger()
 
@@ -302,7 +303,7 @@ class ReindexService:
 
             methods_result = await self.db_connection.execute(
                 text("""
-                    SELECT method_type, value, label, is_primary
+                    SELECT method_type, value, label, is_primary, is_archived
                     FROM contact_methods
                     WHERE contact_id = :contact_id
                     ORDER BY is_primary DESC, created_at ASC
@@ -336,22 +337,8 @@ class ReindexService:
 
             emails = [row.value for row in methods_rows if row.method_type == "email"]
             phones = [row.value for row in methods_rows if row.method_type == "phone"]
-            primary_email = next(
-                (
-                    row.value
-                    for row in methods_rows
-                    if row.method_type == "email" and row.is_primary
-                ),
-                emails[0] if emails else None,
-            )
-            primary_phone = next(
-                (
-                    row.value
-                    for row in methods_rows
-                    if row.method_type == "phone" and row.is_primary
-                ),
-                phones[0] if phones else None,
-            )
+            primary_email = primary_or_first_in_use(methods_rows, "email")
+            primary_phone = primary_or_first_in_use(methods_rows, "phone")
 
             full_name = (
                 f"{contact_row.first_name} {contact_row.last_name or ''}".strip()

@@ -5,6 +5,7 @@ Processes domain events from the outbox and updates MeiliSearch indices
 to keep search data synchronized with the database.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import structlog
@@ -51,6 +52,20 @@ CONTACT_REINDEX_EVENT_TYPES = frozenset(
         "ImportantDateDeleted",
     }
 )
+
+
+def primary_or_first_in_use(methods: Sequence[Any], method_type: str) -> str | None:
+    """The contact's value of ``method_type`` a search document leads with.
+
+    The primary one, or with none the first still in use: an archived value
+    is kept for matching (it stays in ``emails`` / ``phones``) but never stands
+    as the contact's current email or phone.
+    """
+    of_type = [m for m in methods if m.method_type == method_type]
+    chosen = next((m for m in of_type if m.is_primary), None) or next(
+        (m for m in of_type if not m.is_archived), None
+    )
+    return chosen.value if chosen is not None else None
 
 
 class SearchIndexer:
@@ -212,7 +227,7 @@ class SearchIndexer:
 
             # Fetch contact methods (email, phone)
             methods_query = text("""
-                SELECT method_type, value, label, is_primary
+                SELECT method_type, value, label, is_primary, is_archived
                 FROM contact_methods
                 WHERE contact_id = :contact_id
                 ORDER BY is_primary DESC, created_at ASC
@@ -250,22 +265,8 @@ class SearchIndexer:
             # Build comprehensive contact document
             emails = [row.value for row in methods_rows if row.method_type == "email"]
             phones = [row.value for row in methods_rows if row.method_type == "phone"]
-            primary_email = next(
-                (
-                    row.value
-                    for row in methods_rows
-                    if row.method_type == "email" and row.is_primary
-                ),
-                emails[0] if emails else None,
-            )
-            primary_phone = next(
-                (
-                    row.value
-                    for row in methods_rows
-                    if row.method_type == "phone" and row.is_primary
-                ),
-                phones[0] if phones else None,
-            )
+            primary_email = primary_or_first_in_use(methods_rows, "email")
+            primary_phone = primary_or_first_in_use(methods_rows, "phone")
 
             notes_content = " ".join([row.content for row in notes_rows])
             tags = [row.name for row in tags_rows]
