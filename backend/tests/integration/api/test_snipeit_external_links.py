@@ -353,3 +353,36 @@ async def test_imported_journal_is_found_by_the_record_it_was_imported_from(
     assert await repo.find_ids_by_integration_source(
         test_user.id, _MAINTENANCE_SOURCE
     ) == {journal_id}
+
+
+@pytest.mark.asyncio
+async def test_imported_journal_is_not_found_by_its_echo(
+    async_connection: AsyncConnection,
+    test_user: SessionUser,
+) -> None:
+    """A lookup answers only for an id the journal's external links show."""
+    journal_id = await _journal(async_connection, test_user.id)
+    await _link_import(async_connection, test_user.id, journal_id, _ORIGINAL)
+    await _record_push(async_connection, journal_id, _ECHO)
+    repo = SqlJournalRepository(async_connection)
+
+    assert (
+        await repo.find_id_by_external_id(test_user.id, _MAINTENANCE_SOURCE, _ECHO)
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_journal_a_user_wrote_is_found_by_the_record_it_pushed(
+    async_connection: AsyncConnection,
+    test_user: SessionUser,
+) -> None:
+    journal_id = await _journal(async_connection, test_user.id)
+    await _record_push(async_connection, journal_id, "snipeit_maint:8")
+    repo = SqlJournalRepository(async_connection)
+
+    found = await repo.find_id_by_external_id(
+        test_user.id, _MAINTENANCE_SOURCE, "snipeit_maint:8"
+    )
+
+    assert found == journal_id
