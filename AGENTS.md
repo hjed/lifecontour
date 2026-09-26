@@ -264,6 +264,20 @@ personal-management-system/
 - **React Server Components**: Minimize the use of `'use client'`, `useEffect`, and `setState`; favor React Server Components (RSC) and Next.js SSR features.
 - **Forms**: Always use `Form`, `FormField`, `FormControl`, `FormLabel`, `FormMessage` components for forms with react-hook-form and Zod validation, guaranteeing proper accessibility linking automatically.
 
+## CI for PR Stacks
+
+**Only the bottom layer of a PR stack runs CI. This is deliberate, to save Actions budget. Do not change it.**
+
+GitHub runs workflows for every PR in a native stack as if it targeted `main`, so without a gate each push to any layer ran the full suite (E2E included). The `changes` job in `.github/workflows/ci.yml` therefore runs only for the **lowest unmerged** layer (`github.event.pull_request.stack.base.ref == github.event.pull_request.base.ref`), non-stacked PRs, and pushes. Every other job `needs: changes`, so on upper layers they all show as skipped.
+
+- ❌ **Never** remove or loosen that gate, or add a trigger/job that runs CI for upper layers automatically.
+- ❌ **Never** add a job without `needs: changes` (directly or through another job) — it would escape the gate.
+- ✅ To run CI on an upper layer, trigger it manually: `gh workflow run ci.yml --ref <branch>`. It tests the branch head and path-filters against `main`, so it covers the layers below too.
+- Re-running a skipped PR run does **not** help — a re-run reuses the original event and skips again.
+- When the PR below merges, the retarget fires no CI event: the new bottom layer runs CI on its next push (e.g. the `gh stack` rebase), or dispatch it manually.
+
+See [CI/CD Setup → Stacked PRs](docs/ci-cd-setup.md#stacked-prs).
+
 ## Detailed Architecture & Development Guidelines
 
 To avoid repetition, detailed guidelines are maintained in specialized documents in the `docs/` directory. **You must refer to these documents for specific implementation details, patterns, and rules.**
