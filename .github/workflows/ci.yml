@@ -201,6 +201,8 @@ jobs:
     name: Core Shared Linting
     runs-on: ubuntu-latest
     needs: changes
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ./core_shared
@@ -319,6 +321,8 @@ jobs:
     name: Core Shared Unit Tests
     runs-on: ubuntu-latest
     needs: changes
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ./core_shared
@@ -672,6 +676,8 @@ jobs:
     name: Frontend Linting
     runs-on: ubuntu-latest
     needs: changes
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ./frontend
@@ -727,6 +733,8 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     needs: changes
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ./frontend
