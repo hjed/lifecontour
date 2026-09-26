@@ -1071,6 +1071,9 @@ class SnipeItSyncService:
                 skipped += 1
             except _MaintenanceFailed:
                 failed += 1
+            except SnipeItRateLimitError:
+                # Not a failed record: the batch job defers the whole batch.
+                raise
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Unexpected error syncing maintenance record",

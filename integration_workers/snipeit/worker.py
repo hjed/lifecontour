@@ -38,6 +38,7 @@ from core_shared.logging import configure_logging, get_logger
 from core_shared.models.sync_job import SyncJobStatus
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from core_shared.worker_arq import DEFAULT_MAX_TRIES
 
 from snipeit_rate_limiter import SnipeItRateLimitError
 from snipeit_settings import SnipeItWorkerSettings
@@ -191,6 +192,31 @@ async def _record_child(
         await session.commit()
 
 
+async def _fail_parent(session_factory: Any, job_id: str, error_message: str) -> None:
+    await _set_job_status(
+        session_factory,
+        job_id,
+        SyncJobStatus.FAILED,
+        completed_at=datetime.now(UTC),
+        error_message=error_message,
+    )
+
+
+def _rate_limit_defer(ctx: dict[str, Any], retry_after: float | None) -> float:
+    """How long to defer a rate-limited batch, in seconds.
+
+    A deferred batch does not move its parent's ``updated_at``, so all of its
+    retries together must fit the reconciler's staleness window, or the parent
+    is failed as stuck before the batch runs again. Each deferral is capped at
+    the window's share per attempt; a longer ``Retry-After`` just costs an
+    attempt.
+    """
+    max_tries = coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
+    cap = settings.reconciliation_stale_after_seconds / max_tries
+    retry_count = coerce_int(ctx.get("job_try"), 1) - 1
+    return min(retry_after or default_retry_delay(retry_count), cap)
+
+
 async def _run_snipeit_fanout(
     ctx: dict[str, Any],
     user_id: str,
@@ -229,14 +255,12 @@ async def _run_snipeit_fanout(
         sync_service = await _open_sync_service(session_factory, user_id)
     except _NotConfiguredError as exc:
         logger.error(str(exc), task=label, user_id=user_id)
-        await _set_job_status(
-            session_factory,
-            job_id,
-            SyncJobStatus.FAILED,
-            completed_at=datetime.now(UTC),
-            error_message=str(exc),
-        )
+        await _fail_parent(session_factory, job_id, str(exc))
         return {"status": "error", "message": str(exc), "user_id": user_id}
+    except Exception as exc:
+        logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
+        await _fail_parent(session_factory, job_id, str(exc))
+        raise
 
     try:
         batches = [ids async for ids in list_batches(sync_service) if ids]
@@ -256,44 +280,58 @@ async def _run_snipeit_fanout(
             await session.commit()
     except Exception as exc:
         logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
-        await _set_job_status(
-            session_factory,
-            job_id,
-            SyncJobStatus.FAILED,
-            completed_at=datetime.now(UTC),
-            error_message=str(exc),
-        )
+        await _fail_parent(session_factory, job_id, str(exc))
         raise
     finally:
         await sync_service._api_client.close()
 
     # The child rows and parent state are committed; dispatch is now safe.
-    for child_id, ids in zip(child_ids, batches, strict=True):
-        job = await ctx["redis"].enqueue_job(
-            batch_task,
-            user_id,
-            ids,
-            job_id,
-            _job_id=child_id,
-            _queue_name=settings.queue_name,
-        )
+    enqueued = 0
+    for position, (child_id, ids) in enumerate(zip(child_ids, batches, strict=True)):
+        try:
+            job = await ctx["redis"].enqueue_job(
+                batch_task,
+                user_id,
+                ids,
+                job_id,
+                _job_id=child_id,
+                _queue_name=settings.queue_name,
+            )
+        except Exception as exc:
+            # A batch never queued never finalises its own row: fail it and the
+            # rest here so the parent does not wait out the staleness window.
+            logger.exception("Snipe-IT batch dispatch failed", task=label)
+            for unsent_id in child_ids[position:]:
+                await _record_child(
+                    session_factory,
+                    unsent_id,
+                    job_id,
+                    SyncJobStatus.FAILED,
+                    f"Batch was not enqueued: {exc}",
+                )
+            raise
         if job is None:
+            # arq already holds this id: an earlier attempt of this run queued
+            # it, so it still runs and finalises its own row.
             logger.warning(
                 "Snipe-IT batch already enqueued; skipping",
                 task=label,
                 child_job_id=child_id,
             )
+        else:
+            enqueued += 1
 
     logger.info(
         "Enqueued Snipe-IT sync batches",
         task=label,
         user_id=user_id,
         batch_count=len(batches),
+        enqueued=enqueued,
     )
     return {
         "status": "in_progress" if batches else "completed",
         "user_id": user_id,
-        "batches_enqueued": len(batches),
+        "batches_enqueued": enqueued,
     }
 
 
@@ -323,15 +361,17 @@ async def _run_snipeit_batch(
             session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
         )
         return {"synced": 0, "skipped": 0, "failed": len(ids)}
+    except Exception as exc:
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
+        )
+        raise
 
     try:
         result = await sync(sync_service)
     except SnipeItRateLimitError as exc:
         if not is_final_attempt(ctx):
-            retry_count = coerce_int(ctx.get("job_try"), 1) - 1
-            raise Retry(
-                defer=exc.retry_after or default_retry_delay(retry_count)
-            ) from exc
+            raise Retry(defer=_rate_limit_defer(ctx, exc.retry_after)) from exc
         await _record_child(
             session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
         )

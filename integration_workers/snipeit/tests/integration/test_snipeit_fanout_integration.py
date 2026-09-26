@@ -61,13 +61,24 @@ _OK = {"synced": 2, "skipped": 0, "failed": 0}
 
 
 class _RecordingRedis:
-    """Records enqueued jobs; answers each with a job carrying its ``_job_id``."""
+    """Records enqueued jobs; answers each with a job carrying its ``_job_id``.
 
-    def __init__(self) -> None:
+    ``answers`` overrides the answer per call, in order: ``None`` (arq already
+    holds the id) or an exception to raise.
+    """
+
+    def __init__(self, answers: list[Any] | None = None) -> None:
         self.jobs: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self._answers = list(answers or [])
 
     async def enqueue_job(self, function: str, *args: Any, **kwargs: Any) -> Any:
         self.jobs.append((function, args, kwargs))
+        if self._answers:
+            answer = self._answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            if answer is None:
+                return None
         return MagicMock(job_id=kwargs.get("_job_id"))
 
 
@@ -186,22 +197,28 @@ def _worker_fn(name: str) -> Any:
 
 async def _orchestrate(
     kind: _Kind,
-    service: MagicMock,
+    service: MagicMock | Exception,
     *,
     session_factory: Any,
     redis: _RecordingRedis,
     parent_id: str,
     user_id: str,
-) -> None:
-    with patch("worker._create_sync_service", return_value=service):
-        await _worker_fn(kind.orchestrator)(
+) -> Any:
+    """Run an orchestrator whose sync service is ``service`` (or raises it)."""
+    stub = (
+        {"side_effect": service}
+        if isinstance(service, Exception)
+        else {"return_value": service}
+    )
+    with patch("worker._create_sync_service", **stub):
+        return await _worker_fn(kind.orchestrator)(
             _ctx(session_factory, redis, parent_id), user_id, "full"
         )
 
 
 async def _run_batch(
     kind: _Kind,
-    service: MagicMock,
+    service: MagicMock | Exception,
     *,
     session_factory: Any,
     child_id: str,
@@ -210,7 +227,12 @@ async def _run_batch(
     parent_id: str | None,
     job_try: int = 1,
 ) -> Any:
-    with patch("worker._create_sync_service", return_value=service):
+    stub = (
+        {"side_effect": service}
+        if isinstance(service, Exception)
+        else {"return_value": service}
+    )
+    with patch("worker._create_sync_service", **stub):
         return await _worker_fn(kind.batch)(
             _ctx(session_factory, _RecordingRedis(), child_id, job_try=job_try),
             user_id,
@@ -447,6 +469,113 @@ async def test_maintenance_orchestrator_whose_reconciliation_fails_dispatches_no
     assert parent.status == SyncJobStatus.FAILED.value
     assert await repo.list_children(parent_id) == []
     assert redis.jobs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+async def test_orchestrator_whose_sync_service_cannot_be_built_fails_parent(
+    kind_name: str,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """Not only missing configuration: any error building the service (an
+    undecryptable key, say) must not leave the parent ``running``."""
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    with pytest.raises(ValueError, match="bad key"):
+        await _orchestrate(
+            kind,
+            ValueError("bad key"),
+            session_factory=session_factory,
+            redis=redis,
+            parent_id=parent_id,
+            user_id=user_id,
+        )
+
+    parent = await _status(repo, parent_id)
+    assert parent.status == SyncJobStatus.FAILED.value
+    assert parent.error_message == "bad key"
+    assert redis.jobs == []
+
+
+@pytest.mark.asyncio
+async def test_batches_that_cannot_be_enqueued_are_failed(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """A queue error part-way through dispatch fails every batch not yet sent,
+    so the parent finalises instead of waiting out the staleness window."""
+    kind = _KINDS["assets"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis(answers=[MagicMock(), ConnectionError("redis down")])
+
+    with pytest.raises(ConnectionError, match="redis down"):
+        await _orchestrate(
+            kind,
+            _stub_service(kind, batches=[[1], [2], [3]]),
+            session_factory=session_factory,
+            redis=redis,
+            parent_id=parent_id,
+            user_id=user_id,
+        )
+
+    prefix = f"{kind.child_prefix}:{user_id}:{parent_id}:"
+    statuses = {
+        c.job_id: (c.status, c.error_message)
+        for c in await repo.list_children(parent_id)
+    }
+    assert statuses == {
+        f"{prefix}1": (SyncJobStatus.QUEUED.value, None),
+        f"{prefix}2": (
+            SyncJobStatus.FAILED.value,
+            "Batch was not enqueued: redis down",
+        ),
+        f"{prefix}3": (
+            SyncJobStatus.FAILED.value,
+            "Batch was not enqueued: redis down",
+        ),
+    }
+    assert (await _status(repo, parent_id)).failed_children == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_already_held_by_arq_is_not_counted_as_enqueued(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """arq answers ``None`` for an id it already holds: a retried orchestrator
+    re-sending a batch its first attempt queued. That batch still runs, so its
+    row stays queued, but this attempt did not enqueue it."""
+    kind = _KINDS["assets"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis(answers=[None])
+
+    result = await _orchestrate(
+        kind,
+        _stub_service(kind, batches=[[1], [2]]),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+    )
+
+    assert result["batches_enqueued"] == 1
+    children = await repo.list_children(parent_id)
+    assert {c.status for c in children} == {SyncJobStatus.QUEUED.value}
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +817,84 @@ async def test_batch_without_credentials_records_child_failed(
     assert child.status == SyncJobStatus.FAILED.value
     assert child.error_message == "Snipe-IT credentials not configured"
     assert (await _status(repo, parent_id)).failed_children == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_whose_sync_service_cannot_be_built_records_child_failed(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS["assets"]
+    parent_id, redis = await _fan_out(
+        kind,
+        async_connection=async_connection,
+        session_factory=session_factory,
+        repo=repo,
+        user_id=user_id,
+        batches=[[1]],
+    )
+    _fn, (uid, ids, parent), kwargs = redis.jobs[0]
+
+    with pytest.raises(ValueError, match="bad key"):
+        await _run_batch(
+            kind,
+            ValueError("bad key"),
+            session_factory=session_factory,
+            child_id=kwargs["_job_id"],
+            user_id=uid,
+            ids=ids,
+            parent_id=parent,
+        )
+
+    child = await _status(repo, kwargs["_job_id"])
+    assert child.status == SyncJobStatus.FAILED.value
+    assert child.error_message == "bad key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("retry_after", "expected_ms"),
+    [(3600.0, 360_000), (5.0, 5_000)],
+)
+async def test_rate_limit_deferral_stays_inside_the_staleness_window(
+    retry_after: float,
+    expected_ms: int,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """A deferred batch does not move its parent's ``updated_at``, so every
+    retry together must fit the reconciler's window (1800s over 5 tries) or the
+    parent is failed as stuck before the batch runs again."""
+    kind = _KINDS["assets"]
+    _parent_id, redis = await _fan_out(
+        kind,
+        async_connection=async_connection,
+        session_factory=session_factory,
+        repo=repo,
+        user_id=user_id,
+        batches=[[1]],
+    )
+    _fn, (uid, ids, parent), kwargs = redis.jobs[0]
+
+    with pytest.raises(Retry) as retry:
+        await _run_batch(
+            kind,
+            _stub_service(
+                kind,
+                sync_result=SnipeItRateLimitError("slow", retry_after=retry_after),
+            ),
+            session_factory=session_factory,
+            child_id=kwargs["_job_id"],
+            user_id=uid,
+            ids=ids,
+            parent_id=parent,
+        )
+
+    assert retry.value.defer_score == expected_ms
 
 
 @pytest.mark.asyncio

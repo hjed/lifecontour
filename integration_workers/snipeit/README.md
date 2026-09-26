@@ -107,18 +107,23 @@ shared non-blocking fan-out (see
 so their `sync_jobs` row ends `completed` or `failed`, whether it came from a
 manual sync or the periodic one:
 
-1. The orchestrator marks its row `running`. Missing settings or credentials
-   fail it.
+1. The orchestrator marks its row `running`. Missing settings or credentials,
+   or any other error before it has fanned out, fail it.
 2. It lists every batch before dispatching any, so a listing that fails
    part-way fails the row and dispatches nothing. The maintenance sync then
    reconciles deleted records (above); if that fails, nothing is dispatched.
 3. It writes a `queued` child row per batch (`parent_job_id`) and moves to
    `in_progress`, or straight to `completed` when there is nothing to sync.
+   If queueing a batch fails, that batch and every one after it are failed.
 4. Each batch job marks its own row `completed`, or `failed` when any record
    in it failed to sync ("2 of 50 assets failed to sync"), the user is not
    configured, or the batch raised. One failed record therefore fails the
-   whole sync. A rate-limited batch is retried by arq (`Retry`, deferred by
-   the `Retry-After` delay) and only fails on its final attempt.
+   whole sync. A rate-limited batch (asset or maintenance) is retried by arq
+   (`Retry`, deferred by the `Retry-After` delay) and only fails on its final
+   attempt. Each deferral is capped at the staleness window's share per
+   attempt (1800s / 5 tries), because a deferred batch does not move its
+   parent's `updated_at` and the reconciler would otherwise fail the parent as
+   stuck before the batch runs again.
 5. `reconcile_in_progress_parents` runs every five minutes, periodic sync or
    not, and finalises each `in_progress` row from its child rows.
 
