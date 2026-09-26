@@ -212,6 +212,40 @@ class SnipeItAPIClient:
         data = await self._get(f"maintenances/{maintenance_id}")
         return SnipeItMaintenance.model_validate(data)
 
+    async def maintenance_exists(self, maintenance_id: int) -> bool:
+        """Whether Snipe-IT still has this maintenance record.
+
+        Snipe-IT answers a missing record with a 404, or with HTTP 200 and an
+        error body saying it was not found. Both mean the record is gone. Any
+        other error says nothing about the record, so it raises.
+
+        Args:
+            maintenance_id: Snipe-IT maintenance numeric ID.
+
+        Returns:
+            ``False`` only when Snipe-IT says it has no such record.
+
+        Raises:
+            SnipeItAPIError: If Snipe-IT could not answer the question.
+            SnipeItRateLimitError: If Snipe-IT rate limited the request.
+        """
+        try:
+            data = await self._get(f"maintenances/{maintenance_id}")
+        except SnipeItAPIError as exc:
+            if exc.status_code == 404:
+                return False
+            raise
+
+        if data.get("status") == "error":
+            messages = str(data.get("messages", ""))
+            if messages.lower().endswith("not found"):
+                return False
+            raise SnipeItAPIError(
+                f"Snipe-IT GET /maintenances/{maintenance_id} failed: {messages}",
+                status_code=200,
+            )
+        return True
+
     async def update_asset(
         self, asset_id: int, payload: dict[str, Any]
     ) -> SnipeItAsset:
