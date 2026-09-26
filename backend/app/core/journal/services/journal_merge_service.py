@@ -1,6 +1,7 @@
 """Service for merging journals."""
 
 import dataclasses
+from datetime import datetime
 from typing import Any
 
 import structlog
@@ -8,10 +9,14 @@ from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     FitnessMergeMode,
+    GearUsageItem,
     Journal,
     JournalNotFoundError,
 )
-from core_shared.models.journals.exceptions import JournalMergeConflictError
+from core_shared.models.journals.exceptions import (
+    GearUsageDataValidationError,
+    JournalMergeConflictError,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -78,6 +83,37 @@ def _record_date_move(
         format_event_date_range(was),
         format_event_date_range(moved_to),
     )
+
+
+def _merged_gear_usage_item(
+    target: GearUsageItem, source: GearUsageItem, *, source_wins: bool
+) -> GearUsageItem:
+    """One gear item both merged journals list, its dates merged field by field."""
+
+    def pick(
+        target_value: datetime | None, source_value: datetime | None
+    ) -> datetime | None:
+        if source_value is not None and (target_value is None or source_wins):
+            return source_value
+        return target_value
+
+    try:
+        return dataclasses.replace(
+            target,
+            checkout_date=pick(target.checkout_date, source.checkout_date),
+            checkin_date=pick(target.checkin_date, source.checkin_date),
+        )
+    except GearUsageDataValidationError:
+        # The stitched window ends before it starts: keep the survivor's own.
+        return (
+            dataclasses.replace(
+                target,
+                checkout_date=source.checkout_date,
+                checkin_date=source.checkin_date,
+            )
+            if source_wins
+            else target
+        )
 
 
 class JournalMergeService:
@@ -702,8 +738,10 @@ class JournalMergeService:
         the deleted source, a pair still checked out would be checked in by the
         deletion while the merged journal still lists the gear. A pair the
         target already has for that asset stays with the source: the target's
-        own is the one that stands.
+        own is the one that stands, and the source's check-in stays with it.
         """
+        # The pair's asset is the middle of its ``{source}:{asset}:{journal}``
+        # key; a check-in moves only with its checkout, never without it.
         await transaction.execute(
             text(
                 """
@@ -717,12 +755,10 @@ class JournalMergeService:
                   AND s.internal_uuid = :source_uuid
                   AND NOT EXISTS (
                       SELECT 1 FROM sync_metadata t
-                      WHERE t.integration_source = s.integration_source
-                        AND t.external_id = regexp_replace(
-                            s.external_id,
-                            ':' || :source_uuid || '$',
-                            ':' || :target_uuid
-                        )
+                      WHERE t.integration_source = 'snipeit_checkout'
+                        AND t.external_id = 'snipeit_checkout:'
+                            || split_part(s.external_id, ':', 2)
+                            || ':' || :target_uuid
                   )
                 """
             ),
@@ -740,11 +776,11 @@ class JournalMergeService:
     ) -> None:
         """Keep every gear item either journal recorded on the target.
 
-        The source's other items follow the target's, in their order. For a
-        gear item both list, its dates follow the rule every merged field does:
-        the source's are taken when the target has none, or when the source is
-        the survivor. The two dates travel together, so a window is never
-        stitched from both sides.
+        The source's other items follow the target's, in their order. A gear
+        item both list has each date merged as every merged field is: the
+        source's is taken when the target has none, or when the source is the
+        survivor — a missing date never erases the other side's. Should that
+        stitch a window ending before it starts, the survivor's own is kept.
         """
         repo = SqlGearUsageDataRepository(transaction)
         target = await repo.find_by_journal_id(target_id)
@@ -754,14 +790,14 @@ class JournalMergeService:
         merged = target
         for item in source.items:
             existing = merged.item(item.gear_item_id)
-            source_dated = item.checkout_date or item.checkin_date
-            target_dated = existing and (
-                existing.checkout_date or existing.checkin_date
-            )
-            if existing is None or (source_dated and (source_wins or not target_dated)):
+            if existing is None:
                 merged = merged.with_item(
                     dataclasses.replace(item, created_at=None, updated_at=None)
                 )
+                continue
+            merged = merged.with_item(
+                _merged_gear_usage_item(existing, item, source_wins=source_wins)
+            )
         if merged.items != target.items:
             await repo.save(merged)
             changed_fields[f"{GEAR_USAGE_TABLE}_updated"] = True

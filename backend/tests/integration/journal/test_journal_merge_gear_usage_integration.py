@@ -35,6 +35,9 @@ from app.core.tasks.services.task_journal_merge_service import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 USER_ID = "user123"
+_EARLIER = datetime(2026, 3, 19, 18, 0, tzinfo=UTC)
+_BEFORE_CHECKOUT = datetime(2026, 3, 19, 20, 0, tzinfo=UTC)
+_CHECKOUT = datetime(2026, 3, 20, 7, 0, tzinfo=UTC)
 _CHECKIN = datetime(2026, 3, 21, 9, 0, tzinfo=UTC)
 
 
@@ -188,6 +191,75 @@ class TestMergeGearUsage:
             (rope, _CHECKIN)
         ]
 
+    @pytest.mark.parametrize(
+        ("source_wins", "target_dates", "source_dates", "merged_dates"),
+        [
+            # Each date is merged on its own, as every merged field is: the
+            # source's fills a date the target lacks...
+            (False, (_CHECKOUT, None), (None, _CHECKIN), (_CHECKOUT, _CHECKIN)),
+            # ...and, when the source survives, a date the source holds wins,
+            # but its missing one never erases the target's.
+            (True, (_CHECKOUT, None), (None, _CHECKIN), (_CHECKOUT, _CHECKIN)),
+            (True, (_CHECKOUT, _CHECKIN), (_EARLIER, None), (_EARLIER, _CHECKIN)),
+            (False, (_CHECKOUT, _CHECKIN), (_EARLIER, None), (_CHECKOUT, _CHECKIN)),
+            # A window stitched from both sides that would end before it starts
+            # falls back to the winning side's own window.
+            (True, (None, _BEFORE_CHECKOUT), (_CHECKOUT, None), (_CHECKOUT, None)),
+            (
+                False,
+                (None, _BEFORE_CHECKOUT),
+                (_CHECKOUT, None),
+                (None, _BEFORE_CHECKOUT),
+            ),
+        ],
+    )
+    async def test_a_shared_gear_items_dates_merge_field_by_field(
+        self,
+        journal_repo: SqlJournalRepository,
+        gear_usage_repo: SqlGearUsageDataRepository,
+        gear: list[UUID],
+        clean_database: AsyncConnection,
+        source_wins: bool,
+        target_dates: tuple[datetime | None, datetime | None],
+        source_dates: tuple[datetime | None, datetime | None],
+        merged_dates: tuple[datetime | None, datetime | None],
+    ) -> None:
+        rope = gear[0]
+        ids = []
+        for title, (checkout, checkin) in (
+            ("Trip", target_dates),
+            ("Trip (import)", source_dates),
+        ):
+            journal_id = await self._journal(journal_repo, title)
+            await gear_usage_repo.save(
+                GearUsageData(
+                    journal_id=journal_id,
+                    items=(
+                        GearUsageItem(
+                            gear_item_id=rope,
+                            checkout_date=checkout,
+                            checkin_date=checkin,
+                        ),
+                    ),
+                )
+            )
+            ids.append(journal_id)
+        target_id, source_id = ids
+
+        await JournalMergeService._merge_gear_usage_items(
+            target_id,
+            source_id,
+            source_wins=source_wins,
+            changed_fields={},
+            transaction=clean_database,
+        )
+
+        merged = await gear_usage_repo.find_by_journal_id(target_id)
+        assert merged is not None
+        assert [(i.checkout_date, i.checkin_date) for i in merged.items] == [
+            merged_dates
+        ]
+
     async def test_the_sources_snipeit_pairs_move_to_the_target(
         self,
         merge_service: JournalMergeService,
@@ -222,6 +294,7 @@ class TestMergeGearUsage:
         for journal_id, source, asset in (
             (target_id, "snipeit_checkout", 41),
             (source_id, "snipeit_checkout", 41),
+            (source_id, "snipeit_checkin", 41),
             (source_id, "snipeit_checkout", 42),
             (source_id, "snipeit_checkin", 42),
         ):
@@ -254,11 +327,14 @@ class TestMergeGearUsage:
                 """
             )
         )
-        assert [(r.internal_uuid, r.external_id) for r in rows] == [
-            (str(target_id), f"snipeit_checkin:42:{target_id}"),
-            (str(target_id), f"snipeit_checkout:41:{target_id}"),
-            # The target already has the rope's pair; the source's stays with
-            # the source, to be checked in when it is deleted.
-            (str(source_id), f"snipeit_checkout:41:{source_id}"),
-            (str(target_id), f"snipeit_checkout:42:{target_id}"),
-        ]
+        assert sorted((r.internal_uuid, r.external_id) for r in rows) == sorted(
+            [
+                (str(target_id), f"snipeit_checkout:41:{target_id}"),
+                # The target already has the rope's pair, so the source's pair
+                # — checkout and check-in together — stays with the source.
+                (str(source_id), f"snipeit_checkout:41:{source_id}"),
+                (str(source_id), f"snipeit_checkin:41:{source_id}"),
+                (str(target_id), f"snipeit_checkout:42:{target_id}"),
+                (str(target_id), f"snipeit_checkin:42:{target_id}"),
+            ]
+        )
