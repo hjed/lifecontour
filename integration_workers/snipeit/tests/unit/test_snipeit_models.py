@@ -53,6 +53,23 @@ class TestSnipeItActivity:
         assert activity.action_day is None
         assert activity.target is None
 
+    def test_action_wall_clock_is_the_raw_action_date(self) -> None:
+        activity = SnipeItActivity.model_validate(
+            {"id": 1, "action_date": {"datetime": "2024-10-26 08:30:00"}}
+        )
+        assert activity.action_wall_clock == "2024-10-26 08:30:00"
+
+    def test_action_wall_clock_does_not_fall_back_to_created_at(self) -> None:
+        """``created_at`` is when the entry was logged, not the action's time."""
+        activity = SnipeItActivity.model_validate(
+            {
+                "id": 1,
+                "action_date": None,
+                "created_at": {"datetime": "2026-09-13 09:00:00"},
+            }
+        )
+        assert activity.action_wall_clock is None
+
 
 class TestSnipeItNestedObject:
     """Tests for the SnipeItNestedObject model."""

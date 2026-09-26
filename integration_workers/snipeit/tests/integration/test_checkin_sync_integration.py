@@ -247,6 +247,20 @@ def _queue_checkout_and_checkin(
     )
 
 
+def _queue_asset_assignee(
+    mock_transport: Any, assigned_to: dict[str, Any] | None = None
+) -> None:
+    """Queue the asset read that checks it is free before a pair is re-recorded."""
+    mock_transport.add_response(
+        "/hardware/42",
+        json_data={"id": 42, "asset_tag": "T-42", "assigned_to": assigned_to},
+        method="GET",
+    )
+
+
+_OUT_TO_SOMEONE = {"id": 5, "name": "Harry", "type": "user"}
+
+
 class TestHistoricalDatesIntegration:
     """Past usage is recorded in Snipe-IT on the journal's local dates."""
 
@@ -851,6 +865,7 @@ class TestAssetDatesSnapshotIntegration:
             journal_id=journal_id,
             reference_data={"checkin_at": "2025-03-02"},
         )
+        _queue_asset_assignee(mock_transport)
         mock_transport.add_response(
             "/hardware/42/checkout",
             json_data={"status": "success", "messages": "Checked out."},
@@ -876,9 +891,10 @@ class TestAssetDatesSnapshotIntegration:
         )
 
         assert len(mock_transport.responses) == 0
-        assert ("GET", "/api/v1/hardware/42") not in [
-            (r.method, r.url.path) for r in mock_transport.requests
-        ]
+        # Read once, to check the asset is free; its dates are not read again.
+        assert [(r.method, r.url.path) for r in mock_transport.requests].count(
+            ("GET", "/api/v1/hardware/42")
+        ) == 1
         checkout_reference = await _reference_data(
             async_connection, source="snipeit_checkout", journal_id=journal_id
         )
@@ -1120,6 +1136,7 @@ class TestReconcileGearUsageIntegration:
             journal_id=journal_id,
             reference_data={"checkin_at": "2025-03-02"},
         )
+        _queue_asset_assignee(mock_transport)
         _queue_checkout_and_checkin(mock_transport)
 
         await snipeit_sync_service.reconcile_gear_usage(
@@ -1146,6 +1163,47 @@ class TestReconcileGearUsageIntegration:
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": "2025-03-09"}
+
+    @pytest.mark.asyncio
+    async def test_changed_checkout_date_waits_while_the_asset_is_out(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Snipe-IT would refuse the new checkout, so the recorded pair is kept."""
+        journal_id = await _sydney_trip(async_connection)
+        recorded = {"checkout_at": "2025-03-01", "expected_checkin": "2025-03-02"}
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=journal_id,
+            reference_data=recorded,
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkin",
+            journal_id=journal_id,
+            reference_data={"checkin_at": "2025-03-02"},
+        )
+        _queue_asset_assignee(mock_transport, _OUT_TO_SOMEONE)
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == []
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "success",
+            "snipeit_checkin": "success",
+        }
+        assert (
+            await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=journal_id
+            )
+            == recorded
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1221,6 +1279,7 @@ class TestReconcileGearUsageIntegration:
                 {"checkout_at": "2025-03-01", "expected_checkin": "2025-03-02"}
             ),
             session_factory=lambda: _session_factory(async_connection),
+            reason="checkout date changed",
         )
 
         assert superseded is False
@@ -1242,12 +1301,13 @@ def _activity_row(
     action_type: str = "checkout",
     asset_id: int = 42,
     user_id: int = 5,
+    time: str = "00:00:00",
 ) -> dict[str, Any]:
     """An activity report row as Snipe-IT's ``ActionlogsTransformer`` returns it."""
     return {
         "id": log_id,
         "action_type": action_type,
-        "action_date": {"datetime": f"{day} 00:00:00", "formatted": day},
+        "action_date": {"datetime": f"{day} {time}", "formatted": day},
         "created_at": {"datetime": "2026-09-13 09:00:00", "formatted": ""},
         "item": {"id": asset_id, "name": "Tent", "type": "asset"},
         "target": {"id": user_id, "name": "Harry", "type": "user"},
@@ -1430,8 +1490,10 @@ class TestLinkExistingActivityIntegration:
             _activity_row(100, "2025-03-08", asset_id=41),
             # Snipe-IT 6.3.1 can ignore the report's action_type filter.
             _activity_row(100, "2025-03-08", action_type="checkin from"),
+            # Another usage of the asset that day, posted with its own time.
+            _activity_row(100, "2025-03-08", time="09:00:00"),
         ],
-        ids=["other-date", "other-user", "other-asset", "other-action"],
+        ids=["other-date", "other-user", "other-asset", "other-action", "other-time"],
     )
     async def test_non_matching_checkout_is_recorded(
         self,
@@ -1517,6 +1579,490 @@ class TestLinkExistingActivityIntegration:
         assert await _reference_data(
             async_connection, source="snipeit_checkin", journal_id=journal_id
         ) == {"checkin_at": "2025-03-09"}
+
+
+async def _usage_of_the_same_gear(
+    async_connection: AsyncConnection, journal_id: int, *, start: str, end: str
+) -> int:
+    """Insert another GEAR_USAGE journal on the gear item ``journal_id`` uses."""
+    new_journal_id: int = _returned_id(
+        await async_connection.execute(
+            text("""
+                INSERT INTO journals (title, content, user_id,
+                    event_date_range_start, event_date_range_end)
+                VALUES ('Second trip', '', 'user-123', :start, :end)
+                RETURNING id
+            """),
+            {
+                "start": datetime.fromisoformat(start),
+                "end": datetime.fromisoformat(end),
+            },
+        )
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_gear_usage_data
+                (journal_id, gear_item_id, checkout_date, checkin_date)
+            SELECT :new_journal_id, gear_item_id, NULL, NULL
+            FROM journal_gear_usage_data
+            WHERE journal_id = :journal_id
+        """),
+        {"new_journal_id": new_journal_id, "journal_id": journal_id},
+    )
+    return new_journal_id
+
+
+async def _two_canyons(async_connection: AsyncConnection) -> tuple[int, int]:
+    """Two usages of one asset on 26 Oct 2024 in Sydney (AEDT): 08:30-11:33, 12:43-18:33."""
+    morning = await _insert_gear_usage_journal(
+        async_connection,
+        start="2024-10-25T21:30:00+00:00",
+        end="2024-10-26T00:33:00+00:00",
+        user_timezone="Australia/Sydney",
+    )
+    afternoon = await _usage_of_the_same_gear(
+        async_connection,
+        morning,
+        start="2024-10-26T01:43:00+00:00",
+        end="2024-10-26T07:33:00+00:00",
+    )
+    return morning, afternoon
+
+
+_MORNING_CHECKOUT = _activity_row(100, "2024-10-26", time="08:30:00")
+_MORNING_CHECKIN = _activity_row(
+    101, "2024-10-26", action_type="checkin from", time="11:33:00"
+)
+
+
+async def _link_afternoon_to(
+    async_connection: AsyncConnection,
+    afternoon: int,
+    *,
+    log_id: int = 100,
+    checkout_extra: dict[str, Any] | None = None,
+    checkin_error: str | None = None,
+) -> None:
+    """Record the afternoon's pair as linked to existing entries, as #1572 left it."""
+    await _insert_recorded_sync_row(
+        async_connection,
+        source="snipeit_checkout",
+        journal_id=afternoon,
+        reference_data={
+            "checkout_at": "2024-10-26",
+            "expected_checkin": "2024-10-26",
+            "snipeit_log_id": log_id,
+            **(checkout_extra or {}),
+        },
+    )
+    await _insert_recorded_sync_row(
+        async_connection,
+        source="snipeit_checkin",
+        journal_id=afternoon,
+        reference_data={"checkin_at": "2024-10-26", "snipeit_log_id": log_id + 1},
+        error_message=checkin_error,
+    )
+
+
+def _read_checkout_activity(mock_transport: Any) -> bool:
+    return any("action_type=checkout" in str(r.url) for r in mock_transport.requests)
+
+
+class TestSameDayUsagesIntegration:
+    """Two usages of one asset on one day each get their own checkout and check-in."""
+
+    @pytest.mark.asyncio
+    async def test_usage_after_one_posted_before_log_ids_were_kept_is_recorded(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The morning pair was posted without keeping its log id (#1572).
+
+        The afternoon checkout must not take the morning's entry as its own: it
+        is at another time of day.
+        """
+        morning, afternoon = await _two_canyons(async_connection)
+        for source in ("snipeit_checkout", "snipeit_checkin"):
+            await _insert_recorded_sync_row(
+                async_connection,
+                source=source,
+                journal_id=morning,
+                reference_data={"checkout_at": "2024-10-26"},
+            )
+        _queue_activity(mock_transport, "checkout", _MORNING_CHECKOUT)
+        _queue_activity(
+            mock_transport,
+            "checkout",
+            _activity_row(102, "2024-10-26", time="12:43:00"),
+            _MORNING_CHECKOUT,
+        )
+        _queue_activity(mock_transport, "checkin", _MORNING_CHECKIN)
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+        assert _request_body(mock_transport, "checkout", method="POST")[
+            "checkout_at"
+        ] == ("2024-10-26 12:43:00")
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=afternoon
+        )
+        assert checkout_reference["snipeit_log_id"] == 102
+        assert "snipeit_log_id" not in await _reference_data(
+            async_connection, source="snipeit_checkin", journal_id=afternoon
+        )
+
+    @pytest.mark.asyncio
+    async def test_date_only_usages_on_one_day_are_both_recorded(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Both checkouts are at midnight, so only the kept log id tells them apart."""
+        first = await _sydney_trip(async_connection)
+        second = await _usage_of_the_same_gear(
+            async_connection,
+            first,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+        )
+        _queue_activity(mock_transport, "checkout")
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+        _queue_checkout_and_checkin(mock_transport)
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=first,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+        _queue_activity(
+            mock_transport,
+            "checkout",
+            _activity_row(102, "2025-03-08"),
+            _activity_row(100, "2025-03-08"),
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=second,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST] * 2
+        for journal_id, log_id in ((first, 100), (second, 102)):
+            reference = await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=journal_id
+            )
+            assert reference["snipeit_log_id"] == log_id
+
+    @pytest.mark.asyncio
+    async def test_lost_response_retry_links_the_entry_at_its_checkout_time(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        _, afternoon = await _two_canyons(async_connection)
+        _queue_asset_dates(mock_transport)
+        # No checkout response is queued, so the POST fails as if it were lost.
+        with pytest.raises(ValueError, match="No mock response"):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=afternoon,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+        _queue_activity(
+            mock_transport,
+            "checkout",
+            _activity_row(102, "2024-10-26", time="12:43:00"),
+            _MORNING_CHECKOUT,
+        )
+        mock_transport.add_response(
+            "/hardware/42/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=afternoon
+        )
+        assert checkout_reference["snipeit_log_id"] == 102
+
+    @pytest.mark.asyncio
+    async def test_unreadable_report_after_posting_keeps_no_log_id(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        _queue_activity(mock_transport, "checkout")
+        mock_transport.add_response("action_type=checkout", status_code=403)
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.push_checkout_create(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "success",
+            "snipeit_checkin": "success",
+        }
+        assert "snipeit_log_id" not in await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("posting", "age", "deferred"),
+        [
+            (True, 0, True),
+            # Not yet posting: no entry of its own can be among the candidates.
+            (False, 0, False),
+            # Its worker died mid-post; the in-flight window has passed.
+            (True, 3600, False),
+        ],
+        ids=["posting", "not-yet-posting", "stale"],
+    )
+    async def test_link_waits_for_a_checkout_being_posted_on_the_asset(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        posting: bool,
+        age: int,
+        deferred: bool,
+    ) -> None:
+        """The entry found may be the one the other journal is posting.
+
+        Until that journal claims its entry, it cannot be told apart from an
+        entry made by hand, so the link is retried rather than taken.
+        """
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        first = await _sydney_trip(async_connection)
+        second = await _usage_of_the_same_gear(
+            async_connection,
+            first,
+            start="2025-03-07T13:00:00+00:00",
+            end="2025-03-08T13:00:00+00:00",
+        )
+        await _insert_recorded_sync_row(
+            async_connection,
+            source="snipeit_checkout",
+            journal_id=first,
+            reference_data={"posting": True} if posting else {},
+            sync_status="pending",
+        )
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata
+                SET updated_at = now() - make_interval(secs => :age)
+                WHERE integration_source = 'snipeit_checkout'
+                  AND internal_uuid = :journal_id
+            """),
+            {"age": age, "journal_id": str(first)},
+        )
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2025-03-08"))
+
+        if deferred:
+            with pytest.raises(SnipeItSyncInProgress):
+                await snipeit_sync_service.push_checkout_create(
+                    journal_id=second,
+                    session_factory=lambda: _session_factory(async_connection),
+                )
+            assert _posts(mock_transport) == []
+            assert (await _sync_statuses(async_connection, second))[
+                "snipeit_checkout"
+            ] == "failed"
+        else:
+            mock_transport.add_response(
+                "/hardware/42/checkin",
+                json_data={"status": "success", "messages": "Checked in."},
+                method="POST",
+            )
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=second,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+            checkout_reference = await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=second
+            )
+            assert checkout_reference["snipeit_log_id"] == 100
+
+    @pytest.mark.asyncio
+    async def test_checkout_is_marked_posting_before_it_is_posted(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        _queue_asset_dates(mock_transport)
+        # No checkout response is queued, so the POST fails as if it were lost.
+        with pytest.raises(ValueError, match="No mock response"):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert checkout_reference["posting"] is True
+
+    @pytest.mark.asyncio
+    async def test_reconcile_records_a_usage_linked_to_another_usages_entry(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A title update repairs a usage that took the morning's entries (#1572)."""
+        morning, afternoon = await _two_canyons(async_connection)
+        for source in ("snipeit_checkout", "snipeit_checkin"):
+            await _insert_recorded_sync_row(
+                async_connection,
+                source=source,
+                journal_id=morning,
+                reference_data={"checkout_at": "2024-10-26"},
+            )
+        await _link_afternoon_to(async_connection, afternoon)
+        _queue_activity(mock_transport, "checkout", _MORNING_CHECKOUT)
+        _queue_asset_assignee(mock_transport)
+        _queue_activity(mock_transport, "checkout", _MORNING_CHECKOUT)
+        _queue_activity(
+            mock_transport,
+            "checkout",
+            _activity_row(102, "2024-10-26", time="12:43:00"),
+            _MORNING_CHECKOUT,
+        )
+        _queue_checkout_and_checkin(mock_transport)
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
+        assert len(mock_transport.responses) == 0
+        assert await _sync_statuses(async_connection, afternoon) == {
+            "snipeit_checkout": "success",
+            "snipeit_checkin": "success",
+        }
+        checkout_reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=afternoon
+        )
+        assert checkout_reference["snipeit_log_id"] == 102
+
+    @pytest.mark.asyncio
+    async def test_reconcile_repair_waits_while_the_asset_is_out(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Snipe-IT would refuse the checkout, so the linked pair is kept for now."""
+        _, afternoon = await _two_canyons(async_connection)
+        await _link_afternoon_to(async_connection, afternoon)
+        _queue_activity(mock_transport, "checkout", _MORNING_CHECKOUT)
+        _queue_asset_assignee(mock_transport, _OUT_TO_SOMEONE)
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == []
+        assert await _sync_statuses(async_connection, afternoon) == {
+            "snipeit_checkout": "success",
+            "snipeit_checkin": "success",
+        }
+        assert (
+            await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=afternoon
+            )
+        )["snipeit_log_id"] == 100
+
+    @pytest.mark.asyncio
+    async def test_reconcile_keeps_a_link_to_an_entry_made_by_hand(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        _, afternoon = await _two_canyons(async_connection)
+        await _link_afternoon_to(async_connection, afternoon)
+        _queue_activity(mock_transport, "checkout", _activity_row(100, "2024-10-26"))
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == []
+        assert (
+            await _reference_data(
+                async_connection, source="snipeit_checkout", journal_id=afternoon
+            )
+        )["snipeit_log_id"] == 100
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("checkout_extra", "checkin_error"),
+        [
+            # The worker read the asset first, so it posted this checkout itself
+            # and linked it only because the response was lost.
+            (
+                {
+                    "asset_dates_before": {
+                        "last_checkout": None,
+                        "last_checkin": None,
+                    }
+                },
+                None,
+            ),
+            # The asset may still be out, so no checkout can be recorded.
+            (None, "Terminal: API 404"),
+        ],
+        ids=["posted-by-the-worker", "check-in-failed"],
+    )
+    async def test_reconcile_does_not_check_a_link_it_cannot_repair(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        checkout_extra: dict[str, Any] | None,
+        checkin_error: str | None,
+    ) -> None:
+        _, afternoon = await _two_canyons(async_connection)
+        await _link_afternoon_to(
+            async_connection,
+            afternoon,
+            checkout_extra=checkout_extra,
+            checkin_error=checkin_error,
+        )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=afternoon,
+            session_factory=lambda: _session_factory(async_connection),
+        )
+
+        assert _posts(mock_transport) == []
+        assert not _read_checkout_activity(mock_transport)
 
 
 class TestInFlightCheckoutIntegration:
@@ -1872,6 +2418,7 @@ class TestLateCheckinRerecordIntegration:
             )
         _queue_asset_dates(mock_transport)
         _queue_asset_dates(mock_transport)
+        _queue_asset_assignee(mock_transport)
 
         await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,

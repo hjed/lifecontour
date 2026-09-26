@@ -227,6 +227,15 @@ class SnipeItActivity(BaseModel):
                 return raw[:10]
         return None
 
+    @property
+    def action_wall_clock(self) -> str | None:
+        """The raw ``Y-m-d H:i:s`` the action is dated at, in Snipe-IT's server time.
+
+        ``None`` when Snipe-IT left ``action_date`` unset (actions dated today):
+        ``created_at`` is when the entry was logged, not the action's time.
+        """
+        return self.action_date.datetime if self.action_date else None
+
 
 class SnipeItActivityListResponse(BaseModel):
     """Paginated response from ``GET /api/v1/reports/activity``."""
