@@ -154,18 +154,31 @@ async def test_ignore_hides_the_suggestion_until_restored(
     ] == ["noisy@x.com"]
 
 
-async def test_an_email_with_a_slash_can_be_restored(
+async def test_a_percent_encoded_email_can_be_restored(
     authenticated_client: AsyncClient,
 ) -> None:
-    email = "team/leads@x.com"
+    """The ignored address travels in the path, so it arrives encoded."""
+    email = "team+leads@x.com"
     assert (
         await authenticated_client.post(IGNORED_URL, json=_ignore_body(email))
     ).status_code == 201
 
-    restored = await authenticated_client.delete(f"{IGNORED_URL}/team%2Fleads@x.com")
+    restored = await authenticated_client.delete(f"{IGNORED_URL}/team%2Bleads@x.com")
 
     assert restored.status_code == 204
     assert (await authenticated_client.get(IGNORED_URL)).json()["data"] == []
+
+
+async def test_an_email_a_contact_could_not_hold_is_refused(
+    authenticated_client: AsyncClient,
+) -> None:
+    """A "/" is valid in an email's local part but not in one this system
+    stores, so it is refused rather than ignored unreachably."""
+    response = await authenticated_client.post(
+        IGNORED_URL, json=_ignore_body("team/leads@x.com")
+    )
+
+    assert response.status_code == 400
 
 
 async def test_ignoring_again_reports_the_stored_provenance(
