@@ -6,7 +6,7 @@ not have to restate the rest of the trip's gear.
 """
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from core_shared.models.history import Provenance
@@ -34,6 +34,9 @@ from app.mcp.shared.dependencies import (
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
+
+# A date argument left out: distinct from null, which clears the date.
+_UNCHANGED: Literal["unchanged"] = "unchanged"
 
 
 async def _require_owned_journal(
@@ -67,31 +70,33 @@ async def add_gear_usage_item(
     journal_id: Annotated[int, Field(description="Journal the gear was used on")],
     gear_item_id: Annotated[UUID, Field(description="Gear item UUID")],
     checkout_date: Annotated[
-        datetime | None,
+        datetime | None | Literal["unchanged"],
         Field(
             description=(
-                "ISO datetime the item was checked out; omit to keep the item's "
-                "current one (the journal's start when it has none)"
+                "ISO datetime the item was checked out; null clears it (the "
+                "journal's start is then used); leave out to keep the item's "
+                "current one"
             )
         ),
-    ] = None,
+    ] = _UNCHANGED,
     checkin_date: Annotated[
-        datetime | None,
+        datetime | None | Literal["unchanged"],
         Field(
             description=(
-                "ISO datetime the item was checked back in; omit to keep the "
-                "item's current one (the journal's end when it has none)"
+                "ISO datetime the item was checked back in; null clears it (the "
+                "journal's end is then used); leave out to keep the item's "
+                "current one"
             )
         ),
-    ] = None,
+    ] = _UNCHANGED,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
 ) -> str:
     """Record that a gear item was used on a journal, keeping its other gear.
 
     Adds the item (giving the journal the GEAR_USAGE type if it has none), or,
-    when the journal already lists it, sets the dates sent. Every other item is
-    left as it is. To replace the whole list, send GEAR_USAGE ``items`` to
+    when the journal already lists it, sets the dates sent: a date left out is
+    kept and a null one cleared. Every other item is left as it is. To replace the whole list, send GEAR_USAGE ``items`` to
     update_journal_entry instead. Returns the journal's gear items.
     """
     user_id = str(await get_current_user_id())
@@ -104,10 +109,12 @@ async def add_gear_usage_item(
         )
 
     attrs: dict[str, Any] = {"gear_item_id": str(gear_item_id)}
-    if checkout_date is not None:
-        attrs["checkout_date"] = checkout_date.isoformat()
-    if checkin_date is not None:
-        attrs["checkin_date"] = checkin_date.isoformat()
+    for field, value in (
+        ("checkout_date", checkout_date),
+        ("checkin_date", checkin_date),
+    ):
+        if value != _UNCHANGED:
+            attrs[field] = value.isoformat() if isinstance(value, datetime) else None
     await write_service.set_gear_usage_item(
         journal_id,
         attrs,

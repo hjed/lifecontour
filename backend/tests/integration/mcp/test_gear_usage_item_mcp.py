@@ -5,6 +5,7 @@ type if it has none) or updates the dates of one it already lists;
 ``remove_gear_usage_item`` removes one. Neither rewrites the rest of the list.
 """
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -71,7 +72,7 @@ class TestGearUsageItemTools:
     @pytest.mark.asyncio
     async def test_items_are_added_updated_and_removed_one_at_a_time(
         self,
-        authenticated_lifespan_client,
+        authenticated_lifespan_client: Callable[[], Any],
         clean_database: AsyncConnection,
     ) -> None:
         async with authenticated_lifespan_client() as client:
@@ -142,8 +143,35 @@ class TestGearUsageItemTools:
         assert await _gear_usage_history(clean_database, journal_id) == 4
 
     @pytest.mark.asyncio
+    async def test_an_explicit_null_clears_a_date_and_an_omitted_one_keeps_it(
+        self, authenticated_lifespan_client: Callable[[], Any]
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            rope = await _gear_item(client, "Rope")
+            journal_id = await _journal(client)
+            await call_mcp_tool(
+                client,
+                "add_gear_usage_item",
+                {
+                    "journal_id": journal_id,
+                    "gear_item_id": rope,
+                    "checkout_date": "2025-04-08T20:00:00+00:00",
+                    "checkin_date": "2025-04-11T08:00:00+00:00",
+                },
+            )
+
+            cleared = await call_mcp_tool(
+                client,
+                "add_gear_usage_item",
+                {"journal_id": journal_id, "gear_item_id": rope, "checkout_date": None},
+            )
+
+        assert "error" not in cleared, cleared
+        assert _items(cleared) == [(rope, None, "2025-04-11T08:00:00+00:00")]
+
+    @pytest.mark.asyncio
     async def test_removing_an_item_the_journal_does_not_list_is_refused(
-        self, authenticated_lifespan_client
+        self, authenticated_lifespan_client: Callable[[], Any]
     ) -> None:
         async with authenticated_lifespan_client() as client:
             rope = await _gear_item(client, "Rope")
@@ -166,7 +194,7 @@ class TestGearUsageItemTools:
 
     @pytest.mark.asyncio
     async def test_an_unknown_gear_item_is_refused(
-        self, authenticated_lifespan_client
+        self, authenticated_lifespan_client: Callable[[], Any]
     ) -> None:
         async with authenticated_lifespan_client() as client:
             journal_id = await _journal(client)
@@ -185,7 +213,7 @@ class TestGearUsageItemTools:
     @pytest.mark.asyncio
     async def test_another_users_journal_is_reported_missing(
         self,
-        authenticated_lifespan_client,
+        authenticated_lifespan_client: Callable[[], Any],
         clean_database: AsyncConnection,
     ) -> None:
         theirs = await create_journal(

@@ -741,6 +741,9 @@ class JournalWriteService:
         ``attrs`` is the single-item form (``gear_item_id`` and the optional
         dates): other items are kept. A journal without GEAR_USAGE gains it.
         """
+        # Lock the journal before reading its items, so a concurrent change to
+        # the same list is read rather than overwritten; see ``touch_journal``.
+        await self.journal_service.journal_repo.touch(journal_id)
         if await self.gear_usage_data_repo.find_by_journal_id(journal_id) is None:
             await self.add_type(
                 journal_id,
@@ -770,7 +773,13 @@ class JournalWriteService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
-        """Remove one gear item from a journal; the type stays, even if emptied."""
+        """Remove one gear item from a journal; the type stays, even if emptied.
+
+        The journal is locked before its items are read: the remaining list is
+        saved whole, so reading it first would let two removals each restore the
+        item the other removed.
+        """
+        await self.journal_service.journal_repo.touch(journal_id)
         gear_usage = await self.gear_usage_data_repo.find_by_journal_id(journal_id)
         if gear_usage is None or gear_usage.item(gear_item_id) is None:
             raise JournalValidationError(

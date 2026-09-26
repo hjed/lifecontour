@@ -384,6 +384,40 @@ class TestUpdateTypeData:
         }
 
 
+class TestGearUsageItemWrites:
+    """Adding or removing one gear item reads the list under the journal's lock."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["set", "remove"])
+    async def test_the_journal_is_locked_before_its_items_are_read(
+        self, write_service: Any, mock_transaction: AsyncMock, operation: str
+    ) -> None:
+        """Two writers that read first would each save a list missing the
+        other's change; locking first makes the second read the first's."""
+        gear_item_id = uuid4()
+        calls = MagicMock()
+        write_service.journal_service.journal_repo.touch = calls.touch
+        calls.touch.side_effect = AsyncMock()
+        write_service.gear_usage_data_repo.find_by_journal_id = calls.find
+        calls.find.side_effect = AsyncMock(
+            return_value=GearUsageData(
+                journal_id=7, items=(GearUsageItem(gear_item_id=gear_item_id),)
+            )
+        )
+
+        if operation == "set":
+            await write_service.set_gear_usage_item(
+                7, {"gear_item_id": str(gear_item_id)}, mock_transaction
+            )
+        else:
+            await write_service.remove_gear_usage_item(
+                7, gear_item_id, mock_transaction
+            )
+
+        names = [name for name, _, _ in calls.mock_calls]
+        assert names.index("touch") < names.index("find")
+
+
 class TestCreateJournalTags:
     """Tag assignment routes through JournalTagService so events are published.
 
