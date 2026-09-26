@@ -2759,3 +2759,38 @@ class TestDeletedMaintenanceReconcile:
 
         assert deleted == 1
         assert await _maintenance_rows(async_connection) == ["snipeit_maint:9"]
+
+    @pytest.mark.asyncio
+    async def test_a_record_another_users_journal_holds_is_left_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Another user's Snipe-IT is not this sync's to judge."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        their_import = await _seed_maintenance_journal(
+            async_connection,
+            gear_item_id=gear_item_id,
+            title="Their import",
+            imported_from=40,
+        )
+        await _seed_import_record(async_connection, maintenance_id=40, version_hash="h")
+        await _seed_push_record(
+            async_connection, journal_id=their_import, maintenance_id=41
+        )
+        await async_connection.execute(
+            text("UPDATE journals SET user_id = 'user-456' WHERE id = :journal_id"),
+            {"journal_id": their_import},
+        )
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            set(), _joined_session_factory(async_connection)
+        )
+
+        assert deleted == 0
+        assert await _maintenance_rows(async_connection) == [
+            "snipeit_maint:40",
+            "snipeit_maint:41",
+        ]
+        assert mock_transport.requests == []

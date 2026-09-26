@@ -1082,6 +1082,12 @@ class SnipeItSyncService:
         link is kept for the same reason. An echo row, a push row naming an
         imported journal, is deleted: the import's link names its record.
 
+        Sync rows record no user, and each user's sync asks their own Snipe-IT.
+        A row another user's live journal holds, by its push or its import
+        link, is left to that user's sync. A row no journal holds belongs to
+        nobody: every user's inbound sync would import its record as a new
+        journal anyway, so forgetting it changes nothing for anyone.
+
         Only reads are sent to Snipe-IT, so running this again is harmless.
 
         Args:
@@ -1099,10 +1105,32 @@ class SnipeItSyncService:
         async with session_factory() as session:
             result = await session.execute(
                 text("""
-                    SELECT external_id
-                    FROM sync_metadata
-                    WHERE integration_source = 'snipeit_maintenance'
-                """)
+                    SELECT m.external_id
+                    FROM sync_metadata m
+                    WHERE m.integration_source = 'snipeit_maintenance'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM journals j
+                          WHERE j.user_id <> :user_id
+                            AND (
+                                j.id = CASE
+                                    WHEN m.internal_uuid ~ '^[0-9]+$'
+                                    THEN CAST(m.internal_uuid AS bigint)
+                                END
+                                OR EXISTS (
+                                    SELECT 1
+                                    FROM journal_external_event_links l
+                                    WHERE l.journal_id = j.id
+                                      AND l.calendar_id = :calendar_id
+                                      AND l.external_event_id = m.external_id
+                                )
+                            )
+                      )
+                """),
+                {
+                    "user_id": self._user_id,
+                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                },
             )
             candidates = [
                 (row.external_id, maintenance_id)
