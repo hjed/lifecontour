@@ -127,7 +127,8 @@ describe('GearUsageTypeEditor', () => {
     });
   });
 
-  it('offers only gear not already listed', async () => {
+  it('shows gear already listed as added rather than hiding it', async () => {
+    // Hidden, a search for it would find nothing and offer to create it again.
     const user = userEvent.setup();
 
     renderWithProviders(
@@ -140,10 +141,10 @@ describe('GearUsageTypeEditor', () => {
 
     expect(
       await screen.findByRole('option', { name: 'Harness' })
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('option', { name: 'Test Climbing Rope' })
-    ).not.toBeInTheDocument();
+    ).not.toHaveAttribute('aria-disabled', 'true');
+    const listed = screen.getByRole('option', { name: /Test Climbing Rope/ });
+    expect(listed).toHaveAttribute('aria-disabled', 'true');
+    expect(listed).toHaveTextContent('Added');
   });
 
   it('removes one item and keeps the others', async () => {

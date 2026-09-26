@@ -2,7 +2,7 @@
 
 import { useState, useId } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Wrench, Plus, ChevronsUpDown, X } from 'lucide-react';
+import { Wrench, Plus, ChevronsUpDown, X, Check } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,7 @@ import {
 } from './GenericTypeEditorLayout';
 import { gearUsageItems, gearUsageItemsError } from './gearUsageItems';
 import { useTypeEditorState } from './useTypeEditorState';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
@@ -120,10 +121,8 @@ export function GearUsageTypeEditor({
   const gearName = (gearItemId: string) =>
     gearItems?.find((g: GearItem) => g.id === gearItemId)?.name ??
     'Unknown gear item';
-  const unlistedGear =
-    gearItems?.filter(
-      (g: GearItem) => !items.some(item => item.gear_item_id === g.id)
-    ) ?? [];
+  const isListed = (gearItemId: string) =>
+    items.some(item => item.gear_item_id === gearItemId);
 
   const addItem = (gearItemId: string) =>
     setEditData(prev => ({
@@ -343,16 +342,31 @@ export function GearUsageTypeEditor({
                     </Button>
                   </CommandEmpty>
                   <CommandGroup>
-                    {unlistedGear.map((gear: GearItem) => (
+                    {/* Gear already listed stays findable, disabled, so a
+                        search for it does not offer to create it again. */}
+                    {gearItems?.map((gear: GearItem) => (
                       <CommandItem
                         key={gear.id}
                         value={gear.name}
+                        disabled={isListed(gear.id)}
                         onSelect={() => {
                           addItem(gear.id);
                           setOpenCombobox(false);
                         }}
                       >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            isListed(gear.id) ? 'opacity-100' : 'opacity-0'
+                          )}
+                          aria-hidden='true'
+                        />
                         {gear.name}
+                        {isListed(gear.id) && (
+                          <span className='text-muted-foreground ml-auto text-xs'>
+                            Added
+                          </span>
+                        )}
                       </CommandItem>
                     ))}
                   </CommandGroup>
