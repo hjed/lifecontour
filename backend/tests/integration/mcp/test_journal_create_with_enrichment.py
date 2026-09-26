@@ -9,6 +9,7 @@ Reproduces production bugs where:
 - Parent_id was not reflected when the transaction rolled back
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -774,9 +775,9 @@ class TestCreateJournalServicifiedParity:
     @pytest.mark.asyncio
     async def test_a_journal_lists_several_gear_items(
         self,
-        authenticated_lifespan_client,
-        _create_journal_via_mcp,
-        _update_journal_via_mcp,
+        authenticated_lifespan_client: Callable[[], Any],
+        _create_journal_via_mcp: Callable[..., Awaitable[dict[str, Any]]],
+        _update_journal_via_mcp: Callable[..., Awaitable[dict[str, Any]]],
     ) -> None:
         """Create, read and replace the gear items used on one journal."""
         async with authenticated_lifespan_client() as authenticated_client:
@@ -836,7 +837,7 @@ class TestCreateJournalServicifiedParity:
 
     @pytest.mark.asyncio
     async def test_list_journal_types_describes_the_gear_items(
-        self, authenticated_lifespan_client
+        self, authenticated_lifespan_client: Callable[[], Any]
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
             payload = await call_mcp_tool(

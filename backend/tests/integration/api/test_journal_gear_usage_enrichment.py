@@ -9,6 +9,7 @@ reject an add with no initial data, since ``gear_item_id`` is required).
 import uuid
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -145,9 +146,9 @@ async def more_gear_item_ids(
 
 
 async def _put_gear_usage(
-    client: object, journal_id: int, attributes: dict[str, object]
+    client: AsyncClient, journal_id: int, attributes: dict[str, object]
 ) -> dict[str, object]:
-    response = await client.put(  # type: ignore[attr-defined]
+    response = await client.put(
         f"/api/journals/{journal_id}/types/GEAR_USAGE/data",
         json={"data": {"type": "journal-type-data", "attributes": attributes}},
     )
@@ -177,7 +178,7 @@ async def _journal_updated_events(connection: AsyncConnection, journal_id: int) 
 
 @pytest.mark.asyncio
 async def test_a_journal_records_several_gear_items(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     journal_id: int,
     gear_item_id: str,
     more_gear_item_ids: list[str],
@@ -231,7 +232,7 @@ async def test_a_journal_records_several_gear_items(
 
 @pytest.mark.asyncio
 async def test_adding_and_removing_the_type_tells_integrations(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     async_connection: AsyncConnection,
     journal_id: int,
     gear_item_id: str,
@@ -263,7 +264,7 @@ async def test_adding_and_removing_the_type_tells_integrations(
 
 @pytest.mark.asyncio
 async def test_adding_the_type_with_no_gear_item_is_rejected(
-    authenticated_client,
+    authenticated_client: AsyncClient,
     journal_id: int,
 ) -> None:
     response = await authenticated_client.post(
