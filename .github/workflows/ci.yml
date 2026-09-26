@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, develop ]
   workflow_call:
+  # Manual runs for upper layers of a PR stack, which skip CI on push (see the
+  # `changes` job): gh workflow run ci.yml --ref <branch>
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +24,13 @@ jobs:
   # Detect which files have changed to conditionally run jobs
   changes:
     runs-on: ubuntu-latest
+    # PR stacks: only the lowest unmerged layer runs CI, to save Actions budget.
+    # Upper layers skip every job (they all need this one) and are run manually
+    # via workflow_dispatch. Deliberate - see CLAUDE.md "CI for PR stacks".
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.stack == null ||
+      github.event.pull_request.stack.base.ref == github.event.pull_request.base.ref
     # Required permissions for pull requests
     permissions:
       contents: read
@@ -190,6 +200,7 @@ jobs:
   core-shared-lint:
     name: Core Shared Linting
     runs-on: ubuntu-latest
+    needs: changes
     defaults:
       run:
         working-directory: ./core_shared
@@ -307,6 +318,7 @@ jobs:
   core-shared-unit-test:
     name: Core Shared Unit Tests
     runs-on: ubuntu-latest
+    needs: changes
     defaults:
       run:
         working-directory: ./core_shared
@@ -659,6 +671,7 @@ jobs:
   frontend-lint:
     name: Frontend Linting
     runs-on: ubuntu-latest
+    needs: changes
     defaults:
       run:
         working-directory: ./frontend
@@ -713,6 +726,7 @@ jobs:
   frontend-test:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    needs: changes
     defaults:
       run:
         working-directory: ./frontend

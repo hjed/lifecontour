@@ -16,7 +16,8 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 
 ### 1. Main CI Workflow (`.github/workflows/ci.yml`)
 
-**Triggers:** Push and PR to `main`/`develop` branches
+**Triggers:** Push and PR to `main`/`develop` branches; manual `workflow_dispatch`
+(`gh workflow run ci.yml --ref <branch>`); `workflow_call` from the release workflow
 
 **Jobs:**
 - `backend-lint`: Runs Ruff, Black, and MyPy on Python code
@@ -46,6 +47,24 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
   --no-cache-dir --no-sources .`, Redis-ping `HEALTHCHECK` via `os.environ['REDIS_URL']`,
   `USER appuser`, `CMD ["python", "worker.py"]`). See
   [Integration Architecture → Canonical Worker Dockerfile](architecture/integration-architecture.md#canonical-worker-dockerfile).
+
+#### Stacked PRs
+
+Only the **lowest unmerged** PR of a native PR stack runs CI; upper layers skip every
+job. This is deliberate to save Actions budget — do not remove it.
+
+- GitHub runs `pull_request` workflows for every PR in a stack as if it targeted the
+  stack's base (`main`), so the `branches: [main, develop]` filter alone matches every layer.
+- The `changes` job is gated on `github.event.pull_request.stack == null ||
+  github.event.pull_request.stack.base.ref == github.event.pull_request.base.ref`
+  (see GitHub's [Optimizing CI for stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/optimizing-ci-for-stacked-pull-requests)).
+  Every other job depends on `changes`, directly or transitively, so it skips too. New
+  jobs must keep that dependency.
+- Run CI on an upper layer by hand with `gh workflow run ci.yml --ref <branch>`. The
+  path filter diffs against the merge-base with `main`, so the run covers the layers below.
+  Re-running the skipped PR run does not work: it replays the same event.
+- When the PR below merges, the retarget fires no CI event; the new bottom layer runs
+  on its next push, or dispatch it manually.
 
 ### 2. Security Scanning (`.github/workflows/security.yml`)
 
