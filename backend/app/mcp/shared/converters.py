@@ -10,7 +10,9 @@ from typing import Any
 from core_shared.etag import resource_etag
 from core_shared.models.contacts.entities import Contact, ContactRelationship
 
+from app.core.contacts.services.contact_subentity_sync import render_address
 from app.mcp.domains.contacts.schemas import (
+    ContactFieldInfo,
     ContactRelationshipSchema,
     ContactResponse,
     ContactSearchResult,
@@ -44,13 +46,48 @@ class ContactConverter:
         return None
 
     @staticmethod
+    def _contact_fields(
+        contact: Contact, *, include_archived: bool
+    ) -> list[ContactFieldInfo]:
+        fields = [
+            ContactFieldInfo(
+                id=method.id,
+                kind=method.method_type.value,
+                value=method.value,
+                label=method.label,
+                is_primary=method.is_primary,
+                is_archived=method.is_archived,
+            )
+            for method in contact.methods or []
+            if method.id is not None
+        ]
+        fields += [
+            ContactFieldInfo(
+                id=address.id,
+                kind="address",
+                value=render_address(address),
+                label=address.label,
+                is_primary=address.is_primary,
+                is_archived=address.is_archived,
+            )
+            for address in contact.addresses or []
+            if address.id is not None
+        ]
+        return [f for f in fields if include_archived or not f.is_archived]
+
+    @staticmethod
     def to_contact_response(
         contact: Contact,
         additional_context: str = "",
         external_links: list[ExternalLinkSchema] | None = None,
+        *,
+        include_archived: bool = False,
     ) -> ContactResponse:
         """
         Convert a Contact entity to an AI-friendly ContactResponse.
+
+        Archived emails, phones and addresses are left out of ``contact_fields``
+        unless ``include_archived`` is set.
 
         Args:
             contact: Contact domain entity
@@ -148,6 +185,9 @@ class ContactConverter:
             relationships=relationships_list,
             is_favourite=contact.is_favourite,
             important_dates=important_dates,
+            contact_fields=ContactConverter._contact_fields(
+                contact, include_archived=include_archived
+            ),
             summary=summary,
             interaction_summary=interaction_summary,
             follow_up_suggestions=ai_follow_up_suggestions,
