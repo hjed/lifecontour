@@ -82,15 +82,14 @@ limiter):
 
 - `periodic_sync_all_snipeit_accounts` (at `:30`) — for every user with Snipe-IT settings
   and working auth (`needs_reauth = FALSE`), enqueues `sync_snipeit_assets` and
-  `sync_snipeit_maintenances` with sync type `smart`, and records a `sync_jobs`
-  row for each. Snipe-IT sends no webhooks for asset creation, asset edits or
+  `sync_snipeit_maintenances` with sync type `smart`, writing a `sync_jobs` row
+  for each before queueing it (a job arq refuses has its row failed). Snipe-IT sends no webhooks for asset creation, asset edits or
   maintenance records, so this is the only way those changes arrive without a
   manual sync. Neither orchestrator honours `smart` yet (#1560), so each run is a
   full re-import; unchanged assets and maintenance records are skipped by
   version hash. The asset and maintenance syncs run concurrently, so a
   maintenance record on an asset new in this run can be skipped as "gear item
-  not yet synced"; it is imported by the next run (#1563). The `sync_jobs` rows
-  stay `queued`, as a manual sync's do (#1562).
+  not yet synced"; it is imported by the next run (#1563).
   Once the maintenance listing has run to the end, the sync rows of records it
   did not return are reconciled (`reconcile_deleted_maintenances`): each record
   is looked up, and the row of one Snipe-IT no longer has is deleted, except the
@@ -100,9 +99,33 @@ limiter):
 - `periodic_checkin_all_snipeit_accounts` (at `:00`) — checks in assets whose usage period
   has ended.
 
+### Sync Jobs and Fan-Out
+
+Both orchestrators (`sync_snipeit_assets`, `sync_snipeit_maintenances`) use the
+shared non-blocking fan-out (see
+[Integration Architecture](../../docs/architecture/integration-architecture.md#non-blocking-fan-outs-and-reconciliation)),
+so their `sync_jobs` row ends `completed` or `failed`, whether it came from a
+manual sync or the periodic one:
+
+1. The orchestrator marks its row `running`. Missing settings or credentials
+   fail it.
+2. It lists every batch before dispatching any, so a listing that fails
+   part-way fails the row and dispatches nothing. The maintenance sync then
+   reconciles deleted records (above); if that fails, nothing is dispatched.
+3. It writes a `queued` child row per batch (`parent_job_id`) and moves to
+   `in_progress`, or straight to `completed` when there is nothing to sync.
+4. Each batch job marks its own row `completed`, or `failed` when any record
+   in it failed to sync ("2 of 50 assets failed to sync"), the user is not
+   configured, or the batch raised. One failed record therefore fails the
+   whole sync. A rate-limited batch is retried by arq (`Retry`, deferred by
+   the `Retry-After` delay) and only fails on its final attempt.
+5. `reconcile_in_progress_parents` runs every five minutes, periodic sync or
+   not, and finalises each `in_progress` row from its child rows.
+
 Batch job ids include the orchestrator's own job id
-(`snipeit_sync_batch:<user>:<job_id>:<n>`), because arq refuses an id whose
-result it still keeps (`keep_result`, one hour).
+(`snipeit_sync_batch:<user>:<job_id>:<n>`, from 1), because arq refuses an id
+whose result it still keeps (`keep_result`, one hour). The id is also the
+child's `sync_jobs` row id.
 
 ### ARQ Worker Settings
 
@@ -122,11 +145,13 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_maintenance_batch,
         periodic_checkin_all_snipeit_accounts,
         periodic_sync_all_snipeit_accounts,
+        reconcile_in_progress_parents,
     ]
-    # Empty unless ENABLE_PERIODIC_SYNC=true
+    # The first two are empty unless ENABLE_PERIODIC_SYNC=true
     cron_jobs = [
         *generate_cron_jobs(periodic_sync_all_snipeit_accounts, ...),
         *generate_cron_jobs(periodic_checkin_all_snipeit_accounts, ...),
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
     ]
     # Both from build_worker_lifecycle(
     #     close_session_factory=False, log_consumer_errors=True

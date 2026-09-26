@@ -382,8 +382,10 @@ return immediately. Parent completion is decided out-of-band by a shared reconci
 
 **Non-blocking lifecycle:**
 
-1. The orchestrator enqueues the child jobs, persists each as a `sync_jobs` row linked via
-   `parent_job_id`, calls `set_expected_children(...)`, marks itself `IN_PROGRESS`, and returns.
+1. The orchestrator persists a `sync_jobs` row per child linked via `parent_job_id`, records
+   `expected_children`, marks itself `IN_PROGRESS` (or `COMPLETED` when there is nothing to fan
+   out), commits, and only then enqueues the children and returns
+   (`core_shared.fanout.persist_fanout_children`). Immich, Strava and Snipe-IT use this pattern.
 2. Each child, on completion, updates its own row and atomically increments the parent's
    `completed_children` / `failed_children` counter.
 3. A periodic **reconciliation job** finalises the parent.

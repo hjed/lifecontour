@@ -49,14 +49,43 @@ async def _insert_settings(async_connection: AsyncConnection, user_id: str) -> N
 
 
 class _RecordingRedis:
-    """Records enqueued jobs and answers each with a job named after it."""
+    """Records enqueued jobs, and whether each one's ``sync_jobs`` row existed.
 
-    def __init__(self) -> None:
+    Answers each enqueue with a job carrying the requested ``_job_id``, or
+    ``None`` (arq's "already queued") for the functions in ``refuse``.
+    """
+
+    def __init__(
+        self, async_connection: AsyncConnection, refuse: tuple[str, ...] = ()
+    ) -> None:
         self.jobs: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.row_existed: list[bool] = []
+        self._conn = async_connection
+        self._refuse = refuse
 
     async def enqueue_job(self, function: str, *args: Any, **kwargs: Any) -> Any:
         self.jobs.append((function, args, kwargs))
-        return MagicMock(job_id=f"{function}:{args[0]}")
+        existing = await self._conn.execute(
+            text("SELECT 1 FROM sync_jobs WHERE job_id = :job_id"),
+            {"job_id": kwargs.get("_job_id")},
+        )
+        self.row_existed.append(existing.first() is not None)
+        if function in self._refuse:
+            return None
+        return MagicMock(job_id=kwargs["_job_id"])
+
+
+def _session_factory(async_connection: AsyncConnection) -> Any:
+    @asynccontextmanager
+    async def session_factory() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(
+            async_connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        ) as session:
+            yield session
+
+    return session_factory
 
 
 @pytest.mark.asyncio
@@ -82,18 +111,9 @@ async def test_periodic_sync_enqueues_and_records_jobs_for_usable_accounts(
     await _insert_auth(async_connection, needs_reauth, needs_reauth=True)
     await _insert_auth(async_connection, no_settings)
 
-    @asynccontextmanager
-    async def session_factory() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(
-            async_connection,
-            expire_on_commit=False,
-            join_transaction_mode="create_savepoint",
-        ) as session:
-            yield session
-
-    redis = _RecordingRedis()
+    redis = _RecordingRedis(async_connection)
     result = await periodic_sync_all_snipeit_accounts(
-        {"session_factory": session_factory, "redis": redis}
+        {"session_factory": _session_factory(async_connection), "redis": redis}
     )
 
     ours = [job for job in redis.jobs if job[1][0].startswith(prefix)]
@@ -104,6 +124,9 @@ async def test_periodic_sync_enqueues_and_records_jobs_for_usable_accounts(
         ("sync_snipeit_maintenances", (ready_b, "smart")),
     ]
     assert all(kwargs["_queue_name"] == SNIPEIT_ARQ_QUEUE_NAME for *_, kwargs in ours)
+    # The row is written before the job is queued, so an orchestrator that runs
+    # at once always finds its parent row to update.
+    assert all(redis.row_existed)
     assert result["errors"] == []
     assert result["jobs_enqueued"] == 2 * result["accounts_found"]
 
@@ -113,26 +136,52 @@ async def test_periodic_sync_enqueues_and_records_jobs_for_usable_accounts(
                 SELECT job_id, user_id, integration_source, sync_type, status
                 FROM sync_jobs
                 WHERE user_id LIKE :prefix
-                ORDER BY user_id, job_id
             """),
             {"prefix": f"{prefix}%"},
         )
     ).fetchall()
-    assert [tuple(row) for row in rows] == [
-        (f"sync_snipeit_assets:{ready_a}", ready_a, "snipeit", "smart", "queued"),
-        (
-            f"sync_snipeit_maintenances:{ready_a}",
-            ready_a,
-            "snipeit",
-            "smart",
-            "queued",
-        ),
-        (f"sync_snipeit_assets:{ready_b}", ready_b, "snipeit", "smart", "queued"),
-        (
-            f"sync_snipeit_maintenances:{ready_b}",
-            ready_b,
-            "snipeit",
-            "smart",
-            "queued",
-        ),
-    ]
+    assert sorted(tuple(row) for row in rows) == sorted(
+        (kwargs["_job_id"], args[0], "snipeit", "smart", "queued")
+        for _function, args, kwargs in ours
+    )
+    assert len({kwargs["_job_id"] for *_, kwargs in ours}) == len(ours)
+
+
+@pytest.mark.asyncio
+async def test_periodic_sync_fails_the_row_of_a_job_that_was_not_enqueued(
+    async_connection: AsyncConnection,
+) -> None:
+    """A job arq refuses never runs, so its pre-written row is failed at once
+    rather than left queued for ever."""
+    from worker import periodic_sync_all_snipeit_accounts
+
+    user_id = f"periodic-{uuid4().hex[:8]}"
+    await _insert_settings(async_connection, user_id)
+    await _insert_auth(async_connection, user_id)
+
+    redis = _RecordingRedis(async_connection, refuse=("sync_snipeit_maintenances",))
+    result = await periodic_sync_all_snipeit_accounts(
+        {"session_factory": _session_factory(async_connection), "redis": redis}
+    )
+
+    assert (
+        f"sync_snipeit_maintenances was not enqueued for {user_id}"
+        in (result["errors"])
+    )
+    rows = (
+        await async_connection.execute(
+            text("""
+                SELECT job_id, status, error_message
+                FROM sync_jobs WHERE user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+    ).fetchall()
+    by_id = {row.job_id: (row.status, row.error_message) for row in rows}
+    assert len(by_id) == 2
+    job_ids = {f: kw["_job_id"] for f, args, kw in redis.jobs if args[0] == user_id}
+    assert by_id[job_ids["sync_snipeit_assets"]] == ("queued", None)
+    assert by_id[job_ids["sync_snipeit_maintenances"]] == (
+        "failed",
+        "Job was not enqueued",
+    )
