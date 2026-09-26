@@ -89,7 +89,6 @@ from app.api.journals.schemas import (
 )
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.history.services import JournalHistoryService
-from app.core.integrations.external_link_helpers import build_journal_external_links
 from app.core.integrations.immich.album_cover_proxy_service import (
     AlbumCoverProxyService,
 )
@@ -115,7 +114,6 @@ from app.core.journal.models.repositories import (
     GearUsageDataRepository,
     JoggingDataRepository,
     JournalContactRelationshipRepository,
-    JournalRepository,
     JournalSeriesRepository,
     JournalTagRepository,
     KayakingDataRepository,
@@ -134,6 +132,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
@@ -152,7 +153,6 @@ from app.core.search.exceptions import SearchServiceUnavailableError
 # needs to know how many commitments a journal is waiting on, and must not be
 # handed the ability to change one to find out.
 from app.core.tasks.services.task_read_service import TaskReadService
-from app.infrastructure.auth.immich_token_service import ImmichTokenService
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
 from app.infrastructure.di.auth import AdminAccess
@@ -1947,39 +1947,19 @@ async def create_review_item(
 async def get_journal_external_links(
     journal_id: int,
     journal_service: FromDishka[JournalService],
-    journal_repo: FromDishka[JournalRepository],
-    immich_token_service: FromDishka[ImmichTokenService],
+    link_service: FromDishka[JournalExternalLinkService],
     user: FromDishka[SessionUser],
 ) -> ExternalLinksResponse:
     """
     Get external system links for a journal.
 
-    Returns links to external systems (Strava, Google Calendar, Immich) that
-    are associated with this journal, derived from existing sync data.
+    Returns links to external systems (Strava, Google Calendar, Snipe-IT,
+    Immich) that are associated with this journal, derived from existing sync
+    data: the same links the MCP journal tools report.
     """
     await _require_owned_journal(journal_service, user.id, journal_id)
 
-    # Fetch every Strava activity linked to the journal (an additively merged
-    # journal carries more than one)
-    strava_activity_ids = await journal_repo.get_strava_activity_ids(journal_id)
-
-    # Fetch external event links for Google Calendar links
-    external_event_links = await journal_repo.get_external_event_links(journal_id)
-
-    # Fetch Snipe-IT links (maintenance and checkout asset)
-    snipeit_links = await journal_repo.get_snipeit_links(journal_id, user.id)
-
-    # Fetch Immich album links and the user's Immich server URL
-    immich_album_links = await journal_repo.get_immich_album_links(journal_id)
-    immich_server_url = await immich_token_service.get_server_url(user.id)
-
-    links = build_journal_external_links(
-        strava_activity_ids=strava_activity_ids,
-        external_event_links=external_event_links,
-        snipeit_links=snipeit_links,
-        immich_album_links=immich_album_links,
-        immich_server_url=immich_server_url,
-    )
+    links = await link_service.links_for_journal(journal_id, user.id)
 
     return ExternalLinksResponse(
         data=[

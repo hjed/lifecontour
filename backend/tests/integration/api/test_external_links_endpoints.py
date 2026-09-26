@@ -1,9 +1,11 @@
 """Integration tests for external links API endpoints."""
 
 import json
+from typing import Any
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 _TEST_USER_ID = "test-user-123"
 _IMMICH_SERVER_URL = "https://immich.example.com"
@@ -71,6 +73,27 @@ async def _link_strava_activity(async_connection, journal_id, activity_id):
 @pytest.mark.usefixtures("clean_database")
 class TestJournalExternalLinks:
     """Integration tests for GET /api/journals/{id}/external-links."""
+
+    async def _google_synced_calendar(
+        self, client: Any, connection: AsyncConnection, name: str
+    ) -> str:
+        """A calendar synced with Google: only its events open in Google Calendar."""
+        response = await client.post(
+            "/api/calendars",
+            json={"data": {"type": "calendars", "attributes": {"name": name}}},
+        )
+        calendar_id: str = response.json()["data"]["id"]
+        await connection.execute(
+            text(
+                "UPDATE calendars SET google_calendar_id = :google_id "
+                "WHERE id = :calendar_id"
+            ),
+            {
+                "google_id": f"{name}@group.calendar.google.com",
+                "calendar_id": calendar_id,
+            },
+        )
+        return calendar_id
 
     async def _create_journal(self, client, title="Test Journal"):
         """Helper to create a journal and return its id."""
@@ -198,16 +221,9 @@ class TestJournalExternalLinks:
         journal_id = await self._create_journal(integration_api_client)
 
         # Create a calendar first
-        calendar_response = await integration_api_client.post(
-            "/api/calendars",
-            json={
-                "data": {
-                    "type": "calendars",
-                    "attributes": {"name": "Test Calendar"},
-                }
-            },
+        calendar_id = await self._google_synced_calendar(
+            integration_api_client, async_connection, "Test Calendar"
         )
-        calendar_id = calendar_response.json()["data"]["id"]
 
         # Insert external event link directly
         await async_connection.execute(
@@ -264,16 +280,9 @@ class TestJournalExternalLinks:
         )
 
         # Create calendar and external event link
-        calendar_response = await integration_api_client.post(
-            "/api/calendars",
-            json={
-                "data": {
-                    "type": "calendars",
-                    "attributes": {"name": "Mixed Calendar"},
-                }
-            },
+        calendar_id = await self._google_synced_calendar(
+            integration_api_client, async_connection, "Mixed Calendar"
         )
-        calendar_id = calendar_response.json()["data"]["id"]
 
         await async_connection.execute(
             text(

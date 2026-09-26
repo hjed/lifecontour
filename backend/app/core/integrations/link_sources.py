@@ -58,6 +58,15 @@ _SNIPEIT_JOURNAL_ROW = (
 )
 _SNIPEIT_JOURNAL_ROW_WHERE = "m.internal_uuid ~ '^[0-9]+$' AND m.integration_source = "
 
+# The link from an imported journal to the Snipe-IT maintenance it was imported
+# from, as ``l``. An import's sync row names no journal; the backend links the
+# journal to the record on the synthetic maintenance calendar instead.
+SNIPEIT_MAINTENANCE_IMPORT_LINK = (
+    "journal_external_event_links l "
+    "JOIN calendars c ON c.id = l.calendar_id "
+    "AND c.integration_source = 'snipeit_maintenance'"
+)
+
 JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
     IntegrationSource.STRAVA: JournalLinkSource(
         name=IntegrationSource.STRAVA,
@@ -158,6 +167,15 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 journal_id_sql="j.id",
                 external_id_sql="m.external_id",
                 where_sql=f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_maintenance'",
+            ),
+            # Journals imported from Snipe-IT
+            JournalLinkStore(
+                from_sql=(
+                    f"{SNIPEIT_MAINTENANCE_IMPORT_LINK} "
+                    "JOIN journals j ON j.id = l.journal_id"
+                ),
+                journal_id_sql="l.journal_id",
+                external_id_sql="l.external_event_id",
             ),
         ),
     ),
