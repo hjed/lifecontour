@@ -251,12 +251,16 @@ class ContactSuggestionService:
         Adds just the method, under the contact's lock, rather than saving the
         whole contact: a snapshot saved back would undo any edit made to the
         contact since it was read. The email becomes primary only when the
-        contact has none.
+        contact has no email in use - an archived one cannot be primary.
         """
         stored = await self.contact_service.get_contact_by_id(contact_id)
         if stored is None:
             raise ContactNotFoundError(contact_id)
-        emails = [m for m in stored.methods or [] if m.method_type == MethodType.EMAIL]
+        emails = [
+            m
+            for m in stored.methods or []
+            if m.method_type == MethodType.EMAIL and not m.is_archived
+        ]
         if self._holds_email(stored, email):
             return stored
         try:

@@ -41,7 +41,9 @@ async def _unmatched_rows(
     return {row.email: dict(row._mapping) for row in result.fetchall()}
 
 
-async def _create_contact_with_email(connection: AsyncConnection, email: str) -> int:
+async def _create_contact_with_email(
+    connection: AsyncConnection, email: str, *, archived: bool = False
+) -> int:
     contact_id = (
         await connection.execute(
             text("INSERT INTO contacts (first_name) VALUES ('Known') RETURNING id")
@@ -50,11 +52,11 @@ async def _create_contact_with_email(connection: AsyncConnection, email: str) ->
     await connection.execute(
         text(
             """
-            INSERT INTO contact_methods (contact_id, method_type, value)
-            VALUES (:contact_id, 'email', :email)
+            INSERT INTO contact_methods (contact_id, method_type, value, is_archived)
+            VALUES (:contact_id, 'email', :email, :archived)
             """
         ),
-        {"contact_id": contact_id, "email": email},
+        {"contact_id": contact_id, "email": email, "archived": archived},
     )
     return int(contact_id)
 
@@ -196,6 +198,29 @@ class TestUnmatchedParticipantCapture:
                 calendar_id=calendar_id,
                 external_event_id="evt-capture-4",
                 contact_relationships=[_invitee(" jane@x.com ")],
+            )
+        )
+
+        journal_id = result["journal_id"]
+        assert await _linked_contact_ids(async_connection, journal_id) == {contact_id}
+        assert await _unmatched_rows(async_connection, journal_id) == {}
+
+    async def test_an_archived_email_still_resolves_to_its_contact(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """An old address on an invite still identifies the person."""
+        contact_id = await _create_contact_with_email(
+            async_connection, "old@x.com", archived=True
+        )
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="evt-capture-archived",
+                contact_relationships=[_invitee("old@x.com")],
             )
         )
 

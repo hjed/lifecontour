@@ -1869,3 +1869,68 @@ class TestOrganizationTransformation:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestArchivedValuesAreNotPushed:
+    """An archived email, phone or address is never sent to Google.
+
+    The payload replaces Google's lists whole, so leaving an archived value out
+    is what removes an already-synced one from Google.
+    """
+
+    def test_archived_methods_are_left_out(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        person = _transform_contact_to_google_person(
+            {
+                "first_name": "Ada",
+                "methods": [
+                    {
+                        "method_type": "email",
+                        "value": "now@example.com",
+                        "label": None,
+                        "is_primary": True,
+                        "is_archived": False,
+                    },
+                    {
+                        "method_type": "email",
+                        "value": "then@example.com",
+                        "label": None,
+                        "is_primary": False,
+                        "is_archived": True,
+                    },
+                    {
+                        "method_type": "phone",
+                        "value": "+44 20 7946 0000",
+                        "label": None,
+                        "is_primary": False,
+                        "is_archived": True,
+                    },
+                ],
+                "addresses": [],
+            }
+        )
+
+        assert [e["value"] for e in person["emailAddresses"]] == ["now@example.com"]
+        # Still sent, empty: that is what removes the archived phone in Google.
+        assert person["phoneNumbers"] == []
+
+    def test_archived_addresses_are_left_out(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        person = _transform_contact_to_google_person(
+            {
+                "first_name": "Ada",
+                "methods": [],
+                "addresses": [
+                    {
+                        "street_line_1": "1 Childhood Rd",
+                        "country_code": "AU",
+                        "is_primary": False,
+                        "is_archived": True,
+                    }
+                ],
+            }
+        )
+
+        assert person["addresses"] == []

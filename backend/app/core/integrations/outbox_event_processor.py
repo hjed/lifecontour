@@ -37,6 +37,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateTagNameError,
 )
 from app.core.contacts.services.contact_service import ContactService
+from app.core.contacts.services.contact_subentity_sync import keep_archived
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
@@ -98,6 +99,16 @@ class ContactReconciliationConflictError(OutboxEventProcessingError):
         super().__init__(message)
         self.matched_contact_id = matched_contact_id
         self.integration_source = integration_source
+
+
+def _keep_archived_values(incoming: Contact, stored: Contact) -> None:
+    """Keep ``stored``'s archived values through an integration's whole-list save.
+
+    They are never pushed to a provider, so the provider's lists never hold
+    them - see :func:`keep_archived`.
+    """
+    incoming.methods = keep_archived(stored.methods, incoming.methods)
+    incoming.addresses = keep_archived(stored.addresses, incoming.addresses)
 
 
 class OutboxEventProcessor:
@@ -766,6 +777,12 @@ class OutboxEventProcessor:
                     )
             else:
                 contact.id = matched_contact.id
+                if matched_contact.id is not None:
+                    stored = await self.contact_service.get_contact_by_id(
+                        matched_contact.id
+                    )
+                    if stored is not None:
+                        _keep_archived_values(contact, stored)
                 created_contact = await self.contact_service.update_contact(
                     contact,
                     self.connection,
@@ -971,6 +988,8 @@ class OutboxEventProcessor:
             existing_tags = (
                 full_existing_contact.tags or [] if full_existing_contact else []
             )
+            if full_existing_contact is not None:
+                _keep_archived_values(updated_contact_data, full_existing_contact)
 
             # Find the existing integration link (canonical sync_metadata store)
             # to carry forward its reference_data (synced_tags/etag).

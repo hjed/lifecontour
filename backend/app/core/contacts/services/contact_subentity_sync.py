@@ -452,6 +452,59 @@ def with_primary_method(
     ]
 
 
+def archived_match_key(item: ContactMethod | ContactAddress) -> Hashable:
+    """What makes an incoming value the same as an archived one.
+
+    Emails compare as the unique index does - trimmed and case-insensitive;
+    phones on their digits, since a provider may format the same number
+    differently; addresses on every line, trimmed and case-insensitive.
+    """
+    if isinstance(item, ContactAddress):
+        return tuple(
+            (part or "").strip().lower()
+            for part in (
+                item.street_line_1,
+                item.street_line_2,
+                item.locality,
+                item.region,
+                item.postal_code,
+                item.country_code,
+            )
+        )
+    if item.method_type == MethodType.PHONE:
+        return (item.method_type.value, "".join(c for c in item.value if c.isdigit()))
+    return (item.method_type.value, item.value.strip().lower())
+
+
+def keep_archived[T: (ContactMethod, ContactAddress)](
+    stored: Sequence[T] | None, incoming: Sequence[T] | None
+) -> list[T] | None:
+    """An integration's list, with the contact's archived values kept.
+
+    Archived values are never synced out, so an integration's whole-list
+    payload never holds them and would otherwise delete them. They are kept
+    under their ids, which the reconcile matches as unchanged. An incoming
+    value matching an archived one is the provider holding it again: it takes
+    that row's id and is saved un-archived, so the edit reads as a restore.
+
+    ``None`` - the integration said nothing about the list - stays ``None``.
+    """
+    if incoming is None:
+        return None
+    archived = [row for row in stored or [] if row.is_archived]
+    by_key = {archived_match_key(row): row for row in archived}
+    restored: set[int] = set()
+    result: list[T] = []
+    for item in incoming:
+        match = by_key.pop(archived_match_key(item), None) if item.id is None else None
+        if match is None:
+            result.append(item)
+            continue
+        restored.add(id(match))
+        result.append(replace(item, id=match.id, is_archived=False))
+    return result + [row for row in archived if id(row) not in restored]
+
+
 @dataclass(frozen=True)
 class SubResourceMerge:
     """Sub-resource changes named rather than listed.

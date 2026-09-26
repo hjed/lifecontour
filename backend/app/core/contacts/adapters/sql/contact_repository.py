@@ -631,9 +631,68 @@ class SqlContactRepository(ContactRepository):
         survivor is the only other contact that could already hold the value.
         Source primaries for a ``method_type`` the survivor already has a primary
         of are demoted so the re-point cannot violate
-        ``ix_contact_methods_primary_unique`` (survivor's primary wins).
+        ``ix_contact_methods_primary_unique`` (survivor's primary wins). A
+        duplicate the survivor archived but the source still uses stays in use,
+        and one the source has as its primary, where the survivor has no primary
+        of that type, stays primary.
         """
         params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 0. Restore a survivor's archived duplicate of a value the source uses.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_methods tgt
+                SET is_archived = false, updated_at = CURRENT_TIMESTAMP
+                WHERE tgt.contact_id = :survivor_id
+                AND tgt.is_archived
+                AND EXISTS (
+                    SELECT 1 FROM contact_methods src
+                    WHERE src.contact_id = :source_id
+                    AND NOT src.is_archived
+                    AND src.method_type = tgt.method_type
+                    AND src.value = tgt.value
+                )
+                """
+            ),
+            params,
+        )
+
+        # 0b. The source's primary survives the collapse of its duplicate when
+        #     the survivor has no primary of that type to win.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_methods tgt
+                SET is_primary = true, is_archived = false,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE tgt.contact_id = :survivor_id
+                AND NOT tgt.is_primary
+                AND EXISTS (
+                    SELECT 1 FROM contact_methods src
+                    WHERE src.contact_id = :source_id
+                    AND src.is_primary
+                    AND src.method_type = tgt.method_type
+                    AND src.value = tgt.value
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM contact_methods own
+                    WHERE own.contact_id = :survivor_id
+                    AND own.is_primary
+                    AND own.method_type = tgt.method_type
+                )
+                -- One primary: the first of the survivor's copies, if it has two.
+                AND NOT EXISTS (
+                    SELECT 1 FROM contact_methods twin
+                    WHERE twin.contact_id = :survivor_id
+                    AND twin.method_type = tgt.method_type
+                    AND twin.value = tgt.value
+                    AND twin.id < tgt.id
+                )
+                """
+            ),
+            params,
+        )
 
         # 1. Collapse exact duplicates (and resolve the email-unique collision).
         await transaction.execute(
@@ -692,9 +751,81 @@ class SqlContactRepository(ContactRepository):
         Addresses that exactly match a survivor address (every field) collapse.
         Source primaries are demoted when the survivor already has a primary
         address so the re-point cannot violate
-        ``idx_contact_addresses_unique_primary`` (survivor's primary wins).
+        ``idx_contact_addresses_unique_primary`` (survivor's primary wins). A
+        duplicate the survivor archived but the source still uses stays in use,
+        and one that is the source's primary, where the survivor has no primary
+        address, stays primary.
         """
         params = {"source_id": source_id, "survivor_id": survivor_id}
+
+        # 0. Restore a survivor's archived duplicate of an address the source uses.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_addresses tgt
+                SET is_archived = false, updated_at = CURRENT_TIMESTAMP
+                WHERE tgt.contact_id = :survivor_id
+                AND tgt.is_archived
+                AND EXISTS (
+                    SELECT 1 FROM contact_addresses src
+                    WHERE src.contact_id = :source_id
+                    AND NOT src.is_archived
+                    AND src.street_line_1 = tgt.street_line_1
+                    AND src.country_code = tgt.country_code
+                    AND src.street_line_2 IS NOT DISTINCT FROM tgt.street_line_2
+                    AND src.locality IS NOT DISTINCT FROM tgt.locality
+                    AND src.region IS NOT DISTINCT FROM tgt.region
+                    AND src.postal_code IS NOT DISTINCT FROM tgt.postal_code
+                    AND src.label IS NOT DISTINCT FROM tgt.label
+                )
+                """
+            ),
+            params,
+        )
+
+        # 0b. The source's primary survives the collapse of its duplicate when
+        #     the survivor has no primary address to win.
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_addresses tgt
+                SET is_primary = true, is_archived = false,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE tgt.contact_id = :survivor_id
+                AND NOT tgt.is_primary
+                AND EXISTS (
+                    SELECT 1 FROM contact_addresses src
+                    WHERE src.contact_id = :source_id
+                    AND src.is_primary
+                    AND src.street_line_1 = tgt.street_line_1
+                    AND src.country_code = tgt.country_code
+                    AND src.street_line_2 IS NOT DISTINCT FROM tgt.street_line_2
+                    AND src.locality IS NOT DISTINCT FROM tgt.locality
+                    AND src.region IS NOT DISTINCT FROM tgt.region
+                    AND src.postal_code IS NOT DISTINCT FROM tgt.postal_code
+                    AND src.label IS NOT DISTINCT FROM tgt.label
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM contact_addresses own
+                    WHERE own.contact_id = :survivor_id AND own.is_primary
+                )
+                -- One primary: the first of the survivor's copies, if it has two.
+                AND NOT EXISTS (
+                    SELECT 1 FROM contact_addresses twin
+                    WHERE twin.contact_id = :survivor_id
+                    AND twin.street_line_1 = tgt.street_line_1
+                    AND twin.country_code = tgt.country_code
+                    AND twin.street_line_2 IS NOT DISTINCT FROM tgt.street_line_2
+                    AND twin.locality IS NOT DISTINCT FROM tgt.locality
+                    AND twin.region IS NOT DISTINCT FROM tgt.region
+                    AND twin.postal_code IS NOT DISTINCT FROM tgt.postal_code
+                    AND twin.label IS NOT DISTINCT FROM tgt.label
+                    AND twin.id < tgt.id
+                )
+                """
+            ),
+            params,
+        )
 
         # 1. Collapse exact-duplicate addresses (NULL-safe field comparison).
         await transaction.execute(

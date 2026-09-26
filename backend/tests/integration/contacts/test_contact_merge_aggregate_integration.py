@@ -138,7 +138,12 @@ async def _add_email(
 
 
 async def _add_phone(
-    repo: SqlContactRepository, contact_id: int, value: str, *, is_primary: bool = False
+    repo: SqlContactRepository,
+    contact_id: int,
+    value: str,
+    *,
+    is_primary: bool = False,
+    is_archived: bool = False,
 ) -> None:
     await repo.add_method(
         contact_id,
@@ -147,6 +152,7 @@ async def _add_phone(
             value=value,
             contact_id=contact_id,
             is_primary=is_primary,
+            is_archived=is_archived,
         ),
     )
 
@@ -157,6 +163,7 @@ async def _add_address(
     street: str,
     *,
     is_primary: bool,
+    is_archived: bool = False,
 ) -> None:
     await repo.add_address(
         contact_id,
@@ -165,6 +172,7 @@ async def _add_address(
             country_code="AU",
             contact_id=contact_id,
             is_primary=is_primary,
+            is_archived=is_archived,
         ),
     )
 
@@ -312,6 +320,160 @@ class TestContactMergeAggregateIntegration:
             m for m in (survivor.methods or []) if m.method_type == MethodType.PHONE
         ]
         assert [m.value for m in phones] == ["+61400000001"]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_phone_stays_active_if_either_holds_it_active(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        """The survivor archived the number, the source still uses it: in use wins."""
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_phone(contact_repo, survivor_id, "+61400000001", is_archived=True)
+        await _add_phone(contact_repo, source_id, "+61400000001")
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert [(m.value, m.is_archived) for m in survivor.methods or []] == [
+            ("+61400000001", False)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_address_stays_active_if_either_holds_it_active(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_address(
+            contact_repo, survivor_id, "1 Shared St", is_primary=False, is_archived=True
+        )
+        await _add_address(contact_repo, source_id, "1 Shared St", is_primary=False)
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert [(a.street_line_1, a.is_archived) for a in survivor.addresses or []] == [
+            ("1 Shared St", False)
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("survivor_archived", [False, True])
+    async def test_collapsed_phone_keeps_the_sources_primary(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+        survivor_archived: bool,
+    ) -> None:
+        """The survivor holds the number with no primary phone; the source's copy
+        is its primary. The copies collapse into the survivor's row, which must
+        keep that primary rather than lose it with the source's row."""
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_phone(
+            contact_repo, survivor_id, "+61400000001", is_archived=survivor_archived
+        )
+        await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert [
+            (m.value, m.is_primary, m.is_archived) for m in survivor.methods or []
+        ] == [("+61400000001", True, False)]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("survivor_archived", [False, True])
+    async def test_collapsed_address_keeps_the_sources_primary(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+        survivor_archived: bool,
+    ) -> None:
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_address(
+            contact_repo,
+            survivor_id,
+            "1 Shared St",
+            is_primary=False,
+            is_archived=survivor_archived,
+        )
+        await _add_address(contact_repo, source_id, "1 Shared St", is_primary=True)
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert [
+            (a.street_line_1, a.is_primary, a.is_archived)
+            for a in survivor.addresses or []
+        ] == [("1 Shared St", True, False)]
+
+    @pytest.mark.asyncio
+    async def test_survivors_twin_copies_get_one_primary(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        """Two survivor copies of the source's primary: only one takes it."""
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_phone(contact_repo, survivor_id, "+61400000001")
+        await _add_phone(contact_repo, survivor_id, "+61400000001", is_archived=True)
+        await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert sum(m.is_primary for m in survivor.methods or []) == 1
+
+    @pytest.mark.asyncio
+    async def test_collapsed_phone_leaves_the_survivors_primary_alone(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        """With a primary phone of its own, the survivor's primary wins."""
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _add_phone(contact_repo, survivor_id, "+61400000009", is_primary=True)
+        await _add_phone(contact_repo, survivor_id, "+61400000001")
+        await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection
+        )
+
+        survivor = await contact_repo.find_by_id(survivor_id)
+        assert survivor is not None
+        assert {(m.value, m.is_primary) for m in survivor.methods or []} == {
+            ("+61400000009", True),
+            ("+61400000001", False),
+        }
 
     @pytest.mark.asyncio
     async def test_duplicate_primary_address_demoted(

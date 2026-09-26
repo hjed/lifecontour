@@ -235,7 +235,7 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     """
     # Load contact methods
     methods_stmt = text("""
-        SELECT id, method_type, value, label, is_primary
+        SELECT id, method_type, value, label, is_primary, is_archived
         FROM contact_methods
         WHERE contact_id = :contact_id
         ORDER BY is_primary DESC, id ASC
@@ -249,6 +249,7 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
             "value": row.value,
             "label": row.label,
             "is_primary": row.is_primary,
+            "is_archived": row.is_archived,
         }
         for row in methods_rows
     ]
@@ -256,7 +257,7 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     # Load contact addresses
     addresses_stmt = text("""
         SELECT id, label, street_line_1, street_line_2, locality,
-               region, postal_code, country_code, is_primary
+               region, postal_code, country_code, is_primary, is_archived
         FROM contact_addresses
         WHERE contact_id = :contact_id
         ORDER BY is_primary DESC, id ASC
@@ -274,6 +275,7 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
             "postal_code": row.postal_code,
             "country_code": row.country_code,
             "is_primary": row.is_primary,
+            "is_archived": row.is_archived,
         }
         for row in addresses_rows
     ]
@@ -486,11 +488,17 @@ def _transform_phone(method: dict[str, Any]) -> dict[str, Any]:
 def _transform_contact_methods(
     methods: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Transform contact methods (emails and phones) to Google Person format."""
+    """Transform contact methods (emails and phones) to Google Person format.
+
+    Archived methods are left out: they are never synced to a provider, and the
+    payload replaces Google's list, so leaving one out removes it there.
+    """
     email_addresses = []
     phone_numbers = []
 
     for method in methods:
+        if method.get("is_archived"):
+            continue
         if method["method_type"] == "email":
             email_addresses.append(_transform_email(method))
         elif method["method_type"] == "phone":
@@ -530,9 +538,11 @@ def _transform_address(addr: dict[str, Any]) -> dict[str, Any]:
 
 
 def _transform_addresses(addresses: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Transform addresses to Google Person format."""
+    """Transform addresses to Google Person format, leaving archived ones out."""
     google_addresses = []
     for addr in addresses:
+        if addr.get("is_archived"):
+            continue
         addr_data = _transform_address(addr)
         if addr_data:
             google_addresses.append(addr_data)
