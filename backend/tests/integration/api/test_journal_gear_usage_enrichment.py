@@ -257,7 +257,7 @@ async def test_adding_and_removing_the_type_tells_integrations(
     removed = await authenticated_client.delete(
         f"/api/journals/{journal_id}/types/GEAR_USAGE"
     )
-    assert removed.status_code in (200, 204), removed.text
+    assert removed.status_code == 200, removed.text
     assert await _journal_updated_events(async_connection, journal_id) == before + 2
 
 

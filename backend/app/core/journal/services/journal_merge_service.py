@@ -1,5 +1,6 @@
 """Service for merging journals."""
 
+import dataclasses
 from typing import Any
 
 import structlog
@@ -245,6 +246,7 @@ class JournalMergeService:
         await self._repoint_integration_links(
             target_id, source_id, fitness_merge_mode, transaction
         )
+        await self._repoint_gear_usage_pairs(target_id, source_id, transaction)
 
         # 8. Type Data Scalable merge
         await self._merge_type_data(
@@ -668,7 +670,11 @@ class JournalMergeService:
                 )
             elif table_name == GEAR_USAGE_TABLE:
                 await self._merge_gear_usage_items(
-                    target_id, source_id, changed_fields, transaction
+                    target_id,
+                    source_id,
+                    source_wins=default_survivor is source,
+                    changed_fields=changed_fields,
+                    transaction=transaction,
                 )
             else:
                 await self._merge_existing_type_data(
@@ -686,16 +692,59 @@ class JournalMergeService:
                 )
 
     @staticmethod
+    async def _repoint_gear_usage_pairs(
+        target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Move the source's Snipe-IT checkout/check-in pairs onto the target.
+
+        A pair is keyed ``{source}:{asset}:{journal}`` with the journal as its
+        ``internal_uuid``, so the canonical link move does not touch it. Left on
+        the deleted source, a pair still checked out would be checked in by the
+        deletion while the merged journal still lists the gear. A pair the
+        target already has for that asset stays with the source: the target's
+        own is the one that stands.
+        """
+        await transaction.execute(
+            text(
+                """
+                UPDATE sync_metadata s
+                SET internal_uuid = :target_uuid,
+                    external_id = regexp_replace(
+                        s.external_id, ':' || :source_uuid || '$', ':' || :target_uuid
+                    ),
+                    updated_at = now()
+                WHERE s.integration_source IN ('snipeit_checkout', 'snipeit_checkin')
+                  AND s.internal_uuid = :source_uuid
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sync_metadata t
+                      WHERE t.integration_source = s.integration_source
+                        AND t.external_id = regexp_replace(
+                            s.external_id,
+                            ':' || :source_uuid || '$',
+                            ':' || :target_uuid
+                        )
+                  )
+                """
+            ),
+            {"source_uuid": str(source_id), "target_uuid": str(target_id)},
+        )
+
+    @staticmethod
     async def _merge_gear_usage_items(
         target_id: int,
         source_id: int,
+        *,
+        source_wins: bool,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
     ) -> None:
         """Keep every gear item either journal recorded on the target.
 
-        The target's own item wins for a gear item both list; the source's other
-        items follow the target's, in their order.
+        The source's other items follow the target's, in their order. For a
+        gear item both list, its dates follow the rule every merged field does:
+        the source's are taken when the target has none, or when the source is
+        the survivor. The two dates travel together, so a window is never
+        stitched from both sides.
         """
         repo = SqlGearUsageDataRepository(transaction)
         target = await repo.find_by_journal_id(target_id)
@@ -704,8 +753,15 @@ class JournalMergeService:
             return
         merged = target
         for item in source.items:
-            if merged.item(item.gear_item_id) is None:
-                merged = merged.with_item(item)
+            existing = merged.item(item.gear_item_id)
+            source_dated = item.checkout_date or item.checkin_date
+            target_dated = existing and (
+                existing.checkout_date or existing.checkin_date
+            )
+            if existing is None or (source_dated and (source_wins or not target_dated)):
+                merged = merged.with_item(
+                    dataclasses.replace(item, created_at=None, updated_at=None)
+                )
         if merged.items != target.items:
             await repo.save(merged)
             changed_fields[f"{GEAR_USAGE_TABLE}_updated"] = True
