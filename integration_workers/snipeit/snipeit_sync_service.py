@@ -2741,7 +2741,7 @@ class SnipeItSyncService:
 
     async def _return_abandoned_asset(
         self, pair: GearUsagePair, *, session_factory: Any
-    ) -> None:
+    ) -> bool:
         """Check in the asset of a failed checkout attempt whose item was removed.
 
         A checkout whose response was lost is recorded as failed even though
@@ -2752,13 +2752,18 @@ class SnipeItSyncService:
         attempt by another pair counts as holding it, since that attempt may have
         checked the asset out too; leaving it out is recoverable, returning an
         asset still in use is not.
+
+        Returns whether the asset is dealt with (returned, not out to the mapped
+        user, or gone), so the pair can be forgotten. ``False`` while another
+        pair may hold it: the pair is kept, so a later sync retries the return
+        rather than lose the only record that the asset may be out.
         """
         asset_id = pair.asset_id
         try:
             asset = await self._api_client.get_asset(asset_id)
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
-                return
+                return True
             raise
         assignee = asset.assigned_to
         if (
@@ -2766,7 +2771,7 @@ class SnipeItSyncService:
             or assignee.type != "user"
             or str(assignee.id) != str(self._snipeit_user_id)
         ):
-            return
+            return True
 
         async with session_factory() as session:
             held_elsewhere = await session.execute(
@@ -2788,7 +2793,7 @@ class SnipeItSyncService:
                 },
             )
             if held_elsewhere.fetchone():
-                return
+                return False
 
         await self._api_client.checkin_asset(
             asset_id=asset_id,
@@ -2799,6 +2804,7 @@ class SnipeItSyncService:
             journal_id=pair.journal_id,
             snipeit_asset_id=asset_id,
         )
+        return True
 
     async def _mark_checkout_posting(
         self,
@@ -3667,7 +3673,8 @@ class SnipeItSyncService:
         Snipe-IT's log cannot be edited, so it is kept. A pair still checked out
         is checked in now and then forgotten, so adding the item back records a
         new pair. A failed attempt may still have checked the asset out, so it
-        is returned if nothing else may hold it, then forgotten.
+        is returned if nothing else may hold it, then forgotten; while something
+        else may hold it, the pair is kept for a later sync to retry.
 
         Raises:
             SnipeItSyncInProgress: The pair's checkout is being posted now.
@@ -3690,8 +3697,8 @@ class SnipeItSyncService:
             raise SnipeItSyncInProgress(
                 f"Checkout of {pair.checkout_external_id} is in flight"
             )
-        await self._return_abandoned_asset(pair, session_factory=session_factory)
-        await self._forget_pair(pair, session_factory)
+        if await self._return_abandoned_asset(pair, session_factory=session_factory):
+            await self._forget_pair(pair, session_factory)
 
     async def _forget_pair(self, pair: GearUsagePair, session_factory: Any) -> None:
         """Delete a (journal, asset) pair's checkout and check-in sync rows."""

@@ -2571,3 +2571,16 @@ class TestPreviousAssetHeldElsewhereIntegration:
         assert [
             r.url.path for r in mock_transport.requests if r.method == "POST"
         ] == posts
+        # The abandoned pair is forgotten only once its asset was dealt with:
+        # left out for another pair, its row stays so a later sync retries it.
+        abandoned = await async_connection.execute(
+            text("""
+                SELECT 1 FROM sync_metadata
+                WHERE integration_source = 'snipeit_checkout'
+                  AND external_id = :external_id
+            """),
+            {"external_id": f"snipeit_checkout:41:{journal_id}"},
+        )
+        assert (abandoned.fetchone() is None) == (
+            "/api/v1/hardware/41/checkin" in posts
+        )

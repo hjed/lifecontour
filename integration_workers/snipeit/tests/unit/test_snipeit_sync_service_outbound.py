@@ -1562,7 +1562,7 @@ class TestPushCheckinCreate:
         )
 
         await service.push_checkout_create(
-            GearUsagePair(100, 42), session_factory=session_factory
+            journal_id=100, session_factory=session_factory
         )
 
         api_client.checkout_asset.assert_called_once()
