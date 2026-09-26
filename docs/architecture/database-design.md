@@ -403,7 +403,7 @@ pitches, so the gear used on a trip lives on the trip's own journal:
 
 The outdoor dashboard's "gear currently checked out" widget derives checkout state from existing
 tables — no new state is stored. A gear item is **currently checked out** when a `GEAR_USAGE`
-journal references it (`journal_gear_usage_data.gear_item_id`) such that:
+journal lists it (a `journal_gear_usage_items` row) such that:
 
 1. **The resolved checkout window contains now** — `COALESCE(checkout_date,
    journals.event_date_range_start) <= now() < COALESCE(checkin_date, journals.event_date_range_end)`.
@@ -412,9 +412,10 @@ journal references it (`journal_gear_usage_data.gear_item_id`) such that:
    NULL` does **not** mean "still out" — the window falls back to the journal's event range. This is
    the same `COALESCE` resolution the Snipe-IT check-in sweep uses. The checkout bound is inclusive
    and the check-in bound exclusive (at the resolved check-in instant the sweep returns the asset).
-2. **Snipe-IT hasn't already recorded the return** — no `sync_metadata` row with
-   `integration_source = 'snipeit_checkin'`, `internal_uuid = journal_id::text` and
-   `sync_status = 'success'`. This keeps the dashboard consistent with an early return recorded in
+2. **Snipe-IT hasn't already recorded the return** — no successful `snipeit_checkin` `sync_metadata`
+   row for that item's (asset, journal) pair (`external_id = 'snipeit_checkin:<asset id>:<journal
+   id>'`, the asset id being the gear item's `snipeit` sync row). A journal's items are returned one
+   by one. This keeps the dashboard consistent with an early return recorded in
    Snipe-IT while still working when the Snipe-IT integration isn't connected (rule 1 alone then
    decides).
 

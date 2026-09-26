@@ -223,31 +223,210 @@ class TestUpdateGearUsageTypeData:
         )
 
     @pytest.mark.asyncio
-    async def test_another_gear_item_replaces_the_item(self) -> None:
-        """A single-object payload names the entry's one gear item."""
+    async def test_another_gear_item_is_added_alongside(self) -> None:
+        """The single-item form adds or updates one item and removes none."""
         repo = AsyncMock()
-        repo.find_by_journal_id.return_value = GearUsageData(
-            journal_id=5,
-            items=(
-                GearUsageItem(
-                    gear_item_id=uuid4(),
-                    checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
-                ),
-            ),
+        first = GearUsageItem(
+            gear_item_id=uuid4(),
+            checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
         )
-        replacement = uuid4()
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5, items=(first,)
+        )
+        added = uuid4()
 
         await helpers.update_gear_usage_type_data(
-            5, "GEAR_USAGE", {"gear_item_id": str(replacement)}, repo
+            5, "GEAR_USAGE", {"gear_item_id": str(added)}, repo
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.items == (first, GearUsageItem(gear_item_id=added))
+
+    @pytest.mark.asyncio
+    async def test_a_named_item_has_only_its_sent_dates_patched(self) -> None:
+        repo = AsyncMock()
+        checkout = datetime(2024, 1, 1, 8, 0, tzinfo=UTC)
+        first = GearUsageItem(gear_item_id=uuid4(), checkout_date=checkout)
+        second = GearUsageItem(gear_item_id=uuid4())
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5, items=(first, second)
+        )
+
+        await helpers.update_gear_usage_type_data(
+            5,
+            "GEAR_USAGE",
+            {
+                "gear_item_id": str(first.gear_item_id),
+                "checkin_date": "2024-01-02T18:00:00+00:00",
+            },
+            repo,
         )
 
         saved = repo.save.await_args.args[0]
         assert saved.items == (
             GearUsageItem(
-                gear_item_id=replacement,
-                checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+                gear_item_id=first.gear_item_id,
+                checkout_date=checkout,
+                checkin_date=datetime(2024, 1, 2, 18, 0, tzinfo=UTC),
+            ),
+            second,
+        )
+
+    @pytest.mark.asyncio
+    async def test_dates_alone_are_refused_when_several_items_could_be_meant(
+        self,
+    ) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5,
+            items=(
+                GearUsageItem(gear_item_id=uuid4()),
+                GearUsageItem(gear_item_id=uuid4()),
             ),
         )
+
+        with pytest.raises(JournalValidationError) as caught:
+            await helpers.update_gear_usage_type_data(
+                5, "GEAR_USAGE", {"checkin_date": "2024-01-02T18:00:00+00:00"}, repo
+            )
+
+        assert caught.value.field == "gear_item_id"
+        repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_items_replace_the_whole_list(self) -> None:
+        repo = AsyncMock()
+        kept = GearUsageItem(
+            gear_item_id=uuid4(),
+            checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+        )
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5, items=(kept, GearUsageItem(gear_item_id=uuid4()))
+        )
+        added = uuid4()
+
+        await helpers.update_gear_usage_type_data(
+            5,
+            "GEAR_USAGE",
+            {
+                "items": [
+                    {"gear_item_id": str(added)},
+                    # A listed item is complete: its omitted checkout is cleared.
+                    {
+                        "gear_item_id": str(kept.gear_item_id),
+                        "checkin_date": "2024-01-02T18:00:00+00:00",
+                    },
+                ]
+            },
+            repo,
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.journal_id == 5
+        assert saved.items == (
+            GearUsageItem(gear_item_id=added),
+            GearUsageItem(
+                gear_item_id=kept.gear_item_id,
+                checkin_date=datetime(2024, 1, 2, 18, 0, tzinfo=UTC),
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_items_create_the_entry(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = None
+        gear_item_id = uuid4()
+
+        await helpers.update_gear_usage_type_data(
+            5, "GEAR_USAGE", {"items": [{"gear_item_id": str(gear_item_id)}]}, repo
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved == GearUsageData(
+            journal_id=5, items=(GearUsageItem(gear_item_id=gear_item_id),)
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_empty_list_empties_an_existing_entry(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5, items=(GearUsageItem(gear_item_id=uuid4()),)
+        )
+
+        await helpers.update_gear_usage_type_data(5, "GEAR_USAGE", {"items": []}, repo)
+
+        assert repo.save.await_args.args[0].items == ()
+
+    @pytest.mark.asyncio
+    async def test_a_new_entry_needs_a_gear_item(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = None
+
+        with pytest.raises(JournalValidationError) as caught:
+            await helpers.update_gear_usage_type_data(
+                5, "GEAR_USAGE", {"items": []}, repo
+            )
+
+        assert caught.value.field == "items"
+        repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mixing_the_list_with_a_single_item_is_refused(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = None
+
+        with pytest.raises(JournalValidationError) as caught:
+            await helpers.update_gear_usage_type_data(
+                5,
+                "GEAR_USAGE",
+                {
+                    "items": [{"gear_item_id": str(uuid4())}],
+                    "checkin_date": "2024-01-02T18:00:00+00:00",
+                },
+                repo,
+            )
+
+        assert caught.value.field == "items"
+
+    @pytest.mark.asyncio
+    async def test_a_bad_item_is_named_by_its_position(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = None
+
+        with pytest.raises(JournalValidationError) as caught:
+            await helpers.update_gear_usage_type_data(
+                5,
+                "GEAR_USAGE",
+                {
+                    "items": [
+                        {"gear_item_id": str(uuid4())},
+                        {
+                            "gear_item_id": str(uuid4()),
+                            "checkout_date": "2024-01-02T18:00:00+00:00",
+                            "checkin_date": "2024-01-01T18:00:00+00:00",
+                        },
+                    ]
+                },
+                repo,
+            )
+
+        assert caught.value.field == "items[1].checkin_date"
+
+    @pytest.mark.asyncio
+    async def test_a_gear_item_listed_twice_is_refused(self) -> None:
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = None
+        gear_item_id = str(uuid4())
+
+        with pytest.raises(JournalValidationError) as caught:
+            await helpers.update_gear_usage_type_data(
+                5,
+                "GEAR_USAGE",
+                {"items": [{"gear_item_id": gear_item_id}] * 2},
+                repo,
+            )
+
+        assert caught.value.field == "items"
 
 
 class TestUpdateAbseilingTypeData:

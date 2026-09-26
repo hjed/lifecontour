@@ -127,3 +127,156 @@ async def test_add_gear_usage_type_without_data_is_rejected(
     )
 
     assert response.status_code == 400
+
+
+@pytest.fixture
+async def more_gear_item_ids(
+    async_connection: AsyncConnection, test_user: SessionUser
+) -> list[str]:
+    ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    for gear_id, name in zip(ids, ("Harness", "Helmet"), strict=True):
+        await async_connection.execute(
+            text(
+                "INSERT INTO gear_items (id, user_id, name) VALUES (:id, :user_id, :name)"
+            ),
+            {"id": gear_id, "user_id": test_user.id, "name": name},
+        )
+    return ids
+
+
+async def _put_gear_usage(
+    client: object, journal_id: int, attributes: dict[str, object]
+) -> dict[str, object]:
+    response = await client.put(  # type: ignore[attr-defined]
+        f"/api/journals/{journal_id}/types/GEAR_USAGE/data",
+        json={"data": {"type": "journal-type-data", "attributes": attributes}},
+    )
+    assert response.status_code == 200, response.text
+    gear_usage: dict[str, object] = response.json()["data"]["attributes"]["type_data"][
+        "gear_usage"
+    ]
+    return gear_usage
+
+
+def _gear_ids(gear_usage: dict[str, object]) -> list[str]:
+    items = gear_usage["items"]
+    assert isinstance(items, list)
+    return [item["gear_item_id"] for item in items]
+
+
+async def _journal_updated_events(connection: AsyncConnection, journal_id: int) -> int:
+    result = await connection.execute(
+        text(
+            "SELECT count(*) FROM outbox_events "
+            "WHERE event_type = 'JournalUpdated' AND aggregate_id = :id"
+        ),
+        {"id": journal_id},
+    )
+    return int(result.scalar() or 0)
+
+
+@pytest.mark.asyncio
+async def test_a_journal_records_several_gear_items(
+    authenticated_client,
+    journal_id: int,
+    gear_item_id: str,
+    more_gear_item_ids: list[str],
+) -> None:
+    """Items are added, listed in order, and a second never replaces the first."""
+    harness, helmet = more_gear_item_ids
+    add = await authenticated_client.post(
+        f"/api/journals/{journal_id}/types",
+        json={
+            "data": {
+                "type": "journal-type",
+                "attributes": {
+                    "journal_type": "GEAR_USAGE",
+                    "type_data": {
+                        "items": [
+                            {"gear_item_id": gear_item_id},
+                            {
+                                "gear_item_id": harness,
+                                "checkout_date": "2024-01-14T20:00:00+00:00",
+                            },
+                        ]
+                    },
+                },
+            }
+        },
+    )
+    assert add.status_code == 200, add.text
+    gear_usage = add.json()["data"]["attributes"]["type_data"]["gear_usage"]
+    assert _gear_ids(gear_usage) == [gear_item_id, harness]
+    # The single-item fields still carry the first item for older readers.
+    assert gear_usage["gear_item_id"] == gear_item_id
+
+    # The older single-item form adds a third item and keeps the others.
+    gear_usage = await _put_gear_usage(
+        authenticated_client, journal_id, {"gear_item_id": helmet}
+    )
+    assert _gear_ids(gear_usage) == [gear_item_id, harness, helmet]
+
+    # The list replaces the whole set: leaving the harness out removes it.
+    gear_usage = await _put_gear_usage(
+        authenticated_client,
+        journal_id,
+        {"items": [{"gear_item_id": gear_item_id}, {"gear_item_id": helmet}]},
+    )
+    assert _gear_ids(gear_usage) == [gear_item_id, helmet]
+
+    fetched = await authenticated_client.get(f"/api/journals/{journal_id}")
+    items = fetched.json()["data"]["attributes"]["type_data"]["gear_usage"]["items"]
+    assert [item["gear_item_id"] for item in items] == [gear_item_id, helmet]
+
+
+@pytest.mark.asyncio
+async def test_adding_and_removing_the_type_tells_integrations(
+    authenticated_client,
+    async_connection: AsyncConnection,
+    journal_id: int,
+    gear_item_id: str,
+) -> None:
+    """Snipe-IT acts on JournalUpdated, so the type's add and remove publish it."""
+    before = await _journal_updated_events(async_connection, journal_id)
+
+    add = await authenticated_client.post(
+        f"/api/journals/{journal_id}/types",
+        json={
+            "data": {
+                "type": "journal-type",
+                "attributes": {
+                    "journal_type": "GEAR_USAGE",
+                    "type_data": {"items": [{"gear_item_id": gear_item_id}]},
+                },
+            }
+        },
+    )
+    assert add.status_code == 200, add.text
+    assert await _journal_updated_events(async_connection, journal_id) == before + 1
+
+    removed = await authenticated_client.delete(
+        f"/api/journals/{journal_id}/types/GEAR_USAGE"
+    )
+    assert removed.status_code in (200, 204), removed.text
+    assert await _journal_updated_events(async_connection, journal_id) == before + 2
+
+
+@pytest.mark.asyncio
+async def test_adding_the_type_with_no_gear_item_is_rejected(
+    authenticated_client,
+    journal_id: int,
+) -> None:
+    response = await authenticated_client.post(
+        f"/api/journals/{journal_id}/types",
+        json={
+            "data": {
+                "type": "journal-type",
+                "attributes": {
+                    "journal_type": "GEAR_USAGE",
+                    "type_data": {"items": []},
+                },
+            }
+        },
+    )
+
+    assert response.status_code == 400

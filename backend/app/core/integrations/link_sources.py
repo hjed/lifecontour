@@ -135,7 +135,8 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
         ),
     ),
     # 'snipeit' is how a gear-checkout journal's link is displayed: the id it
-    # carries is the Snipe-IT asset of the gear item on the journal.
+    # carries is the Snipe-IT asset of a gear item on the journal, one per
+    # (asset, journal) pair Snipe-IT has a checkout for.
     IntegrationSource.SNIPEIT: JournalLinkSource(
         name=IntegrationSource.SNIPEIT,
         description="Snipe-IT asset id of the gear checked out on the journal",
@@ -143,10 +144,12 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
             JournalLinkStore(
                 from_sql=(
                     f"{_SNIPEIT_JOURNAL_ROW} "
-                    "JOIN journal_gear_usage_data gud ON gud.journal_id = j.id "
+                    "JOIN journal_gear_usage_items gui ON gui.journal_id = j.id "
                     "JOIN sync_metadata m_asset "
-                    "ON m_asset.internal_uuid = CAST(gud.gear_item_id AS VARCHAR) "
-                    "AND m_asset.integration_source = 'snipeit'"
+                    "ON m_asset.internal_uuid = CAST(gui.gear_item_id AS VARCHAR) "
+                    "AND m_asset.integration_source = 'snipeit' "
+                    "AND m.external_id "
+                    "= 'snipeit_checkout:' || m_asset.external_id || ':' || m.internal_uuid"
                 ),
                 journal_id_sql="j.id",
                 external_id_sql="m_asset.external_id",

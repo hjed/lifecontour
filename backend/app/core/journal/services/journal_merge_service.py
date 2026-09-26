@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
+from app.core.journal.adapters.sql.gear_usage_data_repository import (
+    SqlGearUsageDataRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import _JOURNAL_TYPE_TABLE_MAP
 from app.core.journal.models.events import (
     JournalDeleted,
@@ -34,6 +37,7 @@ from app.infrastructure.unit_of_work import transactional
 logger = structlog.get_logger(__name__)
 
 FITNESS_TABLE = "journal_fitness_data"
+GEAR_USAGE_TABLE = "journal_gear_usage_data"
 
 STRAVA_SOURCE = "strava"
 STRAVA_ACTIVITY_ENTITY_TYPE = "activity"
@@ -651,6 +655,8 @@ class JournalMergeService:
             target_row = target_row_res.fetchone()
 
             if not target_row:
+                # A moved GEAR_USAGE entry takes its items along: their
+                # journal_id cascades on update.
                 await self._transfer_new_type_data(
                     table_name,
                     target_id,
@@ -659,6 +665,10 @@ class JournalMergeService:
                     overrides,
                     changed_fields,
                     transaction,
+                )
+            elif table_name == GEAR_USAGE_TABLE:
+                await self._merge_gear_usage_items(
+                    target_id, source_id, changed_fields, transaction
                 )
             else:
                 await self._merge_existing_type_data(
@@ -674,6 +684,32 @@ class JournalMergeService:
                     fitness_merge_mode,
                     transaction,
                 )
+
+    @staticmethod
+    async def _merge_gear_usage_items(
+        target_id: int,
+        source_id: int,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Keep every gear item either journal recorded on the target.
+
+        The target's own item wins for a gear item both list; the source's other
+        items follow the target's, in their order.
+        """
+        repo = SqlGearUsageDataRepository(transaction)
+        target = await repo.find_by_journal_id(target_id)
+        source = await repo.find_by_journal_id(source_id)
+        if target is None or source is None:
+            return
+        merged = target
+        for item in source.items:
+            if merged.item(item.gear_item_id) is None:
+                merged = merged.with_item(item)
+        if merged.items != target.items:
+            await repo.save(merged)
+            changed_fields[f"{GEAR_USAGE_TABLE}_updated"] = True
+        await repo.delete(source_id)
 
     @staticmethod
     def _combine_fitness_metrics(target_dict: Any, source_dict: Any) -> dict[str, Any]:

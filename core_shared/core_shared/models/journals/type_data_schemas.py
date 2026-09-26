@@ -578,41 +578,113 @@ class GearMaintenanceTypeData(TypeDataModel):
         return self
 
 
-class GearUsageTypeData(TypeDataModel):
-    """GEAR_USAGE."""
+def _refuse_inverted_window(
+    checkout: datetime | None, checkin: datetime | None
+) -> None:
+    """A usage window that ends before it begins, refused where it is named.
+
+    Checked only when the payload carries both ends: a patch setting one of
+    them cannot see the stored other, and the entity checks the merged item
+    regardless.
+    """
+    if checkout is None or checkin is None:
+        return
+    # The entity treats a naive datetime as UTC when comparing against an
+    # aware one; match that rather than raising on the mix.
+    if (checkout.tzinfo is None) != (checkin.tzinfo is None):
+        checkout = checkout.replace(tzinfo=checkout.tzinfo or UTC)
+        checkin = checkin.replace(tzinfo=checkin.tzinfo or UTC)
+    if checkout > checkin:
+        raise ValueError("checkin_date cannot be earlier than checkout_date")
+
+
+class GearUsageItemTypeData(TypeDataModel):
+    """One gear item used on a GEAR_USAGE journal."""
 
     gear_item_id: UUID = Field(description="UUID of the gear item being used")
     checkout_date: datetime | None = Field(
-        default=None, description="ISO datetime the item was checked out"
+        default=None,
+        description=(
+            "ISO datetime the item was checked out; null means the journal's start"
+        ),
     )
     checkin_date: datetime | None = Field(
         default=None,
         description=(
-            "ISO datetime the item was checked back in; cannot be earlier than "
-            "checkout_date"
+            "ISO datetime the item was checked back in; null means the journal's "
+            "end. Cannot be earlier than checkout_date"
         ),
     )
 
     @model_validator(mode="after")
-    def _checkin_cannot_precede_checkout(self) -> GearUsageTypeData:
-        """An interval that ends before it begins, refused where it is named.
+    def _checkin_cannot_precede_checkout(self) -> GearUsageItemTypeData:
+        _refuse_inverted_window(self.checkout_date, self.checkin_date)
+        return self
 
-        Checked only when the payload carries both ends: a patch setting one of
-        them cannot see the stored other, and GearUsageData checks the merged
-        row regardless.
+
+_LEGACY_GEAR_USAGE_FIELDS = ("gear_item_id", "checkout_date", "checkin_date")
+
+
+class GearUsageTypeData(TypeDataModel):
+    """GEAR_USAGE: the gear items used on the journal.
+
+    ``items`` is the whole list. The single-item fields are the older shape,
+    still accepted: they add or update one item without touching the others.
+    """
+
+    items: list[GearUsageItemTypeData] | None = Field(
+        default=None,
+        description=(
+            "Every gear item used, replacing the whole list: items left out are "
+            "removed. A gear item may appear once. Do not combine with "
+            "gear_item_id/checkout_date/checkin_date"
+        ),
+    )
+    gear_item_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Deprecated single-item form: adds this gear item, or updates its "
+            "dates if the journal already lists it; other items are kept"
+        ),
+    )
+    checkout_date: datetime | None = Field(
+        default=None,
+        description=(
+            "Deprecated single-item form: checkout of gear_item_id, or of the "
+            "journal's only item when gear_item_id is omitted"
+        ),
+    )
+    checkin_date: datetime | None = Field(
+        default=None,
+        description=(
+            "Deprecated single-item form: check-in of gear_item_id, or of the "
+            "journal's only item when gear_item_id is omitted; cannot be earlier "
+            "than checkout_date"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _one_shape_at_a_time(self) -> GearUsageTypeData:
+        """Refuse mixing the list with the single-item fields, and bad items.
+
+        The write helper applies the same rules (an update is validated without
+        this model's validators), so this is the early, well-named refusal.
         """
-        if self.checkout_date is None or self.checkin_date is None:
-            return self
-
-        checkout, checkin = self.checkout_date, self.checkin_date
-        # The entity treats a naive datetime as UTC when comparing against an
-        # aware one; match that rather than raising on the mix.
-        if (checkout.tzinfo is None) != (checkin.tzinfo is None):
-            checkout = checkout.replace(tzinfo=checkout.tzinfo or UTC)
-            checkin = checkin.replace(tzinfo=checkin.tzinfo or UTC)
-
-        if checkout > checkin:
-            raise ValueError("checkin_date cannot be earlier than checkout_date")
+        if self.items is not None:
+            mixed = [f for f in _LEGACY_GEAR_USAGE_FIELDS if f in self.model_fields_set]
+            if mixed:
+                raise ValueError(
+                    f"items cannot be combined with {', '.join(mixed)}; "
+                    "list every gear item in items instead"
+                )
+            seen: set[UUID] = set()
+            for item in self.items:
+                if item.gear_item_id in seen:
+                    raise ValueError(
+                        f"items lists gear item {item.gear_item_id} more than once"
+                    )
+                seen.add(item.gear_item_id)
+        _refuse_inverted_window(self.checkout_date, self.checkin_date)
         return self
 
 

@@ -184,16 +184,28 @@ async def checkout_journal_with_snipeit_links(
         ),
         {"journal_id": journal_id, "gear_item_id": str(gear_id)},
     )
+    await async_connection.execute(
+        text(
+            """
+            INSERT INTO journal_gear_usage_items (journal_id, gear_item_id)
+            VALUES (:journal_id, :gear_item_id)
+            """
+        ),
+        {"journal_id": journal_id, "gear_item_id": str(gear_id)},
+    )
 
-    # 6. Add Snipe-IT Checkout sync metadata for the journal
+    # 6. Add Snipe-IT Checkout sync metadata for the journal's (asset, journal) pair
     await async_connection.execute(
         text(
             """
             INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_checkout', '50', :journal_uuid, 'success', 'hash3', CURRENT_TIMESTAMP)
+            VALUES ('snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash3', CURRENT_TIMESTAMP)
             """
         ),
-        {"journal_uuid": str(journal_id)},
+        {
+            "journal_uuid": str(journal_id),
+            "external_id": f"snipeit_checkout:100:{journal_id}",
+        },
     )
     assert journal_id is not None
     return int(journal_id)
@@ -251,7 +263,7 @@ async def test_gear_item_returns_snipeit_asset_link(
     # Retrieve the gear_item_id associated with the checkout journal
     result = await async_connection.execute(
         text(
-            "SELECT gear_item_id FROM journal_gear_usage_data WHERE journal_id = :journal_id"
+            "SELECT gear_item_id FROM journal_gear_usage_items WHERE journal_id = :journal_id"
         ),
         {"journal_id": checkout_journal_with_snipeit_links},
     )
@@ -270,6 +282,66 @@ async def test_gear_item_returns_snipeit_asset_link(
     assert link["attributes"]["source"] == "snipeit"
     assert link["attributes"]["url"] == "https://snipeit.example.com/hardware/100"
     assert link["attributes"]["external_id"] == "100"
+
+
+@pytest.mark.asyncio
+async def test_each_checked_out_gear_item_links_its_asset(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    checkout_journal_with_snipeit_links: int,
+    test_user: SessionUser,
+) -> None:
+    """A journal using several items links each asset Snipe-IT checked out.
+
+    An item whose (asset, journal) pair has no checkout yet is not linked.
+    """
+    journal_id = checkout_journal_with_snipeit_links
+    for asset_id, checked_out in (("101", True), ("102", False)):
+        gear_id = str(uuid.uuid4())
+        await async_connection.execute(
+            text(
+                "INSERT INTO gear_items (id, user_id, name) VALUES (:id, :user_id, :name)"
+            ),
+            {"id": gear_id, "user_id": test_user.id, "name": f"Asset {asset_id}"},
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+                VALUES ('snipeit', :asset_id, :gear_id, 'success', 'hash', CURRENT_TIMESTAMP)
+                """
+            ),
+            {"asset_id": asset_id, "gear_id": gear_id},
+        )
+        await async_connection.execute(
+            text(
+                "INSERT INTO journal_gear_usage_items (journal_id, gear_item_id, position) "
+                "VALUES (:journal_id, :gear_id, :position)"
+            ),
+            {"journal_id": journal_id, "gear_id": gear_id, "position": int(asset_id)},
+        )
+        if checked_out:
+            await async_connection.execute(
+                text(
+                    """
+                    INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+                    VALUES ('snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash', CURRENT_TIMESTAMP)
+                    """
+                ),
+                {
+                    "external_id": f"snipeit_checkout:{asset_id}:{journal_id}",
+                    "journal_uuid": str(journal_id),
+                },
+            )
+
+    response = await authenticated_client.get(
+        f"/api/journals/{journal_id}/external-links"
+    )
+
+    assert response.status_code == 200
+    assert sorted(
+        link["attributes"]["external_id"] for link in response.json()["data"]
+    ) == ["100", "101"]
 
 
 async def _maintenance_external_ids(client: AsyncClient, journal_id: int) -> list[str]:

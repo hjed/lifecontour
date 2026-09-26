@@ -470,22 +470,35 @@ class GearMaintenanceDataSchema(BaseModel):
     )
 
 
-class GearUsageDataSchema(BaseModel):
-    """Gear usage data for GEAR_USAGE type journals."""
+class GearUsageItemSchema(BaseModel):
+    """One gear item used on a GEAR_USAGE journal."""
 
+    gear_item_id: str = Field(..., description="UUID of the gear item being used")
+    checkout_date: datetime | None = Field(
+        default=None, description="Optional checkout buffer date"
+    )
+    checkin_date: datetime | None = Field(
+        default=None, description="Optional checkin buffer date"
+    )
+
+
+class GearUsageDataSchema(BaseModel):
+    """Gear usage data for GEAR_USAGE type journals: every gear item used."""
+
+    items: list[GearUsageItemSchema] = Field(
+        default_factory=list, description="The gear items used, in order"
+    )
     gear_item_id: str | None = Field(
         default=None,
-        description=(
-            "UUID of the gear item being used; absent when the entry holds none"
-        ),
+        description="Deprecated: the first item's gear item; read items instead",
     )
     checkout_date: datetime | None = Field(
         default=None,
-        description="Optional checkout buffer date",
+        description="Deprecated: the first item's checkout; read items instead",
     )
     checkin_date: datetime | None = Field(
         default=None,
-        description="Optional checkin buffer date",
+        description="Deprecated: the first item's check-in; read items instead",
     )
 
 

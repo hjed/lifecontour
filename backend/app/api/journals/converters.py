@@ -62,6 +62,7 @@ from app.api.journals.schemas import (
     GearItemResource,
     GearMaintenanceDataSchema,
     GearUsageDataSchema,
+    GearUsageItemSchema,
     JoggingDataSchema,
     JournalAttributes,
     JournalContactRelationshipSchema,
@@ -622,14 +623,25 @@ class TypeDataConverter:
 
     @staticmethod
     def gear_usage_data_to_schema(data: GearUsageData) -> dict[str, Any]:
-        """Convert GearUsageData domain entity to API schema (its first item)."""
-        item = data.items[0] if data.items else None
-        if item is None:
-            return GearUsageDataSchema().model_dump(exclude_none=True)
+        """Convert GearUsageData domain entity to API schema.
+
+        The single-item fields repeat the first item for readers of the older
+        shape.
+        """
+        items = [
+            GearUsageItemSchema(
+                gear_item_id=str(item.gear_item_id),
+                checkout_date=item.checkout_date,
+                checkin_date=item.checkin_date,
+            )
+            for item in data.items
+        ]
+        first = items[0] if items else None
         return GearUsageDataSchema(
-            gear_item_id=str(item.gear_item_id),
-            checkout_date=item.checkout_date,
-            checkin_date=item.checkin_date,
+            items=items,
+            gear_item_id=first.gear_item_id if first else None,
+            checkout_date=first.checkout_date if first else None,
+            checkin_date=first.checkin_date if first else None,
         ).model_dump(exclude_none=True)
 
 

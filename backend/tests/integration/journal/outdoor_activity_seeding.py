@@ -228,11 +228,13 @@ class Seeder:
         end: datetime | None = None,
         checkout_date: datetime | None = None,
         checkin_date: datetime | None = None,
+        more_gear_item_ids: tuple[str, ...] = (),
     ) -> int:
-        """A GEAR_USAGE journal referencing ``gear_item_id``.
+        """A GEAR_USAGE journal using ``gear_item_id`` (and ``more_gear_item_ids``).
 
-        ``checkout_date``/``checkin_date`` are the optional buffer overrides;
-        when unset the checkout window resolves to the journal's event range.
+        ``checkout_date``/``checkin_date`` are the first item's optional buffer
+        overrides; when unset the checkout window resolves to the journal's event
+        range. The further items have no buffers.
         """
         journal_id = await self.create_journal(
             title=title, user_id=user_id, start=start, end=end
@@ -246,15 +248,21 @@ class Seeder:
                         checkout_date=checkout_date,
                         checkin_date=checkin_date,
                     ),
+                    *(GearUsageItem(gear_item_id=UUID(g)) for g in more_gear_item_ids),
                 ),
             )
         )
         return journal_id
 
     async def insert_snipeit_checkin(
-        self, journal_id: int, *, sync_status: str = "success"
+        self, journal_id: int, gear_item_id: str, *, sync_status: str = "success"
     ) -> None:
-        """A ``snipeit_checkin`` sync row, as the worker records a return."""
+        """A ``snipeit_checkin`` sync row, as the worker records a return.
+
+        The gear item is linked to a Snipe-IT asset first (if it is not yet),
+        since a check-in is keyed by the (asset, journal) pair it returns.
+        """
+        asset_id = await self._snipeit_asset_id(gear_item_id)
         await self.connection.execute(
             text(
                 """
@@ -269,10 +277,48 @@ class Seeder:
             ),
             {
                 "journal_id": str(journal_id),
-                "external_id": f"snipeit_checkin:{journal_id}",
+                "external_id": f"snipeit_checkin:{asset_id}:{journal_id}",
                 "sync_status": sync_status,
             },
         )
+
+    async def _snipeit_asset_id(self, gear_item_id: str) -> str:
+        """The Snipe-IT asset id linked to ``gear_item_id``, linking one if needed."""
+        existing = (
+            await self.connection.execute(
+                text(
+                    "SELECT external_id FROM sync_metadata "
+                    "WHERE integration_source = 'snipeit' AND internal_uuid = :id"
+                ),
+                {"id": gear_item_id},
+            )
+        ).scalar()
+        if existing is not None:
+            return str(existing)
+        count = (
+            await self.connection.execute(
+                text(
+                    "SELECT count(*) FROM sync_metadata "
+                    "WHERE integration_source = 'snipeit'"
+                )
+            )
+        ).scalar()
+        asset_id = str(9000 + int(count or 0))
+        await self.connection.execute(
+            text(
+                """
+                INSERT INTO sync_metadata
+                    (internal_uuid, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
+                     created_at, updated_at)
+                VALUES
+                    (:id, 'snipeit', :asset_id, now(), 'ASSET', 'success', 0,
+                     now(), now())
+                """
+            ),
+            {"id": gear_item_id, "asset_id": asset_id},
+        )
+        return asset_id
 
     async def create_template(
         self,
