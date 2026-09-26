@@ -632,7 +632,7 @@ class TypeDataConverter:
                     checkin_date=item.checkin_date,
                 )
                 for item in data.items
-            ]
+            ],
         ).model_dump(exclude_none=True)
 
 
