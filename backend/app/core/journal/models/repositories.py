@@ -874,7 +874,8 @@ class GearUsageDataRepository(ABC):
     """
     Repository interface for gear usage data (GEAR_USAGE type) operations.
 
-    A journal has the GEAR_USAGE type if a GearUsageData row exists for its journal_id.
+    A journal has the GEAR_USAGE type if a GearUsageData entry exists for its
+    journal_id, whether or not the entry holds any gear items.
     """
 
     @abstractmethod
@@ -886,16 +887,18 @@ class GearUsageDataRepository(ABC):
             journal_id: The journal ID to look up
 
         Returns:
-            The GearUsageData if found (journal has GEAR_USAGE type), None otherwise
+            The GearUsageData entry with its items in order if found (journal
+            has GEAR_USAGE type), None otherwise
         """
         pass
 
     @abstractmethod
     async def save(self, gear_usage_data: GearUsageData) -> GearUsageData:
         """
-        Save gear usage data (insert or update).
+        Save gear usage data (insert or update) with exactly its items.
 
-        This effectively adds or updates the GEAR_USAGE type for a journal.
+        This effectively adds or updates the GEAR_USAGE type for a journal. Items
+        the entry no longer lists are removed; the others keep ``created_at``.
 
         Args:
             gear_usage_data: The gear usage data to save

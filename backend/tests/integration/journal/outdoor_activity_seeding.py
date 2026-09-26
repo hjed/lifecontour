@@ -16,6 +16,7 @@ from core_shared.models.journals import (
     EventDateRange,
     GearItem,
     GearUsageData,
+    GearUsageItem,
     JoggingData,
     Journal,
     JournalContactRelationship,
@@ -239,9 +240,13 @@ class Seeder:
         await SqlGearUsageDataRepository(self.connection).save(
             GearUsageData(
                 journal_id=journal_id,
-                gear_item_id=UUID(gear_item_id),
-                checkout_date=checkout_date,
-                checkin_date=checkin_date,
+                items=(
+                    GearUsageItem(
+                        gear_item_id=UUID(gear_item_id),
+                        checkout_date=checkout_date,
+                        checkin_date=checkin_date,
+                    ),
+                ),
             )
         )
         return journal_id

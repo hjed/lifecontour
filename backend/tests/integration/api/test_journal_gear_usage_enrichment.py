@@ -66,6 +66,15 @@ async def test_get_journal_surfaces_existing_gear_usage(
         ),
         {"journal_id": journal_id, "gear_item_id": gear_item_id},
     )
+    await async_connection.execute(
+        text(
+            """
+            INSERT INTO journal_gear_usage_items (journal_id, gear_item_id)
+            VALUES (:journal_id, :gear_item_id)
+            """
+        ),
+        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+    )
 
     response = await authenticated_client.get(f"/api/journals/{journal_id}")
 

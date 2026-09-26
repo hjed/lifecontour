@@ -381,6 +381,24 @@ merge candidates — a different concept):
 - Introduced additively by migration `0098` (create/drop round-trip); not yet consumed by the review
   projection at this phase.
 
+#### Gear usage entries and their items (#1574)
+
+One `GEAR_USAGE` entry records **many** gear items, the way an `ABSEILING_TRIP` entry holds its
+pitches, so the gear used on a trip lives on the trip's own journal:
+
+- `journal_gear_usage_data` — the **entry**, `journal_id` pk. Its presence is what gives a journal the
+  `GEAR_USAGE` type, whether or not it holds any items.
+- `journal_gear_usage_items` — one row per item: pk `(journal_id, gear_item_id)` (a gear item appears
+  at most once per journal), `position` (the order the items were given in), optional
+  `checkout_date` / `checkin_date` buffers, timestamps. `journal_id` → the entry, `ON DELETE CASCADE`
+  and `ON UPDATE CASCADE` (a merge moves an entry by rewriting its `journal_id`); `gear_item_id` →
+  `gear_items.id`, `ON DELETE CASCADE` (deleting a gear item removes only its item).
+- **Transition (migration `0119`)**: every existing entry's gear item and dates were copied into one
+  item. The entry's own `gear_item_id` / `checkout_date` / `checkin_date` are kept for now as a
+  **mirror of its first item** (NULL when it holds none; the gear-item FK is `ON DELETE SET NULL`),
+  written by the repository on every save, so readers not yet moved to the items table keep working.
+  A later migration drops them.
+
 #### Gear checkout state — the "checked out" definition (ITER16-003)
 
 The outdoor dashboard's "gear currently checked out" widget derives checkout state from existing

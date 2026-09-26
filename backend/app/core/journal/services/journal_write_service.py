@@ -231,11 +231,6 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "activity_types",
         "retirement_reason",
     ),
-    JournalType.GEAR_USAGE: (
-        "gear_item_id",
-        "checkout_date",
-        "checkin_date",
-    ),
 }
 
 
@@ -281,6 +276,16 @@ _TYPE_DATA_COLLECTIONS: dict[JournalType, tuple[_CollectionSpec, ...]] = {
                 "did_setup",
                 "notes",
             ),
+        ),
+    ),
+    # Keyed by gear item, which is also a tracked field: adding or removing an
+    # item with no dates is still a change (and what tells Snipe-IT to act).
+    JournalType.GEAR_USAGE: (
+        _CollectionSpec(
+            field_name="items",
+            prefix="gear_usage:item",
+            key=lambda item: str(item.gear_item_id),
+            fields=("gear_item_id", "checkout_date", "checkin_date"),
         ),
     ),
 }
@@ -739,6 +744,9 @@ class JournalWriteService:
             return list(await self.plan_data_repo.get_documents(journal_id))
         if journal_type == JournalType.ABSEILING_TRIP and field_name == "pitches":
             return list(await self.abseil_pitch_repo.find_by_journal_id(journal_id))
+        if journal_type == JournalType.GEAR_USAGE and field_name == "items":
+            gear_usage = await self.gear_usage_data_repo.find_by_journal_id(journal_id)
+            return list(gear_usage.items) if gear_usage is not None else []
         return []
 
     async def _apply_type_data_update(
@@ -1551,20 +1559,26 @@ class JournalWriteService:
     async def _populated_tracked_fields(
         self, journal_type: JournalType, journal_id: int
     ) -> list[str]:
-        """Tracked fields of ``journal_type``'s row that currently hold a value."""
+        """Tracked fields and child collections of ``journal_type`` holding a value."""
+        populated: list[str] = []
         tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
         repo = self._type_data_repo(journal_type) if tracked else None
-        if repo is None:
-            return []
-        row = await repo.find_by_journal_id(journal_id)
-        if row is None:
-            return []
-        # None, "" and False are all "never set": boolean columns default to
-        # false, so reporting them would bury the fields that actually held data.
-        # Checked by identity for False so a real 0 (0 == False) is still reported.
-        return [
-            field for field in tracked if not _is_unpopulated(getattr(row, field, None))
-        ]
+        row = await repo.find_by_journal_id(journal_id) if repo is not None else None
+        if row is not None:
+            # None, "" and False are all "never set": boolean columns default to
+            # false, so reporting them would bury the fields that actually held
+            # data. Checked by identity for False so a real 0 is still reported.
+            populated.extend(
+                field
+                for field in tracked
+                if not _is_unpopulated(getattr(row, field, None))
+            )
+        for spec in _TYPE_DATA_COLLECTIONS.get(journal_type, ()):
+            if await self._load_collection_rows(
+                journal_type, spec.field_name, journal_id
+            ):
+                populated.append(spec.field_name)
+        return populated
 
     async def _replace_contact_relationships(
         self,

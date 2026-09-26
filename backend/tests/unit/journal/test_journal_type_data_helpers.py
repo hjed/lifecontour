@@ -20,7 +20,7 @@ from core_shared.models.journals import (
     JournalType,
     JournalValidationError,
 )
-from core_shared.models.journals.gear_usage_data import GearUsageData
+from core_shared.models.journals.gear_usage_data import GearUsageData, GearUsageItem
 
 from app.core.journal.services import journal_type_data_helpers as helpers
 
@@ -173,8 +173,12 @@ class TestUpdateGearUsageTypeData:
         saved = repo.save.await_args.args[0]
         assert isinstance(saved, GearUsageData)
         assert saved.journal_id == 5
-        assert saved.gear_item_id == gear_item_id
-        assert saved.checkout_date == datetime(2024, 1, 1, 8, 0, tzinfo=UTC)
+        assert saved.items == (
+            GearUsageItem(
+                gear_item_id=gear_item_id,
+                checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+            ),
+        )
 
     @pytest.mark.asyncio
     async def test_missing_gear_item_id_on_create_raises(self) -> None:
@@ -187,12 +191,17 @@ class TestUpdateGearUsageTypeData:
         repo.save.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_updates_existing_row(self) -> None:
+    async def test_updates_the_existing_items_dates(self) -> None:
         repo = AsyncMock()
+        gear_item_id = uuid4()
         existing = GearUsageData(
             journal_id=5,
-            gear_item_id=uuid4(),
-            checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+            items=(
+                GearUsageItem(
+                    gear_item_id=gear_item_id,
+                    checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+                ),
+            ),
         )
         repo.find_by_journal_id.return_value = existing
 
@@ -205,8 +214,40 @@ class TestUpdateGearUsageTypeData:
 
         repo.save.assert_awaited_once()
         saved = repo.save.await_args.args[0]
-        assert saved.gear_item_id == existing.gear_item_id
-        assert saved.checkin_date == datetime(2024, 1, 2, 18, 0, tzinfo=UTC)
+        assert saved.items == (
+            GearUsageItem(
+                gear_item_id=gear_item_id,
+                checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+                checkin_date=datetime(2024, 1, 2, 18, 0, tzinfo=UTC),
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_another_gear_item_replaces_the_item(self) -> None:
+        """A single-object payload names the entry's one gear item."""
+        repo = AsyncMock()
+        repo.find_by_journal_id.return_value = GearUsageData(
+            journal_id=5,
+            items=(
+                GearUsageItem(
+                    gear_item_id=uuid4(),
+                    checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+                ),
+            ),
+        )
+        replacement = uuid4()
+
+        await helpers.update_gear_usage_type_data(
+            5, "GEAR_USAGE", {"gear_item_id": str(replacement)}, repo
+        )
+
+        saved = repo.save.await_args.args[0]
+        assert saved.items == (
+            GearUsageItem(
+                gear_item_id=replacement,
+                checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+            ),
+        )
 
 
 class TestUpdateAbseilingTypeData:

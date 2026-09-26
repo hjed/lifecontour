@@ -473,9 +473,11 @@ class GearMaintenanceDataSchema(BaseModel):
 class GearUsageDataSchema(BaseModel):
     """Gear usage data for GEAR_USAGE type journals."""
 
-    gear_item_id: str = Field(
-        ...,
-        description="UUID of the gear item being used",
+    gear_item_id: str | None = Field(
+        default=None,
+        description=(
+            "UUID of the gear item being used; absent when the entry holds none"
+        ),
     )
     checkout_date: datetime | None = Field(
         default=None,

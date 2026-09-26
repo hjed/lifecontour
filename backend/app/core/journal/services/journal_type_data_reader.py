@@ -256,16 +256,15 @@ def _build_gear_maintenance_data(gear_maint_data: Any) -> dict[str, Any]:
 
 
 def _build_gear_usage_data(gear_usage_data: Any) -> dict[str, Any]:
-    """Build gear usage data dictionary."""
+    """Build gear usage data dictionary from the entry's first gear item."""
+    item = gear_usage_data.items[0] if gear_usage_data.items else None
     return {
-        "gear_item_id": str(gear_usage_data.gear_item_id)
-        if gear_usage_data.gear_item_id
+        "gear_item_id": str(item.gear_item_id) if item else None,
+        "checkout_date": item.checkout_date.isoformat()
+        if item and item.checkout_date
         else None,
-        "checkout_date": gear_usage_data.checkout_date.isoformat()
-        if gear_usage_data.checkout_date
-        else None,
-        "checkin_date": gear_usage_data.checkin_date.isoformat()
-        if gear_usage_data.checkin_date
+        "checkin_date": item.checkin_date.isoformat()
+        if item and item.checkin_date
         else None,
     }
 

@@ -120,7 +120,7 @@ from .fitness_data import FitnessData
 from .fitness_merge_mode import FitnessMergeMode
 from .gear_item import GearItem
 from .gear_maintenance_data import GearMaintenanceData
-from .gear_usage_data import GearUsageData
+from .gear_usage_data import GearUsageData, GearUsageItem
 from .incomplete_outdoor_activity import (
     SUBTYPE_FACTS_FIELDS,
     IncompletenessReason,
@@ -267,6 +267,7 @@ __all__ = [
     "GearItem",
     "GearMaintenanceData",
     "GearUsageData",
+    "GearUsageItem",
     "ActivityTemplate",
     "TemplatePitch",
     "CanoeingData",

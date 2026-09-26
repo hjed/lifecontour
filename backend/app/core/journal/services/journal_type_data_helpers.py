@@ -1009,14 +1009,18 @@ async def update_gear_usage_type_data(
 ) -> None:
     """Update or create GEAR_USAGE type-specific data.
 
-    Mirrors the behaviour previously inlined in the MCP ``update_journal_entry``
-    tool: ``gear_item_id`` is required to create a new row, and the
-    ``checkout_date`` / ``checkin_date`` ISO strings are parsed to ``datetime``.
+    ``attrs`` describes the entry's gear item: ``gear_item_id`` is required to
+    create the entry and, when given, names the item (replacing the one there);
+    the ``checkout_date`` / ``checkin_date`` ISO strings patch that item's dates.
     """
     from core_shared.models.journals.exceptions import GearUsageDataValidationError
-    from core_shared.models.journals.gear_usage_data import GearUsageData
+    from core_shared.models.journals.gear_usage_data import (
+        GearUsageData,
+        GearUsageItem,
+    )
 
     data = await gear_usage_data_repo.find_by_journal_id(journal_id)
+    current = data.items[0] if data is not None and data.items else None
 
     updates: dict[str, Any] = {}
     if "gear_item_id" in attrs and attrs["gear_item_id"]:
@@ -1029,7 +1033,7 @@ async def update_gear_usage_type_data(
             raise JournalValidationError(
                 "gear_item_id", "Must be a valid UUID"
             ) from None
-    elif not data:
+    elif current is None:
         raise JournalValidationError("gear_item_id", "Required")
 
     if "checkout_date" in attrs:
@@ -1042,11 +1046,23 @@ async def update_gear_usage_type_data(
         )
 
     try:
-        if data:
-            new_data = dataclasses.replace(data, **updates)
+        if current is not None:
+            item = dataclasses.replace(
+                current, created_at=None, updated_at=None, **updates
+            )
         else:
-            new_data = GearUsageData(journal_id=journal_id, **updates)
-        await gear_usage_data_repo.save(new_data)
+            item = GearUsageItem(**updates)
+        entry = data if data is not None else GearUsageData(journal_id=journal_id)
+        if current is not None:
+            entry = entry.without_item(current.gear_item_id)
+        entry = dataclasses.replace(
+            entry,
+            items=(
+                item,
+                *(i for i in entry.items if i.gear_item_id != item.gear_item_id),
+            ),
+        )
+        await gear_usage_data_repo.save(entry)
     except GearUsageDataValidationError as e:
         raw_msg = str(e)
         prefix = f"{e.field}: "

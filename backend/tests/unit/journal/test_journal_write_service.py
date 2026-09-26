@@ -29,7 +29,7 @@ from core_shared.models.journals import (
     OutdoorActivityDataValidationError,
 )
 from core_shared.models.journals.constants import MAX_ROLE_LENGTH
-from core_shared.models.journals.gear_usage_data import GearUsageData
+from core_shared.models.journals.gear_usage_data import GearUsageData, GearUsageItem
 
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -318,12 +318,27 @@ class TestUpdateTypeData:
         Regression guard: the single-field type-data endpoint must dispatch
         GEAR_USAGE rather than rejecting it with "no type-specific data".
         """
+        gear_item_id = uuid4()
+        checkout = datetime(2024, 1, 1, 8, 0, tzinfo=UTC)
         existing = GearUsageData(
             journal_id=7,
-            gear_item_id=uuid4(),
-            checkout_date=datetime(2024, 1, 1, 8, 0, tzinfo=UTC),
+            items=(GearUsageItem(gear_item_id=gear_item_id, checkout_date=checkout),),
         )
-        write_service.gear_usage_data_repo.find_by_journal_id.return_value = existing
+        saved = GearUsageData(
+            journal_id=7,
+            items=(
+                GearUsageItem(
+                    gear_item_id=gear_item_id,
+                    checkout_date=checkout,
+                    checkin_date=datetime(2024, 1, 2, 18, 0, tzinfo=UTC),
+                ),
+            ),
+        )
+        write_service.gear_usage_data_repo.find_by_journal_id.side_effect = [
+            existing,  # history snapshot before
+            existing,  # the helper's read
+            saved,  # history snapshot after
+        ]
 
         await write_service.update_type_data(
             7,
@@ -333,6 +348,40 @@ class TestUpdateTypeData:
         )
 
         write_service.gear_usage_data_repo.save.assert_awaited_once()
+        write_service.event_publisher.publish.assert_awaited_once()
+        event = write_service.event_publisher.publish.await_args.args[0]
+        assert event.event_data["changed_fields"] == {
+            f"gear_usage:item:{gear_item_id}:checkin_date": (
+                None,
+                "2024-01-02T18:00:00+00:00",
+            )
+        }
+
+    @pytest.mark.asyncio
+    async def test_adding_an_undated_gear_item_is_recorded(
+        self, write_service, mock_transaction
+    ):
+        """An item with no dates still changes the entry: its gear item is diffed."""
+        gear_item_id = uuid4()
+        write_service.gear_usage_data_repo.find_by_journal_id.side_effect = [
+            GearUsageData(journal_id=7),
+            GearUsageData(journal_id=7),
+            GearUsageData(
+                journal_id=7, items=(GearUsageItem(gear_item_id=gear_item_id),)
+            ),
+        ]
+
+        await write_service.update_type_data(
+            7,
+            JournalType.GEAR_USAGE,
+            {"gear_item_id": str(gear_item_id)},
+            mock_transaction,
+        )
+
+        event = write_service.event_publisher.publish.await_args.args[0]
+        assert event.event_data["changed_fields"] == {
+            f"gear_usage:item:{gear_item_id}:gear_item_id": (None, str(gear_item_id))
+        }
 
 
 class TestCreateJournalTags:
@@ -451,7 +500,7 @@ class TestCreateJournalGearUsage:
 
         write_service.gear_usage_data_repo.save.assert_awaited_once()
         saved = write_service.gear_usage_data_repo.save.await_args.args[0]
-        assert saved.gear_item_id == gear_item_id
+        assert [item.gear_item_id for item in saved.items] == [gear_item_id]
 
 
 class TestUpdateJournalComposite:
@@ -587,6 +636,30 @@ class TestUpdateJournalComposite:
         }
         write_service.fitness_data_repo.delete.assert_awaited_once_with(9)
         write_service.mood_data_repo.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_types_replace_reports_discarded_gear_items(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """Dropping GEAR_USAGE names the items it held rather than nothing."""
+        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        write_service._get_current_types = AsyncMock(
+            return_value={JournalType.GEAR_USAGE, JournalType.MOOD_RATING}
+        )
+        write_service.gear_usage_data_repo.find_by_journal_id.return_value = (
+            GearUsageData(journal_id=9, items=(GearUsageItem(gear_item_id=uuid4()),))
+        )
+        write_service.mood_data_repo.find_by_journal_id.return_value = MagicMock(
+            mood_value=None, mood_label=None, energy_level=None
+        )
+
+        result = await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+        )
+
+        assert result.types_removed == ["gear_usage"]
+        assert result.type_data_discarded == {"gear_usage": ["items"]}
+        write_service.gear_usage_data_repo.delete.assert_awaited_once_with(9)
 
     @pytest.mark.asyncio
     async def test_tags_replace_all(
