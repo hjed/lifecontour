@@ -90,6 +90,16 @@ The hook `rev` and `GITLEAKS_VERSION` in `ci.yml` pin the same version (the audi
 v8.30.1). Change both together; `core_shared/tests/unit/test_secret_scan.py` fails if
 they differ.
 
+**Running the gitleaks tests locally.** The `gitleaks`-marked integration tests need the
+binary on `PATH` (or in `GITLEAKS_BIN`):
+
+```bash
+v=8.30.1  # GITLEAKS_VERSION in ci.yml; check the archive against GITLEAKS_SHA256
+curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v$v/gitleaks_${v}_linux_x64.tar.gz" \
+  | tar -xz -C ~/.local/bin gitleaks
+cd core_shared && uv run pytest -m gitleaks
+```
+
 **When gitleaks flags something:**
 
 1. **A real credential:** don't allowlist it. Remove it, and if it was ever committed,

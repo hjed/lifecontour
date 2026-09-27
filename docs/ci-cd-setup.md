@@ -92,6 +92,9 @@ verified against `GITLEAKS_SHA256`) and runs `scripts/secret_scan.py` over a
 
 - It has no path filter and `needs: changes`, so it runs on every in-gate event and
   skips on upper stack layers like every other job.
+- Before scanning, it runs the `gitleaks`-marked integration tests
+  (`core_shared/tests/integration/test_secret_scan_gitleaks.py`), which prove the committed
+  config still catches a fake AWS key, including in allowlisted files.
 - Output is redacted because Actions logs are public: a finding shows its rule, file,
   line and commit, never the value.
 - It uses the CLI rather than `gitleaks-action`, so it needs no `GITHUB_TOKEN` or other

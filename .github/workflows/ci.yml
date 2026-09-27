@@ -352,6 +352,18 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Test the guardrail against the committed config
+        working-directory: ./core_shared
+        run: |
+          uv venv
+          uv pip install -e .[dev]
+          uv run pytest -m gitleaks tests/integration/test_secret_scan_gitleaks.py
+
       - name: Scan the event's commits
         run: python3 scripts/secret_scan.py
 
@@ -393,7 +405,8 @@ jobs:
           uv pip install -e .[dev]
 
       - name: Run unit tests
-        run: uv run pytest --cov=core_shared --cov-report=xml --cov-report=term-missing
+        # The gitleaks tests need the binary; they run in secret-scan.
+        run: uv run pytest -m "not gitleaks" --cov=core_shared --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

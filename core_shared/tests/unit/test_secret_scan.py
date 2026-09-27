@@ -4,7 +4,8 @@ The CI ``secret-scan`` job runs the script, which picks the commit range to
 scan from the GitHub event and hands it to gitleaks. The range rules are the
 part that fails silently (a wrong range scans nothing and passes), so they are
 tested here with an injected fake command runner; no git or gitleaks binary is
-involved.
+involved. The real binary is exercised by
+``tests/integration/test_secret_scan_gitleaks.py``.
 
 Like ``test_teardown_workspace.py`` this reaches out of ``core_shared`` to
 repo-root files; the script is loaded by path because ``scripts/`` is not an
