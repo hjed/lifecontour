@@ -125,11 +125,38 @@ around a shared centre are not.
 
 ## App icons
 
-The app's `icon.svg`, `favicon.ico` and `apple-icon.png` are generated from `mark.svg` and
-`mark-dark.svg`. The generation commands are recorded here when the app icons are added.
+The app's icons live in `frontend/src/app/`, where the Next.js metadata file conventions emit their
+`<link>` tags:
 
-- `apple-icon.png` is padded by the clear-space rule (one quarter of the mark's width) on a light
-  background.
+| File | Source | Notes |
+|---|---|---|
+| `icon.svg` | `mark.svg` + `mark-dark.svg` | The tab icon. Follows `prefers-color-scheme`. |
+| `favicon.ico` | `mark.svg` | 16 and 32px. The fallback for clients without SVG icons, so light only. |
+| `apple-icon.png` | `mark.svg` | 180px on white, padded by the clear-space rule (a 120px mark, 30px each side). |
+
+- `icon.svg` is assembled by hand: `mark.svg` without its `<desc>`, with the `mark-dark.svg`
+  colours added to its `<style>` block inside `@media (prefers-color-scheme: dark)`. If either
+  source file changes, update it to match.
+- Regenerate the raster icons from the repository root with
+  [Inkscape](https://inkscape.org/) and [ImageMagick 7](https://imagemagick.org/):
+
+  ```bash
+  tmp=$(mktemp -d)
+  for size in 16 32 120; do
+    inkscape branding/mark.svg --export-type=png --export-width=$size \
+      --export-filename="$tmp/mark-$size.png"
+  done
+  magick "$tmp/mark-16.png" "$tmp/mark-32.png" frontend/src/app/favicon.ico
+  magick "$tmp/mark-120.png" -background '#FFFFFF' -gravity center -extent 180x180 \
+    -alpha remove -alpha off -strip -define png:exclude-chunks=date,time \
+    frontend/src/app/apple-icon.png
+  ```
+
+  Inkscape does the rasterising, so the output does not depend on which SVG renderer ImageMagick
+  was built with.
+- Production nginx caches `.ico`, `.svg` and `.png` for a year. `icon.svg` and `apple-icon.png`
+  are linked with a content hash, so a change reaches browsers at once, but a browser that asks for
+  `/favicon.ico` on its own can keep the old one until its cache expires.
 
 ## Trademark
 
