@@ -28,6 +28,11 @@ export interface ContactMethodAttributes {
   value: string;
   label?: string;
   is_primary: boolean;
+  /**
+   * No longer in use, but kept for matching and reference. Never primary and
+   * never synced to a provider. Absent means in use.
+   */
+  is_archived?: boolean;
 }
 
 export interface ContactMethodResource extends Omit<
@@ -47,6 +52,8 @@ export interface ContactAddressAttributes {
   postal_code?: string;
   country_code: string;
   is_primary: boolean;
+  /** See {@link ContactMethodAttributes.is_archived}. */
+  is_archived?: boolean;
 }
 
 export interface ContactAddressResource extends Omit<

@@ -106,6 +106,12 @@ function formatActivityDescription(
   // Format entity type for display
   const entityLabel = entityType.replace(/_/g, ' ').replace('contact ', '');
 
+  // A flag reads as what happened to the value, not as a True/False change.
+  if (fieldName === 'is_archived') {
+    const archived = newValue?.toLowerCase() === 'true';
+    return `${archived ? 'Archived' : 'Restored'} ${entityLabel}`;
+  }
+
   switch (activityType) {
     case 'created':
       return `Added ${formattedField}: "${newValue}"`;

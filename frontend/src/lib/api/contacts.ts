@@ -779,7 +779,7 @@ export async function updateContactMethodField(
   contactId: string,
   methodId: string,
   fieldName: string,
-  value: string
+  value: string | boolean
 ): Promise<void> {
   const requestData = {
     type: 'contact_method_fields',
@@ -810,7 +810,7 @@ export async function updateContactAddressField(
   contactId: string,
   addressId: string,
   fieldName: string,
-  value: string
+  value: string | boolean
 ): Promise<void> {
   const requestData = {
     type: 'contact_address_fields',
@@ -1038,6 +1038,48 @@ export function useDeleteContactAddress() {
         { queryKey: contactKeys.lists() }
       );
       toast.success('Contact address deleted successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/** Which of a contact's value lists an archive or restore applies to. */
+export type ContactValueKind = 'method' | 'address';
+
+/**
+ * Archive or restore one of a contact's emails, phones or addresses.
+ *
+ * Archiving the primary value also makes it no longer primary; the server
+ * does that, so the contact is refetched rather than patched in the cache.
+ */
+export function useSetContactValueArchived() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      contactId,
+      kind,
+      id,
+      archived,
+    }: {
+      contactId: string;
+      kind: ContactValueKind;
+      id: string;
+      archived: boolean;
+    }) =>
+      kind === 'method'
+        ? updateContactMethodField(contactId, id, 'is_archived', archived)
+        : updateContactAddressField(contactId, id, 'is_archived', archived),
+    onSuccess: (_, { contactId, archived }) => {
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: contactKeys.detail(contactId) },
+        { queryKey: contactKeys.lists() },
+        { queryKey: historyKeys.all }
+      );
+      toast.success(archived ? 'Archived' : 'Restored');
     },
     onError: (error: Error) => {
       toast.error(error.message);

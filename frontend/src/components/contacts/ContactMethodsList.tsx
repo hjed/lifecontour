@@ -5,13 +5,14 @@
  * - Edit individual method fields inline
  * - Add new methods
  * - Remove existing methods
+ * - Archive methods no longer in use, and restore them
  * - Manage primary designation constraints
  */
 
 'use client';
 
 import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -35,11 +36,14 @@ import {
 import { InlineEditEmailField } from './InlineEditEmailField';
 import { InlineEditPhoneField } from './InlineEditPhoneField';
 import { InlineEditField } from './InlineEditField';
+import { ArchivedValuesSection } from './ArchivedValuesSection';
 import {
   useAddContactMethod,
   useDeleteContactMethod,
+  useSetContactValueArchived,
   updateContactMethodField,
 } from '@/lib/api/contacts';
+import { partitionArchived } from '@/lib/archived-values';
 import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
 
 export interface ContactMethodsListProps {
@@ -77,6 +81,22 @@ export function ContactMethodsList({
 
   const addMethodMutation = useAddContactMethod();
   const deleteMethodMutation = useDeleteContactMethod();
+  const archiveMutation = useSetContactValueArchived();
+  const [inUse, archived] = partitionArchived(methods);
+
+  const setArchived = async (methodId: string, isArchived: boolean) => {
+    try {
+      await archiveMutation.mutateAsync({
+        contactId,
+        kind: 'method',
+        id: methodId,
+        archived: isArchived,
+      });
+    } catch (error) {
+      // Error handling is done by the mutation hook
+      console.error('Failed to archive method:', error);
+    }
+  };
 
   const resetAddForm = () => {
     setNewMethodType(ContactMethodType.EMAIL);
@@ -201,13 +221,26 @@ export function ContactMethodsList({
         </Button>
       </CardHeader>
       <CardContent className='space-y-3'>
-        {methods.map(method => (
+        {inUse.map(method => (
           <div
             key={method.id}
             className='flex items-center justify-between space-x-3 rounded-md border p-2'
             data-testid={`contact-method-${method.id}`}
           >
             <div className='min-w-0 flex-1'>{renderMethodField(method)}</div>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setArchived(method.id?.toString() || '', true)}
+              disabled={disabled || archiveMutation.isPending}
+              aria-label={`Archive ${method.attributes.value}`}
+              title='Archive: no longer in use, kept for reference'
+            >
+              <Archive
+                className='text-muted-foreground h-4 w-4'
+                aria-hidden='true'
+              />
+            </Button>
             <Button
               variant='ghost'
               size='sm'
@@ -220,9 +253,11 @@ export function ContactMethodsList({
           </div>
         ))}
 
-        {methods.length === 0 && !isAddingMethod && (
+        {inUse.length === 0 && !isAddingMethod && (
           <p className='text-muted-foreground py-4 text-center text-sm'>
-            No contact methods yet. Click the + button to add one.
+            {archived.length > 0
+              ? 'No contact methods in use.'
+              : 'No contact methods yet. Click the + button to add one.'}
           </p>
         )}
 
@@ -317,6 +352,51 @@ export function ContactMethodsList({
             </div>
           </div>
         )}
+
+        <ArchivedValuesSection
+          noun='contact methods'
+          count={archived.length}
+          data-testid='archived-contact-methods'
+        >
+          {archived.map(method => (
+            <div
+              key={method.id}
+              className='flex items-center justify-between space-x-3 rounded-md border border-dashed p-2'
+              data-testid={`archived-contact-method-${method.id}`}
+            >
+              {/* The same editor as a method in use, so an archived value can
+                  be corrected without restoring it (and so syncing it) first. */}
+              <div className='text-muted-foreground min-w-0 flex-1'>
+                {renderMethodField(method)}
+                {method.attributes.label && (
+                  <p className='px-1 text-xs'>{method.attributes.label}</p>
+                )}
+              </div>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => setArchived(method.id?.toString() || '', false)}
+                disabled={disabled || archiveMutation.isPending}
+                aria-label={`Restore ${method.attributes.value}`}
+                title='Restore: back in use'
+              >
+                <ArchiveRestore className='h-4 w-4' aria-hidden='true' />
+              </Button>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => handleDeleteClick(method.id?.toString() || '')}
+                disabled={disabled || deleteMethodMutation.isPending}
+                aria-label={`Delete ${method.attributes.method_type}`}
+              >
+                <Trash2
+                  className='text-destructive h-4 w-4'
+                  aria-hidden='true'
+                />
+              </Button>
+            </div>
+          ))}
+        </ArchivedValuesSection>
       </CardContent>
 
       {/* Delete Confirmation Dialog */}

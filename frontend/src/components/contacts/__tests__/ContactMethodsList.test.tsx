@@ -2,7 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactMethodsList } from '../ContactMethodsList';
 import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
@@ -12,6 +19,7 @@ import * as contactsApi from '@/lib/api/contacts';
 jest.mock('@/lib/api/contacts', () => ({
   useAddContactMethod: jest.fn(),
   useDeleteContactMethod: jest.fn(),
+  useSetContactValueArchived: jest.fn(),
   updateContactMethodField: jest.fn(),
 }));
 
@@ -64,9 +72,15 @@ describe('ContactMethodsList', () => {
   const mockAddMethod = jest.fn();
   const mockDeleteMethod = jest.fn();
   const mockUpdateField = jest.fn();
+  const mockSetArchived = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    (contactsApi.useSetContactValueArchived as jest.Mock).mockReturnValue({
+      mutateAsync: mockSetArchived,
+      isPending: false,
+    });
 
     (contactsApi.useAddContactMethod as jest.Mock).mockReturnValue({
       mutateAsync: mockAddMethod,
@@ -184,6 +198,164 @@ describe('ContactMethodsList', () => {
     expect(addButton).toBeDisabled();
     deleteButtons.forEach(button => {
       expect(button).toBeDisabled();
+    });
+  });
+
+  describe('archived methods', () => {
+    const withArchived: readonly ContactMethodResource[] = [
+      ...mockMethods,
+      {
+        id: '3',
+        type: 'contact_methods',
+        attributes: {
+          method_type: ContactMethodType.EMAIL,
+          value: 'old@example.com',
+          label: 'School',
+          is_primary: false,
+          is_archived: true,
+        },
+      },
+    ];
+
+    it('keeps archived methods behind a collapsed section', () => {
+      render(<ContactMethodsList contactId='123' methods={withArchived} />, {
+        wrapper: createWrapper(),
+      });
+
+      const trigger = screen.getByRole('button', {
+        name: 'Archived contact methods (1)',
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('old@example.com')).not.toBeInTheDocument();
+
+      fireEvent.click(trigger);
+
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('old@example.com')).toBeInTheDocument();
+      expect(screen.getByText('School')).toBeInTheDocument();
+    });
+
+    it('has no archived section when nothing is archived', () => {
+      render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+        wrapper: createWrapper(),
+      });
+
+      expect(
+        screen.queryByRole('button', { name: /Archived contact methods/ })
+      ).not.toBeInTheDocument();
+    });
+
+    it('archives an active method', async () => {
+      render(<ContactMethodsList contactId='123' methods={withArchived} />, {
+        wrapper: createWrapper(),
+      });
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archive john@example.com' })
+      );
+
+      await waitFor(() => {
+        expect(mockSetArchived).toHaveBeenCalledWith({
+          contactId: '123',
+          kind: 'method',
+          id: '1',
+          archived: true,
+        });
+      });
+    });
+
+    it('restores an archived method', async () => {
+      render(<ContactMethodsList contactId='123' methods={withArchived} />, {
+        wrapper: createWrapper(),
+      });
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived contact methods (1)' })
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Restore old@example.com' })
+      );
+
+      await waitFor(() => {
+        expect(mockSetArchived).toHaveBeenCalledWith({
+          contactId: '123',
+          kind: 'method',
+          id: '3',
+          archived: false,
+        });
+      });
+    });
+
+    it('edits an archived method in place, without restoring it', async () => {
+      const user = userEvent.setup();
+      render(<ContactMethodsList contactId='123' methods={withArchived} />, {
+        wrapper: createWrapper(),
+      });
+
+      await user.click(
+        screen.getByRole('button', { name: 'Archived contact methods (1)' })
+      );
+      const row = screen.getByTestId('archived-contact-method-3');
+      await user.click(
+        within(row).getByRole('button', { name: 'Email address (School)' })
+      );
+      const input = within(row).getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, 'older@example.com');
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => {
+        expect(mockUpdateField).toHaveBeenCalledWith(
+          '123',
+          '3',
+          'value',
+          'older@example.com'
+        );
+      });
+      expect(mockSetArchived).not.toHaveBeenCalled();
+    });
+
+    it('formats an archived phone like one in use', () => {
+      render(
+        <ContactMethodsList
+          contactId='123'
+          methods={[
+            {
+              id: '4',
+              type: 'contact_methods',
+              attributes: {
+                method_type: ContactMethodType.PHONE,
+                value: '+61-2-9999-0000',
+                is_primary: false,
+                is_archived: true,
+              },
+            },
+          ]}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Archived contact methods (1)' })
+      );
+
+      expect(
+        within(screen.getByTestId('archived-contact-method-4')).getByRole(
+          'button',
+          { name: 'Phone number' }
+        )
+      ).toHaveTextContent('+61 2 9999 0000');
+    });
+
+    it('says nothing is in use when every method is archived', () => {
+      render(
+        <ContactMethodsList contactId='123' methods={withArchived.slice(2)} />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(
+        screen.getByText('No contact methods in use.')
+      ).toBeInTheDocument();
     });
   });
 });

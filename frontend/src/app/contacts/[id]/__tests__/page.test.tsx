@@ -65,6 +65,10 @@ jest.mock('@/lib/api/contacts', () => ({
     mutateAsync: jest.fn(),
     isPending: false,
   })),
+  useSetContactValueArchived: jest.fn(() => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  })),
   useAddContactImportantDate: jest.fn(() => ({
     mutateAsync: jest.fn(),
     isPending: false,

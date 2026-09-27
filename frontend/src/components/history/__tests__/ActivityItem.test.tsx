@@ -338,6 +338,28 @@ describe('getActivityType', () => {
 });
 
 describe('formatActivityDescription', () => {
+  it('describes archiving a value', () => {
+    expect(
+      formatActivityDescription(
+        'is_archived',
+        'False',
+        'True',
+        'contact_method'
+      )
+    ).toBe('Archived method');
+  });
+
+  it('describes restoring a value', () => {
+    expect(
+      formatActivityDescription(
+        'is_archived',
+        'True',
+        'False',
+        'contact_address'
+      )
+    ).toBe('Restored address');
+  });
+
   it('formats update description', () => {
     const result = formatActivityDescription(
       'first_name',
