@@ -87,6 +87,22 @@ class TestUpdatesArePatches:
             journal_type: attrs
         }
 
+    def test_a_gear_usage_update_may_replace_the_items(self) -> None:
+        items = [{"gear_item_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"}]
+
+        assert validate_type_data({"GEAR_USAGE": {"items": items}}, partial=True) == {
+            "GEAR_USAGE": {"items": items}
+        }
+
+    def test_a_bad_gear_usage_item_is_refused_on_an_update(self) -> None:
+        with pytest.raises(JournalValidationError) as caught:
+            validate_type_data(
+                {"GEAR_USAGE": {"items": [{"gear_item_id": "not-a-uuid"}]}},
+                partial=True,
+            )
+
+        assert "gear_item_id" in caught.value.message
+
     def test_creation_still_demands_its_required_fields(self) -> None:
         """The create path builds the row, so it must carry them."""
         with pytest.raises(JournalValidationError) as caught:

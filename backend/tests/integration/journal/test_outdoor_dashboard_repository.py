@@ -443,7 +443,7 @@ class TestGearCheckoutFacts:
             start=now - timedelta(days=1),
             end=now + timedelta(days=1),
         )
-        await seeder.insert_snipeit_checkin(returned_id)
+        await seeder.insert_snipeit_checkin(returned_id, gear_id)
 
         result = await dashboard_repository.list_gear_checkout_facts(
             USER_ID, ending_after=now
@@ -451,6 +451,33 @@ class TestGearCheckoutFacts:
 
         assert len(result) == 1
         assert result[0].snipeit_checked_in
+
+    async def test_each_gear_item_on_a_journal_is_listed(
+        self,
+        seeder: Seeder,
+        dashboard_repository: SqlOutdoorDashboardRepository,
+    ) -> None:
+        """A trip using several items has each of them out, returned one by one."""
+        now = datetime.now(UTC)
+        rope = await seeder.create_gear_item(name="Rope")
+        harness = await seeder.create_gear_item(name="Harness")
+        journal_id = await seeder.create_gear_usage_journal(
+            rope,
+            start=now - timedelta(days=1),
+            end=now + timedelta(days=1),
+            more_gear_item_ids=(harness,),
+        )
+        # Snipe-IT has the harness back already; the rope is still out.
+        await seeder.insert_snipeit_checkin(journal_id, harness)
+
+        result = await dashboard_repository.list_gear_checkout_facts(
+            USER_ID, ending_after=now
+        )
+
+        assert sorted(
+            (facts.journal_id, facts.gear_name, facts.snipeit_checked_in)
+            for facts in result
+        ) == [(journal_id, "Harness", True), (journal_id, "Rope", False)]
 
     async def test_failed_snipeit_checkin_does_not_flag_the_checkout(
         self,
@@ -462,7 +489,7 @@ class TestGearCheckoutFacts:
         journal_id = await seeder.create_gear_usage_journal(
             gear_id, start=now - timedelta(days=1), end=now + timedelta(days=1)
         )
-        await seeder.insert_snipeit_checkin(journal_id, sync_status="failed")
+        await seeder.insert_snipeit_checkin(journal_id, gear_id, sync_status="failed")
 
         result = await dashboard_repository.list_gear_checkout_facts(
             USER_ID, ending_after=now
@@ -526,7 +553,7 @@ class TestGearCheckoutFacts:
             start=now - timedelta(days=1),
             end=now + timedelta(days=1),
         )
-        await seeder.insert_snipeit_checkin(returned_id)
+        await seeder.insert_snipeit_checkin(returned_id, helmet)
 
         result = await service.list_checked_out_gear(USER_ID)
 

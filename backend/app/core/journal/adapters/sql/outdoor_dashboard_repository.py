@@ -102,7 +102,9 @@ _UPCOMING_QUERY = text(
 # Resolved checkout window: buffer overrides fall back to the journal's event
 # range, mirroring the Snipe-IT worker's check-in sweep. ``ending_after``
 # excludes already-ended windows as a cheap bound; the checked-out
-# determination itself lives in ``is_currently_checked_out`` (core_shared).
+# determination itself lives in ``is_currently_checked_out`` (core_shared). One
+# row per gear item on a journal: Snipe-IT returns each (asset, journal) pair on
+# its own, so a check-in is matched through the item's asset.
 _GEAR_CHECKOUT_QUERY = text(
     """
     SELECT
@@ -112,12 +114,15 @@ _GEAR_CHECKOUT_QUERY = text(
         COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
         COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
         (ci.id IS NOT NULL) AS snipeit_checked_in
-    FROM journal_gear_usage_data u
+    FROM journal_gear_usage_items u
     JOIN journals j ON j.id = u.journal_id
     JOIN gear_items g ON g.id = u.gear_item_id AND g.user_id = :user_id
+    LEFT JOIN sync_metadata asset
+        ON asset.integration_source = 'snipeit'
+        AND asset.internal_uuid = CAST(u.gear_item_id AS TEXT)
     LEFT JOIN sync_metadata ci
         ON ci.integration_source = 'snipeit_checkin'
-        AND ci.internal_uuid = CAST(j.id AS TEXT)
+        AND ci.external_id = 'snipeit_checkin:' || asset.external_id || ':' || j.id
         AND ci.sync_status = 'success'
     WHERE j.user_id = :user_id
         AND COALESCE(u.checkin_date, j.event_date_range_end) > :ending_after

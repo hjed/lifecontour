@@ -1,6 +1,7 @@
 """Integration tests for SqlGearUsageDataRepository."""
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -8,8 +9,10 @@ from core_shared.models.journals import (
     EventDateRange,
     GearItem,
     GearUsageData,
+    GearUsageItem,
     Journal,
 )
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.gear_item_repository import SqlGearItemRepository
@@ -75,134 +78,271 @@ async def test_gear_item(
     return await gear_item_repository.save(gear_item)
 
 
+@pytest_asyncio.fixture
+async def second_gear_item(
+    gear_item_repository: SqlGearItemRepository,
+) -> GearItem:
+    """A second gear item, used on the same journal."""
+    return await gear_item_repository.save(
+        GearItem(user_id="test-user-123", name="Test Rope")
+    )
+
+
+def _uuid(gear_item: GearItem) -> UUID:
+    assert gear_item.id is not None
+    return UUID(gear_item.id)
+
+
+def _journal_id(journal: Journal) -> int:
+    assert journal.id is not None
+    return journal.id
+
+
+async def _mirror(connection: AsyncConnection, journal_id: int) -> tuple[object, ...]:
+    """The legacy single-item columns of the entry: the first item, or NULLs."""
+    row = (
+        await connection.execute(
+            text(
+                "SELECT gear_item_id, checkout_date, checkin_date "
+                "FROM journal_gear_usage_data WHERE journal_id = :id"
+            ),
+            {"id": journal_id},
+        )
+    ).fetchone()
+    assert row is not None
+    return (row.gear_item_id, row.checkout_date, row.checkin_date)
+
+
+_CHECKOUT = datetime(2023, 1, 1, tzinfo=UTC)
+_CHECKIN = datetime(2023, 1, 2, tzinfo=UTC)
+
+
 @pytest.mark.integration
 class TestSqlGearUsageDataRepository:
-    """Integration tests for SqlGearUsageDataRepository."""
+    """A journal's GEAR_USAGE entry and the gear items it holds."""
 
-    async def test_save_and_find(
+    async def test_save_and_find_several_items(
+        self,
+        gear_usage_repository: SqlGearUsageDataRepository,
+        test_journal: Journal,
+        test_gear_item: GearItem,
+        second_gear_item: GearItem,
+    ) -> None:
+        journal_id = _journal_id(test_journal)
+        harness = GearUsageItem(
+            gear_item_id=_uuid(test_gear_item),
+            checkout_date=_CHECKOUT,
+            checkin_date=_CHECKIN,
+        )
+        rope = GearUsageItem(gear_item_id=_uuid(second_gear_item))
+
+        saved = await gear_usage_repository.save(
+            GearUsageData(journal_id=journal_id, items=(harness, rope))
+        )
+
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found == saved
+        assert found.journal_id == journal_id
+        assert [
+            (i.gear_item_id, i.checkout_date, i.checkin_date) for i in found.items
+        ] == [
+            (harness.gear_item_id, _CHECKOUT, _CHECKIN),
+            (rope.gear_item_id, None, None),
+        ]
+        assert all(i.created_at and i.updated_at for i in found.items)
+        assert found.created_at is not None
+
+    async def test_items_keep_the_order_they_were_given_in(
+        self,
+        gear_usage_repository: SqlGearUsageDataRepository,
+        test_journal: Journal,
+        test_gear_item: GearItem,
+        second_gear_item: GearItem,
+    ) -> None:
+        journal_id = _journal_id(test_journal)
+        # Whichever way the ids sort, the given order wins.
+        first, second = sorted(
+            (_uuid(test_gear_item), _uuid(second_gear_item)), reverse=True
+        )
+
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(
+                    GearUsageItem(gear_item_id=first),
+                    GearUsageItem(gear_item_id=second),
+                ),
+            )
+        )
+
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert [i.gear_item_id for i in found.items] == [first, second]
+
+    async def test_an_item_added_later_keeps_the_first(
+        self,
+        gear_usage_repository: SqlGearUsageDataRepository,
+        test_journal: Journal,
+        test_gear_item: GearItem,
+        second_gear_item: GearItem,
+    ) -> None:
+        journal_id = _journal_id(test_journal)
+        first = GearUsageItem(gear_item_id=_uuid(test_gear_item), checkin_date=_CHECKIN)
+        saved = await gear_usage_repository.save(
+            GearUsageData(journal_id=journal_id, items=(first,))
+        )
+
+        await gear_usage_repository.save(
+            saved.with_item(GearUsageItem(gear_item_id=_uuid(second_gear_item)))
+        )
+
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert [(i.gear_item_id, i.checkin_date) for i in found.items] == [
+            (first.gear_item_id, _CHECKIN),
+            (_uuid(second_gear_item), None),
+        ]
+        assert found.items[0].created_at == saved.items[0].created_at
+
+    async def test_saving_updates_an_items_dates(
         self,
         gear_usage_repository: SqlGearUsageDataRepository,
         test_journal: Journal,
         test_gear_item: GearItem,
     ) -> None:
-        """Test saving and finding gear usage data."""
-        journal_id = test_journal.id
-        gear_item_id = test_gear_item.id
-        assert journal_id is not None
-        assert gear_item_id is not None
-        from uuid import UUID
-
-        gear_item_uuid = UUID(gear_item_id)
-
-        checkout_date = datetime(2023, 1, 1, tzinfo=UTC)
-        checkin_date = datetime(2023, 1, 2, tzinfo=UTC)
-
-        data = GearUsageData(
-            journal_id=journal_id,
-            gear_item_id=gear_item_uuid,
-            checkout_date=checkout_date,
-            checkin_date=checkin_date,
+        journal_id = _journal_id(test_journal)
+        gear_item_id = _uuid(test_gear_item)
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id, items=(GearUsageItem(gear_item_id=gear_item_id),)
+            )
         )
 
-        # Save data
-        saved_data = await gear_usage_repository.save(data)
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(
+                    GearUsageItem(gear_item_id=gear_item_id, checkout_date=_CHECKOUT),
+                ),
+            )
+        )
 
-        assert saved_data.journal_id == journal_id
-        assert saved_data.gear_item_id == gear_item_uuid
-        assert saved_data.checkout_date == checkout_date
-        assert saved_data.checkin_date == checkin_date
-        assert saved_data.created_at is not None
-        assert saved_data.updated_at is not None
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert [(i.checkout_date, i.checkin_date) for i in found.items] == [
+            (_CHECKOUT, None)
+        ]
 
-        # Find data
-        found_data = await gear_usage_repository.find_by_journal_id(journal_id)
-        assert found_data is not None
-        assert found_data.journal_id == journal_id
-        assert found_data.gear_item_id == gear_item_uuid
-        assert found_data.checkout_date == checkout_date
-        assert found_data.checkin_date == checkin_date
+    async def test_saving_without_an_item_removes_only_it(
+        self,
+        gear_usage_repository: SqlGearUsageDataRepository,
+        test_journal: Journal,
+        test_gear_item: GearItem,
+        second_gear_item: GearItem,
+    ) -> None:
+        journal_id = _journal_id(test_journal)
+        saved = await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(
+                    GearUsageItem(gear_item_id=_uuid(test_gear_item)),
+                    GearUsageItem(gear_item_id=_uuid(second_gear_item)),
+                ),
+            )
+        )
 
-    async def test_save_updates_existing(
+        await gear_usage_repository.save(saved.without_item(_uuid(test_gear_item)))
+
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert [i.gear_item_id for i in found.items] == [_uuid(second_gear_item)]
+
+    async def test_an_entry_with_no_items_is_still_found(
         self,
         gear_usage_repository: SqlGearUsageDataRepository,
         test_journal: Journal,
         test_gear_item: GearItem,
     ) -> None:
-        """Test saving updates existing gear usage data."""
-        journal_id = test_journal.id
-        gear_item_id = test_gear_item.id
-        assert journal_id is not None
-        assert gear_item_id is not None
-        from uuid import UUID
-
-        gear_item_uuid = UUID(gear_item_id)
-
-        # Initial save
-        data = GearUsageData(
-            journal_id=journal_id,
-            gear_item_id=gear_item_uuid,
-            checkout_date=None,
-            checkin_date=None,
+        journal_id = _journal_id(test_journal)
+        saved = await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(GearUsageItem(gear_item_id=_uuid(test_gear_item)),),
+            )
         )
-        await gear_usage_repository.save(data)
 
-        # Update data
-        import dataclasses
+        await gear_usage_repository.save(saved.without_item(_uuid(test_gear_item)))
 
-        checkout_date = datetime(2023, 1, 1, tzinfo=UTC)
-        data = dataclasses.replace(
-            data,
-            checkout_date=checkout_date,
-            checkin_date=None,
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.items == ()
+
+    async def test_the_legacy_columns_mirror_the_first_item(
+        self,
+        gear_usage_repository: SqlGearUsageDataRepository,
+        async_connection: AsyncConnection,
+        test_journal: Journal,
+        test_gear_item: GearItem,
+        second_gear_item: GearItem,
+    ) -> None:
+        """Readers not yet moved to the items table see the first item."""
+        journal_id = _journal_id(test_journal)
+        harness = GearUsageItem(
+            gear_item_id=_uuid(test_gear_item),
+            checkout_date=_CHECKOUT,
+            checkin_date=_CHECKIN,
         )
-        updated_data = await gear_usage_repository.save(data)
+        rope = GearUsageItem(gear_item_id=_uuid(second_gear_item))
+        saved = await gear_usage_repository.save(
+            GearUsageData(journal_id=journal_id, items=(harness, rope))
+        )
+        assert await _mirror(async_connection, journal_id) == (
+            harness.gear_item_id,
+            _CHECKOUT,
+            _CHECKIN,
+        )
 
-        assert updated_data.checkout_date == checkout_date
-        assert updated_data.checkin_date is None
+        saved = await gear_usage_repository.save(
+            saved.without_item(harness.gear_item_id)
+        )
+        assert await _mirror(async_connection, journal_id) == (
+            rope.gear_item_id,
+            None,
+            None,
+        )
 
-        # Verify update persisted
-        found_data = await gear_usage_repository.find_by_journal_id(journal_id)
-        assert found_data is not None
-        assert found_data.checkout_date == checkout_date
-        assert found_data.checkin_date is None
+        await gear_usage_repository.save(saved.without_item(rope.gear_item_id))
+        assert await _mirror(async_connection, journal_id) == (None, None, None)
 
     async def test_find_returns_none_if_not_found(
         self, gear_usage_repository: SqlGearUsageDataRepository
     ) -> None:
-        """Test finding non-existent data returns None."""
-        found_data = await gear_usage_repository.find_by_journal_id(99999)
-        assert found_data is None
+        assert await gear_usage_repository.find_by_journal_id(99999) is None
 
-    async def test_delete(
+    async def test_delete_removes_the_entry_and_its_items(
         self,
         gear_usage_repository: SqlGearUsageDataRepository,
+        async_connection: AsyncConnection,
         test_journal: Journal,
         test_gear_item: GearItem,
     ) -> None:
-        """Test deleting gear usage data."""
-        journal_id = test_journal.id
-        gear_item_id = test_gear_item.id
-        assert journal_id is not None
-        assert gear_item_id is not None
-        from uuid import UUID
-
-        gear_item_uuid = UUID(gear_item_id)
-
-        # Initial save
-        data = GearUsageData(
-            journal_id=journal_id,
-            gear_item_id=gear_item_uuid,
-            checkout_date=None,
-            checkin_date=None,
+        journal_id = _journal_id(test_journal)
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(GearUsageItem(gear_item_id=_uuid(test_gear_item)),),
+            )
         )
-        await gear_usage_repository.save(data)
 
-        # Delete data
         await gear_usage_repository.delete(journal_id)
 
-        # Verify deleted
-        found_data = await gear_usage_repository.find_by_journal_id(journal_id)
-        assert found_data is None
+        assert await gear_usage_repository.find_by_journal_id(journal_id) is None
+        items = await async_connection.execute(
+            text("SELECT 1 FROM journal_gear_usage_items WHERE journal_id = :id"),
+            {"id": journal_id},
+        )
+        assert items.fetchone() is None
 
     async def test_cascade_delete_with_journal(
         self,
@@ -211,59 +351,40 @@ class TestSqlGearUsageDataRepository:
         test_journal: Journal,
         test_gear_item: GearItem,
     ) -> None:
-        """Test that deleting a journal cascade deletes gear usage data."""
-        journal_id = test_journal.id
-        gear_item_id = test_gear_item.id
-        assert journal_id is not None
-        assert gear_item_id is not None
-        from uuid import UUID
-
-        gear_item_uuid = UUID(gear_item_id)
-
-        # Initial save
-        data = GearUsageData(
-            journal_id=journal_id,
-            gear_item_id=gear_item_uuid,
-            checkout_date=None,
-            checkin_date=None,
+        journal_id = _journal_id(test_journal)
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(GearUsageItem(gear_item_id=_uuid(test_gear_item)),),
+            )
         )
-        await gear_usage_repository.save(data)
 
-        # Delete journal
         await journal_repository.delete(journal_id)
 
-        # Verify deleted
-        found_data = await gear_usage_repository.find_by_journal_id(journal_id)
-        assert found_data is None
+        assert await gear_usage_repository.find_by_journal_id(journal_id) is None
 
-    async def test_cascade_delete_with_gear_item(
+    async def test_deleting_a_gear_item_removes_only_its_item(
         self,
         gear_usage_repository: SqlGearUsageDataRepository,
         gear_item_repository: SqlGearItemRepository,
         test_journal: Journal,
         test_gear_item: GearItem,
+        second_gear_item: GearItem,
     ) -> None:
-        """Test that deleting a gear item cascade deletes gear usage data."""
-        journal_id = test_journal.id
-        gear_item_id = test_gear_item.id
-        assert journal_id is not None
-        assert gear_item_id is not None
-        from uuid import UUID
-
-        gear_item_uuid = UUID(gear_item_id)
-
-        # Initial save
-        data = GearUsageData(
-            journal_id=journal_id,
-            gear_item_id=gear_item_uuid,
-            checkout_date=None,
-            checkin_date=None,
+        journal_id = _journal_id(test_journal)
+        await gear_usage_repository.save(
+            GearUsageData(
+                journal_id=journal_id,
+                items=(
+                    GearUsageItem(gear_item_id=_uuid(test_gear_item)),
+                    GearUsageItem(gear_item_id=_uuid(second_gear_item)),
+                ),
+            )
         )
-        await gear_usage_repository.save(data)
 
-        # Delete gear item
-        await gear_item_repository.delete(gear_item_id)
+        assert test_gear_item.id is not None
+        await gear_item_repository.delete(test_gear_item.id)
 
-        # Verify deleted
-        found_data = await gear_usage_repository.find_by_journal_id(journal_id)
-        assert found_data is None
+        found = await gear_usage_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert [i.gear_item_id for i in found.items] == [_uuid(second_gear_item)]

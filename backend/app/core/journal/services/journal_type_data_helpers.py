@@ -15,9 +15,12 @@ from typing import Any
 from uuid import UUID
 
 from core_shared.models.journals import (
+    GearUsageData,
+    GearUsageItem,
     JournalType,
     JournalValidationError,
 )
+from core_shared.models.journals.exceptions import GearUsageDataValidationError
 
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
@@ -1001,6 +1004,78 @@ async def update_gear_maintenance_type_data(
         raise JournalValidationError(e.field, raw_msg) from e
 
 
+_GEAR_USAGE_SINGLE_ITEM_FIELDS = ("gear_item_id", "checkout_date", "checkin_date")
+
+
+def _parse_gear_item_id(raw: object, field: str) -> UUID:
+    if not isinstance(raw, str):
+        raise JournalValidationError(field, "Must be a string")
+    try:
+        return UUID(raw)
+    except ValueError:
+        raise JournalValidationError(field, "Must be a valid UUID") from None
+
+
+def _gear_usage_items(raw_items: object) -> tuple[GearUsageItem, ...]:
+    """Parse an ``items`` list, naming a bad value by its position."""
+    if not isinstance(raw_items, list):
+        raise JournalValidationError("items", "Must be a list")
+    items: list[GearUsageItem] = []
+    for index, raw in enumerate(raw_items):
+        prefix = f"items[{index}]"
+        if not isinstance(raw, dict):
+            raise JournalValidationError(prefix, "Must be an object")
+        if not raw.get("gear_item_id"):
+            raise JournalValidationError(f"{prefix}.gear_item_id", "Required")
+        try:
+            items.append(
+                GearUsageItem(
+                    gear_item_id=_parse_gear_item_id(
+                        raw["gear_item_id"], f"{prefix}.gear_item_id"
+                    ),
+                    checkout_date=parse_optional_datetime(
+                        raw.get("checkout_date"), f"{prefix}.checkout_date"
+                    ),
+                    checkin_date=parse_optional_datetime(
+                        raw.get("checkin_date"), f"{prefix}.checkin_date"
+                    ),
+                )
+            )
+        except GearUsageDataValidationError as e:
+            raise JournalValidationError(
+                f"{prefix}.{e.field}", str(e).removeprefix(f"{e.field}: ")
+            ) from e
+    return tuple(items)
+
+
+def _patched_gear_usage_item(
+    data: GearUsageData | None, attrs: dict[str, Any]
+) -> GearUsageItem:
+    """The one item the single-item form names, with its sent dates applied.
+
+    ``gear_item_id`` names the item (added if the journal does not list it yet);
+    without it the dates apply to the journal's only item.
+    """
+    items = data.items if data is not None else ()
+    dates: dict[str, Any] = {
+        field: parse_optional_datetime(attrs[field], field)
+        for field in ("checkout_date", "checkin_date")
+        if field in attrs
+    }
+    if attrs.get("gear_item_id"):
+        gear_item_id = _parse_gear_item_id(attrs["gear_item_id"], "gear_item_id")
+        existing = data.item(gear_item_id) if data is not None else None
+        if existing is None:
+            return GearUsageItem(gear_item_id=gear_item_id, **dates)
+        return dataclasses.replace(existing, **dates)
+    if len(items) != 1:
+        raise JournalValidationError(
+            "gear_item_id",
+            "Required: name the gear item whose dates to set" if items else "Required",
+        )
+    return dataclasses.replace(items[0], **dates)
+
+
 async def update_gear_usage_type_data(
     journal_id: int,
     journal_type: str,
@@ -1009,49 +1084,36 @@ async def update_gear_usage_type_data(
 ) -> None:
     """Update or create GEAR_USAGE type-specific data.
 
-    Mirrors the behaviour previously inlined in the MCP ``update_journal_entry``
-    tool: ``gear_item_id`` is required to create a new row, and the
-    ``checkout_date`` / ``checkin_date`` ISO strings are parsed to ``datetime``.
+    ``items`` replaces the whole list of gear items; each listed item is
+    complete, so an omitted date is cleared. The older single-item form
+    (``gear_item_id`` / ``checkout_date`` / ``checkin_date``) adds or updates one
+    item and never removes another: its sent dates patch the named item, or
+    the journal's only item when ``gear_item_id`` is omitted. A new entry needs
+    at least one item.
     """
-    from core_shared.models.journals.exceptions import GearUsageDataValidationError
-    from core_shared.models.journals.gear_usage_data import GearUsageData
-
     data = await gear_usage_data_repo.find_by_journal_id(journal_id)
-
-    updates: dict[str, Any] = {}
-    if "gear_item_id" in attrs and attrs["gear_item_id"]:
-        raw_gear_item_id = attrs["gear_item_id"]
-        if not isinstance(raw_gear_item_id, str):
-            raise JournalValidationError("gear_item_id", "Must be a string")
-        try:
-            updates["gear_item_id"] = UUID(raw_gear_item_id)
-        except ValueError:
-            raise JournalValidationError(
-                "gear_item_id", "Must be a valid UUID"
-            ) from None
-    elif not data:
-        raise JournalValidationError("gear_item_id", "Required")
-
-    if "checkout_date" in attrs:
-        updates["checkout_date"] = parse_optional_datetime(
-            attrs["checkout_date"], "checkout_date"
-        )
-    if "checkin_date" in attrs:
-        updates["checkin_date"] = parse_optional_datetime(
-            attrs["checkin_date"], "checkin_date"
-        )
+    entry = data if data is not None else GearUsageData(journal_id=journal_id)
 
     try:
-        if data:
-            new_data = dataclasses.replace(data, **updates)
+        if attrs.get("items") is not None:
+            mixed = [f for f in _GEAR_USAGE_SINGLE_ITEM_FIELDS if f in attrs]
+            if mixed:
+                raise JournalValidationError(
+                    "items",
+                    f"Cannot be combined with {', '.join(mixed)}; list every gear "
+                    "item in items instead",
+                )
+            entry = dataclasses.replace(entry, items=_gear_usage_items(attrs["items"]))
         else:
-            new_data = GearUsageData(journal_id=journal_id, **updates)
-        await gear_usage_data_repo.save(new_data)
+            entry = entry.with_item(_patched_gear_usage_item(data, attrs))
     except GearUsageDataValidationError as e:
-        raw_msg = str(e)
-        prefix = f"{e.field}: "
-        raw_msg = raw_msg.removeprefix(prefix)
-        raise JournalValidationError(e.field, raw_msg) from e
+        raise JournalValidationError(
+            e.field, str(e).removeprefix(f"{e.field}: ")
+        ) from e
+
+    if data is None and not entry.items:
+        raise JournalValidationError("items", "At least one gear item is required")
+    await gear_usage_data_repo.save(entry)
 
 
 async def update_caving_type_data(

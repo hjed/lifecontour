@@ -387,11 +387,29 @@ merge candidates — a different concept):
 - Introduced additively by migration `0098` (create/drop round-trip); not yet consumed by the review
   projection at this phase.
 
+#### Gear usage entries and their items (#1574)
+
+One `GEAR_USAGE` entry records **many** gear items, the way an `ABSEILING_TRIP` entry holds its
+pitches, so the gear used on a trip lives on the trip's own journal:
+
+- `journal_gear_usage_data` — the **entry**, `journal_id` pk. Its presence is what gives a journal the
+  `GEAR_USAGE` type, whether or not it holds any items.
+- `journal_gear_usage_items` — one row per item: pk `(journal_id, gear_item_id)` (a gear item appears
+  at most once per journal), `position` (the order the items were given in), optional
+  `checkout_date` / `checkin_date` buffers, timestamps. `journal_id` → the entry, `ON DELETE CASCADE`
+  and `ON UPDATE CASCADE` (a merge moves an entry by rewriting its `journal_id`); `gear_item_id` →
+  `gear_items.id`, `ON DELETE CASCADE` (deleting a gear item removes only its item).
+- **Transition (migration `0119`)**: every existing entry's gear item and dates were copied into one
+  item. The entry's own `gear_item_id` / `checkout_date` / `checkin_date` are kept for now as a
+  **mirror of its first item** (NULL when it holds none; the gear-item FK is `ON DELETE SET NULL`),
+  written by the repository on every save, so readers not yet moved to the items table keep working.
+  A later migration drops them.
+
 #### Gear checkout state — the "checked out" definition (ITER16-003)
 
 The outdoor dashboard's "gear currently checked out" widget derives checkout state from existing
 tables — no new state is stored. A gear item is **currently checked out** when a `GEAR_USAGE`
-journal references it (`journal_gear_usage_data.gear_item_id`) such that:
+journal lists it (a `journal_gear_usage_items` row) such that:
 
 1. **The resolved checkout window contains now** — `COALESCE(checkout_date,
    journals.event_date_range_start) <= now() < COALESCE(checkin_date, journals.event_date_range_end)`.
@@ -400,9 +418,10 @@ journal references it (`journal_gear_usage_data.gear_item_id`) such that:
    NULL` does **not** mean "still out" — the window falls back to the journal's event range. This is
    the same `COALESCE` resolution the Snipe-IT check-in sweep uses. The checkout bound is inclusive
    and the check-in bound exclusive (at the resolved check-in instant the sweep returns the asset).
-2. **Snipe-IT hasn't already recorded the return** — no `sync_metadata` row with
-   `integration_source = 'snipeit_checkin'`, `internal_uuid = journal_id::text` and
-   `sync_status = 'success'`. This keeps the dashboard consistent with an early return recorded in
+2. **Snipe-IT hasn't already recorded the return** — no successful `snipeit_checkin` `sync_metadata`
+   row for that item's (asset, journal) pair (`external_id = 'snipeit_checkin:<asset id>:<journal
+   id>'`, the asset id being the gear item's `snipeit` sync row). A journal's items are returned one
+   by one. This keeps the dashboard consistent with an early return recorded in
    Snipe-IT while still working when the Snipe-IT integration isn't connected (rule 1 alone then
    decides).
 

@@ -1250,18 +1250,23 @@ class SqlJournalRepository(JournalRepository):
                 }
             )
 
-        # Checkout/Usage links
+        # Checkout/Usage links: the asset of each gear item whose (asset,
+        # journal) pair Snipe-IT has a checkout for
         snipeit_checkout_query = await self.conn.execute(
             text(
                 """
                 SELECT 'snipeit' AS integration_source, m_asset.external_id, s.base_url
-                FROM sync_metadata m_checkout
-                JOIN journal_gear_usage_data gud ON gud.journal_id = :journal_id
-                JOIN sync_metadata m_asset ON m_asset.internal_uuid = CAST(gud.gear_item_id AS VARCHAR)
+                FROM journal_gear_usage_items gui
+                JOIN sync_metadata m_asset ON m_asset.internal_uuid = CAST(gui.gear_item_id AS VARCHAR)
                     AND m_asset.integration_source = 'snipeit'
+                JOIN sync_metadata m_checkout
+                    ON m_checkout.integration_source = 'snipeit_checkout'
+                    AND m_checkout.internal_uuid = :journal_uuid
+                    AND m_checkout.external_id
+                        = 'snipeit_checkout:' || m_asset.external_id || ':' || :journal_uuid
                 JOIN snipeit_settings s ON s.user_id = :user_id
-                WHERE m_checkout.internal_uuid = :journal_uuid
-                AND m_checkout.integration_source = 'snipeit_checkout'
+                WHERE gui.journal_id = :journal_id
+                ORDER BY gui.position, gui.gear_item_id
                 """
             ),
             {

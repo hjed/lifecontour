@@ -25,6 +25,7 @@ from core_shared.models.journals import (
     FitnessData,
     GearMaintenanceData,
     GearUsageData,
+    GearUsageItem,
     JoggingData,
     JournalType,
     KayakingData,
@@ -98,6 +99,9 @@ _EXCLUDED_FIELDS: dict[JournalType, dict[str, str]] = {
     # TRAVEL nested children have no write path yet (the type-data update endpoint
     # rejects TRAVEL and nothing calls save_flight/accommodation/transportation),
     # so there is no write to record. Deferred until TRAVEL nested editing exists.
+    JournalType.GEAR_USAGE: {
+        "items": "per-row history via gear_usage:item:<gear_item_id>:<field>"
+    },
     JournalType.TRAVEL: {
         "flights": "no write path — deferred until TRAVEL nested editing exists",
         "accommodations": "no write path — deferred until TRAVEL nested editing exists",
@@ -163,6 +167,7 @@ def test_tracked_and_excluded_do_not_overlap() -> None:
 _COLLECTION_ROW_MODELS: dict[JournalType, type] = {
     JournalType.PLAN: PlanDocument,
     JournalType.ABSEILING_TRIP: AbseilPitch,
+    JournalType.GEAR_USAGE: GearUsageItem,
 }
 
 

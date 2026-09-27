@@ -231,11 +231,6 @@ _TYPE_DATA_TRACKED_FIELDS: dict[JournalType, tuple[str, ...]] = {
         "activity_types",
         "retirement_reason",
     ),
-    JournalType.GEAR_USAGE: (
-        "gear_item_id",
-        "checkout_date",
-        "checkin_date",
-    ),
 }
 
 
@@ -283,7 +278,26 @@ _TYPE_DATA_COLLECTIONS: dict[JournalType, tuple[_CollectionSpec, ...]] = {
             ),
         ),
     ),
+    # Keyed by gear item, which is also a tracked field: adding or removing an
+    # item with no dates is still a change (and what tells Snipe-IT to act).
+    JournalType.GEAR_USAGE: (
+        _CollectionSpec(
+            field_name="items",
+            prefix="gear_usage:item",
+            key=lambda item: str(item.gear_item_id),
+            fields=("gear_item_id", "checkout_date", "checkin_date"),
+        ),
+    ),
 }
+
+
+# Types whose type-data changes integrations react to only through
+# ``JournalUpdated``: the Snipe-IT worker checks gear out and in on it and
+# ignores ``JournalTypeAdded`` / ``JournalTypeRemoved``. Adding or removing one
+# of these types with its data therefore publishes the change as an update too.
+_TYPES_ANNOUNCED_AS_UPDATES: frozenset[JournalType] = frozenset(
+    {JournalType.GEAR_USAGE}
+)
 
 
 class TypeReplaceReport(NamedTuple):
@@ -598,7 +612,16 @@ class JournalWriteService:
         for added_type in added_types:
             await self._create_type_specific_data(added_type, journal_id)
 
-        if type_data:
+        if type_data and journal_type in _TYPES_ANNOUNCED_AS_UPDATES:
+            await self.update_type_data(
+                journal_id,
+                journal_type,
+                type_data,
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
+        elif type_data:
             wrapped_type_data = {journal_type.value: type_data}
             await self._process_journal_type_data(
                 journal_id, wrapped_type_data, transaction
@@ -617,6 +640,12 @@ class JournalWriteService:
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
         """Remove a type and delete its type-specific data row."""
+        announced = journal_type in _TYPES_ANNOUNCED_AS_UPDATES
+        before = (
+            await self._snapshot_collections(journal_type, journal_id)
+            if announced
+            else {}
+        )
         await self.journal_service.remove_type_from_journal(
             journal_id,
             journal_type,
@@ -625,6 +654,14 @@ class JournalWriteService:
             source=source,
         )
         await self._delete_type_specific_data(journal_type, journal_id)
+        if announced:
+            await self._publish_type_data_change(
+                journal_id,
+                await self._diff_collections(journal_type, journal_id, before),
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
 
     @transactional
     async def update_type_data(
@@ -646,8 +683,6 @@ class JournalWriteService:
         the Google Calendar outbound worker re-syncs (the history projection skips
         the non-pair marker and records only the real field diffs).
         """
-        from app.core.journal.models.events import JournalUpdated
-
         repo = self._type_data_repo(journal_type)
         tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
         before = (
@@ -657,13 +692,7 @@ class JournalWriteService:
         )
         # Snapshot nested child collections (PLAN documents, ABSEIL pitches) before
         # the update so per-row changes can be diffed into history (Phase 4).
-        collections = _TYPE_DATA_COLLECTIONS.get(journal_type, ())
-        before_collections = {
-            spec.field_name: await self._load_collection_rows(
-                journal_type, spec.field_name, journal_id
-            )
-            for spec in collections
-        }
+        before_collections = await self._snapshot_collections(journal_type, journal_id)
 
         # Type-specific data is part of what a read of the journal returns, so
         # the aggregate's version has to move with it; see ``touch_journal``.
@@ -679,35 +708,79 @@ class JournalWriteService:
             else None
         )
         changed_fields: dict[str, Any] = diff_tracked_fields(before, after, tracked)
-
-        for spec in collections:
-            after_rows = await self._load_collection_rows(
-                journal_type, spec.field_name, journal_id
-            )
-            changed_fields.update(
-                diff_collection_rows(
-                    before_collections[spec.field_name],
-                    after_rows,
-                    key=spec.key,
-                    prefix=spec.prefix,
-                    fields=spec.fields,
-                )
-            )
+        changed_fields.update(
+            await self._diff_collections(journal_type, journal_id, before_collections)
+        )
 
         if journal_type == JournalType.EVENT:
             # The marker (a non-pair signal) triggers calendar sync regardless of
             # whether any tracked field changed; the projection ignores it.
             changed_fields = {**changed_fields, "calendar_info": True}
 
-        if changed_fields:
-            event = JournalUpdated(
+        await self._publish_type_data_change(
+            journal_id,
+            changed_fields,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+        )
+
+    async def _snapshot_collections(
+        self, journal_type: JournalType, journal_id: int
+    ) -> dict[str, list[Any]]:
+        """The rows of ``journal_type``'s child collections, by collection."""
+        return {
+            spec.field_name: await self._load_collection_rows(
+                journal_type, spec.field_name, journal_id
+            )
+            for spec in _TYPE_DATA_COLLECTIONS.get(journal_type, ())
+        }
+
+    async def _diff_collections(
+        self,
+        journal_type: JournalType,
+        journal_id: int,
+        before: dict[str, list[Any]],
+    ) -> dict[str, Any]:
+        """History pairs for how the child collections changed since ``before``."""
+        changed: dict[str, Any] = {}
+        for spec in _TYPE_DATA_COLLECTIONS.get(journal_type, ()):
+            changed.update(
+                diff_collection_rows(
+                    before.get(spec.field_name, []),
+                    await self._load_collection_rows(
+                        journal_type, spec.field_name, journal_id
+                    ),
+                    key=spec.key,
+                    prefix=spec.prefix,
+                    fields=spec.fields,
+                )
+            )
+        return changed
+
+    async def _publish_type_data_change(
+        self,
+        journal_id: int,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+        *,
+        changed_by: str,
+        source: Provenance,
+    ) -> None:
+        """Publish ``JournalUpdated`` for a type-data change, if anything changed."""
+        from app.core.journal.models.events import JournalUpdated
+
+        if not changed_fields:
+            return
+        await self.event_publisher.publish(
+            JournalUpdated(
                 journal_id=journal_id,
                 changed_fields=changed_fields,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
             )
-            await self.event_publisher.publish(event)
+        )
 
     def _type_data_repo(self, journal_type: JournalType) -> Any:
         """Return the single-row repo whose tracked fields back ``journal_type``."""
@@ -739,6 +812,9 @@ class JournalWriteService:
             return list(await self.plan_data_repo.get_documents(journal_id))
         if journal_type == JournalType.ABSEILING_TRIP and field_name == "pitches":
             return list(await self.abseil_pitch_repo.find_by_journal_id(journal_id))
+        if journal_type == JournalType.GEAR_USAGE and field_name == "items":
+            gear_usage = await self.gear_usage_data_repo.find_by_journal_id(journal_id)
+            return list(gear_usage.items) if gear_usage is not None else []
         return []
 
     async def _apply_type_data_update(
@@ -1551,20 +1627,26 @@ class JournalWriteService:
     async def _populated_tracked_fields(
         self, journal_type: JournalType, journal_id: int
     ) -> list[str]:
-        """Tracked fields of ``journal_type``'s row that currently hold a value."""
+        """Tracked fields and child collections of ``journal_type`` holding a value."""
+        populated: list[str] = []
         tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
         repo = self._type_data_repo(journal_type) if tracked else None
-        if repo is None:
-            return []
-        row = await repo.find_by_journal_id(journal_id)
-        if row is None:
-            return []
-        # None, "" and False are all "never set": boolean columns default to
-        # false, so reporting them would bury the fields that actually held data.
-        # Checked by identity for False so a real 0 (0 == False) is still reported.
-        return [
-            field for field in tracked if not _is_unpopulated(getattr(row, field, None))
-        ]
+        row = await repo.find_by_journal_id(journal_id) if repo is not None else None
+        if row is not None:
+            # None, "" and False are all "never set": boolean columns default to
+            # false, so reporting them would bury the fields that actually held
+            # data. Checked by identity for False so a real 0 is still reported.
+            populated.extend(
+                field
+                for field in tracked
+                if not _is_unpopulated(getattr(row, field, None))
+            )
+        for spec in _TYPE_DATA_COLLECTIONS.get(journal_type, ()):
+            if await self._load_collection_rows(
+                journal_type, spec.field_name, journal_id
+            ):
+                populated.append(spec.field_name)
+        return populated
 
     async def _replace_contact_relationships(
         self,

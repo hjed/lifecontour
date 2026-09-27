@@ -396,6 +396,70 @@ class TestRulesDecidableFromThePayload:
         assert parsed.checkin_date is not None
 
 
+class TestGearUsageItems:
+    """GEAR_USAGE lists its gear items; the single-object form stays accepted."""
+
+    ROPE = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+    HARNESS = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+    def test_a_list_of_items_is_accepted(self) -> None:
+        parsed = GearUsageTypeData.model_validate(
+            {
+                "items": [
+                    {"gear_item_id": self.ROPE},
+                    {
+                        "gear_item_id": self.HARNESS,
+                        "checkout_date": "2024-01-14T10:00:00Z",
+                        "checkin_date": "2024-01-15T10:00:00Z",
+                    },
+                ]
+            }
+        )
+
+        assert parsed.items is not None
+        assert [str(item.gear_item_id) for item in parsed.items] == [
+            self.ROPE,
+            self.HARNESS,
+        ]
+
+    def test_an_items_check_in_before_its_check_out_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="checkin_date"):
+            GearUsageTypeData.model_validate(
+                {
+                    "items": [
+                        {
+                            "gear_item_id": self.ROPE,
+                            "checkout_date": "2024-01-15T10:00:00Z",
+                            "checkin_date": "2024-01-14T10:00:00Z",
+                        }
+                    ]
+                }
+            )
+
+    def test_an_item_needs_its_gear_item(self) -> None:
+        with pytest.raises(ValidationError, match="gear_item_id"):
+            GearUsageTypeData.model_validate(
+                {"items": [{"checkout_date": "2024-01-15T10:00:00Z"}]}
+            )
+
+    def test_the_same_gear_item_twice_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="more than once"):
+            GearUsageTypeData.model_validate(
+                {"items": [{"gear_item_id": self.ROPE}, {"gear_item_id": self.ROPE}]}
+            )
+
+    def test_the_list_and_the_single_item_form_cannot_be_mixed(self) -> None:
+        with pytest.raises(ValidationError, match="items"):
+            GearUsageTypeData.model_validate(
+                {"items": [{"gear_item_id": self.ROPE}], "gear_item_id": self.HARNESS}
+            )
+
+    def test_the_single_item_form_is_still_accepted(self) -> None:
+        parsed = GearUsageTypeData.model_validate({"gear_item_id": self.ROPE})
+
+        assert str(parsed.gear_item_id) == self.ROPE
+
+
 class TestRulesLeftToTheEntities:
     """Rules the boundary must NOT take on, and why.
 
