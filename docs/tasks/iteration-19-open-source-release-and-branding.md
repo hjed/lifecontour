@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 4/15 phases ✅ DONE.
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each). Each phase is marked ✅ DONE where it is described below; there is deliberately no running count, because parallel phase PRs would each bump it and git merges those edits silently into a wrong total.
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -375,8 +375,8 @@ compatibility, protect the name and logo, and publish a CLA-backed contribution 
   `AGPL-3.0-or-later`.
 - The copyright line `Copyright (C) 2025–2026 Harry J E Day` appears in the `README.md` licence
   section and `CONTRIBUTING.md`. The README links `LICENSE` and `TRADEMARKS.md`.
-- Vendored content carries its licence notices: the shadcn skill gets its MIT notice, and its
-  third-party logo PNGs are removed.
+- Vendored content carries its licence notices: the shadcn skill's MIT notice is recorded in
+  `.claude/skills/THIRD_PARTY_NOTICES.md`, and the installed skill folders stay unmodified.
 - Every runtime dependency's licence is recorded as AGPL-compatible. An incompatible one blocks
   release.
 - CONTRIBUTING encodes the owner's rules: issue first, ≤500-line PRs, AI-generated PRs reviewed by
@@ -398,6 +398,18 @@ This status note is the only other change in the PR, in the same commit (owner d
 - **Verification:** `diff <(curl -s https://www.gnu.org/licenses/agpl-3.0.txt) LICENSE` is empty.
 
 **Phase 2 — SPDX identifiers, notices, trademarks, conduct, security policy.** PR ~300 lines.
+✅ DONE:
+
+- All six `pyproject.toml` files declare `license = "AGPL-3.0-or-later"` on `hatchling>=1.27`,
+  and each wheel's `METADATA` carries `License-Expression: AGPL-3.0-or-later`.
+- `frontend/package.json` and the two dev-only `docker/oauth-*` packages declare the same
+  identifier.
+- The README and worker READMEs have licence sections.
+- `TRADEMARKS.md`, `CODE_OF_CONDUCT.md` and `SECURITY.md` are added. The Code of Conduct contact
+  is GitHub private vulnerability reporting (owner decision); that channel is enabled at the
+  ITER19-005 Phase 2 flip.
+- The strava `uv.lock` had drifted from `core_shared` on `main`. It was refreshed so
+  `uv lock --check` passes.
 
 - **Python packages:** replace `license = {text = "AGPL-3.0"}` with the PEP 639 form
   `license = "AGPL-3.0-or-later"` in all six `pyproject.toml` files. Raise each
@@ -406,10 +418,14 @@ This status note is the only other change in the PR, in the same commit (owner d
 - **README licence section** (`README.md:271-273`): the SPDX identifier, the copyright line
   `Copyright (C) 2025–2026 Harry J E Day`, and links to `LICENSE` and `TRADEMARKS.md`. Also update
   the worker README licence lines (`integration_workers/*/README.md`).
-- **Vendored shadcn skill:**
-  - Add `.claude/skills/shadcn/LICENSE` (the upstream shadcn/ui MIT text).
-  - Delete `.claude/skills/shadcn/assets/shadcn*.png`, and remove their references in
-    `.claude/skills/shadcn/agents/openai.yml:4-5`.
+- **Vendored shadcn skill:** add `.claude/skills/THIRD_PARTY_NOTICES.md`, which lists each
+  vendored skill's source and licence and reproduces the upstream shadcn/ui MIT text.
+  - The skill folders stay byte-identical to what the `skills` CLI installed, so
+    `skills-lock.json` stays valid and `npx skills update` does not revert anything.
+  - The upstream skill ships its own logo PNGs. They stay, as shadcn's own files that label
+    shadcn's skill; the notice records that they are not this project's work.
+  - This replaces an earlier plan to add a `LICENSE` inside the folder and delete the PNGs,
+    which the owner rejected because the next update would revert it.
 - **`TRADEMARKS.md`:** the Lifecontour name and logo are not licensed by the AGPL. Forks must
   rebrand, and may say "based on Lifecontour".
 - **`CODE_OF_CONDUCT.md`:** the verbatim Contributor Covenant 2.1, with GitHub private reporting as

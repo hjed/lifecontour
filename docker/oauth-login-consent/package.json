@@ -2,6 +2,7 @@
   "name": "oauth-login-consent-service",
   "version": "1.0.0",
   "description": "Auto-accepting OAuth login/consent service for E2E testing",
+  "license": "AGPL-3.0-or-later",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

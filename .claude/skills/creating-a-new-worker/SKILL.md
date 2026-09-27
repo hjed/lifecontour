@@ -118,7 +118,7 @@ Create `integration_workers/<name>/pyproject.toml`, depending on `core_shared` a
 name = "<name>-worker"
 version = "0.1.0"
 description = "<Name> Integration Worker for Personal Management System"
-license = {text = "AGPL-3.0"}
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.14"
 dependencies = [
     "core_shared",
@@ -148,7 +148,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

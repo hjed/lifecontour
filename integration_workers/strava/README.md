@@ -191,3 +191,7 @@ fixtures (`async_engine`, `async_connection`, `db_session`, `apply_migrations`) 
 `tests/integration/conftest.py` from `core_shared.testing.integration`; only this worker's
 environment preamble remains there. See
 [testing-strategy.md](../../docs/architecture/testing-strategy.md) for details.
+
+## License
+
+`AGPL-3.0-or-later`, see the repository [`LICENSE`](../../LICENSE).

@@ -2,6 +2,7 @@
   "name": "oauth-dev-ui",
   "version": "1.0.0",
   "description": "Simple OAuth2 provider UI for development testing",
+  "license": "AGPL-3.0-or-later",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

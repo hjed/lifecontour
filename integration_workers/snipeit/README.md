@@ -207,4 +207,4 @@ environment preamble remains there. See
 
 ## License
 
-AGPL-3.0
+`AGPL-3.0-or-later`, see the repository [`LICENSE`](../../LICENSE).
