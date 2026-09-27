@@ -1,0 +1,11 @@
+# Fingerprints of real credentials that were revoked or rotated at their
+# provider. History is not rewritten, so a rotated secret stays in old
+# commits. Its fingerprint here records that it was handled.
+#
+# Format (one per line): <commit>:<file>:<rule-id>:<line> for `gitleaks git`
+# findings, or <file>:<rule-id>:<line> for `gitleaks dir` findings.
+# Generate entries from a gitleaks JSON report (the `Fingerprint` field),
+# never by hand, and record the rotation in
+# docs/security/open-source-release-audit.md.
+#
+# The pre-release audit found no real credentials, so this file has no entries.

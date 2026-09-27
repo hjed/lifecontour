@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 1/15 phases ✅ DONE.
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 2/15 phases ✅ DONE.
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -260,10 +260,10 @@ new ones permanently.
 
 **Phase Breakdown:**
 
-**Phase 1 — Git history audit, allowlist, hygiene.** PR ~200 lines.
+**Phase 1 — Git history audit, allowlist, hygiene.** PR ~200 lines. ✅ DONE — gitleaks v8.30.1 and TruffleHog 3.97.9 scanned all 603 branches, 114 tags and 1,503 `refs/pull/*/head` refs (4,742 commits). There were 29 gitleaks findings and 58 unknown TruffleHog results, all placeholders or false positives, and 0 real or verified credentials. The committed `.gitleaks.toml` brings the re-scan to 0. The record is in [docs/security/open-source-release-audit.md](../security/open-source-release-audit.md). The history gate is met: the owner confirmed production sets its own `ENCRYPTION_KEY` rather than using the compose default. Two findings for Phase 2: the config needs gitleaks **≥ 8.25**, not ≥8.19; and every allowlist entry must set `targetRules`, because a global allowlist's `paths` skip whole files despite `condition = "AND"`.
 
 - **Scan history:** clone a mirror with `refs/pull/*` fetched and scan all refs:
-  - `gitleaks git --log-opts="--all" <mirror>` (gitleaks ≥8.19 syntax; `detect` is deprecated);
+  - `gitleaks git --log-opts="--all" <mirror>` (gitleaks git-mode syntax; `detect` is deprecated. The committed config needs gitleaks ≥ 8.25);
   - `trufflehog git file://<mirror> --results=verified,unknown`.
 - **Scan the current tree:** check every committed `.env*` file, `docker-compose.yml`, the
   workflows, test fixtures, and the e2e auth setup, and confirm each holds only dev or test
@@ -291,10 +291,10 @@ new ones permanently.
 
 **Phase 2 — Guardrails: gitleaks in pre-commit and CI.** PR ~120 lines.
 
-- **Pre-commit:** add the `gitleaks` hook (pinned rev) to `.pre-commit-config.yaml`, using the
+- **Pre-commit:** add the `gitleaks` hook (pinned rev, ≥ v8.25 and the same as or newer than the audit's v8.30.1) to `.pre-commit-config.yaml`, using the
   committed config.
 - **CI:** add a `secret-scan` job to `ci.yml` with `needs: changes`. It has **no path filter**
-  (like `core-shared-lint`), so it runs on every in-gate event. It uses the pinned gitleaks CLI
+  (like `core-shared-lint`), so it runs on every in-gate event. It uses the pinned gitleaks CLI (≥ v8.25; every `.gitleaks.toml` allowlist entry sets `targetRules`)
   with `.gitleaks.toml` and `.gitleaksignore`, checks out with `fetch-depth: 0`, and scans:
   - **pull_request:** `base.sha..head.sha`;
   - **push:** `before..after`;
