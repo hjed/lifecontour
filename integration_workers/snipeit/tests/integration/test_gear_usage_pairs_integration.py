@@ -8,7 +8,7 @@ that syncing again writes nothing to Snipe-IT.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -16,10 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from snipeit_sync_service import (
-    AssetUsageDates,
     GearUsagePair,
-    OverdueGearUsage,
-    fetch_overdue_gear_usage,
+    UnsyncedGearUsage,
+    fetch_unsynced_gear_usage,
 )
 
 from .test_checkin_sync_integration import (
@@ -225,7 +224,7 @@ class TestSeveralGearItems:
         await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id, session_factory=factory
         )
-        assert await fetch_overdue_gear_usage(factory, "user-123") == []
+        assert await fetch_unsynced_gear_usage(factory, "user-123") == []
         assert mock_transport.requests == []
 
     @pytest.mark.asyncio
@@ -382,20 +381,16 @@ class TestSeveralGearItems:
                 },
             )
 
-        overdue = await fetch_overdue_gear_usage(
+        overdue = await fetch_unsynced_gear_usage(
             lambda: _session_factory(async_connection), "user-123"
         )
 
-        usage_dates = AssetUsageDates(
-            last_checkout=datetime(2025, 3, 8), last_checkin=datetime(2025, 3, 9)
-        )
         assert overdue == [
-            OverdueGearUsage(
+            UnsyncedGearUsage(
                 journal_id=journal_id,
                 asset_id=asset_id,
-                checkout_at=date(2025, 3, 8),
-                checkin_at=date(2025, 3, 9),
-                usage_dates=usage_dates,
+                checkout_at=datetime.fromisoformat(_PAST_START),
+                listed=True,
             )
             for asset_id in (41, 42)
         ]

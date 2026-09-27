@@ -26,7 +26,8 @@ os.environ["ENCRYPTION_KEY"] = "testkey"
 import pytest
 from core_shared.testing import make_arq_ctx
 
-from snipeit_sync_service import GearUsagePair
+from snipeit_api_client import SnipeItAPIError
+from snipeit_rate_limiter import SnipeItRateLimitError
 from worker import (
     sync_snipeit_asset_batch,
     sync_snipeit_assets,
@@ -343,23 +344,23 @@ async def test_sync_snipeit_maintenance_batch(mock_ctx):
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("did_checkin", "reconciles"),
-    [(True, 1), (False, 0)],
-    ids=["checked-in", "nothing-to-check-in"],
-)
-async def test_periodic_checkin_reconciles_after_a_checkin(
-    mock_ctx: dict[str, Any], did_checkin: bool, reconciles: int
-) -> None:
-    """A sweep check-in may close a checkout recorded on an outdated date.
+def _unsynced(journal_id: int, asset_id: int, *, listed: bool = True) -> Any:
+    from datetime import UTC, datetime
 
-    Reconciling straight after lets that journal's corrected pair be recorded;
-    nothing else would revisit it once the asset is back.
-    """
-    from datetime import date, datetime
+    from snipeit_sync_service import UnsyncedGearUsage
 
-    from snipeit_sync_service import AssetUsageDates, OverdueGearUsage
+    return UnsyncedGearUsage(
+        journal_id=journal_id,
+        asset_id=asset_id,
+        checkout_at=datetime(2025, 3, 8, tzinfo=UTC),
+        listed=listed,
+    )
+
+
+async def _sweep(
+    mock_ctx: dict[str, Any], unsynced: list[Any], reconcile: AsyncMock
+) -> dict[str, int]:
+    """Run the sweep for one user with ``unsynced`` pairs and a mocked reconcile."""
     from worker import periodic_checkin_all_snipeit_accounts
 
     settings_result = MagicMock()
@@ -375,16 +376,8 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
     mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
 
     mock_sync_service = MagicMock()
-    mock_sync_service.push_checkin_create = AsyncMock(return_value=did_checkin)
-    mock_sync_service.reconcile_gear_usage = AsyncMock()
+    mock_sync_service.reconcile_gear_usage = reconcile
     mock_sync_service._api_client.close = AsyncMock()
-    overdue = OverdueGearUsage(
-        journal_id=100,
-        asset_id=42,
-        checkout_at=date(2025, 3, 8),
-        checkin_at=date(2025, 3, 9),
-        usage_dates=AssetUsageDates(last_checkin=datetime(2025, 3, 9, 17, 0)),
-    )
 
     with (
         patch(
@@ -394,21 +387,86 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
         ),
         patch("worker._create_sync_service", return_value=mock_sync_service),
         patch(
-            "snipeit_sync_service.fetch_overdue_gear_usage",
+            "snipeit_sync_service.fetch_unsynced_gear_usage",
             new_callable=AsyncMock,
-            return_value=[overdue],
+            return_value=unsynced,
         ),
     ):
-        await periodic_checkin_all_snipeit_accounts(mock_ctx)
+        result = await periodic_checkin_all_snipeit_accounts(mock_ctx)
+    mock_sync_service._api_client.close.assert_awaited_once()
+    return result
 
-    assert mock_sync_service.reconcile_gear_usage.await_count == reconciles
-    if reconciles:
-        # Only the pair just checked in: the sweep never pushes the others.
-        reconcile_kwargs = mock_sync_service.reconcile_gear_usage.await_args.kwargs
-        assert reconcile_kwargs["asset_id"] == 42
-    checkin = mock_sync_service.push_checkin_create.await_args
-    assert checkin.args[0] == GearUsagePair(100, 42)
-    assert checkin.kwargs["usage_dates"] is overdue.usage_dates
+
+def _reconciled(reconcile: AsyncMock) -> list[tuple[int, int | None]]:
+    return [
+        (call.kwargs["journal_id"], call.kwargs.get("asset_id"))
+        for call in reconcile.await_args_list
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sweep_reconciles_each_unsynced_pair(mock_ctx: dict[str, Any]) -> None:
+    """A listed pair is reconciled alone; a pair the journal dropped is released
+    by reconciling the whole journal, the only path that releases it."""
+    reconcile = AsyncMock()
+
+    result = await _sweep(
+        mock_ctx, [_unsynced(100, 41), _unsynced(101, 42, listed=False)], reconcile
+    )
+
+    assert _reconciled(reconcile) == [(100, 41), (101, None)]
+    assert result == {"accounts_found": 1, "reconciled": 2}
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_the_rest_of_an_asset_after_a_failure(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """A later usage of an asset still out for an earlier one would only fail
+    ("not available"); other assets carry on."""
+
+    async def reconcile(**kwargs: Any) -> None:
+        if kwargs["journal_id"] == 100:
+            raise SnipeItAPIError("Asset not available", status_code=200)
+
+    mock = AsyncMock(side_effect=reconcile)
+    result = await _sweep(
+        mock_ctx,
+        [_unsynced(100, 41), _unsynced(101, 41), _unsynced(102, 42)],
+        mock,
+    )
+
+    assert _reconciled(mock) == [(100, 41), (102, 42)]
+    assert result == {"accounts_found": 1, "reconciled": 1}
+
+
+@pytest.mark.asyncio
+async def test_sweep_stops_a_user_that_is_still_rate_limited(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """The client has already retried; the next sweep carries on from here."""
+    mock = AsyncMock(side_effect=SnipeItRateLimitError("429", retry_after=30))
+
+    result = await _sweep(mock_ctx, [_unsynced(100, 41), _unsynced(101, 42)], mock)
+
+    assert _reconciled(mock) == [(100, 41)]
+    assert result == {"accounts_found": 1, "reconciled": 0}
+
+
+@pytest.mark.asyncio
+async def test_sweep_handles_a_bounded_number_of_pairs_per_run(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """A run must finish inside arq's job timeout; oldest first, so the next run
+    carries on where this one stopped."""
+    from worker import SWEEP_MAX_PAIRS
+
+    reconcile = AsyncMock()
+    unsynced = [_unsynced(100 + i, i) for i in range(SWEEP_MAX_PAIRS + 5)]
+
+    await _sweep(mock_ctx, unsynced, reconcile)
+
+    assert _reconciled(reconcile) == [(100 + i, i) for i in range(SWEEP_MAX_PAIRS)]
 
 
 @pytest.mark.asyncio

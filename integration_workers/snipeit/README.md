@@ -97,8 +97,16 @@ their Snipe-IT traffic does not compete for the rate limit:
   push row of a live journal a user wrote. A listing that fails part-way
   reconciles nothing, and a smart sync that stops listing everything (#1560)
   must skip this step too.
-- `periodic_checkin_all_snipeit_accounts` (at `:00`) — checks in assets whose usage period
-  has ended.
+- `periodic_checkin_all_snipeit_accounts` (at `:00`) — finishes the gear usage pushes left
+  unfinished. `fetch_unsynced_gear_usage` selects each (journal, asset) pair
+  whose checkout failed (unless terminal, `error_message` starting `Terminal:`),
+  is pending past the five-minute in-flight lock, or succeeded with no check-in
+  once the usage period has ended (or the journal no longer lists the item).
+  Only pairs a push was attempted for are selected, so old journals are not
+  backfilled. Each pair is reconciled, oldest first per asset; after a failure
+  the asset's later pairs wait for the next run (they would fail "not
+  available"), a user still rate limited is left for the next run, and at most
+  `SWEEP_MAX_PAIRS` (40) pairs per user are handled per run.
 
 ### Rate Limiting
 
