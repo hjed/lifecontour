@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 3/15 phases ✅ DONE.
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 4/15 phases ✅ DONE.
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -534,7 +534,13 @@ dark.
   - The owner confirms legibility and the cultural rule.
 - **Docs:** `branding/README.md`.
 
-**Phase 2 — App icons.** PR ~120 lines.
+**Phase 2 — App icons.** PR ~120 lines. ✅ DONE
+
+- **Progress:** delivered `frontend/src/app/icon.svg` (the mark with a dark media-query swap),
+  `favicon.ico` (16 + 32px, light mark) and `apple-icon.png` (180px, 30px clear space, white),
+  generated with Inkscape and ImageMagick using the commands in `branding/README.md`. The `icons`
+  metadata is gone from `layout.tsx`. The `sidebar.spec.ts` "App icon" e2e also checks that every
+  `link[rel="icon"]` resolves, so a dangling icon link fails the test.
 
 - **`frontend/src/app/icon.svg`:** the mark with an embedded
   `@media (prefers-color-scheme: dark)` style that swaps to the dark strokes.

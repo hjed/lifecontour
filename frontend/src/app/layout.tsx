@@ -12,9 +12,6 @@ export const metadata: Metadata = {
   title: 'Personal Management System',
   description: 'A personal CRM and journal system with AI integration',
   robots: 'noindex, nofollow', // Private application
-  icons: {
-    icon: '/favicon.ico',
-  },
 };
 
 export const viewport: Viewport = {

@@ -344,4 +344,32 @@ test.describe('Sidebar Navigation', () => {
     // Journals) and the absence of an expand toggle on flat journal tags are
     // unit-tested in Sidebar-journal-tags.test.tsx.
   });
+
+  test.describe('App icon', () => {
+    test('serves the SVG tab icon and every icon link resolves', async ({
+      authenticatedPage: page,
+    }) => {
+      await page.goto('/contacts');
+
+      const svgIcon = page.locator('link[rel="icon"][type="image/svg+xml"]');
+      await expect(svgIcon).toHaveAttribute('href', /\/icon\.svg(\?|$)/);
+      // The assertion above proved the href is present.
+      const svgHref = (await svgIcon.getAttribute('href')) ?? '';
+
+      const svgResponse = await page.request.get(svgHref);
+      expect(svgResponse.status()).toBe(200);
+      expect(svgResponse.headers()['content-type']).toContain('image/svg+xml');
+
+      // A dangling icon link (the old '/favicon.ico' metadata) 404s.
+      const hrefs = await page
+        .locator('link[rel="icon"]')
+        .evaluateAll(links =>
+          links.map(link => link.getAttribute('href') ?? '')
+        );
+      for (const href of hrefs) {
+        const response = await page.request.get(href);
+        expect(response.status(), href).toBe(200);
+      }
+    });
+  });
 });
