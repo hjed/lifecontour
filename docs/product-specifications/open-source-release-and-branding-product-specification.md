@@ -58,7 +58,7 @@ This is a product specification, not a technical design. The iteration doc break
 - CLA plus CLA Assistant, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, PR and issue templates.
 - A credential audit of git history (all refs) and GitHub-side content, remediation, and ongoing
   secret-scanning guardrails.
-- A repository-name check, and the rename of user-facing text, package
+- The rename of user-facing text, package
   names and the GitHub repository.
 - Brand mark SVGs, favicon and app icons, a dark variant, and a short brand guide.
 - The go-public runbook: repository settings and the visibility flip.
@@ -315,7 +315,7 @@ and personal-CRM words are all taken, so coined compounds were the viable space.
 - **Trademarks:** the owner searched the IP Australia and USPTO registers on 2026-09-27 and found
   no conflicting mark. The rename is not gated.
 - **Domain:** not wanted. The project lives at its GitHub repository.
-- **Before the repository rename:** confirm the GitHub name `hjed/lifecontour` is free.
+- **Repository name:** the owner confirmed `hjed/lifecontour` is available (2026-09-27).
 
 ### Rename surfaces (option b)
 
@@ -425,7 +425,7 @@ flowchart TD
   B -- no --> D[Merge: LICENSE, SPDX, CONTRIBUTING, CLA, CoC, SECURITY, templates, gitleaks guardrails]
   D --> E[Merge: brand assets + favicon]
   E --> F[Merge: user-facing + package rename]
-  F --> G[Check repo name; rename repo; update prod image refs; verify deploy]
+  F --> G[Rename repo; update prod image refs; verify deploy]
   G --> H[Configure: CLA Assistant, fork-PR approval, rulesets, GHCR package visibility]
   H --> I[Flip visibility to public]
   I --> J[Enable secret scanning + push protection, private vuln reporting; verify with a fork PR]

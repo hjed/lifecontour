@@ -707,7 +707,6 @@ repository's protections, and flip visibility.
 **Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines.
 
 - **Before merge (manual):**
-  - Pre-flight: confirm `hjed/lifecontour` is free on GitHub.
   - Rename the repository to `hjed/lifecontour`.
   - `git remote set-url` in each local checkout and worktree.
   - Re-bind the SonarCloud project and update its key.
@@ -784,8 +783,8 @@ Confirmed with the product owner (2026-09-26, spec planning):
 7. **Copyright holder:** Harry J E Day.
 8. **GHCR packages:** made **public**, so self-hosters can `docker pull`.
 9. **Trademark searches (2026-09-27):** the owner completed the IP Australia and USPTO searches
-   for "Lifecontour" with no conflicts. The name-adoption gate is removed, and **no domain is
-   registered**. Only the repository-name check remains, as a pre-flight in ITER19-005 Phase 1.
+   for "Lifecontour" with no conflicts, and confirmed `hjed/lifecontour` is available. The
+   name-adoption gate is removed, and **no domain is registered**.
 10. **CONTRIBUTING rules:** issue first, ≤500-line PRs, AI-generated PRs reviewed by the submitter
    and run through automated review.
 
