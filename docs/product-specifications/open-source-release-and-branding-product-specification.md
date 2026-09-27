@@ -58,7 +58,7 @@ This is a product specification, not a technical design. The iteration doc break
 - CLA plus CLA Assistant, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, PR and issue templates.
 - A credential audit of git history (all refs) and GitHub-side content, remediation, and ongoing
   secret-scanning guardrails.
-- Name adoption checks (trademark, registries, domain) and the rename of user-facing text, package
+- A repository-name check, and the rename of user-facing text, package
   names and the GitHub repository.
 - Brand mark SVGs, favicon and app icons, a dark variant, and a short brand guide.
 - The go-public runbook: repository settings and the visibility flip.
@@ -310,15 +310,12 @@ and personal-CRM words are all taken, so coined compounds were the viable space.
   others.
 - **Rejected on cultural grounds:** Sherpa, Totem, and borrowed Aboriginal words.
 
-### Adoption gate (before any rename lands)
+### Name clearance
 
-- A search of the **IP Australia** and **USPTO** trademark registers (classes 9 and 42) finds no
-  conflicting mark.
-- **`lifecontour.com`** is registered by the owner. Note: it was unregistered when checked on
-  2026-09-26.
-- The GitHub repository name `hjed/lifecontour` is available.
-- The **PyPI / npm** names are recorded as available or not (informational; nothing is published to
-  the registries).
+- **Trademarks:** the owner searched the IP Australia and USPTO registers on 2026-09-27 and found
+  no conflicting mark. The rename is not gated.
+- **Domain:** not wanted. The project lives at its GitHub repository.
+- **Before the repository rename:** confirm the GitHub name `hjed/lifecontour` is free.
 
 ### Rename surfaces (option b)
 
@@ -426,10 +423,9 @@ flowchart TD
   A[Credential audit: history, all refs, GitHub content] --> B{Real credentials?}
   B -- yes --> C[Revoke/rotate at provider, remove from tree, purge logs/artifacts] --> A
   B -- no --> D[Merge: LICENSE, SPDX, CONTRIBUTING, CLA, CoC, SECURITY, templates, gitleaks guardrails]
-  N[Name adoption gate: trademark, domain, repo name] --> E
   D --> E[Merge: brand assets + favicon]
   E --> F[Merge: user-facing + package rename]
-  F --> G[Rename repo; update prod image refs; verify deploy]
+  F --> G[Check repo name; rename repo; update prod image refs; verify deploy]
   G --> H[Configure: CLA Assistant, fork-PR approval, rulesets, GHCR package visibility]
   H --> I[Flip visibility to public]
   I --> J[Enable secret scanning + push protection, private vuln reporting; verify with a fork PR]
@@ -451,7 +447,7 @@ flowchart TD
    blocks unsigned PRs.
 3. The credential audit record shows every finding triaged, and zero live credentials at flip time.
    gitleaks runs in pre-commit and CI.
-4. The name adoption gate passed. No user-facing surface in the Part 4 table says "Personal
+4. No user-facing surface in the Part 4 table says "Personal
    Management System", "Personal CRM" or "PMS". Excluded from this check: historical docs, the
    deferred infrastructure identifiers, and the two tests that assert the old placeholder is
    absent.

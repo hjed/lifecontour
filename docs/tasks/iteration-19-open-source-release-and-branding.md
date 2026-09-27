@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🔴 PLANNED — 5 sub-iterations, 16 phases (15 PRs; one phase is a manual gate).
+**Status:** 🔴 PLANNED — 5 sub-iterations, 15 phases (one PR each).
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -188,13 +188,10 @@ Established by reviewing the current code during spec planning:
   else waits on it until the flip.
 - **ITER19-002 (Licensing & Contributions)** is independent and can run in parallel from the
   start.
-- **ITER19-003 (Brand Identity)**:
-  - The name-agnostic mark can be drawn at any time, but Phase 1 **merges only after the name
-    adoption gate** (ITER19-004 Phase 0), because it commits the "Lifecontour" wordmark in
-    `lockup.svg` and the brand guide.
-  - Phase 1's SVGs are needed by ITER19-004 Phase 3 (the README lockup).
-- **ITER19-004 (Rename)** requires the **name adoption gate** (Phase 0, manual) before any rename
-  PR merges. Phase 3 needs ITER19-003 Phase 1, and Phase 4 follows Phase 1.
+- **ITER19-003 (Brand Identity)** is independent. Phase 1's SVGs are needed by ITER19-004 Phase 3
+  (the README lockup).
+- **ITER19-004 (Rename)** can start immediately; the trademark searches are complete (see Resolved
+  Decisions). Phase 3 needs ITER19-003 Phase 1, and Phase 4 follows Phase 1.
 - **ITER19-005 (Repository Rename & Go Public)** comes last.
   - Phase 1 needs ITER19-004 merged.
   - Phase 2 (the flip) needs every other phase merged and ITER19-001's gate passed.
@@ -203,8 +200,8 @@ Established by reviewing the current code during spec planning:
 |---|---|---|
 | ITER19-001 Credential Audit & Guardrails | — | -002, -003, -004 |
 | ITER19-002 Licensing & Contributions | — | -001, -003, -004 |
-| ITER19-003 Brand Identity | Name adoption gate (-004 P0), for P1's wordmark | -001, -002, -004 (Phases 1–2) |
-| ITER19-004 Rename to Lifecontour | Name adoption gate; -003 P1 (for P3); P1 (for P4) | -001, -002 |
+| ITER19-003 Brand Identity | — | -001, -002, -004 (Phases 1–2) |
+| ITER19-004 Rename to Lifecontour | -003 P1 (for P3); P1 (for P4) | -001, -002 |
 | ITER19-005 Repository Rename & Go Public | -004 (P1); all + -001 gate (P2) | — |
 
 ```mermaid
@@ -212,12 +209,10 @@ flowchart LR
   A1[001 P1 history audit] --> A3[001 P3 GitHub-side audit]
   A1 --> A2[001 P2 gitleaks guardrails]
   B1[002 P1 LICENSE] --> B2[002 P2 SPDX, TRADEMARKS, CoC, SECURITY] --> B3[002 P3 licence audit] --> B4[002 P4 CONTRIBUTING + CLA]
-  G[004 P0 name gate] --> C1[003 P1 brand SVGs + wordmark]
-  C1 --> C2[003 P2 app icons]
-  G --> D1[004 P1 frontend rename]
-  G --> D2[004 P2 backend/MCP/worker rename]
+  C1[003 P1 brand SVGs + wordmark] --> C2[003 P2 app icons]
+  D1[004 P1 frontend rename]
+  D2[004 P2 backend/MCP/worker rename]
   C1 --> D3[004 P3 Python packages + docs]
-  G --> D3
   D1 --> D4[004 P4 frontend package + design-sync]
   D1 & D2 & D3 & D4 --> E1[005 P1 repo rename + deploy + source link]
   A2 & A3 & B4 & C2 & E1 --> E2[005 P2 configure + flip]
@@ -482,8 +477,7 @@ dark.
 **Specification Reference:**
 - [Part 5: Brand Identity](../product-specifications/open-source-release-and-branding-product-specification.md#part-5-brand-identity)
 
-**Dependencies:** The name adoption gate (ITER19-004 Phase 0) before Phase 1 merges, because it
-commits the "Lifecontour" wordmark. Drafting the mark can start earlier.
+**Dependencies:** None.
 
 **Deliverable:**
 
@@ -548,7 +542,6 @@ docs), it says **Lifecontour**, read from one constant per stack.
 
 **Dependencies:**
 
-- Phase 0 (the name adoption gate) must pass before Phases 1–3 merge.
 - Phase 3 needs ITER19-003 Phase 1 (the lockup for the README).
 - Phase 4 follows Phase 1, so the frontend is stable before the design-sync re-grade.
 
@@ -566,16 +559,6 @@ docs), it says **Lifecontour**, read from one constant per stack.
 - The OSM User-Agent identifies Lifecontour with a project URL.
 
 **Phase Breakdown:**
-
-**Phase 0 — Name adoption gate (manual, no PR).**
-
-- Search the **IP Australia** and **USPTO** trademark registers (classes 9 and 42) for
-  "Lifecontour" and close variants.
-- Register `lifecontour.com`.
-- Confirm that `hjed/lifecontour` is free on GitHub.
-- Record PyPI and npm availability (informational).
-- Record the outcome in the first rename PR's description.
-- A conflict stops ITER19-004 and goes back to the owner.
 
 **Phase 1 — Frontend user-facing rename.** PR ~320 lines.
 
@@ -724,6 +707,7 @@ repository's protections, and flip visibility.
 **Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines.
 
 - **Before merge (manual):**
+  - Pre-flight: confirm `hjed/lifecontour` is free on GitHub.
   - Rename the repository to `hjed/lifecontour`.
   - `git remote set-url` in each local checkout and worktree.
   - Re-bind the SonarCloud project and update its key.
@@ -799,16 +783,19 @@ Confirmed with the product owner (2026-09-26, spec planning):
    because it echoes a First Nations art motif.
 7. **Copyright holder:** Harry J E Day.
 8. **GHCR packages:** made **public**, so self-hosters can `docker pull`.
-9. **CONTRIBUTING rules:** issue first, ≤500-line PRs, AI-generated PRs reviewed by the submitter
+9. **Trademark searches (2026-09-27):** the owner completed the IP Australia and USPTO searches
+   for "Lifecontour" with no conflicts. The name-adoption gate is removed, and **no domain is
+   registered**. Only the repository-name check remains, as a pre-flight in ITER19-005 Phase 1.
+10. **CONTRIBUTING rules:** issue first, ≤500-line PRs, AI-generated PRs reviewed by the submitter
    and run through automated review.
 
 Planning decisions made in this document (not requiring product input, recorded for review):
 
-10. **`LICENSE` is verbatim with no preamble**, and lands alone as the single exception to the
+11. **`LICENSE` is verbatim with no preamble**, and lands alone as the single exception to the
     ≤500-line rule. The copyright line lives in the README and CONTRIBUTING.
-11. **The OSM User-Agent carries no version**; it identifies the product and URL, as OSM's policy
+12. **The OSM User-Agent carries no version**; it identifies the product and URL, as OSM's policy
     requires.
-12. **The frontend package rename is its own phase**, because design-sync keys on the package name
+13. **The frontend package rename is its own phase**, because design-sync keys on the package name
     and needs a re-sync.
 
 ### Remaining design choices (decide during implementation, no product input required)
@@ -826,8 +813,8 @@ Planning decisions made in this document (not requiring product input, recorded 
 |---|---|---|---|---|
 | ITER19-001: Credential Audit & Guardrails | Audit record, `.gitleaks.toml`, gitleaks pre-commit + CI | — | — | — |
 | ITER19-002: Licensing & Contributions | LICENSE/SPDX, licence audit, TRADEMARKS, CoC, SECURITY, CONTRIBUTING, CLA, templates | — | — | — |
-| ITER19-003: Brand Identity | `branding/` assets + guide, app icons | ✅ | — | Name gate (-004 P0) |
-| ITER19-004: Rename to Lifecontour | Name everywhere (UI, API, MCP, workers, packages, design-sync), from one constant per stack | ✅ | ✅ (server name) | Name gate; -003 P1 |
+| ITER19-003: Brand Identity | `branding/` assets + guide, app icons | ✅ | — | — |
+| ITER19-004: Rename to Lifecontour | Name everywhere (UI, API, MCP, workers, packages, design-sync), from one constant per stack | ✅ | ✅ (server name) | -003 P1 |
 | ITER19-005: Repository Rename & Go Public | Repo/images/deploy renamed, source link, public with protections | ✅ | — | All |
 
 ### Phase Summary
@@ -837,15 +824,14 @@ Planning decisions made in this document (not requiring product input, recorded 
 | ITER19-001: Credential Audit & Guardrails | 3 | 3 |
 | ITER19-002: Licensing & Contributions | 4 | 4 |
 | ITER19-003: Brand Identity | 2 | 2 |
-| ITER19-004: Rename to Lifecontour | 5 (P0 manual) | 4 |
+| ITER19-004: Rename to Lifecontour | 4 | 4 |
 | ITER19-005: Repository Rename & Go Public | 2 | 2 |
-| **Total** | **16** | **15** |
+| **Total** | **15** | **15** |
 
 **Suggested delivery order:**
 
-1. Start ITER19-001 Phase 1 and ITER19-004 Phase 0 immediately; the credential audit and the name
-   gate are the two long-lead items.
-2. Run ITER19-002 in parallel. Run ITER19-003 once the name gate has passed.
+1. Start ITER19-001 Phase 1 immediately; the credential audit is the long-lead item.
+2. Run ITER19-002 and ITER19-003 in parallel.
 3. Then ITER19-004 Phases 1–4.
 4. Then ITER19-005 Phase 1, with the deploy step.
 5. ITER19-005 Phase 2 flips the repository last.
