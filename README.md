@@ -222,7 +222,8 @@ alembic downgrade -1
 
 ### Core Documentation
 - **[Architecture Overview](docs/architecture.md)** - System design and patterns
-- **[AI Guidelines](docs/ai-guidelines.md)** - Development guidelines for AI assistants
+- **[AI Guidelines](AGENTS.md)** - Development guidelines for AI assistants
+- **[Contributing](CONTRIBUTING.md)** - How to propose and submit a change
 - **[Task Management](docs/tasks.md)** - Agile development roadmap
 
 ### Development Guides
@@ -266,7 +267,10 @@ NODE_ENV=development
 
 ## 🤝 Contributing
 
-This project follows agile development principles with feature-complete iterations. See [tasks.md](docs/tasks.md) for the current roadmap and [ai-guidelines.md](docs/ai-guidelines.md) for development standards.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: open an issue to discuss
+the change, keep pull requests to at most 500 changed lines, and disclose AI assistance.
+Contributors sign the [Contributor License Agreement](CLA.md) on their first pull request.
+Coding agents follow [AGENTS.md](AGENTS.md). See [tasks.md](docs/tasks.md) for the current roadmap.
 
 ## 📄 License
 

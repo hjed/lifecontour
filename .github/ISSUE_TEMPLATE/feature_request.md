@@ -1,89 +1,50 @@
 ---
-name: Feature Request
-about: Suggest an idea for this project
-title: '[FEATURE] '
+name: Feature Proposal
+about: Propose a feature or behaviour change and discuss it before writing code
+title: '[PROPOSAL] '
 labels: 'enhancement'
 assignees: ''
 ---
 
-## Feature Description
+<!--
+Discuss first: open this proposal and wait for the maintainer to acknowledge it before you start
+work. Pull requests without a linked, acknowledged issue may be closed (typo and docs-only fixes
+are exempt). See CONTRIBUTING.md.
+-->
 
-A clear and concise description of what you want to happen.
+## Problem
 
-## Problem Statement
+What problem does this solve, and for whom? Is it related to an existing issue?
 
-Is your feature request related to a problem? Please describe.
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+## Proposed Change
 
-## Proposed Solution
+Describe the change you want to make and how a user would experience it.
 
-Describe the solution you'd like.
-A clear and concise description of what you want to happen.
+## Alternatives Considered
 
-## Alternative Solutions
+Other approaches you considered, and why you prefer this one.
 
-Describe alternatives you've considered.
-A clear and concise description of any alternative solutions or features you've considered.
+## Scope and Size
 
-## Use Cases
-
-Describe specific use cases for this feature:
-
-1. As a [user type], I want [goal] so that [benefit]
-2. As a [user type], I want [goal] so that [benefit]
-
-## Implementation Details
-
-If you have ideas on how this could be implemented, please describe them here.
-
-### Backend Changes
-- [ ] API endpoints needed
-- [ ] Database schema changes
-- [ ] New services/repositories
-- [ ] Authentication/authorization changes
-
-### Frontend Changes
-- [ ] New UI components
-- [ ] New pages/routes
-- [ ] State management updates
-- [ ] API integration
+- Areas affected (backend, frontend, an integration worker, MCP, docs):
+- Estimated size in changed lines, tests included:
+- If it is over 500 lines, how would you split it into a series of pull requests?
 
 ## Acceptance Criteria
 
 - [ ] Criterion 1
 - [ ] Criterion 2
-- [ ] Criterion 3
+
+## Testing Approach
+
+How will the change be tested (unit, integration, end-to-end)? Tests are written first.
+
+## Contribution
+
+- [ ] I would like to implement this myself, once it is acknowledged
+- [ ] I plan to use AI assistance, and will review every AI-generated line and disclose it in the pull request
+- [ ] I have searched for existing issues and proposals
 
 ## Additional Context
 
-Add any other context, mockups, or screenshots about the feature request here.
-
-## Priority
-
-- [ ] Low - Nice to have
-- [ ] Medium - Would improve user experience
-- [ ] High - Critical for user workflow
-- [ ] Urgent - Blocking other work
-
-## Dependencies
-
-List any dependencies or prerequisites for this feature:
-
-- [ ] Dependency 1
-- [ ] Dependency 2
-
-## Testing Considerations
-
-How should this feature be tested?
-
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] E2E tests
-- [ ] Manual testing scenarios
-
-## Documentation Requirements
-
-- [ ] API documentation updates
-- [ ] User documentation
-- [ ] Architecture documentation
-- [ ] README updates
+Mockups, screenshots or links that help explain the proposal.

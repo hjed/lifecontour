@@ -1,1 +1,1 @@
-Follow the instructions in docs/ai-guidelines.md.
+Follow the instructions in AGENTS.md.
