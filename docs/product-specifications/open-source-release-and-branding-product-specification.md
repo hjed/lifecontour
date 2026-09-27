@@ -118,10 +118,13 @@ The project intends to be AGPL, but it has never applied a licence. There is no 
   it easy for anyone running a modified copy to comply.
 - **Dependency licence audit:** every runtime dependency (Python and npm) is checked for
   compatibility with AGPL-3.0, and the result is recorded. Any incompatible dependency blocks the
-  release until it is replaced.
+  release until it is replaced, or until the owner grants an AGPL section 7 additional permission
+  for it in `LICENSE-EXCEPTIONS.md`. The audit found one such dependency: react-leaflet
+  (Hippocratic-2.1), which the owner kept under an exception.
   - A preliminary review found nothing incompatible. The deps are permissive; psycopg2 and
     pycountry are LGPL; dompurify is MPL/Apache; the Inter font is OFL.
-  - The OpenStreetMap attribution in PDF output (`osm_tile_source.py:40`) must be kept (ODbL).
+  - The OpenStreetMap attribution in PDF output (`osm_tile_source.py:40`) and on the frontend
+    map (`GPXTrackMap.tsx`) must be kept (ODbL).
 - **Vendored content keeps its own licence notices:**
   - `.claude/skills/playwright-skill/LICENSE` (MIT) is already present.
   - `.claude/skills/shadcn/` has **no licence file**, because upstream ships none in the skill
@@ -444,7 +447,8 @@ flowchart TD
 ## Success Criteria
 
 1. `LICENSE` exists, and every package declares `AGPL-3.0-or-later`. The dependency audit shows no
-   incompatible licence.
+   incompatible licence, other than any the owner has covered with an exception in
+   `LICENSE-EXCEPTIONS.md`.
 2. CONTRIBUTING, CLA, CODE_OF_CONDUCT, SECURITY and the PR and issue templates exist. CLA Assistant
    blocks unsigned PRs.
 3. The credential audit record shows every finding triaged, and zero live credentials at flip time.

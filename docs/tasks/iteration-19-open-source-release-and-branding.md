@@ -441,7 +441,15 @@ This status note is the only other change in the PR, in the same commit (owner d
   - The `check-toml` hook passes.
   - A link check over the new files and the README passes.
 
-**Phase 3 — Dependency licence audit.** PR ~200 lines.
+**Phase 3 — Dependency licence audit.** PR ~200 lines. ✅ DONE —
+[`docs/licensing/third-party-licences.md`](../licensing/third-party-licences.md) records the
+counts: Python has 147 unique runtime packages across the six projects, and the frontend has 363
+production `name@version` pairs. Every package is permissive or weak copyleft except
+`caniuse-lite` (CC-BY-4.0, compatible) and `react-leaflet`/`@react-leaflet/core`
+(Hippocratic-2.1). Those two are combined under an AGPL §7 additional permission in the root
+`LICENSE-EXCEPTIONS.md` (owner decision; see Resolved Decision 14). The frontend
+devDependencies that the image ships were also checked for redistributability. No licence
+blocks ITER19-005 Phase 2.
 
 - Generate the runtime licence lists:
   - `pip-licenses` in `--no-dev` synced environments for the backend, `core_shared` and each
@@ -476,6 +484,9 @@ This status note is the only other change in the PR, in the same commit (owner d
     layers. No layer merges without a passing `secret-scan` on its head.
   - External contributors working from forks submit dependent changes as sequential PRs against
     `main` rather than as a stack; each such PR runs full CI.
+- **Licence exceptions:** CONTRIBUTING and the CLA state that contributions are accepted under
+  AGPL-3.0-or-later **plus the additional permissions in `LICENSE-EXCEPTIONS.md`**, so the
+  react-leaflet exception keeps covering the whole codebase.
 - **`CLA.md`:** an individual CLA adapted from the Apache ICLA. The contributor grants the owner a
   perpetual, worldwide, royalty-free, irrevocable copyright and patent licence, including the
   right to sublicense and relicense under any terms, and keeps their own copyright. Include a
@@ -758,6 +769,11 @@ repository's protections, and flip visibility.
     - the **login page**, which is public, so unauthenticated visitors can reach it;
     - `components/auth/UserMenu.tsx`, for signed-in users.
     Both are external links with `rel="noopener noreferrer"`.
+  - **Third-party notices** (from ITER19-002 Phase 3): minified bundles drop licence headers,
+    including react-leaflet's Hippocratic notice. Generate a notices file at build time from the
+    production dependencies' licence files, serve it from the frontend, and link it beside
+    "Source code". A test asserts the file lists `react-leaflet` and the link resolves. Not a
+    release blocker; if it pushes this phase past 500 lines, split it into its own phase.
   - Update the repository-URL text:
     - `docs/mcp-setup.md:155`;
     - `cd personal-management-system` at `README.md:20`, `release.yml:194` and
@@ -838,6 +854,13 @@ Planning decisions made in this document (not requiring product input, recorded 
     requires.
 13. **The frontend package rename is its own phase**, because design-sync keys on the package name
     and needs a re-sync.
+14. **react-leaflet is kept under an AGPL §7 additional permission** (owner, 2026-09-27, Phase 3).
+    `react-leaflet` 5 and `@react-leaflet/core` 3 are Hippocratic-2.1, whose use conditions are
+    AGPL "further restrictions". The owner has no objection to those conditions, so
+    `LICENSE-EXCEPTIONS.md` grants permission to convey the Program combined with them.
+    `LICENSE` stays verbatim and the SPDX identifiers stay `AGPL-3.0-or-later`. The rejected
+    alternative was rewriting `GPXTrackMap.tsx` (its only user) on plain Leaflet (BSD-2), about
+    150 lines; that remains possible later with no licence change.
 
 ### Remaining design choices (decide during implementation, no product input required)
 

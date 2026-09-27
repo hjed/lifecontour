@@ -273,7 +273,10 @@ This project follows agile development principles with feature-complete iteratio
 Copyright (C) 2025–2026 Harry J E Day
 
 This project is licensed under the GNU Affero General Public License v3.0 or later
-(SPDX: `AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
+(SPDX: `AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text, and
+[LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) for the additional permission covering
+react-leaflet. Third-party dependency licences are recorded in the
+[licence audit](docs/licensing/third-party-licences.md).
 
 The project name and logo are not covered by that licence. See [TRADEMARKS.md](TRADEMARKS.md).
 To report a vulnerability, see [SECURITY.md](SECURITY.md), and for community standards see
