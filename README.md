@@ -270,7 +270,14 @@ This project follows agile development principles with feature-complete iteratio
 
 ## 📄 License
 
-AGPL v3 - See [LICENSE](LICENSE) for details.
+Copyright (C) 2025–2026 Harry J E Day
+
+This project is licensed under the GNU Affero General Public License v3.0 or later
+(SPDX: `AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
+
+The project name and logo are not covered by that licence. See [TRADEMARKS.md](TRADEMARKS.md).
+To report a vulnerability, see [SECURITY.md](SECURITY.md), and for community standards see
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ---
 

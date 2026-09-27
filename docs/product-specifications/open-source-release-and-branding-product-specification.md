@@ -124,8 +124,10 @@ The project intends to be AGPL, but it has never applied a licence. There is no 
   - The OpenStreetMap attribution in PDF output (`osm_tile_source.py:40`) must be kept (ODbL).
 - **Vendored content keeps its own licence notices:**
   - `.claude/skills/playwright-skill/LICENSE` (MIT) is already present.
-  - `.claude/skills/shadcn/` has **no licence file**. Add the upstream MIT notice, and drop its
-    bundled shadcn logo PNGs (`assets/shadcn*.png`), which are third-party brand assets.
+  - `.claude/skills/shadcn/` has **no licence file**, because upstream ships none in the skill
+    folder. Its upstream MIT notice goes in `.claude/skills/THIRD_PARTY_NOTICES.md`.
+  - Installed skill folders are left exactly as the `skills` CLI wrote them, bundled logos
+    included, so updates from `skills-lock.json` keep working.
 - **Trademark notice:** a short `TRADEMARKS.md`, linked from the README, states that the Lifecontour
   name and logo are not granted by the AGPL. Forks must rebrand, though they may truthfully say
   "based on Lifecontour".
