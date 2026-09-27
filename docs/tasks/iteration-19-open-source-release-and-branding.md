@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 2/15 phases ✅ DONE.
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 3/15 phases ✅ DONE.
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -509,7 +509,15 @@ dark.
 
 **Phase Breakdown:**
 
-**Phase 1 — Brand assets and guide.** PR ~250 lines.
+**Phase 1 — Brand assets and guide.** PR ~250 lines. ✅ DONE
+
+- **Progress:** delivered `branding/mark.svg`, `mark-dark.svg`, `mark-mono.svg`, `lockup.svg`,
+  `lockup-dark.svg` and `README.md`. `lockup-dark.svg` was added because GitHub shows an `<img>`
+  SVG in the OS colour scheme, not the GitHub theme, so the README needs `<picture>` (the snippet is
+  in the guide). Colours live in `.book`/`.creek`/`.person`/`.wordmark` classes, so each light and
+  dark file differ only in their `<style>` block, ready for Phase 2's media-query swap. The
+  wordmark is Inter SemiBold (OFL), outlined with kerning. The 16/32/128px light and dark
+  contact sheet is attached to the PR for owner sign-off.
 
 - **SVGs in `branding/`:**
   - `mark.svg`, `mark-dark.svg`, `mark-mono.svg`;
