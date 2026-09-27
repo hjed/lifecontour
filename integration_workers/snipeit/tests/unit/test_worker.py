@@ -13,7 +13,6 @@ delegation, alongside the task-orchestration tests.
 
 import importlib
 import os
-from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +26,6 @@ os.environ["ENCRYPTION_KEY"] = "testkey"
 import pytest
 from core_shared.testing import make_arq_ctx
 
-from snipeit_api_client import SnipeItAPIError
 from worker import (
     sync_snipeit_asset_batch,
     sync_snipeit_assets,
@@ -102,6 +100,7 @@ class TestSnipeItWorkerSettings:
             "sync_snipeit_maintenance_batch",
             "periodic_checkin_all_snipeit_accounts",
             "periodic_sync_all_snipeit_accounts",
+            "reconcile_in_progress_parents",
         }
 
     def test_queue_name(self) -> None:
@@ -140,22 +139,30 @@ class TestSnipeItWorkerSettings:
         self,
     ) -> None:
         """When periodic sync is enabled, the worker schedules the asset and
-        maintenance sync and the check-in sweep on the same cadence."""
+        maintenance sync and the check-in sweep on the same cadence, alongside
+        the fan-out reconciler."""
         worker = _reload_worker(ENABLE_PERIODIC_SYNC="true", SYNC_INTERVAL_HOURS="6")
         cron_jobs = worker.WorkerSettings.cron_jobs
         assert [job.coroutine.__name__ for job in cron_jobs] == [
             "periodic_sync_all_snipeit_accounts",
             "periodic_checkin_all_snipeit_accounts",
+            "reconcile_in_progress_parents",
         ]
-        assert [job.hour for job in cron_jobs] == [{0, 6, 12, 18}, {0, 6, 12, 18}]
+        periodic = cron_jobs[:2]
+        assert [job.hour for job in periodic] == [{0, 6, 12, 18}, {0, 6, 12, 18}]
         # Half an hour apart, so the import's traffic does not compete with the
         # sweep's check-ins for the Snipe-IT rate limit.
-        assert [job.minute for job in cron_jobs] == [30, 0]
+        assert [job.minute for job in periodic] == [30, 0]
 
-    def test_schedules_nothing_when_periodic_sync_disabled(self) -> None:
-        """With periodic sync disabled (the default), no cron jobs are scheduled."""
+    def test_schedules_only_the_reconciler_when_periodic_sync_disabled(
+        self,
+    ) -> None:
+        """With periodic sync disabled (the default), only the fan-out reconciler
+        is scheduled: a manual sync's parent still needs finalising."""
         worker = _reload_worker(ENABLE_PERIODIC_SYNC="false")
-        assert not worker.WorkerSettings.cron_jobs
+        assert [job.coroutine.__name__ for job in worker.WorkerSettings.cron_jobs] == [
+            "reconcile_in_progress_parents"
+        ]
 
     def test_no_residual_local_helpers(self) -> None:
         """The duplicated Redis helper and per-worker lifecycle functions are gone."""
@@ -229,94 +236,31 @@ def mock_ctx():
     return make_arq_ctx(redis=MockRedis(), session_factory=MagicMock(), job_id="run-1")
 
 
-@pytest.mark.asyncio
-async def test_sync_snipeit_assets_orchestrator(mock_ctx):
-    """Test the orchestrator job enqueues batch jobs."""
-    user_id = "user-123"
-
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = type(
-            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
-        )()
-
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
-        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
-
-        mock_auth_data.return_value = {
-            "encrypted_api_key": b"api-key",
-        }
-
-        mock_sync_service = MagicMock()
-
-        async def mock_batches():
-            yield [1, 2, 3]
-            yield [4, 5]
-
-        mock_sync_service.list_asset_batches.return_value = mock_batches()
-        mock_sync_service._api_client.close = AsyncMock()
-        mock_create_service.return_value = mock_sync_service
-
-        await sync_snipeit_assets(mock_ctx, user_id)
-
-        assert len(mock_ctx["redis"].jobs) == 2
-
-        job1 = mock_ctx["redis"].jobs[0]
-        assert job1[0] == "sync_snipeit_asset_batch"
-        assert job1[1] == (user_id, [1, 2, 3])
-
-        job2 = mock_ctx["redis"].jobs[1]
-        assert job2[0] == "sync_snipeit_asset_batch"
-        assert job2[1] == (user_id, [4, 5])
-
-        # Batch ids belong to this run: arq keeps a finished job's result for an
-        # hour and refuses an id it still holds, so ids reused across runs
-        # would silently drop the next run's batches.
-        assert [job[2]["_job_id"] for job in mock_ctx["redis"].jobs] == [
-            f"snipeit_sync_batch:{user_id}:run-1:0",
-            f"snipeit_sync_batch:{user_id}:run-1:1",
-        ]
+# The orchestrators' fan-out bookkeeping runs against a real database in
+# ``tests/integration/test_snipeit_fanout_integration.py``; these only pin the
+# calling convention the backend and the periodic sync enqueue them with.
 
 
 @pytest.mark.asyncio
-async def test_sync_snipeit_assets_ignores_otel_carrier(mock_ctx):
-    """Test that the orchestrator job accepts and strips otel_carrier kwargs."""
-    user_id = "user-123"
+@pytest.mark.parametrize(
+    ("orchestrator", "label"),
+    [(sync_snipeit_assets, "assets"), (sync_snipeit_maintenances, "maintenances")],
+)
+async def test_orchestrator_accepts_sync_type_and_otel_carrier(
+    mock_ctx: dict[str, Any], orchestrator: Any, label: str
+) -> None:
+    """``sync_type`` arrives positionally and ``otel_carrier`` as a keyword."""
+    with patch("worker._run_snipeit_fanout", new_callable=AsyncMock) as run:
+        run.return_value = {"status": "completed"}
 
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = type(
-            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
-        )()
-
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
-        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
-        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
-
-        mock_sync_service = MagicMock()
-
-        async def mock_batches():
-            yield []
-
-        mock_sync_service.list_asset_batches.return_value = mock_batches()
-        mock_sync_service._api_client.close = AsyncMock()
-        mock_create_service.return_value = mock_sync_service
-
-        # This should not raise TypeError: sync_snipeit_assets() got an unexpected keyword argument 'otel_carrier'
-        await sync_snipeit_assets(
-            mock_ctx, user_id, otel_carrier={"traceparent": "00-1234-5678-01"}
+        result = await orchestrator(
+            mock_ctx, "user-123", "smart", otel_carrier={"traceparent": "00-1-2-01"}
         )
 
-        # Verify it completed successfully without error
-        mock_sync_service._api_client.close.assert_called_once()
+    assert result == {"status": "completed"}
+    assert run.await_args is not None
+    assert run.await_args.args == (mock_ctx, "user-123", "smart")
+    assert run.await_args.kwargs["label"] == label
 
 
 @pytest.mark.asyncio
@@ -355,171 +299,6 @@ async def test_sync_snipeit_asset_batch(mock_ctx):
         mock_sync_service.sync_asset_batch.assert_called_once_with(
             asset_ids=asset_ids, session_factory=mock_ctx["session_factory"]
         )
-
-
-@pytest.mark.asyncio
-async def test_sync_snipeit_maintenances_orchestrator(mock_ctx):
-    """Test the maintenance orchestrator job enqueues batch jobs."""
-    user_id = "user-123"
-
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = type(
-            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
-        )()
-
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
-        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
-
-        mock_auth_data.return_value = {
-            "encrypted_api_key": b"api-key",
-        }
-
-        mock_sync_service = MagicMock()
-
-        async def mock_batches():
-            yield [10, 20]
-            yield [30]
-
-        mock_sync_service.list_maintenance_batches.return_value = mock_batches()
-        mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
-        mock_sync_service._api_client.close = AsyncMock()
-        mock_create_service.return_value = mock_sync_service
-
-        await sync_snipeit_maintenances(mock_ctx, user_id)
-
-        assert len(mock_ctx["redis"].jobs) == 2
-
-        job1 = mock_ctx["redis"].jobs[0]
-        assert job1[0] == "sync_snipeit_maintenance_batch"
-        assert job1[1] == (user_id, [10, 20])
-
-        job2 = mock_ctx["redis"].jobs[1]
-        assert job2[0] == "sync_snipeit_maintenance_batch"
-        assert job2[1] == (user_id, [30])
-
-        assert [job[2]["_job_id"] for job in mock_ctx["redis"].jobs] == [
-            f"snipeit_maint_batch:{user_id}:run-1:0",
-            f"snipeit_maint_batch:{user_id}:run-1:1",
-        ]
-
-
-@pytest.mark.asyncio
-async def test_sync_snipeit_maintenances_accepts_sync_type_and_otel_carrier(mock_ctx):
-    """Test that the maintenance orchestrator accepts sync_type and otel_carrier.
-
-    enqueue_snipeit_maintenance_sync passes sync_type as a positional arg
-    and otel_carrier as a keyword arg. This test verifies the worker function
-    signature is compatible with that calling convention.
-    """
-    user_id = "user-123"
-
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_result = MagicMock()
-        mock_result.fetchone.return_value = type(
-            "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
-        )()
-
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
-        mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
-        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
-
-        mock_sync_service = MagicMock()
-
-        async def mock_batches():
-            yield []
-
-        mock_sync_service.list_maintenance_batches.return_value = mock_batches()
-        mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
-        mock_sync_service._api_client.close = AsyncMock()
-        mock_create_service.return_value = mock_sync_service
-
-        # Call with sync_type positional and otel_carrier keyword - matches enqueue call
-        await sync_snipeit_maintenances(
-            mock_ctx, user_id, "full", otel_carrier={"traceparent": "00-1234-5678-01"}
-        )
-
-        mock_sync_service._api_client.close.assert_called_once()
-
-
-def _maintenance_orchestrator_service(
-    mock_ctx: dict[str, Any], mock_create_service: MagicMock, batches: Any
-) -> MagicMock:
-    """Wire the orchestrator's settings read and a sync service listing ``batches``."""
-    mock_result = MagicMock()
-    mock_result.fetchone.return_value = type(
-        "Row", (), {"base_url": "https://snipeit.com", "snipeit_user_id": "1"}
-    )()
-    mock_session = AsyncMock()
-    mock_session.execute.return_value = mock_result
-    mock_ctx["session_factory"].return_value.__aenter__.return_value = mock_session
-
-    mock_sync_service = MagicMock()
-    mock_sync_service.list_maintenance_batches.return_value = batches
-    mock_sync_service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
-    mock_sync_service._api_client.close = AsyncMock()
-    mock_create_service.return_value = mock_sync_service
-    return mock_sync_service
-
-
-@pytest.mark.asyncio
-async def test_maintenance_orchestrator_reconciles_every_listed_id(
-    mock_ctx: dict[str, Any],
-) -> None:
-    """A complete listing is what tells a deleted record from a listed one."""
-
-    async def batches() -> AsyncIterator[list[int]]:
-        yield [10, 20]
-        yield [30]
-
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
-        service = _maintenance_orchestrator_service(
-            mock_ctx, mock_create_service, batches()
-        )
-
-        await sync_snipeit_maintenances(mock_ctx, "user-123")
-
-    service.reconcile_deleted_maintenances.assert_awaited_once_with(
-        {10, 20, 30}, mock_ctx["session_factory"]
-    )
-
-
-@pytest.mark.asyncio
-async def test_maintenance_orchestrator_does_not_reconcile_a_partial_listing(
-    mock_ctx: dict[str, Any],
-) -> None:
-    """Every record after a failed page would look deleted."""
-
-    async def batches() -> AsyncIterator[list[int]]:
-        yield [10, 20]
-        raise SnipeItAPIError("Snipe-IT API error: 502", status_code=502)
-
-    with (
-        patch("worker._get_auth_data", new_callable=AsyncMock) as mock_auth_data,
-        patch("worker._create_sync_service") as mock_create_service,
-    ):
-        mock_auth_data.return_value = {"encrypted_api_key": b"api-key"}
-        service = _maintenance_orchestrator_service(
-            mock_ctx, mock_create_service, batches()
-        )
-
-        with pytest.raises(SnipeItAPIError):
-            await sync_snipeit_maintenances(mock_ctx, "user-123")
-
-    service.reconcile_deleted_maintenances.assert_not_awaited()
-    service._api_client.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -629,8 +408,9 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
 async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None:
     """One user's failed enqueue is reported and the next user is still synced.
 
-    arq returns ``None`` when it refuses a job; that user gets no ``sync_jobs``
-    row, and the sweep carries on with the remaining accounts.
+    arq returns ``None`` when it refuses a job; the ``sync_jobs`` row written
+    for it beforehand is failed, and the sweep carries on with the remaining
+    accounts.
     """
     from worker import periodic_sync_all_snipeit_accounts
 
@@ -645,12 +425,14 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
     session_factory.return_value.__aenter__.return_value = mock_session
 
     enqueued: list[tuple[str, tuple[Any, ...]]] = []
+    enqueued_ids: list[str] = []
 
     async def enqueue_job(function: str, *args: Any, **kwargs: Any) -> Any:
         enqueued.append((function, args))
+        enqueued_ids.append(kwargs["_job_id"])
         if args[0] == "user-1":
             return None
-        return MagicMock(job_id=f"{function}:{args[0]}")
+        return MagicMock(job_id=kwargs["_job_id"])
 
     redis = MagicMock()
     redis.enqueue_job = enqueue_job
@@ -658,6 +440,7 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
 
     with patch("worker.SyncJobRepository") as mock_repo_cls:
         mock_repo_cls.return_value.create = AsyncMock()
+        mock_repo_cls.return_value.update_status = AsyncMock()
         result = await periodic_sync_all_snipeit_accounts(ctx)
 
     assert enqueued == [
@@ -669,11 +452,11 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
     assert result["accounts_found"] == 2
     assert result["jobs_enqueued"] == 2
     assert len(result["errors"]) == 2
-    created = [
-        call.kwargs["job_id"]
-        for call in mock_repo_cls.return_value.create.await_args_list
+    repo = mock_repo_cls.return_value
+    created = [call.kwargs["job_id"] for call in repo.create.await_args_list]
+    assert created == enqueued_ids
+    failed = [
+        (call.kwargs["job_id"], call.kwargs["status"])
+        for call in repo.update_status.await_args_list
     ]
-    assert created == [
-        "sync_snipeit_assets:user-2",
-        "sync_snipeit_maintenances:user-2",
-    ]
+    assert failed == [(created[0], "failed"), (created[1], "failed")]

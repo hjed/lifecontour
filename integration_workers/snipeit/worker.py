@@ -11,20 +11,36 @@ implementations will be added in subsequent phases.
 from __future__ import annotations
 
 import sys
-from typing import Any, cast
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
+from typing import Any, NamedTuple, cast
+from uuid import uuid4
 
+from arq import Retry
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
     SharedARQWorkerSettings,
     build_worker_lifecycle,
+    default_retry_delay,
     generate_cron_jobs,
+    generate_reconciliation_cron,
+    reconcile_in_progress_parents,
     redis_settings_from_url,
+)
+from core_shared.fanout import (
+    coerce_int,
+    is_final_attempt,
+    persist_fanout_children,
+    record_child_terminal,
 )
 from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
+from core_shared.models.sync_job import SyncJobStatus
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from core_shared.worker_arq import DEFAULT_MAX_TRIES
 
+from snipeit_rate_limiter import SnipeItRateLimitError
 from snipeit_settings import SnipeItWorkerSettings
 
 # ---------------------------------------------------------------------------
@@ -92,292 +108,385 @@ def _create_sync_service(
     )
 
 
-def _batch_job_id(
-    prefix: str,
-    ctx: dict,  # type: ignore[type-arg]
-    user_id: str,
-    batch_count: int,
-) -> str:
-    """The ARQ job id for one batch of an orchestrator run.
+class _SnipeItSettings(NamedTuple):
+    base_url: str
+    snipeit_user_id: str | None
 
-    Scoped to the orchestrator's own job id: arq keeps a finished job's result
-    for ``keep_result`` seconds and refuses to enqueue an id it still holds, so
-    ids shared across runs would silently drop a later run's batches.
+
+class _NotConfiguredError(Exception):
+    """A user's Snipe-IT settings or credentials are missing, so no sync can run."""
+
+
+async def _get_settings(session_factory: Any, user_id: str) -> _SnipeItSettings | None:
+    from sqlalchemy import text
+
+    async with session_factory() as session:
+        result = await session.execute(
+            text("""
+                SELECT base_url, snipeit_user_id
+                FROM snipeit_settings
+                WHERE user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        row = result.fetchone()
+
+    if row is None or not row.base_url:
+        return None
+    return _SnipeItSettings(row.base_url, row.snipeit_user_id)
+
+
+async def _open_sync_service(session_factory: Any, user_id: str) -> Any:
+    """Build a user's sync service, or raise ``_NotConfiguredError``."""
+    snipeit = await _get_settings(session_factory, user_id)
+    if snipeit is None:
+        raise _NotConfiguredError("Snipe-IT settings not configured")
+
+    auth_data = await _get_auth_data(session_factory, user_id)
+    if not auth_data:
+        raise _NotConfiguredError("Snipe-IT credentials not configured")
+
+    return _create_sync_service(
+        user_id=user_id,
+        auth_data=auth_data,
+        base_url=snipeit.base_url,
+        snipeit_user_id=snipeit.snipeit_user_id,
+        worker_settings=settings,
+        session_factory=session_factory,
+    )
+
+
+async def _set_job_status(
+    session_factory: Any, job_id: str, status: SyncJobStatus, **kwargs: Any
+) -> None:
+    """Update a ``sync_jobs`` row in its own committed unit of work."""
+    async with session_factory() as session:
+        repo = SyncJobRepository(await session.connection())
+        updated = await repo.update_status(job_id=job_id, status=status.value, **kwargs)
+        await session.commit()
+    if updated is None:
+        logger.warning("Sync job row not found", job_id=job_id, status=status.value)
+
+
+async def _record_child(
+    session_factory: Any,
+    child_job_id: str,
+    parent_job_id: str | None,
+    status: SyncJobStatus,
+    error_message: str | None = None,
+) -> None:
+    """Mark a batch's row terminal and bump its parent's counter.
+
+    A batch queued before the fan-out existed carries no parent, and no row.
     """
-    return f"{prefix}:{user_id}:{ctx['job_id']}:{batch_count}"
+    if parent_job_id is None:
+        return
+    async with session_factory() as session:
+        await record_child_terminal(
+            SyncJobRepository(await session.connection()),
+            child_job_id=child_job_id,
+            parent_job_id=parent_job_id,
+            status=status.value,
+            error_message=error_message,
+        )
+        await session.commit()
+
+
+async def _fail_parent(session_factory: Any, job_id: str, error_message: str) -> None:
+    await _set_job_status(
+        session_factory,
+        job_id,
+        SyncJobStatus.FAILED,
+        completed_at=datetime.now(UTC),
+        error_message=error_message,
+    )
+
+
+def _rate_limit_defer(ctx: dict[str, Any], retry_after: float | None) -> float:
+    """How long to defer a rate-limited batch, in seconds.
+
+    A deferred batch does not move its parent's ``updated_at``, so all of its
+    retries together must fit the reconciler's staleness window, or the parent
+    is failed as stuck before the batch runs again. Each deferral is capped at
+    the window's share per attempt; a longer ``Retry-After`` just costs an
+    attempt.
+    """
+    max_tries = coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
+    cap = settings.reconciliation_stale_after_seconds / max_tries
+    retry_count = coerce_int(ctx.get("job_try"), 1) - 1
+    return min(retry_after or default_retry_delay(retry_count), cap)
+
+
+async def _run_snipeit_fanout(
+    ctx: dict[str, Any],
+    user_id: str,
+    sync_type: str,
+    *,
+    label: str,
+    list_batches: Callable[[Any], AsyncIterator[list[int]]],
+    batch_task: str,
+    child_id_prefix: str,
+    after_listing: Callable[[Any, list[list[int]]], Awaitable[object]] | None = None,
+) -> dict[str, Any]:
+    """Non-blocking fan-out shared by the asset and maintenance orchestrators.
+
+    Marks the parent ``running``, lists every batch, runs ``after_listing`` on
+    the complete listing, then persists a child row per batch (the parent goes
+    ``in_progress``, or ``completed`` when there is nothing to sync) and commits
+    before dispatching them. Each batch finalises its own row; the reconciler
+    finalises the parent. A listing that fails part-way dispatches nothing.
+
+    Child ids are scoped to this run: arq keeps a finished job's result for
+    ``keep_result`` seconds and refuses to enqueue an id it still holds, so ids
+    shared across runs would silently drop a later run's batches.
+    """
+    job_id: str = ctx["job_id"]
+    session_factory = ctx["session_factory"]
+
+    await _set_job_status(
+        session_factory,
+        job_id,
+        SyncJobStatus.RUNNING,
+        started_at=datetime.now(UTC),
+        progress=0,
+    )
+
+    try:
+        sync_service = await _open_sync_service(session_factory, user_id)
+    except _NotConfiguredError as exc:
+        logger.error(str(exc), task=label, user_id=user_id)
+        await _fail_parent(session_factory, job_id, str(exc))
+        return {"status": "error", "message": str(exc), "user_id": user_id}
+    except Exception as exc:
+        logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
+        await _fail_parent(session_factory, job_id, str(exc))
+        raise
+
+    try:
+        batches = [ids async for ids in list_batches(sync_service) if ids]
+        if after_listing is not None:
+            await after_listing(sync_service, batches)
+
+        async with session_factory() as session:
+            child_ids = await persist_fanout_children(
+                SyncJobRepository(await session.connection()),
+                parent_job_id=job_id,
+                user_id=user_id,
+                integration_source="snipeit",
+                sync_type=sync_type,
+                child_id_prefix=f"{child_id_prefix}:{user_id}:{job_id}:",
+                count=len(batches),
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
+        await _fail_parent(session_factory, job_id, str(exc))
+        raise
+    finally:
+        await sync_service._api_client.close()
+
+    # The child rows and parent state are committed; dispatch is now safe.
+    enqueued = 0
+    for position, (child_id, ids) in enumerate(zip(child_ids, batches, strict=True)):
+        try:
+            job = await ctx["redis"].enqueue_job(
+                batch_task,
+                user_id,
+                ids,
+                job_id,
+                _job_id=child_id,
+                _queue_name=settings.queue_name,
+            )
+        except Exception as exc:
+            # A batch never queued never finalises its own row: fail it and the
+            # rest here so the parent does not wait out the staleness window.
+            logger.exception("Snipe-IT batch dispatch failed", task=label)
+            for unsent_id in child_ids[position:]:
+                await _record_child(
+                    session_factory,
+                    unsent_id,
+                    job_id,
+                    SyncJobStatus.FAILED,
+                    f"Batch was not enqueued: {exc}",
+                )
+            raise
+        if job is None:
+            # arq already holds this id: an earlier attempt of this run queued
+            # it, so it still runs and finalises its own row.
+            logger.warning(
+                "Snipe-IT batch already enqueued; skipping",
+                task=label,
+                child_job_id=child_id,
+            )
+        else:
+            enqueued += 1
+
+    logger.info(
+        "Enqueued Snipe-IT sync batches",
+        task=label,
+        user_id=user_id,
+        batch_count=len(batches),
+        enqueued=enqueued,
+    )
+    return {
+        "status": "in_progress" if batches else "completed",
+        "user_id": user_id,
+        "batches_enqueued": enqueued,
+    }
+
+
+async def _run_snipeit_batch(
+    ctx: dict[str, Any],
+    user_id: str,
+    ids: list[int],
+    parent_job_id: str | None,
+    *,
+    noun: str,
+    sync: Callable[[Any], Awaitable[dict[str, int]]],
+) -> dict[str, int]:
+    """Batch scaffolding shared by the asset and maintenance batch jobs.
+
+    Records the batch's own row ``completed``, or ``failed`` when any item
+    failed, the user is not configured, or the sync raised. A rate limit is
+    retried by arq until the final attempt; arq retries nothing else.
+    """
+    session_factory = ctx["session_factory"]
+    child_job_id: str = ctx["job_id"]
+
+    try:
+        sync_service = await _open_sync_service(session_factory, user_id)
+    except _NotConfiguredError as exc:
+        logger.error(str(exc), user_id=user_id)
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
+        )
+        return {"synced": 0, "skipped": 0, "failed": len(ids)}
+    except Exception as exc:
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
+        )
+        raise
+
+    try:
+        result = await sync(sync_service)
+    except SnipeItRateLimitError as exc:
+        if not is_final_attempt(ctx):
+            raise Retry(defer=_rate_limit_defer(ctx, exc.retry_after)) from exc
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
+        )
+        raise
+    except Exception as exc:
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.FAILED, str(exc)
+        )
+        raise
+    finally:
+        await sync_service._api_client.close()
+
+    failed = result.get("failed", 0)
+    if failed:
+        await _record_child(
+            session_factory,
+            child_job_id,
+            parent_job_id,
+            SyncJobStatus.FAILED,
+            f"{failed} of {len(ids)} {noun} failed to sync",
+        )
+    else:
+        await _record_child(
+            session_factory, child_job_id, parent_job_id, SyncJobStatus.COMPLETED
+        )
+    return dict(result)
 
 
 @trace_arq_job
 async def sync_snipeit_assets(
-    ctx: dict,  # type: ignore[type-arg]
+    ctx: dict[str, Any],
     user_id: str,
     sync_type: str = "full",
-) -> None:
+) -> dict[str, Any]:
     """Orchestrator job for full sync of Snipe-IT assets."""
     # TODO: Implement smart sync behavior using sync_type parameter
-    session_factory = ctx["session_factory"]
-    worker_settings: SnipeItWorkerSettings = settings
-
-    from sqlalchemy import text
-
-    # 1. Fetch settings
-    async with session_factory() as session:
-        result = await session.execute(
-            text("""
-                SELECT base_url, snipeit_user_id
-                FROM snipeit_settings
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id},
-        )
-        settings_row = result.fetchone()
-
-    if not settings_row or not settings_row.base_url:
-        logger.error("Snipe-IT settings not found", user_id=user_id)
-        return
-
-    base_url = settings_row.base_url
-    snipeit_user_id = settings_row.snipeit_user_id
-
-    # 2. Fetch auth data
-    auth_data = await _get_auth_data(session_factory, user_id)
-    if not auth_data:
-        logger.error("Snipe-IT auth not found", user_id=user_id)
-        return
-
-    # 3. Create sync service
-    sync_service = _create_sync_service(
-        user_id=user_id,
-        auth_data=auth_data,
-        base_url=base_url,
-        snipeit_user_id=snipeit_user_id,
-        worker_settings=worker_settings,
-        session_factory=session_factory,
+    return await _run_snipeit_fanout(
+        ctx,
+        user_id,
+        sync_type,
+        label="assets",
+        list_batches=lambda service: service.list_asset_batches(),
+        batch_task="sync_snipeit_asset_batch",
+        child_id_prefix="snipeit_sync_batch",
     )
-
-    try:
-        redis = ctx["redis"]
-
-        batch_count = 0
-        async for asset_ids in sync_service.list_asset_batches():
-            if not asset_ids:
-                continue
-
-            job_id = _batch_job_id("snipeit_sync_batch", ctx, user_id, batch_count)
-            await redis.enqueue_job(
-                "sync_snipeit_asset_batch",
-                user_id,
-                asset_ids,
-                _job_id=job_id,
-                _queue_name=worker_settings.queue_name,
-            )
-            batch_count += 1
-
-        logger.info(
-            "Enqueued Snipe-IT sync batches",
-            user_id=user_id,
-            batch_count=batch_count,
-        )
-
-    finally:
-        await sync_service._api_client.close()
 
 
 @trace_arq_job
 async def sync_snipeit_asset_batch(
-    ctx: dict,  # type: ignore[type-arg]
+    ctx: dict[str, Any],
     user_id: str,
     asset_ids: list[int],
+    parent_job_id: str | None = None,
 ) -> dict[str, int]:
     """Worker job to process a batch of Snipe-IT assets."""
     session_factory = ctx["session_factory"]
-    worker_settings: SnipeItWorkerSettings = settings
-
-    from sqlalchemy import text
-
-    # 1. Fetch settings
-    async with session_factory() as session:
-        result = await session.execute(
-            text("""
-                SELECT base_url, snipeit_user_id
-                FROM snipeit_settings
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id},
-        )
-        settings_row = result.fetchone()
-
-    if not settings_row or not settings_row.base_url:
-        logger.error("Snipe-IT settings not found", user_id=user_id)
-        return {"synced": 0, "skipped": 0, "failed": len(asset_ids)}
-
-    base_url = settings_row.base_url
-    snipeit_user_id = settings_row.snipeit_user_id
-
-    # 2. Fetch auth data
-    auth_data = await _get_auth_data(session_factory, user_id)
-    if not auth_data:
-        logger.error("Snipe-IT auth not found", user_id=user_id)
-        return {"synced": 0, "skipped": 0, "failed": len(asset_ids)}
-
-    # 3. Create sync service
-    sync_service = _create_sync_service(
-        user_id=user_id,
-        auth_data=auth_data,
-        base_url=base_url,
-        snipeit_user_id=snipeit_user_id,
-        worker_settings=worker_settings,
-        session_factory=session_factory,
+    return await _run_snipeit_batch(
+        ctx,
+        user_id,
+        asset_ids,
+        parent_job_id,
+        noun="assets",
+        sync=lambda service: service.sync_asset_batch(
+            asset_ids=asset_ids, session_factory=session_factory
+        ),
     )
-
-    try:
-        result = await sync_service.sync_asset_batch(
-            asset_ids=asset_ids,
-            session_factory=session_factory,
-        )
-        return dict(result)
-    finally:
-        await sync_service._api_client.close()
 
 
 @trace_arq_job
 async def sync_snipeit_maintenances(
-    ctx: dict,  # type: ignore[type-arg]
+    ctx: dict[str, Any],
     user_id: str,
     sync_type: str = "full",
-) -> None:
+) -> dict[str, Any]:
     """Orchestrator job for full sync of Snipe-IT maintenance records."""
     # TODO: Implement smart sync behavior using sync_type parameter
     session_factory = ctx["session_factory"]
-    worker_settings: SnipeItWorkerSettings = settings
 
-    from sqlalchemy import text
-
-    # 1. Fetch settings
-    async with session_factory() as session:
-        result = await session.execute(
-            text("""
-                SELECT base_url, snipeit_user_id
-                FROM snipeit_settings
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id},
-        )
-        settings_row = result.fetchone()
-
-    if not settings_row or not settings_row.base_url:
-        logger.error("Snipe-IT settings not found", user_id=user_id)
-        return
-
-    base_url = settings_row.base_url
-    snipeit_user_id = settings_row.snipeit_user_id
-
-    # 2. Fetch auth data
-    auth_data = await _get_auth_data(session_factory, user_id)
-    if not auth_data:
-        logger.error("Snipe-IT auth not found", user_id=user_id)
-        return
-
-    # 3. Create sync service
-    sync_service = _create_sync_service(
-        user_id=user_id,
-        auth_data=auth_data,
-        base_url=base_url,
-        snipeit_user_id=snipeit_user_id,
-        worker_settings=worker_settings,
-        session_factory=session_factory,
-    )
-
-    try:
-        redis = ctx["redis"]
-
-        # Fetch all maintenance IDs and enqueue batch jobs
-        batch_count = 0
-        listed_ids: set[int] = set()
-        async for maintenance_ids in sync_service.list_maintenance_batches():
-            if not maintenance_ids:
-                continue
-            listed_ids.update(maintenance_ids)
-
-            job_id = _batch_job_id("snipeit_maint_batch", ctx, user_id, batch_count)
-            await redis.enqueue_job(
-                "sync_snipeit_maintenance_batch",
-                user_id,
-                maintenance_ids,
-                _job_id=job_id,
-                _queue_name=worker_settings.queue_name,
-            )
-            batch_count += 1
-
-        logger.info(
-            "Enqueued Snipe-IT maintenance sync batches",
-            user_id=user_id,
-            batch_count=batch_count,
-        )
-
+    async def _reconcile_deleted(service: Any, batches: list[list[int]]) -> None:
         # Only a listing that ran to the end says which records are gone: one
         # that raised part-way never gets here.
-        await sync_service.reconcile_deleted_maintenances(listed_ids, session_factory)
+        listed_ids = {maintenance_id for batch in batches for maintenance_id in batch}
+        await service.reconcile_deleted_maintenances(listed_ids, session_factory)
 
-    finally:
-        await sync_service._api_client.close()
+    return await _run_snipeit_fanout(
+        ctx,
+        user_id,
+        sync_type,
+        label="maintenances",
+        list_batches=lambda service: service.list_maintenance_batches(),
+        batch_task="sync_snipeit_maintenance_batch",
+        child_id_prefix="snipeit_maint_batch",
+        after_listing=_reconcile_deleted,
+    )
 
 
 @trace_arq_job
 async def sync_snipeit_maintenance_batch(
-    ctx: dict,  # type: ignore[type-arg]
+    ctx: dict[str, Any],
     user_id: str,
     maintenance_ids: list[int],
+    parent_job_id: str | None = None,
 ) -> dict[str, int]:
     """Worker job to process a batch of Snipe-IT maintenance records."""
     session_factory = ctx["session_factory"]
-    worker_settings: SnipeItWorkerSettings = settings
-
-    from sqlalchemy import text
-
-    # 1. Fetch settings
-    async with session_factory() as session:
-        result = await session.execute(
-            text("""
-                SELECT base_url, snipeit_user_id
-                FROM snipeit_settings
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id},
-        )
-        settings_row = result.fetchone()
-
-    if not settings_row or not settings_row.base_url:
-        logger.error("Snipe-IT settings not found", user_id=user_id)
-        return {"synced": 0, "skipped": 0, "failed": len(maintenance_ids)}
-
-    base_url = settings_row.base_url
-    snipeit_user_id = settings_row.snipeit_user_id
-
-    # 2. Fetch auth data
-    auth_data = await _get_auth_data(session_factory, user_id)
-    if not auth_data:
-        logger.error("Snipe-IT auth not found", user_id=user_id)
-        return {"synced": 0, "skipped": 0, "failed": len(maintenance_ids)}
-
-    # 3. Create sync service
-    sync_service = _create_sync_service(
-        user_id=user_id,
-        auth_data=auth_data,
-        base_url=base_url,
-        snipeit_user_id=snipeit_user_id,
-        worker_settings=worker_settings,
-        session_factory=session_factory,
+    return await _run_snipeit_batch(
+        ctx,
+        user_id,
+        maintenance_ids,
+        parent_job_id,
+        noun="maintenances",
+        sync=lambda service: service.sync_maintenance_batch(
+            maintenance_ids=maintenance_ids, session_factory=session_factory
+        ),
     )
-
-    try:
-        result = await sync_service.sync_maintenance_batch(
-            maintenance_ids=maintenance_ids,
-            session_factory=session_factory,
-        )
-        return dict(result)
-    finally:
-        await sync_service._api_client.close()
 
 
 @trace_arq_job
@@ -493,6 +602,74 @@ async def periodic_checkin_all_snipeit_accounts(
 _PERIODIC_SYNC_JOBS = ("sync_snipeit_assets", "sync_snipeit_maintenances")
 
 
+async def _schedule_periodic_sync(
+    session: Any, redis: Any, function: str, user_id: str
+) -> str | None:
+    """Record one periodic sync's ``sync_jobs`` row, then enqueue it.
+
+    The row is committed before the job is queued, so an orchestrator that runs
+    at once always finds its parent row. A job that is not queued fails its row
+    rather than leaving it queued for ever. Returns an error, or ``None``.
+    """
+    job_id = uuid4().hex
+    try:
+        await SyncJobRepository(await session.connection()).create(
+            job_id=job_id,
+            user_id=user_id,
+            integration_source="snipeit",
+            sync_type="smart",
+            status=SyncJobStatus.QUEUED.value,
+        )
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        await session.rollback()
+        logger.error(
+            "Error recording periodic Snipe-IT sync job",
+            function=function,
+            user_id=user_id,
+            exc_info=True,
+        )
+        return f"{function} failed for {user_id}: {exc!s}"
+
+    try:
+        job = await redis.enqueue_job(
+            function,
+            user_id,
+            "smart",
+            _job_id=job_id,
+            _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Error enqueueing periodic Snipe-IT sync job",
+            function=function,
+            user_id=user_id,
+            exc_info=True,
+        )
+        row_error, error = str(exc), f"{function} failed for {user_id}: {exc!s}"
+    else:
+        if job is not None:
+            return None
+        logger.warning(
+            "Failed to enqueue periodic Snipe-IT sync job",
+            function=function,
+            user_id=user_id,
+        )
+        row_error, error = (
+            "Job was not enqueued",
+            f"{function} was not enqueued for {user_id}",
+        )
+
+    await SyncJobRepository(await session.connection()).update_status(
+        job_id=job_id,
+        status=SyncJobStatus.FAILED.value,
+        completed_at=datetime.now(UTC),
+        error_message=row_error,
+    )
+    await session.commit()
+    return error
+
+
 @trace_arq_job
 async def periodic_sync_all_snipeit_accounts(
     ctx: dict[str, Any],
@@ -501,7 +678,7 @@ async def periodic_sync_all_snipeit_accounts(
 
     Called by ARQ cron. For every user with Snipe-IT settings and working auth,
     enqueues ``sync_snipeit_assets`` and ``sync_snipeit_maintenances`` with the
-    'smart' sync type and records a ``sync_jobs`` row for each. Users whose auth
+    'smart' sync type, writing each one's ``sync_jobs`` row first. Users whose auth
     needs re-authorising are left out, since their syncs could not run. A
     failure for one user is recorded in ``errors`` and the rest are still
     synced.
@@ -531,41 +708,13 @@ async def periodic_sync_all_snipeit_accounts(
         for row in accounts:
             user_id = str(row.user_id)
             for function in _PERIODIC_SYNC_JOBS:
-                try:
-                    job = await ctx["redis"].enqueue_job(
-                        function,
-                        user_id,
-                        "smart",
-                        _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
-                    )
-                    if job is None:
-                        errors.append(f"{function} was not enqueued for {user_id}")
-                        logger.warning(
-                            "Failed to enqueue periodic Snipe-IT sync job",
-                            function=function,
-                            user_id=user_id,
-                        )
-                        continue
-
-                    repo = SyncJobRepository(await session.connection())
-                    await repo.create(
-                        job_id=job.job_id,
-                        user_id=user_id,
-                        integration_source="snipeit",
-                        sync_type="smart",
-                        status="queued",
-                    )
-                    await session.commit()
+                error = await _schedule_periodic_sync(
+                    session, ctx["redis"], function, user_id
+                )
+                if error is None:
                     jobs_enqueued += 1
-                except Exception as exc:  # noqa: BLE001
-                    await session.rollback()
-                    errors.append(f"{function} failed for {user_id}: {exc!s}")
-                    logger.error(
-                        "Error enqueueing periodic Snipe-IT sync job",
-                        function=function,
-                        user_id=user_id,
-                        exc_info=True,
-                    )
+                else:
+                    errors.append(error)
 
     logger.info(
         "Periodic Snipe-IT sync scheduling complete",
@@ -618,8 +767,10 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     cadence: the asset and maintenance import
     (``periodic_sync_all_snipeit_accounts``) and the check-in sweep
     (``periodic_checkin_all_snipeit_accounts``), which returns assets whose usage
-    period has ended. Only the functions list, consumer wiring, cron schedule, and
-    documented overrides live here.
+    period has ended. The fan-out reconciler (``reconcile_in_progress_parents``)
+    always runs, finalising orchestrator parents from their batch rows. Only the
+    functions list, consumer wiring, cron schedule, and documented overrides live
+    here.
     """
 
     queue_name = SNIPEIT_ARQ_QUEUE_NAME
@@ -632,13 +783,15 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_snipeit_maintenance_batch,
         periodic_checkin_all_snipeit_accounts,
         periodic_sync_all_snipeit_accounts,
+        reconcile_in_progress_parents,
     ]
 
     # Cron schedule: the periodic asset/maintenance import and the check-in
     # sweep (shared helper; both empty when periodic sync is disabled). The
     # import runs half an hour after the sweep: each job has its own rate
     # limiter, so running together they could exceed Snipe-IT's limit, and a
-    # rate-limited check-in waits for the next sweep.
+    # rate-limited check-in waits for the next sweep. The fan-out reconciler
+    # runs every few minutes regardless, since manual syncs fan out too.
     cron_jobs = [
         *generate_cron_jobs(
             periodic_sync_all_snipeit_accounts,
@@ -651,6 +804,7 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
             enable_periodic_sync=settings.enable_periodic_sync,
             sync_interval_hours=settings.sync_interval_hours,
         ),
+        *generate_reconciliation_cron(reconcile_in_progress_parents),
     ]
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:

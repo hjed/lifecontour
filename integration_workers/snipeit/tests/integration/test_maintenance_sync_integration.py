@@ -2794,3 +2794,24 @@ class TestDeletedMaintenanceReconcile:
             "snipeit_maint:41",
         ]
         assert mock_transport.requests == []
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_maintenance_record_is_raised_for_the_batch_to_retry(
+    snipeit_sync_service: Any,
+    mock_transport: Any,
+    async_connection: AsyncConnection,
+) -> None:
+    """A rate limit is not a failed record: it must reach the batch job, which
+    defers the whole batch, instead of being counted as a failure."""
+    from snipeit_rate_limiter import SnipeItRateLimitError
+
+    mock_transport.add_response(
+        "/maintenances/17", status_code=429, headers={"Retry-After": "7"}
+    )
+
+    with pytest.raises(SnipeItRateLimitError):
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17],
+            session_factory=_joined_session_factory(async_connection),
+        )
