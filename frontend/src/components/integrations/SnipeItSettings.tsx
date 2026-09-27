@@ -22,6 +22,7 @@ import {
   useSnipeItConnect,
   useSnipeItDisconnect,
 } from '@/lib/api/integrations';
+import { APP_NAME } from '@/lib/constants';
 
 const snipeItSettingsSchema = z.object({
   base_url: z
@@ -143,8 +144,8 @@ export function SnipeItSettings({ connected = false }: SnipeItSettingsProps) {
                 />
               </FormControl>
               <FormDescription>
-                Your user ID in Snipe-IT. This maps your PMS account to your
-                Snipe-IT user for checkout and assignment operations.
+                Your user ID in Snipe-IT. This maps your {APP_NAME} account to
+                your Snipe-IT user for checkout and assignment operations.
               </FormDescription>
               <FormMessage />
             </FormItem>

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { APP_TITLE_PATTERN } from './utils/test-helpers';
 
 /**
  * Tag Filtering Tests — Unified Contacts List
@@ -15,7 +16,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
   }) => {
     // Navigate to tag-filtered contacts page
     await unauthenticatedPage.goto('/contacts?tag=1');
-    await expect(unauthenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(unauthenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Should redirect to login first
     await expect(unauthenticatedPage).toHaveURL(/\/auth\/login/);
@@ -69,7 +70,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     // Navigate to contacts with tag filter (new unified URL)
     const firstTag = tags[0];
     await page.goto(`/contacts?tag=${firstTag.id}`);
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await expect(page).toHaveTitle(APP_TITLE_PATTERN);
 
     // Should show contacts with this tag (guaranteed by fixture)
     const contactsWithTag = contacts.filter(
@@ -175,7 +176,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
 
     // 5. Navigate to unified contacts page with parent tag filter
     await authenticatedPage.goto(`/contacts?tag=${parentId}`);
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // The contact should appear because filtering by parent includes descendants
     const contactCard = authenticatedPage.locator(
@@ -252,7 +253,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
 
     // 3. Navigate to the unified contacts page with tag filter
     await authenticatedPage.goto(`/contacts?tag=${tagId}`);
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // The contact should be visible
     const contactCard = authenticatedPage.locator(
@@ -275,7 +276,7 @@ test.describe('Tag Filtering via Main Contacts List', () => {
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/contacts?tag=1');
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Should have consistent navigation elements (sidebar)
     const { SidebarTestHelpers } = await import('./utils/test-helpers');

@@ -90,24 +90,16 @@ jest.mock('@/lib/constants', () => ({
     SESSION: 'auth_session',
     CSRF_TOKEN: 'csrf_token',
   },
-  UI_TEXT: {
-    WELCOME_BACK: 'Welcome Back',
-    SIGN_IN_DESCRIPTION: 'Sign in to your Personal Management System',
-    CONTINUE_WITH: 'Continue with',
-    CONNECTING_TO: 'Connecting to',
-    PRIVACY_NOTICE:
-      'By signing in, you agree to our terms of service and privacy policy.',
-    PRIVATE_APP_NOTICE: 'This is a private application for personal use only.',
-    LOADING: 'Loading',
-    CHECKING_AUTH: 'Checking your authentication status',
-    PLEASE_WAIT: 'Please wait...',
-    COMPLETING_SIGN_IN: 'Completing Sign In',
-    FINISH_SESSION_SETUP: 'Please wait while we finish setting up your session',
-    SHOULD_TAKE_MOMENT: 'This should only take a moment...',
-    AUTH_FAILED: 'Authentication Failed',
-    PROBLEM_SIGNING_IN: 'There was a problem signing you in',
-    TRY_AGAIN: 'Try signing in again',
-  },
+  // Product naming and UI copy come from the real module so they cannot drift
+  APP_NAME:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .APP_NAME,
+  APP_TAGLINE:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .APP_TAGLINE,
+  UI_TEXT:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .UI_TEXT,
   VALIDATION_MESSAGES: {
     REQUIRED_FIELD: 'This field is required',
   },

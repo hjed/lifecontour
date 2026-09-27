@@ -5,6 +5,7 @@
  */
 
 import { test, expect } from '../fixtures';
+import { APP_NAME, UI_TEXT } from '../../../src/lib/constants';
 
 test.describe('Login Page - Unauthenticated Users', () => {
   test.describe('Page Rendering', () => {
@@ -15,9 +16,8 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await unauthenticatedPage.goto('/auth/login');
 
       // Check page title
-      await expect(unauthenticatedPage).toHaveTitle(
-        /Personal Management System/
-      );
+      // The login page sets no title of its own, so it gets the root default
+      await expect(unauthenticatedPage).toHaveTitle(APP_NAME);
 
       // Check main heading
       const heading = unauthenticatedPage.locator('h1');
@@ -25,8 +25,9 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await expect(heading).toHaveText('Welcome Back');
 
       // Check description
-      const description = unauthenticatedPage.locator(
-        'text=Sign in to your Personal Management System'
+      const description = unauthenticatedPage.getByText(
+        UI_TEXT.SIGN_IN_DESCRIPTION,
+        { exact: true }
       );
       await expect(description).toBeVisible();
 
@@ -67,10 +68,11 @@ test.describe('Login Page - Unauthenticated Users', () => {
       );
       await expect(privacyNotice).toBeVisible();
 
-      const privateAppNotice = unauthenticatedPage.locator(
-        'text=This is a private application for personal use only.'
+      const selfHostedNotice = unauthenticatedPage.getByText(
+        UI_TEXT.SELF_HOSTED_NOTICE,
+        { exact: true }
       );
-      await expect(privateAppNotice).toBeVisible();
+      await expect(selfHostedNotice).toBeVisible();
     });
   });
 
@@ -499,7 +501,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       expect(content).not.toContain('organization');
 
       // Should use proper Australian terminology
-      expect(content).toContain('Personal Management System');
+      expect(content).toContain(APP_NAME);
     });
   });
 });

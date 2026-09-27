@@ -7,6 +7,13 @@
 
 import { Page, expect, Locator } from '@playwright/test';
 import { TestDataManager } from '../data-management';
+import { APP_NAME } from '../../../src/lib/constants';
+
+/**
+ * Matches every page title: the root title is APP_NAME and page titles
+ * use the "<page> | APP_NAME" template.
+ */
+export const APP_TITLE_PATTERN = new RegExp(APP_NAME);
 
 /**
  * Common selectors used across e2e tests.
@@ -292,7 +299,7 @@ export class ContactTestHelpers {
     expectedContent?: string
   ): Promise<'redirected' | 'accessed'> {
     await this.page.goto(url);
-    await expect(this.page).toHaveTitle(/Personal Management System/);
+    await expect(this.page).toHaveTitle(APP_TITLE_PATTERN);
 
     const auth = new AuthHelpers(this.page);
     const result = await auth.handleProtectedPageAccess();
@@ -353,7 +360,7 @@ export class ContactTestHelpers {
    */
   async navigateToAuthenticatedPage(url: string): Promise<void> {
     await this.page.goto(url);
-    await expect(this.page).toHaveTitle(/Personal Management System/);
+    await expect(this.page).toHaveTitle(APP_TITLE_PATTERN);
 
     // Should not be redirected to login (auto-waits for redirect)
     await expect(this.page).not.toHaveURL(/\/auth\/login/);
@@ -376,7 +383,7 @@ export class ContactTestHelpers {
    */
   async navigateToUnauthenticatedPage(url: string): Promise<void> {
     await this.page.goto(url);
-    await expect(this.page).toHaveTitle(/Personal Management System/);
+    await expect(this.page).toHaveTitle(APP_TITLE_PATTERN);
 
     // Wait for any redirects to complete (auto-waits)
     await expect(this.page).toHaveURL(/\/auth\/login/);
@@ -485,7 +492,7 @@ export class ContactTestHelpers {
     ).toBeVisible();
 
     // Page should have proper title
-    await expect(this.page).toHaveTitle(/Personal Management System/);
+    await expect(this.page).toHaveTitle(APP_TITLE_PATTERN);
 
     // Page should have main content area
     const mainContent = this.page.locator('main, [role="main"]');
@@ -1136,7 +1143,7 @@ export class AuthHelpers {
     shouldContinue: boolean;
   }> {
     await this.page.goto(url);
-    await expect(this.page).toHaveTitle(/Personal Management System/);
+    await expect(this.page).toHaveTitle(APP_TITLE_PATTERN);
 
     const result = await this.handleProtectedPageAccess();
 

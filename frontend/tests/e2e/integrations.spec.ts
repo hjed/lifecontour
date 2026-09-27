@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { APP_NAME } from '../../src/lib/constants';
 
 test.describe('Integration Management - Authenticated User', () => {
   test('should display integration health status', async ({
@@ -141,6 +142,9 @@ test.describe('Integration Management - Authenticated User', () => {
   }) => {
     // Navigate to integrations page
     await authenticatedPage.goto('/integrations');
+
+    // Page titles use the "<page> | APP_NAME" template from the root layout
+    await expect(authenticatedPage).toHaveTitle(`Integrations | ${APP_NAME}`);
 
     // Wait for page to load
     await authenticatedPage.waitForSelector(

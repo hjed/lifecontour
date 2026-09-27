@@ -5,13 +5,14 @@ import { Providers } from '@/lib/providers';
 import { Header, DesktopSidebar } from '@/components/layout';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
+import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
 
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Personal Management System',
-  description: 'A personal CRM and journal system with AI integration',
-  robots: 'noindex, nofollow', // Private application
+  title: { default: APP_NAME, template: `%s | ${APP_NAME}` },
+  description: APP_TAGLINE,
+  robots: 'noindex, nofollow', // Self-hosted instances hold personal data
 };
 
 export const viewport: Viewport = {

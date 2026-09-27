@@ -602,7 +602,15 @@ docs), it says **Lifecontour**, read from one constant per stack.
 
 **Phase Breakdown:**
 
-**Phase 1 — Frontend user-facing rename.** PR ~320 lines.
+**Phase 1 — Frontend user-facing rename.** PR ~320 lines. ✅ DONE
+
+- **Progress:** `APP_NAME` and `APP_TAGLINE` live in `frontend/src/lib/constants.ts`, and the root
+  metadata uses `title.template`. `UI_TEXT.PRIVATE_APP_NOTICE` was renamed to `SELF_HOSTED_NOTICE`
+  ("This is a private, self-hosted Lifecontour instance."). The Jest `@/lib/constants` mocks read
+  `APP_NAME`, `APP_TAGLINE` and `UI_TEXT` through `jest.requireActual` instead of copying the
+  strings. `APP_TITLE_PATTERN` is derived from `APP_NAME`. The login spec asserts the exact root
+  title and `integrations.spec.ts` the exact `Integrations | Lifecontour`, which together prove
+  the default and the template.
 
 - **Constants:** add `APP_NAME = 'Lifecontour'` and `APP_TAGLINE` to `frontend/src/lib/constants.ts`.
 - **Metadata:**

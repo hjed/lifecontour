@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { APP_TITLE_PATTERN } from './utils/test-helpers';
 
 /**
  * Contact Favourites and Filtering Tests
@@ -15,7 +16,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Navigate to favourites page
       await page.goto('/contacts/favourites');
-      await expect(page).toHaveTitle(/Personal Management System/);
+      await expect(page).toHaveTitle(APP_TITLE_PATTERN);
 
       // Should show favourite contacts (guaranteed by fixture)
       const favouriteContacts = contacts.filter(c => c.isFavourite);
@@ -49,7 +50,7 @@ test.describe('Contact Favourites and Filtering', () => {
 
       // Navigate to contacts page
       await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
+      await expect(page).toHaveTitle(APP_TITLE_PATTERN);
 
       // Should show contacts with mixed favourite states (guaranteed by fixture)
       expect(contacts.length).toBeGreaterThan(0);
@@ -76,7 +77,7 @@ test.describe('Contact Favourites and Filtering', () => {
     }) => {
       // Navigate to contacts page
       await authenticatedPage.goto('/contacts');
-      await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+      await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
       // Navigate to favourites via sidebar
       // Look for favourites link in sidebar and click it
