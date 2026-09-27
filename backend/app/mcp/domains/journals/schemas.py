@@ -1007,6 +1007,25 @@ class CheckedOutGearMCPEntry(BaseModel):
     journal_id: int = Field(description="GEAR_USAGE journal recording the checkout")
 
 
+class GearUsageItemMCPEntry(BaseModel):
+    """One gear item used on a journal."""
+
+    gear_item_id: str = Field(description="Gear item UUID")
+    checkout_date: datetime | None = Field(
+        description="Checkout buffer; null means the journal's start"
+    )
+    checkin_date: datetime | None = Field(
+        description="Check-in buffer; null means the journal's end"
+    )
+
+
+class GearUsageItemsMCPResponse(BaseModel):
+    """The gear items a journal records, after adding or removing one."""
+
+    journal_id: int = Field(description="Journal the gear was used on")
+    items: list[GearUsageItemMCPEntry] = Field(description="Gear items, in order")
+
+
 class TemplateDoneMCPEntry(BaseModel):
     """A template the user has done, with its per-template done-count.
 

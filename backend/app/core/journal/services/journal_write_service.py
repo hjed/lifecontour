@@ -21,6 +21,7 @@ just its SAVEPOINT and the loop continues.
 import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any, NamedTuple
+from uuid import UUID
 
 import structlog
 from core_shared.models.history import Provenance
@@ -720,6 +721,84 @@ class JournalWriteService:
         await self._publish_type_data_change(
             journal_id,
             changed_fields,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+        )
+
+    @transactional
+    async def set_gear_usage_item(
+        self,
+        journal_id: int,
+        attrs: dict[str, Any],
+        transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> None:
+        """Add one gear item to a journal, or set the dates sent on it.
+
+        ``attrs`` is the single-item form (``gear_item_id`` and the optional
+        dates): other items are kept. A journal without GEAR_USAGE gains it.
+        """
+        # Lock the journal before reading its items, so a concurrent change to
+        # the same list is read rather than overwritten; see ``touch_journal``.
+        await self.journal_service.journal_repo.touch(journal_id)
+        if await self.gear_usage_data_repo.find_by_journal_id(journal_id) is None:
+            await self.add_type(
+                journal_id,
+                JournalType.GEAR_USAGE,
+                attrs,
+                transaction,
+                changed_by=changed_by,
+                source=source,
+            )
+            return
+        await self.update_type_data(
+            journal_id,
+            JournalType.GEAR_USAGE,
+            attrs,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+        )
+
+    @transactional
+    async def remove_gear_usage_item(
+        self,
+        journal_id: int,
+        gear_item_id: UUID,
+        transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+    ) -> None:
+        """Remove one gear item from a journal; the type stays, even if emptied.
+
+        The journal is locked before its items are read: the remaining list is
+        saved whole, so reading it first would let two removals each restore the
+        item the other removed.
+        """
+        await self.journal_service.journal_repo.touch(journal_id)
+        gear_usage = await self.gear_usage_data_repo.find_by_journal_id(journal_id)
+        if gear_usage is None or gear_usage.item(gear_item_id) is None:
+            raise JournalValidationError(
+                "gear_item_id", f"Gear item {gear_item_id} is not used on this journal"
+            )
+        remaining = gear_usage.without_item(gear_item_id).items
+        await self.update_type_data(
+            journal_id,
+            JournalType.GEAR_USAGE,
+            {
+                "items": [
+                    {
+                        "gear_item_id": str(item.gear_item_id),
+                        "checkout_date": item.checkout_date,
+                        "checkin_date": item.checkin_date,
+                    }
+                    for item in remaining
+                ]
+            },
             transaction,
             changed_by=changed_by,
             source=source,
