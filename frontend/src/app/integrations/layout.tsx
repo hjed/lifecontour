@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Integrations | Personal Management System',
+  title: 'Integrations',
   description: 'Manage your external integrations and sync settings',
 };
 

@@ -5,6 +5,10 @@
  * to meet SonarQube quality standards.
  */
 
+// Product identity: the single source of the product name in the frontend
+export const APP_NAME = 'Lifecontour';
+export const APP_TAGLINE = 'Your journal, people and adventures — self-hosted.';
+
 // API Endpoints
 export const API_ENDPOINTS = {
   AUTH: {
@@ -149,12 +153,12 @@ export const ENTITY_TYPES = [
 // Common UI Text
 export const UI_TEXT = {
   WELCOME_BACK: 'Welcome Back',
-  SIGN_IN_DESCRIPTION: 'Sign in to your Personal Management System',
+  SIGN_IN_DESCRIPTION: `Sign in to ${APP_NAME}`,
   CONTINUE_WITH: 'Continue with',
   CONNECTING_TO: 'Connecting to',
   PRIVACY_NOTICE:
     'By signing in, you agree to our terms of service and privacy policy.',
-  PRIVATE_APP_NOTICE: 'This is a private application for personal use only.',
+  SELF_HOSTED_NOTICE: `This is a private, self-hosted ${APP_NAME} instance.`,
   LOADING: 'Loading',
   CHECKING_AUTH: 'Checking your authentication status',
   PLEASE_WAIT: 'Please wait...',

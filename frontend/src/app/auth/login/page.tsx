@@ -154,7 +154,7 @@ function LoginContent() {
           {/* Privacy notice */}
           <div className='text-muted-foreground text-center text-sm'>
             <p>{UI_TEXT.PRIVACY_NOTICE}</p>
-            <p className='mt-2'>{UI_TEXT.PRIVATE_APP_NOTICE}</p>
+            <p className='mt-2'>{UI_TEXT.SELF_HOSTED_NOTICE}</p>
           </div>
         </CardContent>
       </Card>

@@ -11,7 +11,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard';
 import { JournalCreateForm } from '@/components/journals/JournalCreateForm';
 
 export const metadata: Metadata = {
-  title: 'New Journal | Personal Management System',
+  title: 'New Journal',
   description: 'Create a new journal entry',
 };
 

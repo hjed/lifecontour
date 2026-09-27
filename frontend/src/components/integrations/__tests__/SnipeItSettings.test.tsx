@@ -7,6 +7,7 @@ import {
   useSnipeItConnect,
   useSnipeItDisconnect,
 } from '@/lib/api/integrations';
+import { APP_NAME } from '@/lib/constants';
 
 jest.mock('@/lib/api/integrations', () => ({
   useSnipeItSettings: jest.fn(),
@@ -71,6 +72,14 @@ describe('SnipeItSettings', () => {
       expect(
         screen.getByRole('button', { name: /save & connect/i })
       ).toBeInTheDocument();
+    });
+
+    it('names the product in the user ID description', () => {
+      render(<SnipeItSettings />);
+
+      const description = screen.getByText(/your user id in snipe-it/i);
+      expect(description).toHaveTextContent(`maps your ${APP_NAME} account`);
+      expect(description).not.toHaveTextContent(/\bPMS\b/);
     });
 
     it('shows a validation error when the base URL is invalid', async () => {

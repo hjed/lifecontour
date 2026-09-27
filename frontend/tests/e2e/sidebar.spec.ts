@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
+import { APP_TITLE_PATTERN } from './utils/test-helpers';
 import { TestDataManager } from './data-management';
 
 /**
@@ -192,7 +193,7 @@ test.describe('Sidebar Navigation', () => {
 
       // Navigate
       await page.goto('/contacts');
-      await expect(page).toHaveTitle(/Personal Management System/);
+      await expect(page).toHaveTitle(APP_TITLE_PATTERN);
 
       // Reload to ensure sidebar tag tree picks up the newly created tags
       await page.reload();

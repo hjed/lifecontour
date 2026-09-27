@@ -4,6 +4,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
 import { TimezoneSettings } from '@/components/settings/TimezoneSettings';
 import { TemplateSettings } from '@/components/settings/TemplateSettings';
+import { APP_NAME } from '@/lib/constants';
 
 export default function SettingsPage() {
   return (
@@ -12,7 +13,7 @@ export default function SettingsPage() {
         <div className='mb-8'>
           <h1 className='text-3xl font-bold tracking-tight'>Settings</h1>
           <p className='text-muted-foreground'>
-            Manage your personal management system settings
+            Manage your {APP_NAME} settings
           </p>
         </div>
 

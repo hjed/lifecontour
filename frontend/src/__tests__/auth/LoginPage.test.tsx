@@ -14,6 +14,7 @@ import {
   TEST_CONSTANTS,
 } from '@/test-utils';
 import LoginPage from '@/app/auth/login/page';
+import { APP_NAME, UI_TEXT } from '@/lib/constants';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -58,8 +59,9 @@ describe('LoginPage', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'Welcome Back'
     );
+    expect(screen.getByText(`Sign in to ${APP_NAME}`)).toBeInTheDocument();
     expect(
-      screen.getByText(/sign in to your personal management system/i)
+      screen.getByText(`This is a private, self-hosted ${APP_NAME} instance.`)
     ).toBeInTheDocument();
 
     // Wait for OAuth provider buttons to load
@@ -161,7 +163,7 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />);
 
     // Check for Australian English terminology
-    expect(screen.getByText(/personal management system/i)).toBeInTheDocument();
+    expect(screen.getByText(UI_TEXT.SIGN_IN_DESCRIPTION)).toBeInTheDocument();
 
     // Should not use American spellings
     expect(screen.queryByText(/organization/i)).not.toBeInTheDocument();

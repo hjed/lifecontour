@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { APP_TITLE_PATTERN } from './utils/test-helpers';
 import { TestDataManager } from './data-management';
 
 test.describe('Contact Management - Authenticated User', () => {
@@ -8,7 +9,7 @@ test.describe('Contact Management - Authenticated User', () => {
     await authenticatedPage.goto('/contacts');
 
     // Verify the page loads successfully
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Should be on contacts page, not redirected to login
     await expect(authenticatedPage).toHaveURL(/\/contacts/);
@@ -22,7 +23,7 @@ test.describe('Contact Management - Authenticated User', () => {
     emptyContactsPage,
   }) => {
     await emptyContactsPage.goto('/contacts');
-    await expect(emptyContactsPage).toHaveTitle(/Personal Management System/);
+    await expect(emptyContactsPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Wait for the page to finish loading
     await expect(
@@ -50,7 +51,7 @@ test.describe('Contact Management - Authenticated User', () => {
     await authenticatedPage.goto('/contacts/new');
 
     // Verify the page loads successfully
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
     await expect(authenticatedPage).toHaveURL(/\/contacts\/new/);
 
     // Should see create contact form
@@ -77,7 +78,7 @@ test.describe('Contact Management - Authenticated User', () => {
     await authenticatedPage.goto(`/contacts/${contact.id}`);
 
     // Verify page loads without error 418 or other crashes
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Check that contact name is loaded
     await expect(
@@ -100,7 +101,7 @@ test.describe('Contact Management - Authenticated User', () => {
     await authenticatedPage.goto('/contacts/123');
 
     // Verify the page loads successfully
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Page should load (might show 404 for non-existent contact, but that's valid)
     const pageContent = authenticatedPage.locator('body');
@@ -192,7 +193,7 @@ test.describe('Contact Management - Authenticated User', () => {
     });
 
     await page.goto('/contacts');
-    await expect(page).toHaveTitle(/Personal Management System/);
+    await expect(page).toHaveTitle(APP_TITLE_PATTERN);
     await expect(page.getByRole('heading', { name: 'Contacts' })).toBeVisible({
       timeout: 10000,
     });
@@ -252,7 +253,7 @@ test.describe('Contact Management - Authenticated User', () => {
 
     // Navigate to Alice's detail page
     await authenticatedPage.goto(`/contacts/${alice.id}`);
-    await expect(authenticatedPage).toHaveTitle(/Personal Management System/);
+    await expect(authenticatedPage).toHaveTitle(APP_TITLE_PATTERN);
 
     // Wait for the contact name to be visible
     await expect(
