@@ -1,6 +1,6 @@
 # Iteration 19: Open-Source Release & Branding
 
-**Status:** 🔴 PLANNED — 5 sub-iterations, 15 phases (one PR each).
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); 1/15 phases ✅ DONE.
 
 **Dependencies:** None on product features. It operates on the repository, its metadata, the
 app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
@@ -387,7 +387,9 @@ compatibility, protect the name and logo, and publish a CLA-backed contribution 
 **Phase Breakdown:**
 
 **Phase 1 — `LICENSE` alone.** PR ~660 lines, all verbatim. This is the single exception to the
-≤500-line rule, accepted with this plan; see Delivery Rule 3.
+≤500-line rule, accepted with this plan; see Delivery Rule 3. ✅ DONE — root `LICENSE` is
+the verbatim GNU AGPL-3.0 text (661 lines, no preamble); `diff` against the GNU source is empty.
+This status note is the only other change in the PR, in the same commit (owner decision).
 
 - Add `LICENSE`: the verbatim `https://www.gnu.org/licenses/agpl-3.0.txt`, with **no preamble**.
   The copyright line lives in `README.md` and `CONTRIBUTING.md`, which keeps the file
