@@ -87,7 +87,15 @@ def _create_sync_service(
     snipeit_user_id: str | None,
     worker_settings: SnipeItWorkerSettings,
     session_factory: Any,  # noqa: ARG001
+    *,
+    wait_on_limit: bool = True,
 ) -> Any:
+    """Build a user's sync service over the shared limiter of their instance.
+
+    By default its client waits for the limiter's budget, so a burst of events
+    slows to Snipe-IT's pace instead of failing. Batch jobs pass
+    ``wait_on_limit=False``: they defer themselves on ``SnipeItRateLimitError``.
+    """
     from cryptography.fernet import Fernet
 
     from snipeit_api_client import SnipeItAPIClient
@@ -99,6 +107,7 @@ def _create_sync_service(
     api_client = SnipeItAPIClient.create(
         base_url=base_url,
         api_key=api_key,
+        wait_on_limit=wait_on_limit,
     )
 
     return SnipeItSyncService(
@@ -137,7 +146,11 @@ async def _get_settings(session_factory: Any, user_id: str) -> _SnipeItSettings 
 
 
 async def _open_sync_service(session_factory: Any, user_id: str) -> Any:
-    """Build a user's sync service, or raise ``_NotConfiguredError``."""
+    """Build a batch job's sync service, or raise ``_NotConfiguredError``.
+
+    Its client raises on a spent budget rather than wait: the batch jobs defer
+    themselves on ``SnipeItRateLimitError`` (see ``_rate_limit_defer``).
+    """
     snipeit = await _get_settings(session_factory, user_id)
     if snipeit is None:
         raise _NotConfiguredError("Snipe-IT settings not configured")
@@ -153,6 +166,7 @@ async def _open_sync_service(session_factory: Any, user_id: str) -> Any:
         snipeit_user_id=snipeit.snipeit_user_id,
         worker_settings=settings,
         session_factory=session_factory,
+        wait_on_limit=False,
     )
 
 
@@ -790,9 +804,10 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
 
     # Cron schedule: the periodic asset/maintenance import and the check-in
     # sweep (shared helper; both empty when periodic sync is disabled). The
-    # import runs half an hour after the sweep: each job has its own rate
-    # limiter, so running together they could exceed Snipe-IT's limit, and a
-    # rate-limited check-in waits for the next sweep. The fan-out reconciler
+    # import runs half an hour after the sweep: they share one rate limit
+    # budget (see ``rate_limiter_for``), so running together would only slow
+    # both down, and a sweep that still ends rate limited resumes on the next
+    # run. The fan-out reconciler
     # runs every few minutes regardless, since manual syncs fan out too.
     cron_jobs = [
         *generate_cron_jobs(

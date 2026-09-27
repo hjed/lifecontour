@@ -32,7 +32,9 @@ the single source of truth for the worker's consumed-event set:
 | `snipeit.webhook_received` | `_handle_webhook_received` | syncs the webhook's asset (`item.id`). The backend translates Snipe-IT's Slack-format notifications into `{action, item: {id}}` and publishes only those that link an asset |
 
 A handler that raises leaves its event unacknowledged so the base class retries
-it via the pending-entries path. See
+it via the pending-entries path. A gear-usage journal is reconciled on create as
+well as on update, so a redelivered create finishes a (journal, asset) pair
+whose check-in failed after its checkout was recorded. See
 [Stream-Consumer Route Registration](../../docs/architecture/integration-architecture.md)
 for the shared convention.
 
@@ -77,8 +79,7 @@ Periodic sync is **disabled by default**. The worker inherits
 `ENABLE_PERIODIC_SYNC`/`SYNC_INTERVAL_HOURS` from `BaseWorkerSettings`; enable it
 by setting `ENABLE_PERIODIC_SYNC=true` and a `SYNC_INTERVAL_HOURS` cadence. Two
 cron jobs then run every `SYNC_INTERVAL_HOURS`-th hour, half an hour apart so
-their Snipe-IT traffic does not compete for the rate limit (each job has its own
-limiter):
+their Snipe-IT traffic does not compete for the rate limit:
 
 - `periodic_sync_all_snipeit_accounts` (at `:30`) — for every user with Snipe-IT settings
   and working auth (`needs_reauth = FALSE`), enqueues `sync_snipeit_assets` and
@@ -98,6 +99,23 @@ limiter):
   must skip this step too.
 - `periodic_checkin_all_snipeit_accounts` (at `:00`) — checks in assets whose usage period
   has ended.
+
+### Rate Limiting
+
+Snipe-IT throttles each API key (120 requests a minute by default) and answers
+a request over it with a 429. The worker keeps one limiter per Snipe-IT instance
+for the whole process (`rate_limiter_for`), so the stream consumer, the check-in
+sweep and the batch jobs all spend one budget:
+
+- The stream consumer and the check-in sweep **wait** for a slot when it is
+  spent, so a burst of events slows to Snipe-IT's pace instead of failing.
+- The batch jobs **raise** `SnipeItRateLimitError` instead and defer themselves
+  (below).
+- A 429 that still arrives is retried twice by the client, after Snipe-IT's
+  `Retry-After` or 2s then 4s, never waiting more than 30s. A 429 is safe to
+  resend, even for a POST, because the throttle rejects it before the controller
+  runs. Timeouts and 5xx responses are not retried there, since a POST may have
+  landed.
 
 ### Sync Jobs and Fan-Out
 

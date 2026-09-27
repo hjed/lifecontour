@@ -11,7 +11,7 @@ if "DATABASE_URL" not in os.environ:
 os.environ["ENCRYPTION_KEY"] = "testkey"
 
 from collections.abc import AsyncGenerator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -26,7 +26,11 @@ from snipeit_models import (
     SnipeItMaintenanceListResponse,
     SnipeItMaintenanceWriteResponse,
 )
-from snipeit_rate_limiter import SnipeItRateLimitError
+from snipeit_rate_limiter import (
+    SnipeItRateLimiter,
+    SnipeItRateLimitError,
+    rate_limiter_for,
+)
 
 
 class TestSnipeItAPIClientListAssetActivity:
@@ -326,7 +330,10 @@ class TestSnipeItAPIClientErrorHandling:
         mock_429 = MagicMock()
         mock_429.status_code = 429
         mock_429.headers = {"Retry-After": "30"}
-        with patch.object(client_no_refresh._client, "get", return_value=mock_429):
+        with (
+            patch.object(client_no_refresh._client, "get", return_value=mock_429),
+            patch("snipeit_api_client.asyncio.sleep"),
+        ):
             with pytest.raises(SnipeItRateLimitError, match="rate limited"):
                 await client_no_refresh.get_asset(1)
 
@@ -364,6 +371,134 @@ class TestSnipeItAPIClientErrorHandling:
         ):
             with pytest.raises(httpx.ConnectError):
                 await client_no_refresh.get_asset(1)
+
+
+class TestSnipeItAPIClientRateLimiter:
+    """Clients of one Snipe-IT instance share its budget."""
+
+    @pytest.mark.asyncio
+    async def test_clients_of_one_instance_share_a_limiter(self) -> None:
+        first = SnipeItAPIClient.create(
+            base_url="https://shared.example.com", api_key="key"
+        )
+        second = SnipeItAPIClient.create(
+            base_url="https://shared.example.com/", api_key="key"
+        )
+        try:
+            assert first._rate_limiter is second._rate_limiter
+            assert first._rate_limiter is rate_limiter_for("https://shared.example.com")
+        finally:
+            await first.close()
+            await second.close()
+
+    @pytest.mark.asyncio
+    async def test_a_full_budget_raises_by_default(self) -> None:
+        client = SnipeItAPIClient(
+            client=MagicMock(), rate_limiter=SnipeItRateLimiter(requests_per_minute=0)
+        )
+        with pytest.raises(SnipeItRateLimitError, match="rate limit reached"):
+            await client.get_asset(1)
+
+    @pytest.mark.asyncio
+    async def test_a_waiting_client_waits_for_a_slot_instead(self) -> None:
+        limiter = SnipeItRateLimiter(requests_per_minute=0)
+        http = MagicMock()
+        http.get = AsyncMock(return_value=_ok_response(_asset_json()))
+        client = SnipeItAPIClient(client=http, rate_limiter=limiter, wait_on_limit=True)
+
+        with patch.object(limiter, "wait_for_slot", new_callable=AsyncMock) as wait:
+            await client.get_asset(1)
+
+        wait.assert_awaited_once()
+        http.get.assert_awaited_once()
+
+
+def _rate_limited(retry_after: str | None = None) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 429
+    resp.headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return resp
+
+
+class TestSnipeItAPIClientRateLimitRetry:
+    """A 429 is retried after a short wait before it is given up on."""
+
+    @staticmethod
+    def _client(*responses: MagicMock, method: str = "get") -> SnipeItAPIClient:
+        http = MagicMock()
+        setattr(http, method, AsyncMock(side_effect=list(responses)))
+        return SnipeItAPIClient(client=http)
+
+    @pytest.mark.asyncio
+    async def test_waits_the_retry_after_then_succeeds(self) -> None:
+        client = self._client(_rate_limited("7"), _ok_response(_asset_json()))
+        with patch("snipeit_api_client.asyncio.sleep") as sleep:
+            asset = await client.get_asset(1)
+        assert asset.id == 1
+        sleep.assert_awaited_once_with(7.0)
+
+    @pytest.mark.asyncio
+    async def test_backs_off_exponentially_without_a_retry_after(self) -> None:
+        client = self._client(
+            _rate_limited(), _rate_limited(), _ok_response(_asset_json())
+        )
+        with patch("snipeit_api_client.asyncio.sleep") as sleep:
+            await client.get_asset(1)
+        assert [c.args[0] for c in sleep.await_args_list] == [2.0, 4.0]
+
+    @pytest.mark.asyncio
+    async def test_caps_a_long_retry_after(self) -> None:
+        client = self._client(_rate_limited("600"), _ok_response(_asset_json()))
+        with patch("snipeit_api_client.asyncio.sleep") as sleep:
+            await client.get_asset(1)
+        sleep.assert_awaited_once_with(30.0)
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_two_retries(self) -> None:
+        client = self._client(
+            _rate_limited("1"), _rate_limited("1"), _rate_limited("5")
+        )
+        with patch("snipeit_api_client.asyncio.sleep") as sleep:
+            with pytest.raises(SnipeItRateLimitError) as exc_info:
+                await client.get_asset(1)
+        assert sleep.await_count == 2
+        assert exc_info.value.retry_after == 5.0
+
+    @pytest.mark.asyncio
+    async def test_a_rate_limited_post_is_sent_again(self) -> None:
+        """Snipe-IT's throttle rejects before the checkout runs, so resending is safe."""
+        client = self._client(
+            _rate_limited("0"),
+            _ok_response({"status": "success", "messages": "Checked out."}),
+            method="post",
+        )
+        with patch("snipeit_api_client.asyncio.sleep"):
+            await client.checkout_asset(42, {"assigned_user": 5})
+        assert client._client.post.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_each_attempt_spends_the_budget(self) -> None:
+        limiter = SnipeItRateLimiter(requests_per_minute=10)
+        http = MagicMock()
+        http.get = AsyncMock(
+            side_effect=[_rate_limited("0"), _ok_response(_asset_json())]
+        )
+        client = SnipeItAPIClient(client=http, rate_limiter=limiter)
+        with patch("snipeit_api_client.asyncio.sleep"):
+            await client.get_asset(1)
+        assert limiter._count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_server_error_is_not_retried(self) -> None:
+        """A POST that failed with a 5xx may have landed, so it is never resent here."""
+        failed = MagicMock()
+        failed.status_code = 500
+        client = self._client(failed, method="post")
+        with patch("snipeit_api_client.asyncio.sleep") as sleep:
+            with pytest.raises(SnipeItAPIError):
+                await client.checkout_asset(42, {"assigned_user": 5})
+        sleep.assert_not_called()
+        assert client._client.post.await_count == 1
 
 
 class TestSnipeItAPIClientClose:
@@ -763,7 +898,10 @@ class TestSnipeItAPIClientDeleteMaintenance:
         mock_429 = MagicMock()
         mock_429.status_code = 429
         mock_429.headers = {"Retry-After": "30"}
-        with patch.object(client_no_refresh._client, "delete", return_value=mock_429):
+        with (
+            patch.object(client_no_refresh._client, "delete", return_value=mock_429),
+            patch("snipeit_api_client.asyncio.sleep"),
+        ):
             with pytest.raises(SnipeItRateLimitError, match="rate limited"):
                 await client_no_refresh.delete_maintenance(101)
 

@@ -467,3 +467,57 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
         for call in repo.update_status.await_args_list
     ]
     assert failed == [(created[0], "failed"), (created[1], "failed")]
+
+
+class TestSyncServiceRateLimiting:
+    """Event and sweep clients wait for Snipe-IT's budget; batch jobs defer."""
+
+    @staticmethod
+    def _create(**overrides: Any) -> MagicMock:
+        from worker import _create_sync_service, settings
+
+        fernet = MagicMock()
+        fernet.return_value.decrypt.return_value = b"api-key"
+        with (
+            patch("cryptography.fernet.Fernet", fernet),
+            patch("snipeit_api_client.SnipeItAPIClient.create") as create,
+        ):
+            _create_sync_service(
+                user_id="user-1",
+                auth_data={"encrypted_api_key": b"token"},
+                base_url="https://snipeit.example.com",
+                snipeit_user_id="5",
+                worker_settings=settings,
+                session_factory=MagicMock(),
+                **overrides,
+            )
+        return create
+
+    def test_waits_for_a_slot_by_default(self) -> None:
+        create = self._create()
+        assert create.call_args.kwargs["wait_on_limit"] is True
+
+    def test_batch_jobs_opt_out_to_defer_instead(self) -> None:
+        create = self._create(wait_on_limit=False)
+        assert create.call_args.kwargs["wait_on_limit"] is False
+
+    @pytest.mark.asyncio
+    async def test_batch_jobs_open_a_service_that_does_not_wait(self) -> None:
+        from worker import _open_sync_service, _SnipeItSettings
+
+        with (
+            patch(
+                "worker._get_settings",
+                new_callable=AsyncMock,
+                return_value=_SnipeItSettings("https://snipeit.example.com", "5"),
+            ),
+            patch(
+                "worker._get_auth_data",
+                new_callable=AsyncMock,
+                return_value={"encrypted_api_key": b"token"},
+            ),
+            patch("worker._create_sync_service") as create,
+        ):
+            await _open_sync_service(MagicMock(), "user-1")
+
+        assert create.call_args.kwargs["wait_on_limit"] is False

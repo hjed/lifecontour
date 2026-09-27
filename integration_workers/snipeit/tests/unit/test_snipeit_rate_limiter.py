@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from snipeit_rate_limiter import SnipeItRateLimiter, SnipeItRateLimitError
+from snipeit_rate_limiter import (
+    SnipeItRateLimiter,
+    SnipeItRateLimitError,
+    rate_limiter_for,
+)
 
 
 class TestSnipeItRateLimiter:
@@ -55,3 +59,51 @@ class TestSnipeItRateLimiter:
 
         with pytest.raises(SnipeItRateLimitError):
             limiter.acquire()
+
+
+class TestWaitForSlot:
+    """``wait_for_slot`` waits out a full window instead of raising."""
+
+    @pytest.mark.asyncio
+    async def test_returns_at_once_while_within_the_limit(self) -> None:
+        limiter = SnipeItRateLimiter(requests_per_minute=2)
+        with patch("snipeit_rate_limiter.asyncio.sleep") as sleep:
+            await limiter.wait_for_slot()
+            await limiter.wait_for_slot()
+        sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sleeps_until_the_window_resets_then_counts_the_request(
+        self,
+    ) -> None:
+        clock = [1000.0]
+        with patch("snipeit_rate_limiter.time.monotonic", side_effect=lambda: clock[0]):
+            limiter = SnipeItRateLimiter(requests_per_minute=1)
+            await limiter.wait_for_slot()
+            clock[0] += 20
+
+            async def advance(seconds: float) -> None:
+                clock[0] += seconds
+
+            with patch(
+                "snipeit_rate_limiter.asyncio.sleep", side_effect=advance
+            ) as sleep:
+                await limiter.wait_for_slot()
+
+            sleep.assert_awaited_once_with(40)
+            # The slot it waited for is taken: the next caller waits again.
+            with pytest.raises(SnipeItRateLimitError):
+                limiter.acquire()
+
+
+class TestSharedRateLimiter:
+    """Every client of one Snipe-IT instance counts against one budget."""
+
+    def test_the_same_instance_shares_one_limiter(self) -> None:
+        first = rate_limiter_for("https://snipe.example.com/")
+        assert rate_limiter_for("https://snipe.example.com") is first
+
+    def test_another_instance_has_its_own(self) -> None:
+        assert rate_limiter_for("https://a.example.com") is not rate_limiter_for(
+            "https://b.example.com"
+        )

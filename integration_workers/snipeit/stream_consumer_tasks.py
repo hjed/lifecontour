@@ -418,18 +418,15 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
 
         try:
             if journal_type == "GEAR_USAGE":
-                if event.event_type == "JournalCreated":
-                    await sync_service.push_checkout_create(
-                        journal_id=journal_id,
-                        session_factory=self._session_factory,
-                    )
-                else:
-                    # JournalUpdated: reconcile the desired checkout/checkin state
-                    # (e.g. check the asset in if the usage period has ended).
-                    await sync_service.reconcile_gear_usage(
-                        journal_id=journal_id,
-                        session_factory=self._session_factory,
-                    )
+                # Created or updated, reconcile the desired checkout/checkin
+                # state. A create is not just a checkout: when its check-in
+                # failed after the checkout was recorded (e.g. a 429), the
+                # redelivered event must still check the asset back in, or it
+                # stays out and every later checkout of it fails.
+                await sync_service.reconcile_gear_usage(
+                    journal_id=journal_id,
+                    session_factory=self._session_factory,
+                )
                 logger.info(
                     "Successfully processed journal gear usage event",
                     journal_id=journal_id,

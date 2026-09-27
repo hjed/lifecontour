@@ -508,7 +508,11 @@ async def test_handle_event_processes_journal_created_gear_usage(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """JournalCreated event for GEAR_USAGE triggers push_checkout_create."""
+    """JournalCreated for GEAR_USAGE reconciles, like an update.
+
+    A redelivered create must finish a pair whose check-in failed after its
+    checkout was recorded; only the reconcile takes the check-in path then.
+    """
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
@@ -546,7 +550,6 @@ async def test_handle_event_processes_journal_created_gear_usage(
     )
 
     mock_sync_service = AsyncMock()
-    mock_sync_service.push_checkout_create = AsyncMock()
     mock_sync_service._api_client = AsyncMock()
 
     with (
@@ -555,10 +558,11 @@ async def test_handle_event_processes_journal_created_gear_usage(
     ):
         await consumer._handle_event(event)
 
-        mock_sync_service.push_checkout_create.assert_called_once_with(
+        mock_sync_service.reconcile_gear_usage.assert_called_once_with(
             journal_id=100,
             session_factory=mock_session_factory,
         )
+        mock_sync_service.push_checkout_create.assert_not_called()
         mock_sync_service._api_client.close.assert_called_once()
 
 
