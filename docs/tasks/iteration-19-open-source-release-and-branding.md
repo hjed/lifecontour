@@ -1,0 +1,825 @@
+# Iteration 19: Open-Source Release & Branding
+
+**Status:** 🔴 PLANNED — 5 sub-iterations, 16 phases (15 PRs; one phase is a manual gate).
+
+**Dependencies:** None on product features. It operates on the repository, its metadata, the
+app's user-facing naming, and the GitHub/GHCR/SonarCloud configuration.
+
+**Goal:** Publish the repository as the open-source project **Lifecontour**. This needs:
+
+- a legally applied **AGPL-3.0-or-later** licence and a **CLA**-backed contribution model;
+- a credential-clean history with permanent secret-scanning guardrails;
+- the new name everywhere the product names itself;
+- a line-art brand mark used as the favicon and app icon.
+
+## Overview
+
+The system has been developed privately by one developer. This iteration makes it public without
+exposing credentials, applies the licence the metadata has always claimed, gives outside
+contributors a documented path, and replaces the "Personal Management System / PMS" naming with
+**Lifecontour**.
+
+This iteration realises the
+[Open-Source Release & Branding Product Specification](../product-specifications/open-source-release-and-branding-product-specification.md).
+It does **not** rename infrastructure identifiers (DB names, Redis streams, env vars, compose
+`pms-*` names, log and OTel service names). It does not rewrite historical docs, and it does not
+adopt the brand palette as the app's UI theme.
+
+**Work split:**
+
+- Five **sub-iterations**, each broken into **PR-sized phases** (≤500-line diffs, green and
+  deployable `main` per phase), following the [Iteration 16](./iteration-16-outdoor-logbook-improvements.md)
+  format.
+- Unlike feature iterations, several phases are **operational**: scans, GitHub and GHCR
+  settings, a production deploy update. Those phases still produce a PR: the audit record,
+  config, and docs changes. Their out-of-repo steps are listed as checklist items that the PR
+  description confirms.
+
+## Reference Documents
+
+- **[Open-Source Release & Branding Product Specification](../product-specifications/open-source-release-and-branding-product-specification.md)** — approved behaviour (the spec this document delivers)
+- **[CI/CD Setup](../ci-cd-setup.md)** — the stacked-PR CI gate (`needs: changes`), release workflow, GHCR images
+- **[Code Quality Standards](../code-quality-standards.md)** — pre-commit hooks, ruff/mypy, frontend `quality:check`
+- **[Testing Strategy](../architecture/testing-strategy.md)** — RTL, Playwright e2e, backend unit tests
+- **[Frontend Design](../architecture/frontend-design.md)** — Next.js metadata and app-chrome conventions
+- **[MCP Setup](../mcp-setup.md)** — MCP server identity shown to clients
+
+### External Documentation
+
+- **GNU AGPL-3.0** — https://www.gnu.org/licenses/agpl-3.0.txt (the verbatim licence text; SPDX `AGPL-3.0-or-later`)
+- **CLA Assistant** — https://github.com/cla-assistant/cla-assistant (CLA via a gist, enforced as a PR status)
+- **Apache Individual CLA** — https://www.apache.org/licenses/icla.pdf (the template the CLA adapts)
+- **Contributor Covenant 2.1** — https://www.contributor-covenant.org/version/2/1/code_of_conduct/
+- **gitleaks** — https://github.com/gitleaks/gitleaks (pre-commit hook, CI, `.gitleaks.toml` allowlist)
+- **TruffleHog** — https://github.com/trufflesecurity/trufflehog (verified-credential scan of git history and container images)
+- **Next.js metadata files** — `app/icon.svg`, `app/favicon.ico`, `app/apple-icon.png` and `metadata.title.template` (context7 Next.js docs)
+- **OSM tile usage policy** — https://operations.osmfoundation.org/policies/tiles/ (identifying User-Agent)
+- **GitHub docs** — renaming a repository (redirects), secret scanning and push protection, private vulnerability reporting, rulesets, fork-PR workflow approval
+
+## Delivery Rules
+
+These apply to every sub-iteration and every phase:
+
+1. **Tests first where there is behaviour.**
+   - Rename and UI phases update or write the failing assertions first (new title, new MCP name,
+     new User-Agent, source-code link), then change the code (red → green → refactor).
+   - Documentation, licence and scan phases have no TDD component. Their verification step is
+     listed per phase instead.
+2. **Green main:** do not merge unless the relevant backend tests, `ruff`, `mypy`, and frontend
+   `pnpm quality:check` pass. The pre-commit hooks run on every commit.
+3. **PR size ≤ 500 lines.**
+   - The one exception is the verbatim AGPL `LICENSE` (about 660 lines), which lands **alone** in
+     its own PR (ITER19-002 Phase 1). It is verified by an exact diff against the GNU source,
+     not read line by line.
+   - Other verbatim texts (the Contributor Covenant) count against the budget normally.
+4. **Credentials are rotated, not just deleted.** A real credential found anywhere is revoked at
+   the provider **before** any cleanup commit. Secret values never appear in the audit record, PR
+   descriptions, or commit messages.
+5. **The CI gate is untouched.**
+   - New CI jobs declare `needs: changes`, directly or transitively. A job with no path filter
+     follows the `core-shared-lint` precedent.
+   - Nothing loosens the stacked-PR gate.
+   - Never use `pull_request_target` with a checkout of PR code.
+6. **Name the product through one constant per stack.**
+   - The frontend and backend each read the product name from a single constant, so a future
+     rename is a one-line change.
+   - Tests assert against the same constant or a shared pattern, not string literals scattered
+     across specs.
+7. **No infrastructure renames.** DB names, streams, env vars, compose `pms-*` names, and log/OTel
+   service names are deferred (spec Out of Scope). Any such identifier a phase touches is left as
+   is.
+8. **The visibility flip is last.** It happens only after ITER19-001 has recorded zero unresolved
+   real-credential findings and ITER19-002 to ITER19-004 have merged.
+
+## Grounding Findings (shaped the sub-iteration boundaries)
+
+Established by reviewing the current code during spec planning:
+
+- **No `LICENSE` file exists**, though `README.md:271-273` links to one.
+  - All six `pyproject.toml` files declare the non-SPDX `license = {text = "AGPL-3.0"}`.
+  - `frontend/package.json` has no `license` field.
+  - Every Python package builds with **hatchling** (`[build-system]`, e.g.
+    `backend/pyproject.toml:84-86`). Hatchling ≥1.27 accepts the PEP 639 SPDX string form. No
+    `License ::` classifiers are present.
+  - Result: a small, mechanical licensing phase.
+- **Repo contributors are the owner, dependabot, and AI agents only** (an Augment agent, Claude
+  co-author trailers). No retroactive contributor consent is needed before licensing.
+- **CI already uses no secrets on PRs.**
+  - `ci.yml` has no `pull_request_target` and references no secrets.
+  - The only secret in any workflow is `GITHUB_TOKEN`, in `release.yml`, which runs on tags.
+  - SonarCloud runs as Automatic Analysis, outside Actions, and `sonar-project.properties` is dead
+    config.
+  - Fork PRs therefore need no workflow changes, only a repository setting.
+- **No secret scanning exists anywhere.** `security.yml` runs pip-audit and Bandit weekly, and
+  `.pre-commit-config.yaml` has no secret hook.
+- **Preliminary scans found no real credentials:**
+  - `.env.dev` and `.env.test` hold placeholders only;
+  - no private-key or Google API-key patterns appear in history;
+  - no real GitHub, AWS, OpenAI or JWT tokens are in the current tree;
+  - there are no HTTP cassettes or HAR files.
+  - A full audit is still required: 4,500+ commits, 747 remote branches, and `refs/pull/*`.
+- **Stray tracked files:** `.tmpxYhLD4` (a local MCP config with local paths and workspace IDs)
+  and the root `ITER2-004-Phase2-Production-Readiness.md`.
+- **Vendored skills:**
+  - `.claude/skills/playwright-skill/LICENSE` (MIT) is present.
+  - `.claude/skills/shadcn/` has no licence file and ships shadcn logo PNGs under `assets/`,
+    which `.claude/skills/shadcn/agents/openai.yml:4-5` references.
+- **The contribution templates already exist.** `.github/pull_request_template.md` and
+  `.github/ISSUE_TEMPLATE/{bug_report,feature_request}.md` are extended rather than created.
+  `README.md` and `.github/copilot-instructions.md` link to a missing `docs/ai-guidelines.md`.
+- **Frontend naming is scattered string literals:**
+  - `layout.tsx:12-13` (title, description), `integrations/layout.tsx:4`,
+    `journals/new/page.tsx:14`;
+  - `lib/constants.ts:152` (sign-in) and `:157` ("private application");
+  - `settings/page.tsx:15`, and "PMS" in `SnipeItSettings.tsx:146`.
+  - About 25 e2e `toHaveTitle(/Personal Management System/)` assertions are spread across
+    `contacts*.spec.ts`, `sidebar.spec.ts:195`, `auth/login.spec.ts` and `utils/test-helpers.ts`,
+    plus the unit tests `LoginPage.test.tsx`, `jest.setup.ts:165` and
+    `contacts/new/__tests__/page.test.tsx`.
+  - Two tests (`home-dashboard.spec.ts:64`, `app/__tests__/page.test.tsx:397`) assert an old
+    placeholder is **absent**; they stay unchanged.
+  - Old-name assertions that are not titles: `auth/login.spec.ts:29`
+    (`text=Sign in to your Personal Management System`) and `:502` (a body `toContain`), plus
+    `LoginPage.test.tsx:164`.
+  - Next.js 16's `metadata.title.template` removes the need for per-page suffix literals.
+- **Design-sync is keyed to the frontend package name.** `frontend/.design-sync/config.json:3-4`
+  has `"pkg": "personal-management-frontend"` and `"globalName": "PMS"`, and 47
+  `previews/*.tsx` import from that package name. Renaming the package is therefore its own
+  phase, including a `/design-sync` re-sync. Editing the previews clears their verification
+  hashes (see `frontend/.design-sync/NOTES.md`).
+- **Backend naming:**
+  - `main.py:319-320` (FastAPI title and description, shown in OpenAPI) and the log messages at
+    `main.py:69,280`;
+  - `mcp/server.py:113-115` (MCP server name and instructions);
+  - "PMS" in the OpenAPI field text at `snipeit_settings_schemas.py:20,33`;
+  - the OSM User-Agent default at `infrastructure/config.py:177`. Note that
+    `tests/unit/journal/test_osm_tile_source.py:34` passes its own `_USER_AGENT` to the
+    constructor, so **nothing asserts the default today**;
+  - module docstrings (`backend/app/__init__.py`, `main.py:2`), `backend/README.md`,
+    `backend/INTEGRATION_TESTS.md`;
+  - the `core_shared` module docstrings.
+- **Worker outbound identity:** the Strava GPX `"creator": "PersonalManagementSystem"`
+  (`integration_workers/strava/gpx_generator.py:60`) appears in files users download.
+- **Package identity:**
+  - `backend/pyproject.toml:2,4,6`: name `personal-management-backend`, the description
+    "Personal CRM & Journal System", and a placeholder author (`dev@example.com`). The
+    `core_shared` and four worker `pyproject.toml` files carry the same description and author
+    placeholders;
+  - `backend/uv.lock:1634` (the project name, regenerated with the rename);
+  - `frontend/package.json:2,4`: the name and description. There is no author field.
+  - Worker package names and `core_shared` are unchanged.
+- **Docs naming:** `README.md` (including `:20` `cd personal-management-system` and `:277`),
+  `frontend/README.md`, `AGENTS.md` (project context), `docs/tasks.md:1`,
+  `docs/architecture.md`, `frontend/.design-sync/conventions.md`, the release-notes text
+  (`release.yml:194`), `frontend/.env.example:6` (unused `NEXT_PUBLIC_APP_NAME`), and
+  `docker/oauth-ui/views/index.ejs:66`.
+  - The README has **no badges** today. The licence badge is new, and there is no SonarCloud badge
+    to update.
+- **GHCR image paths follow the repository name** (`release.yml:16`,
+  `IMAGE_NAME: ${{ github.repository }}`). Renaming the repository moves future images to
+  `ghcr.io/hjed/lifecontour-*`, so production's image references must change in the same step.
+  Old packages stay pullable for rollback.
+- **The favicon is broken.** `layout.tsx:15-16` references `/favicon.ico`, but `frontend/public/`
+  holds only `.gitkeep`, so the app has no icon today.
+
+## Dependency and Parallelisation Notes
+
+- **ITER19-001 (Credential Audit)** starts first. Its Phase 1 result is the release gate; nothing
+  else waits on it until the flip.
+- **ITER19-002 (Licensing & Contributions)** is independent and can run in parallel from the
+  start.
+- **ITER19-003 (Brand Identity)** is independent. Its Phase 1 SVGs are needed by ITER19-004
+  Phase 3 (README lockup).
+- **ITER19-004 (Rename)** requires the **name adoption gate** (Phase 0, manual) before any rename
+  PR merges. Phase 3 needs ITER19-003 Phase 1, and Phase 4 follows Phase 1.
+- **ITER19-005 (Repository Rename & Go Public)** comes last.
+  - Phase 1 needs ITER19-004 merged.
+  - Phase 2 (the flip) needs every other phase merged and ITER19-001's gate passed.
+
+| Sub-iteration | Depends on | Can parallelise with |
+|---|---|---|
+| ITER19-001 Credential Audit & Guardrails | — | -002, -003, -004 |
+| ITER19-002 Licensing & Contributions | — | -001, -003, -004 |
+| ITER19-003 Brand Identity | — | -001, -002, -004 (Phases 1–2) |
+| ITER19-004 Rename to Lifecontour | Name adoption gate; -003 P1 (for P3); P1 (for P4) | -001, -002 |
+| ITER19-005 Repository Rename & Go Public | -004 (P1); all + -001 gate (P2) | — |
+
+```mermaid
+flowchart LR
+  A1[001 P1 history audit] --> A3[001 P3 GitHub-side audit]
+  A1 --> A2[001 P2 gitleaks guardrails]
+  B1[002 P1 LICENSE] --> B2[002 P2 SPDX, TRADEMARKS, CoC, SECURITY] --> B3[002 P3 licence audit] --> B4[002 P4 CONTRIBUTING + CLA]
+  C1[003 P1 brand SVGs] --> C2[003 P2 app icons]
+  G[004 P0 name gate] --> D1[004 P1 frontend rename]
+  G --> D2[004 P2 backend/MCP/worker rename]
+  C1 --> D3[004 P3 Python packages + docs]
+  G --> D3
+  D1 --> D4[004 P4 frontend package + design-sync]
+  D1 & D2 & D3 & D4 --> E1[005 P1 repo rename + deploy + source link]
+  A2 & A3 & B4 & C2 & E1 --> E2[005 P2 configure + flip]
+```
+
+## Task Breakdown
+
+Each sub-iteration defines:
+
+- its objective;
+- the specification section it realises;
+- its dependencies;
+- its deliverable;
+- the outcomes its phases must collectively satisfy;
+- a **phase breakdown**, where each phase carries a PR-size estimate, scope, and its tests or
+  verification and documentation updates.
+
+### ITER19-001: Credential Audit & Secret-Scanning Guardrails
+
+**Objective:** Prove that no live credential is exposed anywhere the public flip reveals, and block
+new ones permanently.
+
+**Specification Reference:**
+- [Part 3: Security Audit & Guardrails](../product-specifications/open-source-release-and-branding-product-specification.md#part-3-security-audit--guardrails)
+
+**Dependencies:** None.
+
+**Deliverable:**
+
+- A committed audit record: every finding triaged, and no secret values.
+- A tuned `.gitleaks.toml`.
+- gitleaks enforced in pre-commit and CI.
+- A GitHub-side audit (PR/issue text, Actions logs and artifacts, GHCR image layers).
+
+**Outcomes the phases must satisfy:**
+- Every git ref is scanned with gitleaks and TruffleHog (verification on): all branches, tags, and
+  `refs/pull/*/head` fetched from GitHub.
+- Every finding is classified as *real credential* / *dev-test placeholder* / *false positive*.
+  Real credentials are revoked or rotated at the provider before anything else. The gate is
+  zero unresolved real findings.
+- Placeholders and false positives are allowlisted in `.gitleaks.toml`, so the guardrails start
+  clean.
+- The stray tracked files are removed.
+- gitleaks blocks new secrets at commit (pre-commit) and in CI (behind `needs: changes`).
+
+**Phase Breakdown:**
+
+**Phase 1 — Git history audit, allowlist, hygiene.** PR ~200 lines.
+
+- **Scan history:** clone a mirror with `refs/pull/*` fetched and scan all refs:
+  - `gitleaks git --log-opts="--all" <mirror>` (gitleaks ≥8.19 syntax; `detect` is deprecated);
+  - `trufflehog git file://<mirror> --results=verified,unknown`.
+- **Scan the current tree:** check every committed `.env*` file, `docker-compose.yml`, the
+  workflows, test fixtures, and the e2e auth setup, and confirm each holds only dev or test
+  placeholders.
+- **Triage:** record each finding in `docs/security/open-source-release-audit.md` with the
+  scanner, rule, file, first commit, classification, and action taken. **Never record the secret
+  value.**
+- **Rotate:** revoke or rotate any real credential at its provider first (Google OAuth, Strava,
+  Immich, Snipe-IT, OIDC, MeiliSearch…), then remove it from the tree.
+- **Commit:**
+  - `.gitleaks.toml`, extending the default ruleset and allowlisting the dev/test placeholders
+    (`.env.dev`, `.env.test`, `*.env.example`, test fixtures) by path plus value regex, not by
+    blanket path;
+  - a `.gitleaksignore` holding the **fingerprints** of rotated real credentials. History is
+    not rewritten, so a rotated secret is still in the history; its fingerprint documents that
+    it was handled;
+  - removal of `.tmpxYhLD4`, with `.tmp*` added to `.gitignore`;
+  - `ITER2-004-Phase2-Production-Readiness.md` moved under `docs/tasks/`.
+- **Verification:**
+  - Re-running `gitleaks git` over the full mirror with the committed `.gitleaks.toml` and
+    `.gitleaksignore` reports zero findings.
+  - The TruffleHog verified-results count is zero.
+  - Both commands and their summary counts are recorded in the audit doc.
+- **Docs:** `docs/security/open-source-release-audit.md` (new).
+
+**Phase 2 — Guardrails: gitleaks in pre-commit and CI.** PR ~120 lines.
+
+- **Pre-commit:** add the `gitleaks` hook (pinned rev) to `.pre-commit-config.yaml`, using the
+  committed config.
+- **CI:** add a `secret-scan` job to `ci.yml` with `needs: changes`. It has **no path filter**
+  (like `core-shared-lint`), so it runs on every in-gate event. It uses the pinned gitleaks CLI
+  with `.gitleaks.toml` and `.gitleaksignore`, checks out with `fetch-depth: 0`, and scans:
+  - **pull_request:** `base.sha..head.sha`;
+  - **push:** `before..after`;
+  - **tag** (via `release.yml:21`) and **workflow_dispatch** (upper stack layers): the full
+    history of the ref. The allowlist and ignore file keep this clean.
+- If the gitleaks GitHub Action is chosen over the CLI, it needs `GITHUB_TOKEN`. That works on
+  fork PRs (read-only) and is recorded against the "no repository secrets on PRs" invariant. The
+  CLI avoids the question.
+- **Verification:**
+  - Locally: a throwaway commit containing a fake AWS-style key is rejected by the hook, and
+    `gitleaks git` flags it. Do not push it.
+  - In CI: the job passes on the phase's own PR.
+- **Docs:**
+  - `docs/code-quality-standards.md`: the new hook, and how to allowlist a false positive.
+  - `docs/ci-cd-setup.md`: the `secret-scan` job, plus the rule "never use `pull_request_target`
+    with a checkout of PR code".
+
+**Phase 3 — GitHub-side content audit.** PR ~80 lines (audit record only).
+
+- **PR and issue text:** scan all PR and issue bodies, comments, and review comments. Export them
+  via `gh api` paginated, then run `gitleaks dir <export>` over the export.
+- **Actions:**
+  - Scan retained logs and artifacts.
+  - Delete any Actions run log or artifact that holds a secret; `gh run delete` removes a run and
+    its logs.
+- **Releases and wiki:** check release notes and assets, and the wiki if one exists.
+- **GHCR images:** the packages become public in ITER19-005, so every published image is
+  scanned first.
+  - Enumerate packages and tags with `gh api /users/hjed/packages?package_type=container` and
+    `.../packages/container/<name>/versions`.
+  - Run `trufflehog docker --image ghcr.io/hjed/<package>:<tag>` for each; the CLI does not
+    accept wildcards.
+- **Record and rotate:** triage each result into the audit doc, with the same rotation rules as
+  Phase 1.
+- **Verification:** the audit doc's GitHub-side section lists each surface scanned, its count, and
+  zero unresolved real findings.
+
+---
+
+### ITER19-002: Licensing & Contribution Model
+
+**Objective:** Legally apply AGPL-3.0-or-later with consistent identifiers, record licence
+compatibility, protect the name and logo, and publish a CLA-backed contribution path.
+
+**Specification Reference:**
+- [Part 1: Licensing](../product-specifications/open-source-release-and-branding-product-specification.md#part-1-licensing)
+- [Part 2: Contribution Model](../product-specifications/open-source-release-and-branding-product-specification.md#part-2-contribution-model)
+
+**Dependencies:** None.
+
+**Deliverable:**
+
+- `LICENSE` and SPDX identifiers.
+- The dependency licence audit.
+- `TRADEMARKS.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CONTRIBUTING.md` and `CLA.md`.
+- Updated PR and issue templates.
+
+**Outcomes the phases must satisfy:**
+- A root `LICENSE` holds the verbatim AGPL-3.0 text with no preamble. Every package declares
+  `AGPL-3.0-or-later`.
+- The copyright line `Copyright (C) 2025–2026 Harry J E Day` appears in the `README.md` licence
+  section and `CONTRIBUTING.md`. The README links `LICENSE` and `TRADEMARKS.md`.
+- Vendored content carries its licence notices: the shadcn skill gets its MIT notice, and its
+  third-party logo PNGs are removed.
+- Every runtime dependency's licence is recorded as AGPL-compatible. An incompatible one blocks
+  release.
+- CONTRIBUTING encodes the owner's rules: issue first, ≤500-line PRs, AI-generated PRs reviewed by
+  the submitter plus automated review plus disclosure, rebase-only, and the stacked-PR CI note.
+- The CLA is a **licence grant** (not assignment) that permits relicensing, and it is enforceable
+  by CLA Assistant.
+
+**Phase Breakdown:**
+
+**Phase 1 — `LICENSE` alone.** PR ~660 lines, all verbatim. This is the single exception to the
+≤500-line rule, accepted with this plan; see Delivery Rule 3.
+
+- Add `LICENSE`: the verbatim `https://www.gnu.org/licenses/agpl-3.0.txt`, with **no preamble**.
+  The copyright line lives in `README.md` and `CONTRIBUTING.md`, which keeps the file
+  byte-identical to the GNU source.
+- Nothing else goes in this PR, so review is the diff check alone.
+- **Verification:** `diff <(curl -s https://www.gnu.org/licenses/agpl-3.0.txt) LICENSE` is empty.
+
+**Phase 2 — SPDX identifiers, notices, trademarks, conduct, security policy.** PR ~300 lines.
+
+- **Python packages:** replace `license = {text = "AGPL-3.0"}` with the PEP 639 form
+  `license = "AGPL-3.0-or-later"` in all six `pyproject.toml` files. Raise each
+  `[build-system]` requirement to `hatchling>=1.27`, which accepts the SPDX string.
+- **Frontend:** add `"license": "AGPL-3.0-or-later"` to `frontend/package.json`.
+- **README licence section** (`README.md:271-273`): the SPDX identifier, the copyright line
+  `Copyright (C) 2025–2026 Harry J E Day`, and links to `LICENSE` and `TRADEMARKS.md`. Also update
+  the worker README licence lines (`integration_workers/*/README.md`).
+- **Vendored shadcn skill:**
+  - Add `.claude/skills/shadcn/LICENSE` (the upstream shadcn/ui MIT text).
+  - Delete `.claude/skills/shadcn/assets/shadcn*.png`, and remove their references in
+    `.claude/skills/shadcn/agents/openai.yml:4-5`.
+- **`TRADEMARKS.md`:** the Lifecontour name and logo are not licensed by the AGPL. Forks must
+  rebrand, and may say "based on Lifecontour".
+- **`CODE_OF_CONDUCT.md`:** the verbatim Contributor Covenant 2.1, with GitHub private reporting as
+  the contact method.
+- **`SECURITY.md`:**
+  - report via GitHub private vulnerability reporting, never public issues;
+  - the latest release is supported;
+  - the expected response window.
+- **Verification:**
+  - Every Python project builds with `uv build`, which proves hatchling accepts the SPDX string.
+    `uv lock --check` passes.
+  - `rtk proxy git grep -n 'AGPL-3.0"'` finds no bare identifiers.
+  - The `check-toml` hook passes.
+  - A link check over the new files and the README passes.
+
+**Phase 3 — Dependency licence audit.** PR ~200 lines.
+
+- Generate the runtime licence lists:
+  - `pip-licenses` in `--no-dev` synced environments for the backend, `core_shared` and each
+    worker;
+  - `pnpm licenses list --prod` for the frontend.
+- **Record, don't dump:** `docs/licensing/third-party-licences.md` holds **per-ecosystem counts
+  by licence family**, plus an **individual list of every non-permissive package** (copyleft,
+  weak copyleft, unknown or custom) with a compatibility verdict. The regeneration commands are
+  included so the audit can be repeated.
+- **Known so far:** psycopg2 and pycountry are LGPL (compatible); dompurify is MPL-2.0 or
+  Apache-2.0; the Inter font is OFL.
+- Keep the OpenStreetMap ODbL attribution (`osm_tile_source.py:40`).
+- Any incompatible or unknown licence is raised to the owner and blocks ITER19-005 Phase 2.
+- **Verification:** the per-ecosystem totals equal the package counts in the lockfiles
+  (`backend/uv.lock`, the `core_shared` and worker locks, and the production tree of
+  `pnpm-lock.yaml`).
+
+**Phase 4 — CONTRIBUTING, CLA, templates.** PR ~350 lines.
+
+- **`CONTRIBUTING.md`:**
+  - the copyright notice, and that contributions are licensed under AGPL-3.0-or-later plus the
+    CLA;
+  - discuss first on an issue, with typo and docs fixes exempt;
+  - ≤500 changed lines per PR, split into a stack beyond that;
+  - AI-generated PRs: the submitter reviews every line, runs automated code review and the quality
+    gates, and discloses AI assistance; agents follow `AGENTS.md`;
+  - test-first; rebase, never merge `main`; pre-commit;
+  - quality commands, linking `docs/code-quality-standards.md` and the testing strategy;
+  - the stacked-PR note: only the bottom layer runs CI, and the maintainer dispatches upper layers.
+- **`CLA.md`:** an individual CLA adapted from the Apache ICLA. The contributor grants the owner a
+  perpetual, worldwide, royalty-free, irrevocable copyright and patent licence, including the
+  right to sublicense and relicense under any terms, and keeps their own copyright. Include a
+  short plain-English summary.
+- **`.github/pull_request_template.md` (extend):** linked issue, diff size, tests run, an
+  AI-assistance disclosure with "I reviewed every AI-generated line" and "automated review run",
+  and CLA acknowledgement.
+- **`.github/ISSUE_TEMPLATE/` (extend):** `feature_request.md` becomes the "discuss first"
+  proposal. Add `config.yml` that disables blank issues and links security reports to
+  `SECURITY.md`.
+- Fix the dangling `docs/ai-guidelines.md` links in `README.md` and
+  `.github/copilot-instructions.md` to point at `AGENTS.md`.
+- **Verification:**
+  - A GitHub preview of the templates shows the new fields.
+  - A link check passes.
+  - CLA Assistant itself is installed in ITER19-005 Phase 2.
+
+---
+
+### ITER19-003: Brand Identity
+
+**Objective:** Ship the Lifecontour mark, concept E (an open logbook, a person, a creek), as
+hand-tuned SVG brand assets and as the app's favicon and app icons, legible at 16px in light and
+dark.
+
+**Specification Reference:**
+- [Part 5: Brand Identity](../product-specifications/open-source-release-and-branding-product-specification.md#part-5-brand-identity)
+
+**Dependencies:** None.
+
+**Deliverable:**
+
+- `branding/` holding `mark.svg`, `mark-dark.svg`, `mark-mono.svg`, `lockup.svg` and a brand
+  guide.
+- Working `icon.svg`, `favicon.ico` and `apple-icon.png` in the app.
+
+**Outcomes the phases must satisfy:**
+- The mark is concept E, drawn on a 64-unit grid with strokes ≥3 units, using the palette
+  Eucalypt `#2F5D50`, Creek `#2B7A9E`, Sandstone `#D08A3C`.
+- The dark variant lightens the strokes for contrast on dark backgrounds. The mono variant uses
+  `currentColor`.
+- **Cultural review rule:** no concentric circles or rings and no dot-infill. The brand guide
+  records this rule and the reason.
+- The app serves a working icon. The dangling `/favicon.ico` metadata is gone. The tab icon
+  follows `prefers-color-scheme`.
+
+**Phase Breakdown:**
+
+**Phase 1 — Brand assets and guide.** PR ~250 lines.
+
+- **SVGs in `branding/`:**
+  - `mark.svg`, `mark-dark.svg`, `mark-mono.svg`;
+  - `lockup.svg`: the mark plus a "Lifecontour" wordmark, with the text converted to paths so it
+    renders without the font.
+- **Brand guide (`branding/README.md`):** palette, minimum size, clear space, do/don't, the
+  cultural review rule, and a pointer to `TRADEMARKS.md`.
+- The SVGs are hand-authored and optimised (no editor metadata) and include `<title>` for
+  accessibility.
+- **Verification:**
+  - Render each SVG at 16, 32 and 128px on light and dark backgrounds, with `inkscape` or
+    `rsvg-convert` into a contact sheet.
+  - Attach the sheet to the PR description. Do not commit it.
+  - The owner confirms legibility and the cultural rule.
+- **Docs:** `branding/README.md`.
+
+**Phase 2 — App icons.** PR ~120 lines.
+
+- **`frontend/src/app/icon.svg`:** the mark with an embedded
+  `@media (prefers-color-scheme: dark)` style that swaps to the dark strokes.
+- **`frontend/src/app/favicon.ico`** (16 and 32px) and **`frontend/src/app/apple-icon.png`**
+  (180px, padded, on a light background): generated from the SVG with the command recorded in
+  `branding/README.md`.
+- Remove `icons: { icon: '/favicon.ico' }` from `layout.tsx`. The Next.js file conventions emit
+  the `<link>` tags.
+- **Tests:** a Playwright e2e in an existing app-shell spec (e.g. `sidebar.spec.ts`). It asserts
+  that a `link[rel="icon"]` whose href points at the app's `icon.svg` is present, and that
+  fetching that href returns 200 with an SVG content type. It runs on the `firefox` and
+  `Mobile Chrome` projects.
+- **Verification:** a manual check in light and dark browser themes that the tab icon switches
+  variant.
+
+---
+
+### ITER19-004: Rename to Lifecontour
+
+**Objective:** Everywhere the product names itself (UI, API, MCP, outbound requests, packages,
+docs), it says **Lifecontour**, read from one constant per stack.
+
+**Specification Reference:**
+- [Part 4: Name — Lifecontour](../product-specifications/open-source-release-and-branding-product-specification.md#part-4-name--lifecontour)
+
+**Dependencies:**
+
+- Phase 0 (the name adoption gate) must pass before Phases 1–3 merge.
+- Phase 3 needs ITER19-003 Phase 1 (the lockup for the README).
+- Phase 4 follows Phase 1, so the frontend is stable before the design-sync re-grade.
+
+**Deliverable:** A user, API consumer, or MCP client sees "Lifecontour", and the tagline is
+*"Your journal, people and adventures — self-hosted."*
+
+**Outcomes the phases must satisfy:**
+- Every surface in the spec's rename table is renamed, plus the worker descriptions and the
+  Strava GPX `creator`. The deferred infrastructure identifiers are untouched.
+- The frontend titles use `metadata.title.template` (`'%s | Lifecontour'`), with the product name
+  from one constant.
+- The backend, MCP and workers read the product name from one `core_shared` constant.
+- The e2e and unit title assertions use a single shared pattern.
+- "Private application" wording becomes self-hosted-instance wording. `robots: noindex` stays.
+- The OSM User-Agent identifies Lifecontour with a project URL.
+
+**Phase Breakdown:**
+
+**Phase 0 — Name adoption gate (manual, no PR).**
+
+- Search the **IP Australia** and **USPTO** trademark registers (classes 9 and 42) for
+  "Lifecontour" and close variants.
+- Register `lifecontour.com`.
+- Confirm that `hjed/lifecontour` is free on GitHub.
+- Record PyPI and npm availability (informational).
+- Record the outcome in the first rename PR's description.
+- A conflict stops ITER19-004 and goes back to the owner.
+
+**Phase 1 — Frontend user-facing rename.** PR ~320 lines.
+
+- **Constants:** add `APP_NAME = 'Lifecontour'` and `APP_TAGLINE` to `frontend/src/lib/constants.ts`.
+- **Metadata:**
+  - `layout.tsx` metadata becomes `title: { default: APP_NAME, template: '%s | ' + APP_NAME }`,
+    with the tagline as the description.
+  - The per-page titles (`integrations/layout.tsx:4`, `journals/new/page.tsx:14`) become bare
+    page names.
+- **Copy:**
+  - the sign-in text (`constants.ts:152`);
+  - the "private application" text (`constants.ts:157`) becomes self-hosted-instance wording;
+  - the settings copy (`settings/page.tsx:15`);
+  - "PMS" in `SnipeItSettings.tsx:146`.
+- **Tests (red first):**
+  - Add `APP_TITLE_PATTERN` to `tests/e2e/utils/test-helpers.ts`, and change every
+    `toHaveTitle(/Personal Management System/)` (about 22 sites) to use it.
+  - Update the non-title e2e assertions at `auth/login.spec.ts:29` and `:502` to the new sign-in
+    copy.
+  - Update the unit assertions in `LoginPage.test.tsx` (including `:164`), `jest.setup.ts:165` and
+    `contacts/new/__tests__/page.test.tsx`.
+  - Leave `home-dashboard.spec.ts:64` and `app/__tests__/page.test.tsx:397` unchanged.
+  - Add an RTL assertion that the Snipe-IT settings copy says "Lifecontour".
+- **Verification:**
+  - `pnpm quality:check` and the full Jest suite pass.
+  - The changed e2e specs pass on `firefox` and `Mobile Chrome`.
+  - `rtk proxy git grep -n -e "Personal Management System" -e "Personal CRM" -e "\bPMS\b" -- frontend/src frontend/tests`
+    returns only the two absence tests.
+
+**Phase 2 — Backend, MCP, worker and outbound identity.** PR ~300 lines.
+
+- **Constants:**
+  - Add `PRODUCT_NAME = "Lifecontour"`, `PRODUCT_TAGLINE` and
+    `PRODUCT_URL = "https://github.com/hjed/lifecontour"` in `core_shared`, so the backend and the
+    workers share them. The URL resolves once ITER19-005 renames the repository.
+- **FastAPI and backend:**
+  - the `title` and `description` (`main.py:319-320`);
+  - the startup and shutdown log messages (`main.py:69,280`);
+  - the docstrings at `main.py:2` and `backend/app/__init__.py`.
+- **MCP:**
+  - The server `name` and the `instructions` wording (`mcp/server.py:113-115`) use the constants.
+  - Tool docstrings are unchanged unless they name the product.
+- **OpenAPI:** the "PMS" field text in `snipeit_settings_schemas.py:20,33` becomes "Lifecontour".
+- **OSM User-Agent:**
+  - The default (`config.py:177`) becomes
+    `f"{PRODUCT_NAME} (+{PRODUCT_URL}; outdoor-logbook-pdf)"`.
+  - It has **no version component**. OSM's policy needs an identifying agent with contact
+    information, and this avoids depending on package metadata that is renamed in Phase 3.
+- **Strava GPX:** the `creator` attribute (`integration_workers/strava/gpx_generator.py:60`) uses
+  `PRODUCT_NAME`.
+- **Docs:** update the naming in `backend/README.md`, `backend/INTEGRATION_TESTS.md` and the
+  `core_shared` module docstrings.
+- **Tests (red first):**
+  - backend unit: the OpenAPI schema `info.title` equals `PRODUCT_NAME`;
+  - backend unit: the MCP server's `name` equals `PRODUCT_NAME`;
+  - backend unit: **`Settings()` default** for the tile User-Agent contains `PRODUCT_NAME` and
+    `PRODUCT_URL`. The existing `test_osm_tile_source.py` injects its own agent and does not
+    cover this;
+  - backend unit: the Snipe-IT schema descriptions do not contain "PMS";
+  - Strava worker unit: the generated GPX root's `creator` equals `PRODUCT_NAME`.
+- **Verification:**
+  - The backend, `core_shared` and Strava unit tests, `ruff` and `mypy` pass.
+  - `rtk proxy git grep` for the old names under `backend/app`, `core_shared/` and
+    `integration_workers/` returns only the deferred infrastructure identifiers (log/OTel service
+    names, DB and stream names).
+
+**Phase 3 — Python package metadata and docs.** PR ~300 lines.
+
+- **Packages:**
+  - `backend/pyproject.toml`: name `lifecontour-backend`, and the description and author
+    (`Harry J E Day`) in place of the placeholders.
+  - The same description and author fixes in `core_shared` and the four worker `pyproject.toml`
+    files. The package names are unchanged.
+  - Regenerate `backend/uv.lock`, touching only the project name.
+- **README** (with ITER19-003 Phase 1): the title, the tagline, the `branding/lockup.svg` header,
+  a new licence badge, and "About" copy.
+- **Docs:**
+  - `frontend/README.md`;
+  - `AGENTS.md` project context;
+  - `docs/tasks.md:1` heading;
+  - `docs/architecture.md` heading;
+  - `frontend/.design-sync/conventions.md` (prose only);
+  - `frontend/.env.example:6` (remove the unused `NEXT_PUBLIC_APP_NAME`);
+  - `docker/oauth-ui/views/index.ejs:66`.
+- **Left for ITER19-005 Phase 1:** repository-URL text (`cd personal-management-system` at
+  `README.md:20` and `release.yml:194`, `docs/architecture/frontend-design.md:109`), because it is
+  only correct once the repository is renamed.
+- **Verification:**
+  - The backend Docker image builds; Docker installs from `pyproject`.
+  - `uv lock --check` passes for each project.
+  - The README renders the lockup and badge on GitHub (branch preview).
+
+**Phase 4 — Frontend package rename and design-sync.** PR ~150 lines.
+
+- `frontend/package.json`: name `lifecontour-frontend`, and the description.
+- `frontend/.design-sync/config.json:3-4`: set `"pkg": "lifecontour-frontend"` and
+  `"globalName": "Lifecontour"`.
+- Update the package import in the 47 `previews/*.tsx` files. It is a mechanical one-line change
+  per file; `ds-entry.ts` is updated if it names the package.
+- Run `node .design-sync/prepare.mjs`, format with Prettier, then run `/design-sync` to re-publish
+  and re-grade the previews, following `frontend/.design-sync/NOTES.md`. The edits clear the
+  previews' verification hashes, so the re-sync is part of this phase.
+- **Verification:**
+  - `pnpm install --frozen-lockfile` and `pnpm quality:check` pass.
+  - The design-sync build succeeds, and the re-sync reports every preview verified.
+
+---
+
+### ITER19-005: Repository Rename & Go Public
+
+**Objective:** Move the repository, images and deployment to the new name, configure the public
+repository's protections, and flip visibility.
+
+**Specification Reference:**
+- [Part 6: Go-Public Runbook](../product-specifications/open-source-release-and-branding-product-specification.md#part-6-go-public-runbook)
+- [Part 4 — images follow the repository name](../product-specifications/open-source-release-and-branding-product-specification.md#decision-images-follow-the-repository-name)
+- [Part 1 — AGPL §13 source offer](../product-specifications/open-source-release-and-branding-product-specification.md#target-behaviour)
+
+**Dependencies:**
+
+- Phase 1 needs ITER19-004.
+- Phase 2 needs every other phase merged and ITER19-001's gate passed.
+
+**Deliverable:**
+
+- The repository at `hjed/lifecontour`, with production pulling `ghcr.io/hjed/lifecontour-*`.
+- A "Source code" link in the app.
+- Public visibility, with secret scanning, push protection, a required CLA check, and fork-PR
+  approval on.
+
+**Outcomes the phases must satisfy:**
+- The repository is renamed. Old URLs and remotes redirect. SonarCloud is re-bound, and the badge
+  URLs are updated.
+- A release produces `ghcr.io/hjed/lifecontour-*` images. Production is redeployed from them and
+  verified. The old packages are kept for rollback.
+- The app shows a "Source code" link to the public repository (AGPL §13).
+- The GHCR packages are public, linked to the repository.
+- After the flip: secret scanning and push protection, private vulnerability reporting, and
+  Dependabot alerts are enabled. A ruleset on `main` requires PRs, passing checks, and the CLA
+  check. First-time contributors' workflows need approval.
+- A test PR from a fork gets the CLA bot, runs CI without secrets, and shows the templates.
+
+**Phase Breakdown:**
+
+**Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines.
+
+- **Before merge (manual):**
+  - Rename the repository to `hjed/lifecontour`.
+  - `git remote set-url` in each local checkout and worktree.
+  - Re-bind the SonarCloud project and update its key.
+- **In the PR:**
+  - `SOURCE_CODE_URL` in `frontend/src/lib/constants.ts`, and a "Source code" item in
+    `components/auth/UserMenu.tsx` (an external link, `rel="noopener noreferrer"`).
+  - Update the repository-URL text:
+    - `docs/mcp-setup.md:155`;
+    - `cd personal-management-system` at `README.md:20`, `release.yml:194` and
+      `docs/troubleshooting/docker-development.md`;
+    - `docs/architecture/frontend-design.md:109`.
+  - `sonar-project.properties`: delete it, since it is dead config (Automatic Analysis reads
+    `.sonarcloud.properties`), or update it.
+- **Tests (red first):**
+  - RTL, **new** `components/auth/__tests__/UserMenu.test.tsx` (none exists today): `UserMenu`
+    renders a "Source code" link to `SOURCE_CODE_URL` that opens in a new tab.
+  - e2e, **new** in an app-shell spec: open the user menu and assert the link is visible with the
+    right href, on `firefox` and `Mobile Chrome`. No existing e2e opens the user menu.
+- **After merge (manual):**
+  - Tag a release, and confirm `release.yml` publishes `ghcr.io/hjed/lifecontour-*`.
+  - Update the production deployment's image references and redeploy.
+  - Verify health, login, and an MCP call.
+  - Keep the old packages.
+- **Docs:** `docs/ci-cd-setup.md` gets the new image paths and a note that they follow
+  `github.repository`.
+
+**Phase 2 — Configure the public repository and flip.** PR ~100 lines (docs only).
+
+- **Pre-flip:**
+  - Install CLA Assistant, with `CLA.md` published as its gist. **Allowlist the bots**
+    (`dependabot[bot]` and any other automation) so the required CLA check does not block them.
+  - Require approval for first-time contributors' workflow runs.
+  - Create a ruleset on `main`: PR required, the required status checks, the CLA check, and no
+    force-push.
+  - Make the GHCR packages public and link them to the repository.
+- **Flip:** set the repository visibility to public.
+- **Post-flip:**
+  - Enable secret scanning plus push protection, private vulnerability reporting, and Dependabot
+    alerts.
+  - Triage any secret-scanning alerts from GitHub's full-history scan into the audit doc.
+  - Open a test PR from a fork (a trivial docs change) and confirm the CLA bot, secret-free CI, and
+    templates, then close it.
+  - Confirm the public README renders the lockup, the licence badge, and the LICENSE and
+    TRADEMARKS links.
+- **Docs:** `docs/ci-cd-setup.md` gets a "Public repository settings" section covering each
+  setting above and why, plus the fork-PR and CLA flow. Append the post-flip triage to
+  `docs/security/open-source-release-audit.md`.
+- **Verification:** walk through the spec's Success Criteria 1–6 and record each result in the PR
+  description.
+
+---
+
+## Resolved Decisions
+
+Confirmed with the product owner (2026-09-26, spec planning):
+
+1. **Licence:** AGPL-3.0-**or-later**.
+2. **Contribution agreement:** a **CLA** as a licence grant (not assignment). There are no
+   commercial plans today, but the option stays open.
+3. **Publish strategy:** flip the existing repository. Branches and PR history being public is
+   acceptable; only credentials are in scope.
+4. **Rename depth:** user-facing text, package names and the repository name. Infrastructure is
+   deferred.
+5. **Name:** **Lifecontour**, with the tagline *"Your journal, people and adventures —
+   self-hosted."*
+6. **Icon:** concept **E**, the original with the creek. The contour-ring variant was rejected
+   because it echoes a First Nations art motif.
+7. **Copyright holder:** Harry J E Day.
+8. **GHCR packages:** made **public**, so self-hosters can `docker pull`.
+9. **CONTRIBUTING rules:** issue first, ≤500-line PRs, AI-generated PRs reviewed by the submitter
+   and run through automated review.
+
+Planning decisions made in this document (not requiring product input, recorded for review):
+
+10. **`LICENSE` is verbatim with no preamble**, and lands alone as the single exception to the
+    ≤500-line rule. The copyright line lives in the README and CONTRIBUTING.
+11. **The OSM User-Agent carries no version**; it identifies the product and URL, as OSM's policy
+    requires.
+12. **The frontend package rename is its own phase**, because design-sync keys on the package name
+    and needs a re-sync.
+
+### Remaining design choices (decide during implementation, no product input required)
+
+- The exact CLA wording within the Apache-ICLA-derived licence grant, and whether CLA Assistant
+  stores signatures in its default store or in a repository file.
+- The gitleaks CI mechanism (the official action vs. the pinned CLI), provided it stays behind
+  `needs: changes` and uses the committed config.
+- The exact `core_shared` module for the product constants (e.g. `core_shared/product.py`).
+- Where the user menu places the "Source code" link (item order and icon).
+
+## Sub-Iteration Summary
+
+| Sub-iteration | Deliverable | UI | MCP | Depends on |
+|---|---|---|---|---|
+| ITER19-001: Credential Audit & Guardrails | Audit record, `.gitleaks.toml`, gitleaks pre-commit + CI | — | — | — |
+| ITER19-002: Licensing & Contributions | LICENSE/SPDX, licence audit, TRADEMARKS, CoC, SECURITY, CONTRIBUTING, CLA, templates | — | — | — |
+| ITER19-003: Brand Identity | `branding/` assets + guide, app icons | ✅ | — | — |
+| ITER19-004: Rename to Lifecontour | Name everywhere (UI, API, MCP, workers, packages, design-sync), from one constant per stack | ✅ | ✅ (server name) | Name gate; -003 P1 |
+| ITER19-005: Repository Rename & Go Public | Repo/images/deploy renamed, source link, public with protections | ✅ | — | All |
+
+### Phase Summary
+
+| Sub-iteration | Phases | Est. PRs |
+|---|---|---|
+| ITER19-001: Credential Audit & Guardrails | 3 | 3 |
+| ITER19-002: Licensing & Contributions | 4 | 4 |
+| ITER19-003: Brand Identity | 2 | 2 |
+| ITER19-004: Rename to Lifecontour | 5 (P0 manual) | 4 |
+| ITER19-005: Repository Rename & Go Public | 2 | 2 |
+| **Total** | **16** | **15** |
+
+**Suggested delivery order:**
+
+1. Start ITER19-001 Phase 1 and ITER19-004 Phase 0 immediately; the credential audit and the name
+   gate are the two long-lead items.
+2. Run ITER19-002 and ITER19-003 in parallel.
+3. Then ITER19-004 Phases 1–4.
+4. Then ITER19-005 Phase 1, with the deploy step.
+5. ITER19-005 Phase 2 flips the repository last.
