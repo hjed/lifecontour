@@ -131,6 +131,18 @@ class TestResolveLogOpts:
     def test_unknown_event_fails_safe_to_full_history(self, script: ModuleType) -> None:
         assert _resolve(script, "schedule", {}) == "HEAD"
 
+    @pytest.mark.parametrize("bad", ["--output=/tmp/x", "main", BASE[:39], ""])
+    def test_non_sha_payload_values_never_reach_git_log(
+        self, script: ModuleType, bad: str
+    ) -> None:
+        # --log-opts is parsed by `git log`, so an option-shaped value would be
+        # argument injection; anything but a full SHA scans the full history.
+        pr: dict[str, object] = {
+            "pull_request": {"base": {"sha": bad}, "head": {"sha": HEAD}}
+        }
+        assert _resolve(script, "pull_request", pr) == "HEAD"
+        assert _resolve(script, "push", {"before": BEFORE, "after": bad}) == "HEAD"
+
 
 @pytest.mark.unit
 class TestBuildCommand:

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -32,6 +33,10 @@ from pathlib import Path
 from typing import Any
 
 ZERO_SHA = "0" * 40
+# SHA-1 or SHA-256 object names. Anything else from the event payload is
+# dropped: --log-opts is parsed by `git log`, so an option-shaped value would
+# be argument injection.
+_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 FULL_HISTORY = "HEAD"
 
 # Runs an argv and returns its exit code; injected by the tests.
@@ -54,14 +59,20 @@ class ScanTarget:
     after: str | None = None
 
 
+def _sha(value: object) -> str | None:
+    if isinstance(value, str) and _SHA.fullmatch(value):
+        return value
+    return None
+
+
 def target_from_event(event_name: str, payload: Mapping[str, Any]) -> ScanTarget:
     pull_request = payload.get("pull_request") or {}
     return ScanTarget(
         event_name=event_name,
-        base=(pull_request.get("base") or {}).get("sha"),
-        head=(pull_request.get("head") or {}).get("sha"),
-        before=payload.get("before"),
-        after=payload.get("after"),
+        base=_sha((pull_request.get("base") or {}).get("sha")),
+        head=_sha((pull_request.get("head") or {}).get("sha")),
+        before=_sha(payload.get("before")),
+        after=_sha(payload.get("after")),
     )
 
 
