@@ -1617,7 +1617,7 @@ gear, recent totals, templates done) slot in alongside it (ITER16-003).
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and frontend principles
-- [AI Guidelines](../ai-guidelines.md) - Frontend development standards and guidelines
+- [AI Guidelines](../../AGENTS.md) - Frontend development standards and guidelines
 - [Technology Stack](./technology-stack.md) - Frontend technology choices and frameworks
 - [Domain Architecture](./domain-architecture.md) - Domain patterns for frontend integration
 - [API Design](./api-design.md) - API integration patterns for frontend

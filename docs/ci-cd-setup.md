@@ -161,12 +161,14 @@ credential audit, including how to re-run it, is recorded in
 
 ### Issue Templates
 - Bug report template with environment details
-- Feature request template with acceptance criteria
+- Feature proposal template: the "discuss first" issue that precedes a pull request
+  ([CONTRIBUTING](../CONTRIBUTING.md))
+- `config.yml` disables blank issues and sends security reports to `SECURITY.md`
 
 ### Pull Request Template
-- Comprehensive checklist for code quality
-- Testing requirements
-- Documentation updates
+- Linked issue, diff size (≤500 lines) and tests run
+- AI-assistance disclosure and CLA acknowledgement
+- Maintainer check that `secret-scan` passed on the head ([Stacked PRs](#stacked-prs))
 
 ## Setup Instructions
 

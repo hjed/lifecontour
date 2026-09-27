@@ -469,7 +469,16 @@ blocks ITER19-005 Phase 2.
   - `pnpm list --prod --depth Infinity --json`, de-duplicated, for the frontend.
   - Record the commands and counts in the audit doc.
 
-**Phase 4 — CONTRIBUTING, CLA, templates.** PR ~350 lines.
+**Phase 4 — CONTRIBUTING, CLA, templates.** PR ~350 lines. ✅ DONE — added `CONTRIBUTING.md` and
+`CLA.md` (Apache ICLA v2.2 adapted: a licence grant to the maintainer with the right to relicense
+under any terms, a patent grant, AI-assisted-contribution representations and a plain-English
+summary). The PR template now asks for the linked issue, diff size, tests run, AI disclosure, CLA
+acknowledgement and the maintainer's `secret-scan` check. `feature_request.md` is the
+"Feature Proposal" (discuss first), `bug_report.md` warns against public vulnerability reports,
+and `ISSUE_TEMPLATE/config.yml` disables blank issues and links the security policy. Every
+current doc's dangling `docs/ai-guidelines.md` link now points at `AGENTS.md`, not only the two
+named here; historical `docs/tasks/` keep theirs. CLA Assistant is the hosted app with its default
+signature store (see Remaining design choices).
 
 - **`CONTRIBUTING.md`:**
   - the copyright notice, and that contributions are licensed under AGPL-3.0-or-later plus the
@@ -786,7 +795,9 @@ repository's protections, and flip visibility.
     - `docs/mcp-setup.md:155`;
     - `cd personal-management-system` at `README.md:20`, `release.yml:194` and
       `docs/troubleshooting/docker-development.md`;
-    - `docs/architecture/frontend-design.md:109`.
+    - `docs/architecture/frontend-design.md:109`;
+    - the security-policy URL in `.github/ISSUE_TEMPLATE/config.yml` (GitHub redirects the old
+      one, but it should name the new repository).
   - `sonar-project.properties`: delete it, since it is dead config (Automatic Analysis reads
     `.sonarcloud.properties`), or update it.
 - **Tests (red first):**
@@ -872,8 +883,12 @@ Planning decisions made in this document (not requiring product input, recorded 
 
 ### Remaining design choices (decide during implementation, no product input required)
 
-- The exact CLA wording within the Apache-ICLA-derived licence grant, and whether CLA Assistant
-  stores signatures in its default store or in a repository file.
+- ~~The exact CLA wording within the Apache-ICLA-derived licence grant, and whether CLA Assistant
+  stores signatures in its default store or in a repository file.~~ **Decided in ITER19-002
+  Phase 4:** `CLA.md` v1.0, and the **hosted CLA Assistant** (cla-assistant.io) with its default
+  store. CLA Assistant Lite (the GitHub Action) was rejected. It needs no PAT for same-repository
+  storage, but its repository is archived and unmaintained, it commits signatures to a branch that
+  must stay unprotected, and it adds a privileged `pull_request_target` workflow.
 - The gitleaks CI mechanism (the official action vs. the pinned CLI), provided it stays behind
   `needs: changes` and uses the committed config.
 - The exact `core_shared` module for the product constants (e.g. `core_shared/product.py`).

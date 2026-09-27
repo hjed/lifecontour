@@ -6,6 +6,12 @@ labels: 'bug'
 assignees: ''
 ---
 
+<!--
+Do not report security vulnerabilities here. Report them privately as described in SECURITY.md.
+If you plan to fix the bug yourself, say so below and wait for the maintainer to acknowledge the
+issue before opening a pull request (see CONTRIBUTING.md).
+-->
+
 ## Bug Description
 
 A clear and concise description of what the bug is.
@@ -63,3 +69,5 @@ If you have ideas on how to fix this bug, please describe them here.
 - [ ] I have provided all the requested information
 - [ ] I have tested this on the latest version
 - [ ] I have included error logs (if applicable)
+- [ ] This is not a security vulnerability
+- [ ] I would like to fix this myself

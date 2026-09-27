@@ -8,7 +8,7 @@ All linting and code quality tools in this project run the **same standardized c
 
 - ✅ CI Pipeline (`.github/workflows/ci.yml`)
 - ✅ Local Development Script (`./scripts/dev.sh lint`)
-- ✅ AI Guidelines (`docs/ai-guidelines.md`)
+- ✅ AI Guidelines (`AGENTS.md`)
 - ✅ Pre-commit Hooks (`.pre-commit-config.yaml`), including gitleaks secret scanning
 
 ## Virtual Environment Standardization

@@ -1,0 +1,6 @@
+# Issue chooser: every issue starts from a template (see CONTRIBUTING.md, "Discuss first").
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/hjed/personal-management-system/security/policy
+    about: Never open a public issue for a vulnerability. Report it privately as described in SECURITY.md.

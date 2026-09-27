@@ -1205,7 +1205,7 @@ that predates #1524 and is tracked separately.
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and API principles
-- [AI Guidelines](../ai-guidelines.md) - API development standards and guidelines
+- [AI Guidelines](../../AGENTS.md) - API development standards and guidelines
 - [Technology Stack](./technology-stack.md) - API technology choices and frameworks
 - [Domain Architecture](./domain-architecture.md) - Domain layer patterns and business logic
 - [Testing Strategy](./testing-strategy.md) - API testing patterns and validation

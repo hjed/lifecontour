@@ -145,7 +145,6 @@ personal-management-system/
 |── docs/                         # All documentation
 |   ├── architecture/             # Architecture documentation
 |   ├── examples/                 # Code examples and patterns
-|   ├── ai-guidelines.md          # AI assistant guidelines
 |   ├── tasks.md                  # Task tracking and agile development
 |   └── ...                       # Other documentation
 ```

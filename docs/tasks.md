@@ -21,7 +21,7 @@ A comprehensive personal management system with Python FastAPI backend, Next.js 
 
 The [architecture document](./architecture.md) provides a high-level overview of the system architecture and navigation.
 
-The [AI guidelines](./ai-guidelines.md) provide essential information for AI assistants working on the project. The AI Guidelines MUST be followed at all times. NO EXCEPTIONS.
+The [AI guidelines](../AGENTS.md) provide essential information for AI assistants working on the project. The AI Guidelines MUST be followed at all times. NO EXCEPTIONS.
 
 Integrations MUST follow the integration architecture specified in the [integration architecture document](./architecture/integration-architecture.md). Including using the event based architecture.
 

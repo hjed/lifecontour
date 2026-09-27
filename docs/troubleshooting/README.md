@@ -90,6 +90,6 @@ Follow the existing format in these guides for consistency.
 ## 📚 Related Documentation
 
 - [Architecture Overview](../architecture.md) - System design and patterns
-- [AI Guidelines](../ai-guidelines.md) - Development guidelines
+- [AI Guidelines](../../AGENTS.md) - Development guidelines
 - [Code Quality Standards](../code-quality-standards.md) - Development standards
 - [CI/CD Setup](../ci-cd-setup.md) - Continuous integration configuration

@@ -661,7 +661,7 @@ def test_get_primary_email():
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and testing principles
-- [AI Guidelines](../ai-guidelines.md) - Test-first development workflow and quality standards
+- [AI Guidelines](../../AGENTS.md) - Test-first development workflow and quality standards
 - [Technology Stack](./technology-stack.md) - Testing technology choices and high-level strategy
 - [Domain Architecture](./domain-architecture.md) - Domain patterns and validation strategies
 - [API Design](./api-design.md) - API testing patterns and validation
