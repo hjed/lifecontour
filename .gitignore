@@ -102,6 +102,7 @@ docker-compose.override.yml
 # Temporary files
 *.tmp
 *.temp
+/.tmp*
 .cache/
 
 .serena/

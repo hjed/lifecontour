@@ -1,0 +1,71 @@
+# gitleaks configuration: the default ruleset plus a narrow allowlist of
+# the dev/test placeholders and false positives found by the pre-release
+# credential audit. See docs/security/open-source-release-audit.md for the
+# triage behind every entry.
+#
+# Requires gitleaks >= 8.25 (top-level [[allowlists]] with `condition`).
+#
+# Rules for adding an entry:
+# - Never allowlist a real credential. Rotate it at the provider, then add
+#   its fingerprint to .gitleaksignore.
+# - Pair a path with a value regex (condition = "AND") so a real-looking key
+#   added to the same file is still caught. Value-only entries are reserved
+#   for shapes that can never be a secret.
+# - `regexes` match the extracted secret, not the whole line.
+# - Always set `targetRules`. In gitleaks 8.30 a *global* allowlist's
+#   `paths` skip the whole file whatever `condition` says, so a path-scoped
+#   global entry would hide every rule's findings there, real keys included.
+#   A rule-targeted allowlist honours `condition = "AND"`.
+
+title = "Lifecontour gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Committed env files: dev/test/example placeholder values"
+condition = "AND"
+paths = ['''(^|/)\.env(\.[a-z]+)?(\.example)?$''']
+regexes = [
+  '''^(dev|test|your)[-_][A-Za-z0-9_-]*$''',
+  '''^[A-Za-z0-9_-]*change[-_]in[-_]production$''',
+]
+
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Test suites: fixture keys and placeholder API keys that only tests use"
+condition = "AND"
+paths = ['''(^|/)tests/''']
+regexes = [
+  # Fernet/base64 encryption keys generated for test fixtures.
+  # KzC1vY… is also the docker-compose.yml dev ENCRYPTION_KEY default;
+  # production sets its own key (see the audit doc's Resolved items).
+  '''^dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ9$''',
+  '''^uO6F-e9F_m65sS8Yh1c4G6fM2D_jO4rV3U-f1Y-tLnM=$''',
+  '''^KzC1vYhL3bQpT_x5Ue8q0Wl1MvX-oVwYwK9cQx7lKHg=$''',
+  '''^EM2rovSCk4Z2FjGzeugSOM8YVNEc4IiOoRxNrhLiDCo=$''',
+  # base64("foobar-secret-token-0123456789abc").
+  '''^Zm9vYmFyLXNlY3JldC10b2tlbi0wMTIzNDU2Nzg5YWJj$''',
+  # Mock Immich shared-link key.
+  '''^xYz789AbCdEfGhIjKlMnOpQrStUvWx$''',
+  '''^test[-_][A-Za-z0-9_-]*$''',
+]
+
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Vendored Playwright skill docs: example key and Google's public reCAPTCHA test keys"
+condition = "AND"
+paths = ['''(^|/)\.(agents|claude)/skills/playwright-skill/''']
+regexes = [
+  '''^test-key-abc123$''',
+  '''^6LeIxAcTAAAAA(JcZVRqyHh71UMIEGNQ_MXjiZKhI|GG-vFI1TnRWxMZNFuojJ4WifJWe)$''',
+]
+
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Never secrets: IANA timezone names and e2e tag names in CI logs"
+regexes = [
+  '''^(Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)/[A-Z][A-Za-z_]+$''',
+  '''^Nav(Parent|Child)-\d{13}-\d{1,4}$''',
+]

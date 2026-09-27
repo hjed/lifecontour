@@ -76,6 +76,12 @@ job. This is deliberate to save Actions budget — do not remove it.
 - `codeql-analysis`: GitHub's CodeQL analysis
 - `docker-security`: Trivy vulnerability scanning
 
+Secret scanning (gitleaks in pre-commit and a `secret-scan` CI job, added in ITER19-001 Phase 2)
+uses the committed `.gitleaks.toml` (allowlist) and `.gitleaksignore` (fingerprints of rotated
+credentials). The pre-release credential audit,
+including how to re-run it, is recorded in
+[Open-Source Release Credential Audit](./security/open-source-release-audit.md).
+
 ### 4. Dependency Updates (`.github/workflows/dependency-update.yml`)
 
 **Triggers:** Weekly schedule (Mondays) + manual dispatch
