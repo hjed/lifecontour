@@ -38,6 +38,7 @@ from .test_checkin_sync_integration import (
     _sync_statuses,
     _usage_of_the_same_gear,
 )
+from .test_gear_usage_pairs_integration import _remove_gear_item, _trip
 
 # Stored instants of a trip that is 8-9 March 2025 in Sydney (AEDT).
 _PAST_START = "2025-03-07T13:00:00+00:00"
@@ -356,14 +357,8 @@ class TestFetchUnsyncedGearUsage:
         )
 
         assert [
-            (u.journal_id, u.asset_id, u.listed)
-            for u in await self._fetch(async_connection)
-        ] == [
-            (failed, 41, True),
-            (abandoned, 42, True),
-            (superseded, 43, True),
-            (overdue, 44, True),
-        ]
+            (u.journal_id, u.asset_id) for u in await self._fetch(async_connection)
+        ] == [(failed, 41), (abandoned, 42), (superseded, 43), (overdue, 44)]
 
     @pytest.mark.asyncio
     async def test_leaves_out_what_a_sweep_cannot_or_need_not_fix(
@@ -412,10 +407,11 @@ class TestFetchUnsyncedGearUsage:
         assert await self._fetch(async_connection) == []
 
     @pytest.mark.asyncio
-    async def test_flags_a_pair_whose_item_the_journal_no_longer_lists(
+    async def test_selects_a_pair_whose_item_the_journal_no_longer_lists(
         self, async_connection: AsyncConnection
     ) -> None:
-        """Only a reconcile of the whole journal releases such a pair."""
+        """A failed attempt may still have checked the asset out; only a
+        reconcile of the pair returns it."""
         journal_id = await _usage(async_connection, "41")
         await _checkout_row(
             async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
@@ -426,9 +422,8 @@ class TestFetchUnsyncedGearUsage:
         )
 
         assert [
-            (u.journal_id, u.asset_id, u.listed)
-            for u in await self._fetch(async_connection)
-        ] == [(journal_id, 41, False)]
+            (u.journal_id, u.asset_id) for u in await self._fetch(async_connection)
+        ] == [(journal_id, 41)]
 
     @pytest.mark.asyncio
     async def test_orders_each_assets_pairs_oldest_first(
@@ -526,3 +521,43 @@ class TestSweepRecoversLostPushes:
                 "snipeit_checkout": "success",
                 "snipeit_checkin": "success",
             }
+
+
+class TestReconcilingOneRemovedPair:
+    @pytest.mark.asyncio
+    async def test_releases_that_pair_and_leaves_the_journals_other_items_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The sweep reconciles pair by pair, so releasing a removed item must
+        not push the journal's other items as well."""
+        journal_id, gear = await _trip(async_connection, past=True, assets=("41", "42"))
+        await _remove_gear_item(async_connection, journal_id, gear["41"])
+        await _checkout_row(
+            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+        )
+        # The failed attempt never reached Snipe-IT: the asset is not out.
+        mock_transport.add_response(
+            "/hardware/41",
+            json_data={"id": 41, "asset_tag": "T-41", "assigned_to": None},
+            method="GET",
+        )
+
+        await snipeit_sync_service.reconcile_gear_usage(
+            journal_id=journal_id,
+            session_factory=lambda: _session_factory(async_connection),
+            asset_id=41,
+        )
+
+        assert [r.url.path for r in mock_transport.requests] == ["/api/v1/hardware/41"]
+        remaining = await async_connection.execute(
+            text("""
+                SELECT external_id FROM sync_metadata
+                WHERE internal_uuid = :journal_id
+                  AND integration_source IN ('snipeit_checkout', 'snipeit_checkin')
+            """),
+            {"journal_id": str(journal_id)},
+        )
+        assert remaining.fetchall() == []

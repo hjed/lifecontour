@@ -390,7 +390,6 @@ class TestSeveralGearItems:
                 journal_id=journal_id,
                 asset_id=asset_id,
                 checkout_at=datetime.fromisoformat(_PAST_START),
-                listed=True,
             )
             for asset_id in (41, 42)
         ]

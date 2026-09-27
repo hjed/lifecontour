@@ -344,7 +344,7 @@ async def test_sync_snipeit_maintenance_batch(mock_ctx):
         )
 
 
-def _unsynced(journal_id: int, asset_id: int, *, listed: bool = True) -> Any:
+def _unsynced(journal_id: int, asset_id: int) -> Any:
     from datetime import UTC, datetime
 
     from snipeit_sync_service import UnsyncedGearUsage
@@ -353,7 +353,6 @@ def _unsynced(journal_id: int, asset_id: int, *, listed: bool = True) -> Any:
         journal_id=journal_id,
         asset_id=asset_id,
         checkout_at=datetime(2025, 3, 8, tzinfo=UTC),
-        listed=listed,
     )
 
 
@@ -405,16 +404,15 @@ def _reconciled(reconcile: AsyncMock) -> list[tuple[int, int | None]]:
 
 
 @pytest.mark.asyncio
-async def test_sweep_reconciles_each_unsynced_pair(mock_ctx: dict[str, Any]) -> None:
-    """A listed pair is reconciled alone; a pair the journal dropped is released
-    by reconciling the whole journal, the only path that releases it."""
+async def test_sweep_reconciles_each_unsynced_pair_on_its_own(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """Pair by pair, so one pair never pushes the rest of its journal."""
     reconcile = AsyncMock()
 
-    result = await _sweep(
-        mock_ctx, [_unsynced(100, 41), _unsynced(101, 42, listed=False)], reconcile
-    )
+    result = await _sweep(mock_ctx, [_unsynced(100, 41), _unsynced(101, 42)], reconcile)
 
-    assert _reconciled(reconcile) == [(100, 41), (101, None)]
+    assert _reconciled(reconcile) == [(100, 41), (101, 42)]
     assert result == {"accounts_found": 1, "reconciled": 2}
 
 
@@ -454,7 +452,7 @@ async def test_sweep_stops_a_user_that_is_still_rate_limited(
 
 
 @pytest.mark.asyncio
-async def test_sweep_handles_a_bounded_number_of_pairs_per_run(
+async def test_sweep_attempts_a_bounded_number_of_pairs_per_run(
     mock_ctx: dict[str, Any],
 ) -> None:
     """A run must finish inside arq's job timeout; oldest first, so the next run
@@ -467,6 +465,26 @@ async def test_sweep_handles_a_bounded_number_of_pairs_per_run(
     await _sweep(mock_ctx, unsynced, reconcile)
 
     assert _reconciled(reconcile) == [(100 + i, i) for i in range(SWEEP_MAX_PAIRS)]
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_asset_does_not_use_up_the_run(
+    mock_ctx: dict[str, Any],
+) -> None:
+    """Pairs skipped after their asset failed are not attempts: an asset with
+    more unfinished pairs than the cap still leaves the run to the others."""
+    from worker import SWEEP_MAX_PAIRS
+
+    async def reconcile(**kwargs: Any) -> None:
+        if kwargs["asset_id"] == 1:
+            raise SnipeItAPIError("Asset not available", status_code=200)
+
+    mock = AsyncMock(side_effect=reconcile)
+    stuck = [_unsynced(100 + i, 1) for i in range(SWEEP_MAX_PAIRS + 5)]
+
+    await _sweep(mock_ctx, [*stuck, _unsynced(999, 2)], mock)
+
+    assert _reconciled(mock) == [(100, 1), (999, 2)]
 
 
 @pytest.mark.asyncio

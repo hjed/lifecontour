@@ -3502,7 +3502,8 @@ class SnipeItSyncService:
         asset) pair (see :meth:`_reconcile_pair`). A pair recorded for a gear
         item the journal no longer lists — removed, or the whole GEAR_USAGE type
         dropped — is released (see :meth:`_release_removed_pair`). ``asset_id``
-        limits this to that one pair and releases nothing.
+        limits this to that one pair, whether it is reconciled or released, and
+        touches no other.
         """
         data = await self._fetch_journal_and_gear_usages(journal_id, session_factory)
         if not data:
@@ -3511,15 +3512,16 @@ class SnipeItSyncService:
         recorded = await self._recorded_checkouts(journal_id, session_factory)
 
         # Removed items first: an asset leaves before its replacement is taken.
-        if asset_id is None:
-            listed = {usage.asset_id for usage in usages}
-            for recorded_asset_id, checkout_row in recorded.items():
-                if recorded_asset_id not in listed:
-                    await self._release_removed_pair(
-                        GearUsagePair(journal_id, recorded_asset_id),
-                        checkout_row,
-                        session_factory,
-                    )
+        listed = {usage.asset_id for usage in usages}
+        for recorded_asset_id, checkout_row in recorded.items():
+            if asset_id is not None and recorded_asset_id != asset_id:
+                continue
+            if recorded_asset_id not in listed:
+                await self._release_removed_pair(
+                    GearUsagePair(journal_id, recorded_asset_id),
+                    checkout_row,
+                    session_factory,
+                )
 
         for usage in usages:
             if usage.asset_id is None:
@@ -3953,15 +3955,13 @@ class AssetUsageDates:
 class UnsyncedGearUsage:
     """A (journal, asset) pair whose Snipe-IT checkout or check-in is unfinished.
 
-    ``listed`` is whether the journal still lists the asset's gear item. A pair
-    it no longer lists is released by reconciling the whole journal; a listed
-    one by reconciling just this pair.
+    It may be for a gear item the journal no longer lists; reconciling the pair
+    releases it then.
     """
 
     journal_id: int
     asset_id: int
     checkout_at: datetime
-    listed: bool
 
     @property
     def pair(self) -> GearUsagePair:
@@ -3994,7 +3994,6 @@ async def fetch_unsynced_gear_usage(
             text(f"""
                 SELECT j.id AS journal_id,
                        co.external_id AS checkout_external_id,
-                       u.gear_item_id IS NOT NULL AS listed,
                        COALESCE(u.checkout_date, j.event_date_range_start)
                            AS checkout_date
                 FROM sync_metadata co
@@ -4044,7 +4043,6 @@ async def fetch_unsynced_gear_usage(
                 journal_id=row.journal_id,
                 asset_id=asset_id,
                 checkout_at=row.checkout_date,
-                listed=row.listed,
             )
         )
     unsynced.sort(

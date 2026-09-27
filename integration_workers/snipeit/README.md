@@ -103,10 +103,12 @@ their Snipe-IT traffic does not compete for the rate limit:
   is pending past the five-minute in-flight lock, or succeeded with no check-in
   once the usage period has ended (or the journal no longer lists the item).
   Only pairs a push was attempted for are selected, so old journals are not
-  backfilled. Each pair is reconciled, oldest first per asset; after a failure
-  the asset's later pairs wait for the next run (they would fail "not
-  available"), a user still rate limited is left for the next run, and at most
-  `SWEEP_MAX_PAIRS` (40) pairs per user are handled per run.
+  backfilled. Each pair is reconciled on its own (`reconcile_gear_usage` with
+  `asset_id`, which releases the pair when the journal no longer lists its
+  item), oldest first per asset. After a failure the asset's later pairs wait
+  for the next run (they would fail "not available") without counting towards
+  the run's `SWEEP_MAX_PAIRS` (40) attempts per user, and a user still rate
+  limited is left for the next run.
 
 ### Rate Limiting
 

@@ -503,7 +503,7 @@ async def sync_snipeit_maintenance_batch(
     )
 
 
-# The most (journal, asset) pairs one sweep run reconciles per user. Each costs
+# The most (journal, asset) pairs one sweep run attempts per user. Each costs
 # up to about 8 Snipe-IT calls, so at 120 calls a minute 40 pairs take under
 # three minutes, inside arq's 300s job timeout. The pairs come oldest first, so
 # the next run carries on where this one stopped.
@@ -566,7 +566,7 @@ async def periodic_checkin_all_snipeit_accounts(
         )
         try:
             reconciled += await _sweep_user(
-                sync_service, unsynced[:SWEEP_MAX_PAIRS], session_factory, user_id
+                sync_service, unsynced, session_factory, user_id
             )
         finally:
             await sync_service._api_client.close()
@@ -582,20 +582,26 @@ async def periodic_checkin_all_snipeit_accounts(
 async def _sweep_user(
     sync_service: Any, unsynced: list[Any], session_factory: Any, user_id: str
 ) -> int:
-    """Reconcile one user's unsynced pairs in order; return how many succeeded."""
+    """Reconcile one user's unsynced pairs in order; return how many succeeded.
+
+    At most ``SWEEP_MAX_PAIRS`` are attempted. A pair skipped because its asset
+    already failed this run is not an attempt, so an asset stuck with many
+    unfinished pairs costs one attempt and leaves the run to the others.
+    """
     failed_assets: set[int] = set()
+    attempted = 0
     reconciled = 0
     for usage in unsynced:
+        if attempted == SWEEP_MAX_PAIRS:
+            break
         if usage.asset_id in failed_assets:
             continue
-        # A pair the journal no longer lists is only released by reconciling
-        # the whole journal.
-        only_this_pair = {"asset_id": usage.asset_id} if usage.listed else {}
+        attempted += 1
         try:
             await sync_service.reconcile_gear_usage(
                 journal_id=usage.journal_id,
                 session_factory=session_factory,
-                **only_this_pair,
+                asset_id=usage.asset_id,
             )
         except SnipeItRateLimitError:
             logger.warning(
