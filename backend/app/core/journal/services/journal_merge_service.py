@@ -1,5 +1,7 @@
 """Service for merging journals."""
 
+import dataclasses
+from datetime import datetime
 from typing import Any
 
 import structlog
@@ -7,15 +9,22 @@ from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
     FitnessMergeMode,
+    GearUsageItem,
     Journal,
     JournalNotFoundError,
 )
-from core_shared.models.journals.exceptions import JournalMergeConflictError
+from core_shared.models.journals.exceptions import (
+    GearUsageDataValidationError,
+    JournalMergeConflictError,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
+)
+from app.core.journal.adapters.sql.gear_usage_data_repository import (
+    SqlGearUsageDataRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import _JOURNAL_TYPE_TABLE_MAP
 from app.core.journal.models.events import (
@@ -34,6 +43,7 @@ from app.infrastructure.unit_of_work import transactional
 logger = structlog.get_logger(__name__)
 
 FITNESS_TABLE = "journal_fitness_data"
+GEAR_USAGE_TABLE = "journal_gear_usage_data"
 
 STRAVA_SOURCE = "strava"
 STRAVA_ACTIVITY_ENTITY_TYPE = "activity"
@@ -73,6 +83,37 @@ def _record_date_move(
         format_event_date_range(was),
         format_event_date_range(moved_to),
     )
+
+
+def _merged_gear_usage_item(
+    target: GearUsageItem, source: GearUsageItem, *, source_wins: bool
+) -> GearUsageItem:
+    """One gear item both merged journals list, its dates merged field by field."""
+
+    def pick(
+        target_value: datetime | None, source_value: datetime | None
+    ) -> datetime | None:
+        if source_value is not None and (target_value is None or source_wins):
+            return source_value
+        return target_value
+
+    try:
+        return dataclasses.replace(
+            target,
+            checkout_date=pick(target.checkout_date, source.checkout_date),
+            checkin_date=pick(target.checkin_date, source.checkin_date),
+        )
+    except GearUsageDataValidationError:
+        # The stitched window ends before it starts: keep the survivor's own.
+        return (
+            dataclasses.replace(
+                target,
+                checkout_date=source.checkout_date,
+                checkin_date=source.checkin_date,
+            )
+            if source_wins
+            else target
+        )
 
 
 class JournalMergeService:
@@ -241,6 +282,7 @@ class JournalMergeService:
         await self._repoint_integration_links(
             target_id, source_id, fitness_merge_mode, transaction
         )
+        await self._repoint_gear_usage_pairs(target_id, source_id, transaction)
 
         # 8. Type Data Scalable merge
         await self._merge_type_data(
@@ -651,6 +693,8 @@ class JournalMergeService:
             target_row = target_row_res.fetchone()
 
             if not target_row:
+                # A moved GEAR_USAGE entry takes its items along: their
+                # journal_id cascades on update.
                 await self._transfer_new_type_data(
                     table_name,
                     target_id,
@@ -659,6 +703,14 @@ class JournalMergeService:
                     overrides,
                     changed_fields,
                     transaction,
+                )
+            elif table_name == GEAR_USAGE_TABLE:
+                await self._merge_gear_usage_items(
+                    target_id,
+                    source_id,
+                    source_wins=default_survivor is source,
+                    changed_fields=changed_fields,
+                    transaction=transaction,
                 )
             else:
                 await self._merge_existing_type_data(
@@ -674,6 +726,82 @@ class JournalMergeService:
                     fitness_merge_mode,
                     transaction,
                 )
+
+    @staticmethod
+    async def _repoint_gear_usage_pairs(
+        target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Move the source's Snipe-IT checkout/check-in pairs onto the target.
+
+        A pair is keyed ``{source}:{asset}:{journal}`` with the journal as its
+        ``internal_uuid``, so the canonical link move does not touch it. Left on
+        the deleted source, a pair still checked out would be checked in by the
+        deletion while the merged journal still lists the gear. A pair the
+        target already has for that asset stays with the source: the target's
+        own is the one that stands, and the source's check-in stays with it.
+        """
+        # The pair's asset is the middle of its ``{source}:{asset}:{journal}``
+        # key; a check-in moves only with its checkout, never without it.
+        await transaction.execute(
+            text(
+                """
+                UPDATE sync_metadata s
+                SET internal_uuid = :target_uuid,
+                    external_id = regexp_replace(
+                        s.external_id, ':' || :source_uuid || '$', ':' || :target_uuid
+                    ),
+                    updated_at = now()
+                WHERE s.integration_source IN ('snipeit_checkout', 'snipeit_checkin')
+                  AND s.internal_uuid = :source_uuid
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sync_metadata t
+                      WHERE t.integration_source = 'snipeit_checkout'
+                        AND t.external_id = 'snipeit_checkout:'
+                            || split_part(s.external_id, ':', 2)
+                            || ':' || :target_uuid
+                  )
+                """
+            ),
+            {"source_uuid": str(source_id), "target_uuid": str(target_id)},
+        )
+
+    @staticmethod
+    async def _merge_gear_usage_items(
+        target_id: int,
+        source_id: int,
+        *,
+        source_wins: bool,
+        changed_fields: dict[str, Any],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Keep every gear item either journal recorded on the target.
+
+        The source's other items follow the target's, in their order. A gear
+        item both list has each date merged as every merged field is: the
+        source's is taken when the target has none, or when the source is the
+        survivor — a missing date never erases the other side's. Should that
+        stitch a window ending before it starts, the survivor's own is kept.
+        """
+        repo = SqlGearUsageDataRepository(transaction)
+        target = await repo.find_by_journal_id(target_id)
+        source = await repo.find_by_journal_id(source_id)
+        if target is None or source is None:
+            return
+        merged = target
+        for item in source.items:
+            existing = merged.item(item.gear_item_id)
+            if existing is None:
+                merged = merged.with_item(
+                    dataclasses.replace(item, created_at=None, updated_at=None)
+                )
+                continue
+            merged = merged.with_item(
+                _merged_gear_usage_item(existing, item, source_wins=source_wins)
+            )
+        if merged.items != target.items:
+            await repo.save(merged)
+            changed_fields[f"{GEAR_USAGE_TABLE}_updated"] = True
+        await repo.delete(source_id)
 
     @staticmethod
     def _combine_fitness_metrics(target_dict: Any, source_dict: Any) -> dict[str, Any]:

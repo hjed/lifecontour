@@ -142,7 +142,7 @@ async def test_checked_out_gear_excludes_future_and_returned_checkouts(
         start=now - timedelta(days=1),
         end=now + timedelta(days=1),
     )
-    await seeder.insert_snipeit_checkin(returned_id)
+    await seeder.insert_snipeit_checkin(returned_id, helmet)
 
     response = await authenticated_client.get(URL)
 

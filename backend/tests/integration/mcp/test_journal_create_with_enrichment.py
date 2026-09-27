@@ -9,6 +9,7 @@ Reproduces production bugs where:
 - Parent_id was not reflected when the transaction rolled back
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -770,6 +771,83 @@ class TestCreateJournalServicifiedParity:
 
             assert "error" not in payload, f"Unexpected error: {payload}"
             assert "gear_usage" in payload["types"]
+
+    @pytest.mark.asyncio
+    async def test_a_journal_lists_several_gear_items(
+        self,
+        authenticated_lifespan_client: Callable[[], Any],
+        _create_journal_via_mcp: Callable[..., Awaitable[dict[str, Any]]],
+        _update_journal_via_mcp: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> None:
+        """Create, read and replace the gear items used on one journal."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            rope = await self._create_gear_item(authenticated_client)
+            harness = await self._create_gear_item(authenticated_client)
+            helmet = await self._create_gear_item(authenticated_client)
+
+            created = await _create_journal_via_mcp(
+                authenticated_client,
+                {
+                    "title": "Canyon trip",
+                    "content": "Gear for the weekend.",
+                    "event_date_range": {"start": "2025-04-09", "end": "2025-04-10"},
+                    "types": ["GEAR_USAGE"],
+                    "type_data": {
+                        "GEAR_USAGE": {
+                            "items": [
+                                {"gear_item_id": rope},
+                                {
+                                    "gear_item_id": harness,
+                                    "checkout_date": "2025-04-08T20:00:00+00:00",
+                                },
+                            ]
+                        }
+                    },
+                },
+            )
+            assert "error" not in created, f"Unexpected error: {created}"
+            journal_id = created["id"]
+
+            fetched = await call_mcp_tool(
+                authenticated_client, "get_journal", {"journal_id": journal_id}
+            )
+            items = fetched["type_data"]["gear_usage"]["items"]
+            assert [
+                (item["gear_item_id"], item["checkout_date"]) for item in items
+            ] == [(rope, None), (harness, "2025-04-08T20:00:00+00:00")]
+
+            updated = await _update_journal_via_mcp(
+                authenticated_client,
+                journal_id,
+                {
+                    "type_data": {
+                        "GEAR_USAGE": {
+                            "items": [{"gear_item_id": rope}, {"gear_item_id": helmet}]
+                        }
+                    }
+                },
+            )
+            assert "error" not in updated, f"Unexpected error: {updated}"
+
+            fetched = await call_mcp_tool(
+                authenticated_client, "get_journal", {"journal_id": journal_id}
+            )
+            items = fetched["type_data"]["gear_usage"]["items"]
+            assert [item["gear_item_id"] for item in items] == [rope, helmet]
+
+    @pytest.mark.asyncio
+    async def test_list_journal_types_describes_the_gear_items(
+        self, authenticated_lifespan_client: Callable[[], Any]
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            payload = await call_mcp_tool(
+                authenticated_client, "list_journal_types", {}, request_id=2
+            )
+
+        gear_usage = next(
+            t for t in payload["journal_types"] if t["name"] == "GEAR_USAGE"
+        )
+        assert "items" in gear_usage["type_data_fields"]
 
     @pytest.mark.asyncio
     async def test_create_journal_missing_gear_usage_type_data_rejected(

@@ -139,6 +139,13 @@ class TestGetJournalByExternalId:
             ),
             {"journal_id": journal_id, "gear_item_id": gear_id},
         )
+        await clean_database.execute(
+            text(
+                "INSERT INTO journal_gear_usage_items (journal_id, gear_item_id) "
+                "VALUES (:journal_id, :gear_item_id)"
+            ),
+            {"journal_id": journal_id, "gear_item_id": gear_id},
+        )
         await _link_sync_metadata(
             clean_database,
             source="snipeit_checkout",

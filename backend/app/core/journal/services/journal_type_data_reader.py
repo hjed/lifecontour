@@ -255,19 +255,23 @@ def _build_gear_maintenance_data(gear_maint_data: Any) -> dict[str, Any]:
     }
 
 
-def _build_gear_usage_data(gear_usage_data: Any) -> dict[str, Any]:
-    """Build gear usage data dictionary."""
+def _build_gear_usage_item(item: Any) -> dict[str, Any]:
     return {
-        "gear_item_id": str(gear_usage_data.gear_item_id)
-        if gear_usage_data.gear_item_id
-        else None,
-        "checkout_date": gear_usage_data.checkout_date.isoformat()
-        if gear_usage_data.checkout_date
-        else None,
-        "checkin_date": gear_usage_data.checkin_date.isoformat()
-        if gear_usage_data.checkin_date
-        else None,
+        "gear_item_id": str(item.gear_item_id),
+        "checkout_date": item.checkout_date.isoformat() if item.checkout_date else None,
+        "checkin_date": item.checkin_date.isoformat() if item.checkin_date else None,
     }
+
+
+def _build_gear_usage_data(gear_usage_data: Any) -> dict[str, Any]:
+    """Build gear usage data: every item, and the first again in the old shape."""
+    items = [_build_gear_usage_item(item) for item in gear_usage_data.items]
+    first = (
+        items[0]
+        if items
+        else dict.fromkeys(("gear_item_id", "checkout_date", "checkin_date"))
+    )
+    return {"items": items, **first}
 
 
 class TypeDataReader(NamedTuple):

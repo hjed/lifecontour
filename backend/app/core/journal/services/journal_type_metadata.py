@@ -52,7 +52,7 @@ JOURNAL_TYPE_DESCRIPTIONS: dict[str, str] = {
     "OUTDOOR_PLANNING": "Outdoor planning meeting (an EVENT about upcoming activities)",
     "OUTDOOR_TRAINING": "Outdoor skills training session",
     "GEAR_MAINTENANCE": "Maintenance or retirement of a gear item",
-    "GEAR_USAGE": "Checkout/checkin of a gear item",
+    "GEAR_USAGE": "The gear items used, each with an optional checkout/checkin window",
 }
 
 
