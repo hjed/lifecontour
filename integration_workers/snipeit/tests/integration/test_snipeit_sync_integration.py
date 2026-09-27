@@ -8,65 +8,20 @@ in `sync_metadata`.
 
 from __future__ import annotations
 
-import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
-import httpx
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from snipeit_api_client import SnipeItAPIClient
 from snipeit_sync_service import SnipeItSyncService
 
-# Using same mock transport pattern from other integration tests
-
-
-class MockTransport(httpx.AsyncBaseTransport):
-    def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
-
-    def add_response(
-        self,
-        url_pattern: str,
-        status_code: int = 200,
-        json_data: object = None,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
-                self.responses.pop(i)
-                content = json.dumps(data).encode() if data is not None else b""
-                return httpx.Response(
-                    status_code=status,
-                    content=content,
-                    headers={**hdrs, "content-type": "application/json"},
-                    request=request,
-                )
-        raise ValueError(f"No mock response configured for {url}")
-
-
-@pytest.fixture
-def mock_transport() -> MockTransport:
-    return MockTransport()
-
-
-@pytest.fixture
-def integration_client(mock_transport: MockTransport) -> SnipeItAPIClient:
-    client = SnipeItAPIClient.create(
-        base_url="https://snipeit.example.com/api/v1/",
-        api_key="test-api-key",
-    )
-    client._client = httpx.AsyncClient(
-        transport=mock_transport,
-        base_url="https://snipeit.example.com/api/v1/",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
-    return client
+# ``MockTransport``, ``mock_transport`` and ``integration_client`` are shared
+# fixtures defined in ``conftest.py``.
 
 
 @pytest.fixture
@@ -82,7 +37,7 @@ class TestSnipeItSyncIntegration:
     async def test_sync_asset_batch_inserts_gear_item(
         self,
         sync_service: SnipeItSyncService,
-        mock_transport: MockTransport,
+        mock_transport: Any,
         db_session: AsyncSession,
         async_engine: Any,
     ) -> None:
@@ -148,3 +103,170 @@ class TestSnipeItSyncIntegration:
         assert meta_row.internal_uuid == gear_id
         assert meta_row.sync_status == "success"
         assert meta_row.version_hash is not None
+
+
+def _asset_json(
+    asset_id: int, name: str, status: str = "Ready to Deploy"
+) -> dict[str, Any]:
+    return {
+        "id": asset_id,
+        "name": name,
+        "asset_tag": f"{asset_id:05d}",
+        "status_label": {"id": 4 if status == "Retired" else 2, "name": status},
+    }
+
+
+def _listing(*assets: dict[str, Any]) -> dict[str, Any]:
+    return {"total": len(assets), "rows": list(assets)}
+
+
+def _listing_statuses(mock_transport: Any) -> list[list[str] | None]:
+    """The ``status`` filter of each ``GET /hardware`` listing, in call order."""
+    statuses: list[list[str] | None] = []
+    for request in mock_transport.requests:
+        url = urlparse(str(request.url))
+        if url.path.endswith("/hardware"):
+            statuses.append(parse_qs(url.query).get("status"))
+    return statuses
+
+
+def _queue_listings(
+    mock_transport: Any, default: dict[str, Any], archived: dict[str, Any]
+) -> None:
+    """Queue the default then the archived listing.
+
+    The default listing is queued first: its pattern is also a substring of
+    the archived listing's URL, and the transport serves the first match.
+    """
+    mock_transport.add_response("/hardware?", json_data=default, method="GET")
+    mock_transport.add_response(
+        "/hardware?offset=0&limit=50&status=Archived",
+        json_data=archived,
+        method="GET",
+    )
+
+
+async def _collect(sync_service: SnipeItSyncService) -> list[list[int]]:
+    return [batch async for batch in sync_service.list_asset_batches()]
+
+
+@pytest.fixture
+def session_factory(async_connection: AsyncConnection) -> Any:
+    """A worker-style session factory bound to the rolled-back test connection."""
+
+    @asynccontextmanager
+    async def _factory() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(
+            async_connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        ) as session:
+            yield session
+
+    return _factory
+
+
+async def _gear_rows_for(conn: AsyncConnection, external_id: str) -> list[Any]:
+    """The gear items linked to a Snipe-IT asset through ``sync_metadata``."""
+    result = await conn.execute(
+        text("""
+            SELECT g.id, g.name
+            FROM sync_metadata m
+            JOIN gear_items g ON g.id::text = m.internal_uuid
+            WHERE m.integration_source = 'snipeit' AND m.external_id = :external_id
+        """),
+        {"external_id": external_id},
+    )
+    return list(result.fetchall())
+
+
+class TestSnipeItArchivedAssetListing:
+    """Snipe-IT leaves archived (e.g. Retired) assets out of its default
+    hardware listing, so the asset sync lists them separately (#1570)."""
+
+    @pytest.mark.asyncio
+    async def test_lists_archived_assets_after_the_default_listing(
+        self, sync_service: SnipeItSyncService, mock_transport: Any
+    ) -> None:
+        _queue_listings(
+            mock_transport,
+            default=_listing(_asset_json(1, "Rope")),
+            archived=_listing(_asset_json(18, "CE4Y Harness 1", "Retired")),
+        )
+
+        batches = await _collect(sync_service)
+
+        assert batches == [[1], [18]]
+        assert _listing_statuses(mock_transport) == [None, ["Archived"]]
+
+    @pytest.mark.asyncio
+    async def test_asset_in_both_listings_is_listed_once(
+        self, sync_service: SnipeItSyncService, mock_transport: Any
+    ) -> None:
+        """An instance that shows archived assets in its default listing
+        returns them from both listings."""
+        retired = _asset_json(18, "CE4Y Harness 1", "Retired")
+        _queue_listings(
+            mock_transport,
+            default=_listing(_asset_json(1, "Rope"), retired),
+            archived=_listing(retired),
+        )
+
+        batches = await _collect(sync_service)
+
+        assert batches == [[1, 18]]
+
+    @pytest.mark.asyncio
+    async def test_full_sync_creates_gear_item_for_archived_asset(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: Any,
+    ) -> None:
+        retired = _asset_json(18, "CE4Y Harness 1", "Retired")
+        _queue_listings(mock_transport, default=_listing(), archived=_listing(retired))
+        mock_transport.add_response("/hardware/18", json_data=retired, method="GET")
+
+        for batch in await _collect(sync_service):
+            result = await sync_service.sync_asset_batch(batch, session_factory)
+            assert result["synced"] == len(batch)
+
+        rows = await _gear_rows_for(async_connection, "18")
+        assert [row.name for row in rows] == ["CE4Y Harness 1"]
+
+    @pytest.mark.asyncio
+    async def test_asset_retired_after_sync_keeps_its_gear_item(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: Any,
+    ) -> None:
+        deployable = _asset_json(18, "CE4Y Harness 1")
+        _queue_listings(
+            mock_transport, default=_listing(deployable), archived=_listing()
+        )
+        mock_transport.add_response("/hardware/18", json_data=deployable, method="GET")
+        for batch in await _collect(sync_service):
+            await sync_service.sync_asset_batch(batch, session_factory)
+        [original] = await _gear_rows_for(async_connection, "18")
+
+        retired = {
+            **_asset_json(18, "CE4Y Harness 1", "Retired"),
+            "name": "Harness (retired)",
+        }
+        _queue_listings(mock_transport, default=_listing(), archived=_listing(retired))
+        mock_transport.add_response("/hardware/18", json_data=retired, method="GET")
+        for batch in await _collect(sync_service):
+            result = await sync_service.sync_asset_batch(batch, session_factory)
+            assert result["synced"] == 1
+
+        rows = await _gear_rows_for(async_connection, "18")
+        assert [(row.id, row.name) for row in rows] == [
+            (original.id, "Harness (retired)")
+        ]
+        gear_count = await async_connection.scalar(
+            text("SELECT count(*) FROM gear_items WHERE user_id = 'user-123'")
+        )
+        assert gear_count == 1

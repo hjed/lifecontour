@@ -22,6 +22,7 @@ from snipeit_models import (
     SnipeItActivityListResponse,
     SnipeItAsset,
     SnipeItAssetListResponse,
+    SnipeItAssetStatusFilter,
     SnipeItMaintenance,
     SnipeItMaintenanceListResponse,
     SnipeItMaintenanceWriteResponse,
@@ -218,6 +219,34 @@ class TestSnipeItAPIClientListAssets:
         call_kwargs = mock_get.call_args
         params = call_kwargs.kwargs.get("params") or call_kwargs.args[1]
         assert params["assigned_to"] == "42"
+
+    @pytest.mark.asyncio
+    async def test_status_filter_passed(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """A status filter is sent as Snipe-IT's ``status`` query parameter."""
+        resp = _ok_response(_list_json())
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_assets(
+                status=SnipeItAssetStatusFilter.ARCHIVED
+            )
+
+        assert mock_get.call_args.kwargs["params"]["status"] == "Archived"
+
+    @pytest.mark.asyncio
+    async def test_no_status_filter_by_default(
+        self, client_no_refresh: SnipeItAPIClient
+    ) -> None:
+        """Without a status filter Snipe-IT's default listing is requested."""
+        resp = _ok_response(_list_json())
+        with patch.object(
+            client_no_refresh._client, "get", return_value=resp
+        ) as mock_get:
+            await client_no_refresh.list_assets()
+
+        assert "status" not in mock_get.call_args.kwargs["params"]
 
     @pytest.mark.asyncio
     async def test_paths_do_not_have_leading_slash(

@@ -24,6 +24,7 @@ from snipeit_models import (
     SnipeItActivityListResponse,
     SnipeItAsset,
     SnipeItAssetListResponse,
+    SnipeItAssetStatusFilter,
     SnipeItMaintenance,
     SnipeItMaintenanceListResponse,
     SnipeItMaintenanceWriteResponse,
@@ -128,6 +129,7 @@ class SnipeItAPIClient:
         self,
         *,
         assigned_to_user_id: str | None = None,
+        status: SnipeItAssetStatusFilter | None = None,
         page: int = 1,
         per_page: int = 50,
     ) -> SnipeItAssetListResponse:
@@ -136,6 +138,8 @@ class SnipeItAPIClient:
         Args:
             assigned_to_user_id: Optional Snipe-IT user ID to filter assets
                 assigned to a specific user.
+            status: Optional status filter. Without one Snipe-IT's default
+                listing leaves out archived assets.
             page: Page number (1-based).
             per_page: Number of assets per page.
 
@@ -149,6 +153,8 @@ class SnipeItAPIClient:
         }
         if assigned_to_user_id is not None:
             params["assigned_to"] = assigned_to_user_id
+        if status is not None:
+            params["status"] = status.value
 
         data = await self._get("hardware", params=params)
         return SnipeItAssetListResponse.model_validate(data)
