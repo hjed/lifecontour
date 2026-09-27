@@ -139,7 +139,11 @@ manual sync or the periodic one:
 1. The orchestrator marks its row `running`. Missing settings or credentials,
    or any other error before it has fanned out, fail it.
 2. It lists every batch before dispatching any, so a listing that fails
-   part-way fails the row and dispatches nothing. The maintenance sync then
+   part-way fails the row and dispatches nothing. The asset sync lists
+   Snipe-IT's default hardware listing and then its archived assets
+   (`status=Archived`): the default leaves out assets with an archived status
+   label such as Retired, which keep their gear items. An asset both listings
+   return is batched once. The maintenance sync then
    reconciles deleted records (above); if that fails, nothing is dispatched.
 3. It writes a `queued` child row per batch (`parent_job_id`) and moves to
    `in_progress`, or straight to `completed` when there is nothing to sync.

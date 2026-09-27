@@ -13,9 +13,20 @@ Snipe-IT returns nested ``{id, name}`` objects for related entities
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+
+class SnipeItAssetStatusFilter(StrEnum):
+    """Values of the ``status`` filter on ``GET /api/v1/hardware``.
+
+    Without one Snipe-IT leaves assets with an archived status label (such as
+    Retired) out of the listing, unless its admin setting shows them.
+    """
+
+    ARCHIVED = "Archived"
 
 
 class SnipeItNestedObject(BaseModel):

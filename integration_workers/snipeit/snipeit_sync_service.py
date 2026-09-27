@@ -26,7 +26,12 @@ from sqlalchemy import text
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
-from snipeit_models import SnipeItActivity, SnipeItAsset, SnipeItMaintenance
+from snipeit_models import (
+    SnipeItActivity,
+    SnipeItAsset,
+    SnipeItAssetStatusFilter,
+    SnipeItMaintenance,
+)
 from snipeit_rate_limiter import SnipeItRateLimitError
 
 logger = structlog.get_logger(__name__)
@@ -717,13 +722,31 @@ class SnipeItSyncService:
     async def list_asset_batches(self) -> AsyncIterator[list[int]]:
         """Yield pages of Snipe-IT asset IDs for batch processing.
 
+        Snipe-IT's default hardware listing leaves out assets with an archived
+        status label (such as Retired), so the archived assets are listed after
+        it. An asset both listings return, as they do when Snipe-IT is set to
+        show archived assets, is yielded once.
+
         Yields:
             Lists of Snipe-IT asset IDs, one list per API page.
         """
+        seen: set[int] = set()
+        for status in (None, SnipeItAssetStatusFilter.ARCHIVED):
+            async for asset_ids in self._asset_id_pages(status):
+                unseen = [asset_id for asset_id in asset_ids if asset_id not in seen]
+                seen.update(unseen)
+                if unseen:
+                    yield unseen
+
+    async def _asset_id_pages(
+        self, status: SnipeItAssetStatusFilter | None
+    ) -> AsyncIterator[list[int]]:
+        """Yield the asset IDs of each page of one hardware listing."""
         page = 1
         while True:
             response = await self._api_client.list_assets(
                 assigned_to_user_id=self._snipeit_user_id,
+                status=status,
                 page=page,
                 per_page=_PAGE_SIZE,
             )
@@ -734,6 +757,7 @@ class SnipeItSyncService:
             asset_ids = [asset.id for asset in response.rows]
             logger.info(
                 "Listed Snipe-IT asset batch",
+                status=status,
                 page=page,
                 batch_size=len(asset_ids),
                 total_expected=response.total,
@@ -747,6 +771,7 @@ class SnipeItSyncService:
 
         logger.info(
             "Finished listing asset batches",
+            status=status,
             pages_fetched=page,
         )
 
