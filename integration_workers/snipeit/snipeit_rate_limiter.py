@@ -6,14 +6,15 @@ Unlike Strava, Snipe-IT doesn't provide rate limit headers, so we
 track counts locally and pre-emptively block when the limit is reached.
 
 Snipe-IT throttles per API key, not per client, so the worker keeps one limiter
-per Snipe-IT instance (:func:`rate_limiter_for`) and every client talking to that
-instance counts against it. A client made per event with a limiter of its own
+per API key on each Snipe-IT instance (:func:`rate_limiter_for`) and every client
+using that key counts against it. A client made per event with a limiter of its own
 never limits a burst of events, which then meets Snipe-IT's 429s instead.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 
 import structlog
@@ -89,13 +90,18 @@ _shared_limiters: dict[str, SnipeItRateLimiter] = {}
 
 
 def rate_limiter_for(
-    base_url: str, requests_per_minute: int = _DEFAULT_REQUESTS_PER_MINUTE
+    base_url: str,
+    api_key: str,
+    requests_per_minute: int = _DEFAULT_REQUESTS_PER_MINUTE,
 ) -> SnipeItRateLimiter:
-    """The worker process's one limiter for the Snipe-IT instance at ``base_url``.
+    """The worker process's one limiter for ``api_key`` on the instance at ``base_url``.
 
-    ``requests_per_minute`` only applies to the first call for an instance.
+    Snipe-IT throttles each API key, so users sharing an instance each get a
+    budget of their own. The key is kept only as a hash. ``requests_per_minute``
+    only applies to the first call for a key.
     """
-    key = base_url.rstrip("/")
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    key = f"{base_url.rstrip('/')}#{key_hash}"
     limiter = _shared_limiters.get(key)
     if limiter is None:
         limiter = SnipeItRateLimiter(requests_per_minute=requests_per_minute)

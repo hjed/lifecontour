@@ -374,22 +374,29 @@ class TestSnipeItAPIClientErrorHandling:
 
 
 class TestSnipeItAPIClientRateLimiter:
-    """Clients of one Snipe-IT instance share its budget."""
+    """Clients using one API key on one Snipe-IT instance share its budget."""
 
     @pytest.mark.asyncio
-    async def test_clients_of_one_instance_share_a_limiter(self) -> None:
+    async def test_clients_of_one_api_key_share_a_limiter(self) -> None:
         first = SnipeItAPIClient.create(
             base_url="https://shared.example.com", api_key="key"
         )
         second = SnipeItAPIClient.create(
             base_url="https://shared.example.com/", api_key="key"
         )
+        other_key = SnipeItAPIClient.create(
+            base_url="https://shared.example.com", api_key="other-key"
+        )
         try:
             assert first._rate_limiter is second._rate_limiter
-            assert first._rate_limiter is rate_limiter_for("https://shared.example.com")
+            assert first._rate_limiter is rate_limiter_for(
+                "https://shared.example.com", "key"
+            )
+            assert other_key._rate_limiter is not first._rate_limiter
         finally:
             await first.close()
             await second.close()
+            await other_key.close()
 
     @pytest.mark.asyncio
     async def test_a_full_budget_raises_by_default(self) -> None:

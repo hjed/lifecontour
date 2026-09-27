@@ -97,13 +97,28 @@ class TestWaitForSlot:
 
 
 class TestSharedRateLimiter:
-    """Every client of one Snipe-IT instance counts against one budget."""
+    """Every client using one API key on one instance counts against one budget.
 
-    def test_the_same_instance_shares_one_limiter(self) -> None:
-        first = rate_limiter_for("https://snipe.example.com/")
-        assert rate_limiter_for("https://snipe.example.com") is first
+    Snipe-IT throttles each API key, so another key on the same instance, e.g.
+    another user's, has a budget of its own.
+    """
+
+    def test_one_key_on_one_instance_shares_a_limiter(self) -> None:
+        first = rate_limiter_for("https://snipe.example.com/", "key-1")
+        assert rate_limiter_for("https://snipe.example.com", "key-1") is first
+
+    def test_another_key_on_the_same_instance_has_its_own(self) -> None:
+        assert rate_limiter_for("https://snipe.example.com", "key-1") is not (
+            rate_limiter_for("https://snipe.example.com", "key-2")
+        )
 
     def test_another_instance_has_its_own(self) -> None:
-        assert rate_limiter_for("https://a.example.com") is not rate_limiter_for(
-            "https://b.example.com"
+        assert rate_limiter_for("https://a.example.com", "key-1") is not (
+            rate_limiter_for("https://b.example.com", "key-1")
         )
+
+    def test_the_api_key_is_not_kept_in_the_clear(self) -> None:
+        from snipeit_rate_limiter import _shared_limiters
+
+        rate_limiter_for("https://snipe.example.com", "secret-api-key")
+        assert not any("secret-api-key" in key for key in _shared_limiters)

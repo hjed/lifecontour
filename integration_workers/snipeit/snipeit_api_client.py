@@ -96,8 +96,9 @@ class SnipeItAPIClient:
 
         Convenience constructor for production use. For testing, inject
         the client directly via the constructor. The client shares the
-        worker's limiter for this Snipe-IT instance (see
-        :func:`rate_limiter_for`), so every client of it spends one budget.
+        worker's limiter for this API key on this Snipe-IT instance (see
+        :func:`rate_limiter_for`), so every client using the key spends one
+        budget.
 
         Args:
             base_url: Snipe-IT instance base URL
@@ -117,7 +118,7 @@ class SnipeItAPIClient:
         )
         return cls(
             client=client,
-            rate_limiter=rate_limiter_for(base_url, requests_per_minute),
+            rate_limiter=rate_limiter_for(base_url, api_key, requests_per_minute),
             wait_on_limit=wait_on_limit,
         )
 

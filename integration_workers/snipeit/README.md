@@ -103,9 +103,10 @@ their Snipe-IT traffic does not compete for the rate limit:
 ### Rate Limiting
 
 Snipe-IT throttles each API key (120 requests a minute by default) and answers
-a request over it with a 429. The worker keeps one limiter per Snipe-IT instance
-for the whole process (`rate_limiter_for`), so the stream consumer, the check-in
-sweep and the batch jobs all spend one budget:
+a request over it with a 429. The worker keeps one limiter per API key on each
+Snipe-IT instance for the whole process (`rate_limiter_for`), so for each user
+the stream consumer, the check-in sweep and the batch jobs all spend one budget,
+and users sharing an instance do not spend each other's:
 
 - The stream consumer and the check-in sweep **wait** for a slot when it is
   spent, so a burst of events slows to Snipe-IT's pace instead of failing.
