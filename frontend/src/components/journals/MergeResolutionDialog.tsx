@@ -399,6 +399,14 @@ function FitnessMergeModeSection({
   );
 }
 
+/**
+ * Types whose data the merge combines rather than choosing a side: the merged
+ * journal keeps every gear item either journal lists.
+ */
+const TYPES_MERGED_WITHOUT_CONFLICT: ReadonlySet<string> = new Set([
+  'gear_usage',
+]);
+
 export function MergeResolutionDialog({
   targetJournal,
   sourceJournal,
@@ -492,6 +500,7 @@ export function MergeResolutionDialog({
     // Type Data
     if (source.type_data && target.type_data) {
       Object.keys(source.type_data).forEach(typeKey => {
+        if (TYPES_MERGED_WITHOUT_CONFLICT.has(typeKey)) return;
         const tKey = typeKey as keyof typeof target.type_data;
         const targetObj = target.type_data?.[tKey];
         const sourceObj = source.type_data?.[tKey];

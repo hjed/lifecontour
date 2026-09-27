@@ -98,8 +98,9 @@ interface JournalDetailViewProps {
 }
 
 /**
- * Journal types whose backend row has a required field with no default (e.g. a
- * mandatory gear_item_id) and therefore cannot be persisted by an empty "add".
+ * Journal types whose backend row needs data with no default (e.g. Gear Usage
+ * needs at least one gear item) and therefore cannot be persisted by an empty
+ * "add".
  * These are added to a local pending list first so their inline editor renders;
  * the type is only created on the backend once the user saves the initial data.
  */

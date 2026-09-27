@@ -488,18 +488,6 @@ class GearUsageDataSchema(BaseModel):
     items: list[GearUsageItemSchema] = Field(
         default_factory=list, description="The gear items used, in order"
     )
-    gear_item_id: str | None = Field(
-        default=None,
-        description="Deprecated: the first item's gear item; read items instead",
-    )
-    checkout_date: datetime | None = Field(
-        default=None,
-        description="Deprecated: the first item's checkout; read items instead",
-    )
-    checkin_date: datetime | None = Field(
-        default=None,
-        description="Deprecated: the first item's check-in; read items instead",
-    )
 
 
 class KayakingDataSchema(BaseModel):

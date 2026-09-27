@@ -1855,14 +1855,14 @@ export class TestDataManager {
   }
 
   /**
-   * Create a GEAR_USAGE journal recording a checkout of `gearItemId`.
+   * Create a GEAR_USAGE journal recording the use of `gearItemIds`, in order.
    *
    * The checkout window resolves to the journal's event range, so a range
    * spanning "now" is a currently-checked-out item and a past range is not.
    */
   async createGearUsageJournal(options: {
     title: string;
-    gearItemId: string;
+    gearItemIds: string[];
     start: string;
     end: string;
   }): Promise<TestJournal> {
@@ -1872,7 +1872,11 @@ export class TestDataManager {
       event_date_range: { start: options.start, end: options.end },
       types: ['gear_usage'],
       type_data: {
-        gear_usage: { gear_item_id: options.gearItemId },
+        gear_usage: {
+          items: options.gearItemIds.map(gearItemId => ({
+            gear_item_id: gearItemId,
+          })),
+        },
       },
     });
   }

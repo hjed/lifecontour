@@ -130,12 +130,15 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
 
 A new journal type `GEAR_USAGE` will be introduced. This type can be added to travel, trip, or outdoor activity journals to record gear being utilized.
 
+One `GEAR_USAGE` journal lists **many gear items**, each with its own optional buffer dates (#1574), so the gear used on a trip lives on that trip's own journal. Snipe-IT gets one checkout and check-in per **(journal, asset) pair**, keyed `snipeit_checkout:{asset}:{journal}` / `snipeit_checkin:{asset}:{journal}`: every rule below applies to each gear item on its own. A gear item whose gear is not synced to Snipe-IT is skipped; the journal's other items still sync.
+
 ### Sync Rules
 
 - **Outbound Only**: `GEAR_USAGE` journals sync **to** Snipe-IT as a "Checkout" to the mapped user. We do not sync inbound "Checkin" data **from** Snipe-IT.
 - **Return Behavior**: The personal management system actively **checks the asset back in** to Snipe-IT when the usage period ends — Snipe-IT does not auto-return assets at `expected_checkin`, so the asset would otherwise stay checked out indefinitely. A check-in is triggered when any of the following occur:
   - The usage period ends — a periodic sweep checks in assets whose resolved check-in date has passed.
-  - The `GEAR_USAGE` journal is deleted (the asset is returned).
+  - The `GEAR_USAGE` journal is deleted (every asset it still has out is returned).
+  - A gear item is removed from the journal, or the journal loses the `GEAR_USAGE` type, while its asset is still out: that asset is returned and the pair forgotten, so adding the item back records a new checkout. A removed item whose checkout and check-in are both recorded is left as history — Snipe-IT's log cannot be edited. A failed checkout attempt for a removed item may still have checked the asset out, so it is returned while Snipe-IT shows it out to the mapped user and no other pair may hold it.
   - The `GEAR_USAGE` journal is updated such that the usage period is now in the past.
   - On creation, if the check-in date is already in the past, the checkout and check-in are recorded immediately.
 
@@ -166,6 +169,8 @@ A new journal type `GEAR_USAGE` will be introduced. This type can be added to tr
   - The search reads the newest 500 entries per asset and action type.
   - A match is claimed on the journal's sync row before anything is recorded, under a per-asset lock, so journals processed at the same time cannot both link one entry.
   - Linking is best-effort: if the activity report cannot be read (the API key lacks permission, the Snipe-IT version has no report, or the response is unexpected), the history is recorded as usual.
+- **Adding and removing items**: adding a gear item to a journal records only that item's checkout; removing one returns only that item's asset. Syncing a journal again — a repeated event, an unrelated update or the periodic sweep — writes nothing for a pair already recorded. The periodic sweep returns each overdue item on its own and never checks out a journal's other items.
+- **Folding a separate usage journal into its trip**: to move a gear item from its own `GEAR_USAGE` journal onto the trip's journal (as the logbook import's per-item journals are), **delete the separate journal first**, then add the item to the trip with the same dates. A deleted journal's links to Snipe-IT history no longer count, so the trip's pair links the checkout and check-in already recorded and nothing new is written. Adding the item before deleting the separate journal would record the trip's usage a second time.
 - **Buffer Dates**:
   - Users can specify a separate start and end date for the gear checkout to allow for buffer (e.g., packing the day before).
   - **Default**: The buffer dates explicitly default to the journal's event dates if not modified by the user.

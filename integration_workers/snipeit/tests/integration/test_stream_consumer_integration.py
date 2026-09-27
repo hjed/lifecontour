@@ -427,3 +427,89 @@ class TestStreamConsumerIntegration:
             {"journal_id": str(journal_id)},
         )
         assert remaining.fetchone() is None
+
+    @pytest.mark.asyncio
+    async def test_a_journal_that_lost_its_gear_is_still_reconciled(
+        self,
+        async_connection: Any,
+    ) -> None:
+        """Only its checkout rows are left once every gear item is removed.
+
+        The update must still reach the reconcile, which returns the assets.
+        """
+        from contextlib import asynccontextmanager
+
+        from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
+
+        user_id = "user-whose-trip-lost-its-gear"
+        await async_connection.execute(
+            text("""
+                INSERT INTO snipeit_settings
+                    (user_id, base_url, snipeit_user_id, webhook_token,
+                     created_at, updated_at)
+                VALUES (:user_id, 'https://snipeit.example.com', 5, 'token-1574',
+                        now(), now())
+            """),
+            {"user_id": user_id},
+        )
+        journal_id = (
+            await async_connection.execute(
+                text("""
+                    INSERT INTO journals (title, content, user_id,
+                        event_date_range_start, event_date_range_end)
+                    VALUES ('Trip', '', :user_id, now(), now())
+                    RETURNING id
+                """),
+                {"user_id": user_id},
+            )
+        ).scalar()
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (internal_uuid, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
+                     created_at, updated_at)
+                VALUES
+                    (:journal_uuid, 'snipeit_checkout', :external_id,
+                     now(), 'hash', 'success', 0, now(), now())
+            """),
+            {
+                "journal_uuid": str(journal_id),
+                "external_id": f"snipeit_checkout:42:{journal_id}",
+            },
+        )
+
+        @asynccontextmanager
+        async def session_factory() -> AsyncIterator[SqlAsyncSession]:
+            async with SqlAsyncSession(
+                async_connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        consumer = SnipeItWorkerStreamConsumer(
+            stream_client=AsyncMock(),
+            session_factory=session_factory,
+        )
+        event = StreamEvent(
+            message_id="124",
+            event_id="def",
+            event_type="JournalUpdated",
+            aggregate_id=journal_id,
+            event_data={"journal_id": journal_id, "changed_fields": {}},
+            occurred_at="2026-09-26T00:00:00Z",
+        )
+        sync_service = AsyncMock()
+
+        with (
+            patch("worker._get_auth_data", return_value={"mock": "auth"}),
+            patch("worker._create_sync_service", return_value=sync_service),
+        ):
+            await consumer._handle_event(event)
+
+        sync_service.reconcile_gear_usage.assert_awaited_once()
+        assert (
+            sync_service.reconcile_gear_usage.await_args.kwargs["journal_id"]
+            == journal_id
+        )

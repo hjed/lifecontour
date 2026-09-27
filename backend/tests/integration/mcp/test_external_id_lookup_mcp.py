@@ -134,10 +134,9 @@ class TestGetJournalByExternalId:
         journal_id = await _insert_journal(clean_database, "Rope checkout")
         await clean_database.execute(
             text(
-                "INSERT INTO journal_gear_usage_data (journal_id, gear_item_id) "
-                "VALUES (:journal_id, :gear_item_id)"
+                "INSERT INTO journal_gear_usage_data (journal_id) VALUES (:journal_id)"
             ),
-            {"journal_id": journal_id, "gear_item_id": gear_id},
+            {"journal_id": journal_id},
         )
         await clean_database.execute(
             text(

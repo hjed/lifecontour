@@ -623,25 +623,16 @@ class TypeDataConverter:
 
     @staticmethod
     def gear_usage_data_to_schema(data: GearUsageData) -> dict[str, Any]:
-        """Convert GearUsageData domain entity to API schema.
-
-        The single-item fields repeat the first item for readers of the older
-        shape.
-        """
-        items = [
-            GearUsageItemSchema(
-                gear_item_id=str(item.gear_item_id),
-                checkout_date=item.checkout_date,
-                checkin_date=item.checkin_date,
-            )
-            for item in data.items
-        ]
-        first = items[0] if items else None
+        """Convert GearUsageData domain entity to API schema."""
         return GearUsageDataSchema(
-            items=items,
-            gear_item_id=first.gear_item_id if first else None,
-            checkout_date=first.checkout_date if first else None,
-            checkin_date=first.checkin_date if first else None,
+            items=[
+                GearUsageItemSchema(
+                    gear_item_id=str(item.gear_item_id),
+                    checkout_date=item.checkout_date,
+                    checkin_date=item.checkin_date,
+                )
+                for item in data.items
+            ],
         ).model_dump(exclude_none=True)
 
 

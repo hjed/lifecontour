@@ -132,6 +132,31 @@ describe('MergeResolutionDialog', () => {
     expect(screen.getByText(/No conflicts detected/i)).toBeInTheDocument();
   });
 
+  it('keeps both journals gear without asking', () => {
+    // The merge keeps every gear item either journal lists, so differing gear
+    // is not a conflict to resolve.
+    const withGear = (gearItemId: string) => {
+      const journal = JSON.parse(JSON.stringify(mockTarget));
+      journal.attributes.type_data = {
+        gear_usage: { items: [{ gear_item_id: gearItemId }] },
+      };
+      return journal;
+    };
+
+    render(
+      <MergeResolutionDialog
+        targetJournal={withGear('g1')}
+        sourceJournal={withGear('g2')}
+        open={true}
+        isPending={false}
+        onOpenChange={mockOnOpenChange}
+        onResolve={mockOnResolve}
+      />
+    );
+
+    expect(screen.getByText(/No conflicts detected/i)).toBeInTheDocument();
+  });
+
   describe('calendar conflicts', () => {
     const TARGET_CAL_ID = '11111111-1111-1111-1111-111111111111';
     const SOURCE_CAL_ID = '22222222-2222-2222-2222-222222222222';

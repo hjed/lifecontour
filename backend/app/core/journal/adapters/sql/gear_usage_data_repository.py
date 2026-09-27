@@ -2,11 +2,6 @@
 
 A journal's GEAR_USAGE entry is its ``journal_gear_usage_data`` row; the gear
 items it holds are ``journal_gear_usage_items`` rows, in ``position`` order.
-
-Until the legacy columns are dropped, the entry's own ``gear_item_id`` /
-``checkout_date`` / ``checkin_date`` mirror its first item (NULL when it has
-none), so readers not yet moved to the items table keep seeing what they did
-when an entry held a single item.
 """
 
 from uuid import UUID
@@ -148,35 +143,10 @@ class SqlGearUsageDataRepository(GearUsageDataRepository):
                 },
             )
 
-        await self._refresh_mirror(journal_id)
-
         saved = await self.find_by_journal_id(journal_id)
         if saved is None:
             raise RuntimeError("Failed to save gear usage data")
         return saved
-
-    async def _refresh_mirror(self, journal_id: int) -> None:
-        """Copy the entry's first item into its legacy single-item columns."""
-        await self.connection.execute(
-            text(
-                """
-                UPDATE journal_gear_usage_data d
-                SET gear_item_id = first_item.gear_item_id,
-                    checkout_date = first_item.checkout_date,
-                    checkin_date = first_item.checkin_date
-                FROM (SELECT 1) AS one
-                LEFT JOIN LATERAL (
-                    SELECT gear_item_id, checkout_date, checkin_date
-                    FROM journal_gear_usage_items
-                    WHERE journal_id = :journal_id
-                    ORDER BY position, gear_item_id
-                    LIMIT 1
-                ) first_item ON true
-                WHERE d.journal_id = :journal_id
-                """
-            ),
-            {"journal_id": journal_id},
-        )
 
     async def delete(self, journal_id: int) -> None:
         """Delete a journal's gear usage entry; its items cascade with it."""

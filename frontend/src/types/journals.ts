@@ -353,10 +353,16 @@ export interface GearMaintenanceData {
   retirement_reason?: string | null;
 }
 
-export interface GearUsageData {
-  gear_item_id?: string | null;
+/** One gear item used on a GEAR_USAGE journal, with optional buffer dates. */
+export interface GearUsageItem {
+  gear_item_id: string;
   checkout_date?: string | null;
   checkin_date?: string | null;
+}
+
+export interface GearUsageData {
+  /** Every gear item used, in order. Saving replaces the whole list. */
+  items?: GearUsageItem[];
 }
 
 // Type data union type

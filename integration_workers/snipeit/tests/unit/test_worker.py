@@ -26,6 +26,7 @@ os.environ["ENCRYPTION_KEY"] = "testkey"
 import pytest
 from core_shared.testing import make_arq_ctx
 
+from snipeit_sync_service import GearUsagePair
 from worker import (
     sync_snipeit_asset_batch,
     sync_snipeit_assets,
@@ -379,6 +380,7 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
     mock_sync_service._api_client.close = AsyncMock()
     overdue = OverdueGearUsage(
         journal_id=100,
+        asset_id=42,
         checkout_at=date(2025, 3, 8),
         checkin_at=date(2025, 3, 9),
         usage_dates=AssetUsageDates(last_checkin=datetime(2025, 3, 9, 17, 0)),
@@ -400,8 +402,13 @@ async def test_periodic_checkin_reconciles_after_a_checkin(
         await periodic_checkin_all_snipeit_accounts(mock_ctx)
 
     assert mock_sync_service.reconcile_gear_usage.await_count == reconciles
-    checkin_kwargs = mock_sync_service.push_checkin_create.await_args.kwargs
-    assert checkin_kwargs["usage_dates"] is overdue.usage_dates
+    if reconciles:
+        # Only the pair just checked in: the sweep never pushes the others.
+        reconcile_kwargs = mock_sync_service.reconcile_gear_usage.await_args.kwargs
+        assert reconcile_kwargs["asset_id"] == 42
+    checkin = mock_sync_service.push_checkin_create.await_args
+    assert checkin.args[0] == GearUsagePair(100, 42)
+    assert checkin.kwargs["usage_dates"] is overdue.usage_dates
 
 
 @pytest.mark.asyncio
