@@ -309,6 +309,14 @@ new ones permanently.
   - The maintainer confirms it in the PR checklist.
   - The pre-commit hook and, after the flip, GitHub push protection remain as backstops that do
     not depend on CI.
+- **Fork PRs are never upper layers.** A PR's base must be a branch in the upstream repository,
+  so an external contributor cannot build a stack upstream: every fork PR targets `main` and runs
+  the full in-gate CI, `secret-scan` included, once its first-run workflow approval is given.
+  Stacks are a maintainer workflow on upstream branches, where the dispatch above works.
+  - CONTRIBUTING tells external contributors to submit dependent changes as **sequential** PRs
+    against `main`, opening the next once the previous one merges, not as a stack.
+  - If a fork contributor needs to stack anyway, the maintainer pushes the layers to upstream
+    branches first; they are then scanned like any upstream stack.
 - If the gitleaks GitHub Action is chosen over the CLI, it needs `GITHUB_TOKEN`. That works on
   fork PRs (read-only) and is recorded against the "no repository secrets on PRs" invariant. The
   CLI avoids the question.
@@ -448,6 +456,8 @@ compatibility, protect the name and logo, and publish a CLA-backed contribution 
   - quality commands, linking `docs/code-quality-standards.md` and the testing strategy;
   - the stacked-PR note: only the bottom layer runs CI, and the maintainer dispatches upper
     layers. No layer merges without a passing `secret-scan` on its head.
+  - External contributors working from forks submit dependent changes as sequential PRs against
+    `main` rather than as a stack; each such PR runs full CI.
 - **`CLA.md`:** an individual CLA adapted from the Apache ICLA. The contributor grants the owner a
   perpetual, worldwide, royalty-free, irrevocable copyright and patent licence, including the
   right to sublicense and relicense under any terms, and keeps their own copyright. Include a
