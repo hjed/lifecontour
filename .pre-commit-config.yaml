@@ -195,6 +195,13 @@ repos:
         language: system
         files: \.toml$
 
+  # Secret scanning of staged changes with the committed .gitleaks.toml and
+  # .gitleaksignore. Keep rev in step with GITLEAKS_VERSION in ci.yml.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
   # Cross-platform hooks from pre-commit-hooks (Python-based, no bash required)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

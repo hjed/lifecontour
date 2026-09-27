@@ -19,6 +19,10 @@ env:
   NODE_VERSION: "26"
   UV_VERSION: "0.11.15"
   PNPM_VERSION: "11.7.0"
+  # Keep in step with the gitleaks hook rev in .pre-commit-config.yaml
+  # (core_shared/tests/unit/test_secret_scan.py asserts they match).
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 
 jobs:
   # Detect which files have changed to conditionally run jobs
@@ -316,6 +320,40 @@ jobs:
           files: ./backend/coverage.xml
           flags: backend-unit
           name: backend-unit-coverage
+
+  # Secret scanning. No path filter: it runs on every in-gate event, and
+  # upper stack layers get it through the manual dispatch like every other job.
+  # Scans the event's commit range (full history on dispatch and tags); see
+  # scripts/secret_scan.py and docs/ci-cd-setup.md.
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    needs: changes
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLo "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          echo "GITLEAKS_BIN=$RUNNER_TEMP/gitleaks" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Scan the event's commits
+        run: python3 scripts/secret_scan.py
 
   core-shared-unit-test:
     name: Core Shared Unit Tests
