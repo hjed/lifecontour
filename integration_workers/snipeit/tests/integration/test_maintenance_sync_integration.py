@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -2806,11 +2807,16 @@ async def test_rate_limited_maintenance_record_is_raised_for_the_batch_to_retry(
     defers the whole batch, instead of being counted as a failure."""
     from snipeit_rate_limiter import SnipeItRateLimitError
 
-    mock_transport.add_response(
-        "/maintenances/17", status_code=429, headers={"Retry-After": "7"}
-    )
+    # Still rate limited once the client's own retries are spent.
+    for _ in range(3):
+        mock_transport.add_response(
+            "/maintenances/17", status_code=429, headers={"Retry-After": "7"}
+        )
 
-    with pytest.raises(SnipeItRateLimitError):
+    with (
+        patch("snipeit_api_client.asyncio.sleep"),
+        pytest.raises(SnipeItRateLimitError),
+    ):
         await snipeit_sync_service.sync_maintenance_batch(
             maintenance_ids=[17],
             session_factory=_joined_session_factory(async_connection),

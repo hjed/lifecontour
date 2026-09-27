@@ -309,6 +309,13 @@ class _MaintenanceFailed(Exception):
 IN_FLIGHT_LOCK_SECONDS = 300
 
 
+# Starts the ``error_message`` of a failed checkout or check-in that retrying will
+# not fix: missing or inverted dates, or an asset Snipe-IT refuses or does not
+# have. The periodic sweep skips these; an edit to the journal still retries a
+# checkout, since the edit may be what fixes it.
+TERMINAL_ERROR_PREFIX = "Terminal:"
+
+
 class SnipeItSyncInProgress(Exception):
     """Raised when another worker holds a journal's Snipe-IT checkout.
 
@@ -2583,7 +2590,7 @@ class SnipeItSyncService:
             )
             # Unlock the pending status so it can be retried when data is fixed
             await self._unlock_pending_checkout(
-                pair, session_factory, "Missing required dates"
+                pair, session_factory, f"{TERMINAL_ERROR_PREFIX} missing required dates"
             )
             return
 
@@ -2595,7 +2602,9 @@ class SnipeItSyncService:
                 checkin_date=str(checkin_date),
             )
             await self._unlock_pending_checkout(
-                pair, session_factory, "Invalid date range"
+                pair,
+                session_factory,
+                f"{TERMINAL_ERROR_PREFIX} check-in before checkout",
             )
             return
 
@@ -2669,7 +2678,7 @@ class SnipeItSyncService:
                 await self._unlock_pending_checkout(
                     pair,
                     session_factory,
-                    f"API Error {exc.status_code}",
+                    f"{TERMINAL_ERROR_PREFIX} API {exc.status_code}",
                 )
                 return
 
@@ -3301,7 +3310,7 @@ class SnipeItSyncService:
                     journal_id,
                     external_id,
                     session_factory,
-                    error_message=f"Terminal: API {exc.status_code}",
+                    error_message=f"{TERMINAL_ERROR_PREFIX} API {exc.status_code}",
                     checkin_at=checkin_at,
                 )
                 return False
@@ -3493,7 +3502,8 @@ class SnipeItSyncService:
         asset) pair (see :meth:`_reconcile_pair`). A pair recorded for a gear
         item the journal no longer lists — removed, or the whole GEAR_USAGE type
         dropped — is released (see :meth:`_release_removed_pair`). ``asset_id``
-        limits this to that one pair and releases nothing.
+        limits this to that one pair, whether it is reconciled or released, and
+        touches no other.
         """
         data = await self._fetch_journal_and_gear_usages(journal_id, session_factory)
         if not data:
@@ -3502,15 +3512,16 @@ class SnipeItSyncService:
         recorded = await self._recorded_checkouts(journal_id, session_factory)
 
         # Removed items first: an asset leaves before its replacement is taken.
-        if asset_id is None:
-            listed = {usage.asset_id for usage in usages}
-            for recorded_asset_id, checkout_row in recorded.items():
-                if recorded_asset_id not in listed:
-                    await self._release_removed_pair(
-                        GearUsagePair(journal_id, recorded_asset_id),
-                        checkout_row,
-                        session_factory,
-                    )
+        listed = {usage.asset_id for usage in usages}
+        for recorded_asset_id, checkout_row in recorded.items():
+            if asset_id is not None and recorded_asset_id != asset_id:
+                continue
+            if recorded_asset_id not in listed:
+                await self._release_removed_pair(
+                    GearUsagePair(journal_id, recorded_asset_id),
+                    checkout_row,
+                    session_factory,
+                )
 
         for usage in usages:
             if usage.asset_id is None:
@@ -3941,96 +3952,100 @@ class AssetUsageDates:
 
 
 @dataclass(frozen=True)
-class OverdueGearUsage:
-    """A checked-out gear item whose usage period on its journal has ended.
+class UnsyncedGearUsage:
+    """A (journal, asset) pair whose Snipe-IT checkout or check-in is unfinished.
 
-    Dates are the local calendar dates the usage ran over, read in the user's
-    configured timezone (see :func:`_snipeit_zone`).
+    It may be for a gear item the journal no longer lists; reconciling the pair
+    releases it then.
     """
 
     journal_id: int
     asset_id: int
-    checkout_at: date | None
-    checkin_at: date
-    usage_dates: AssetUsageDates | None = None
+    checkout_at: datetime
 
     @property
     def pair(self) -> GearUsagePair:
-        """The (journal, asset) pair to check in."""
+        """The (journal, asset) pair to reconcile."""
         return GearUsagePair(self.journal_id, self.asset_id)
 
-    @property
-    def note(self) -> str:
-        """The usage window recorded on the Snipe-IT check-in."""
-        start = self.checkout_at.isoformat() if self.checkout_at else "unknown"
-        return f"Usage period {start} to {self.checkin_at.isoformat()}"
 
-    def snipeit_checkin_at(self, *, now: datetime | None = None) -> date | None:
-        """The ``checkin_at`` to send Snipe-IT (``None`` while it may be today there)."""
-        return _snipeit_checkin_at(self.checkin_at, now=now)
-
-
-async def fetch_overdue_gear_usage(
+async def fetch_unsynced_gear_usage(
     session_factory: Any, user_id: str
-) -> list[OverdueGearUsage]:
-    """Return a user's checked-out gear items with no check-in whose period has ended.
+) -> list[UnsyncedGearUsage]:
+    """Return a user's gear usage pairs that a push left unfinished.
 
-    One entry per (journal, asset) pair, so a trip's items are returned one by
-    one.
+    Drives the periodic sweep. A pair is selected when its checkout:
 
-    Drives the periodic check-in sweep. The resolved check-in instant is compared
-    against ``now()``, matching :func:`_usage_period_has_ended`; the returned
-    dates are local to the user's configured zone.
+    - failed, unless the failure is terminal (``TERMINAL_ERROR_PREFIX``): an
+      edit still retries those, but a sweep would only fail them again;
+    - is pending past ``IN_FLIGHT_LOCK_SECONDS``, so its worker died;
+    - succeeded with no check-in, once the usage period has ended, or at once
+      when the journal no longer lists the item (it was removed while out).
+
+    Only pairs a push was attempted for are selected — every processed event
+    writes the checkout row before calling Snipe-IT — so journals written
+    before Snipe-IT or the gear item was connected are not backfilled.
+
+    Pairs come grouped by asset, oldest checkout first: an asset's earlier
+    usage has to be checked back in before its later one can be checked out.
     """
     async with session_factory() as session:
         result = await session.execute(
             text(f"""
                 SELECT j.id AS journal_id,
-                       asset.external_id AS asset_external_id,
-                       COALESCE(u.checkin_date, j.event_date_range_end) AS checkin_date,
-                       COALESCE(u.checkout_date, j.event_date_range_start) AS checkout_date,
-                       us.timezone AS user_timezone
+                       co.external_id AS checkout_external_id,
+                       COALESCE(u.checkout_date, j.event_date_range_start)
+                           AS checkout_date
                 FROM sync_metadata co
-                JOIN journals j ON j.id = co.internal_uuid::integer
-                JOIN journal_gear_usage_items u ON u.journal_id = j.id
-                JOIN sync_metadata asset
-                    ON asset.integration_source = 'snipeit'
-                    AND asset.internal_uuid = CAST(u.gear_item_id AS TEXT)
+                JOIN journals j ON j.id::text = co.internal_uuid
+                LEFT JOIN (
+                    journal_gear_usage_items u
+                    JOIN sync_metadata asset
+                        ON asset.integration_source = 'snipeit'
+                        AND asset.internal_uuid = CAST(u.gear_item_id AS TEXT)
+                )
+                    ON u.journal_id = j.id
                     AND co.external_id
                         = 'snipeit_checkout:' || asset.external_id || ':' || j.id
-                LEFT JOIN user_settings us ON us.user_id = j.user_id
                 LEFT JOIN sync_metadata ci
                     ON {_CHECKIN_OF_CHECKOUT}
                     AND ci.sync_status = 'success'
                 WHERE co.integration_source = 'snipeit_checkout'
-                  AND co.sync_status = 'success'
                   AND j.user_id = :user_id
-                  AND ci.id IS NULL
-                  AND COALESCE(u.checkin_date, j.event_date_range_end) < now()
-                ORDER BY j.id, u.position, u.gear_item_id
+                  AND (
+                      (co.sync_status = 'failed'
+                       AND COALESCE(co.error_message, '') NOT LIKE :terminal)
+                      OR (co.sync_status = 'pending'
+                          AND co.updated_at
+                              < now() - make_interval(secs => :in_flight))
+                      OR (co.sync_status = 'success'
+                          AND ci.id IS NULL
+                          AND (u.gear_item_id IS NULL
+                               OR COALESCE(u.checkin_date, j.event_date_range_end)
+                                  < now()))
+                  )
             """),
-            {"user_id": user_id},
+            {
+                "user_id": user_id,
+                "terminal": f"{TERMINAL_ERROR_PREFIX}%",
+                "in_flight": IN_FLIGHT_LOCK_SECONDS,
+            },
         )
         rows = result.fetchall()
 
-    overdue: list[OverdueGearUsage] = []
+    unsynced: list[UnsyncedGearUsage] = []
     for row in rows:
-        zone = _snipeit_zone(row)
-        checkin_at = _local_date(row.checkin_date, zone)
-        if checkin_at is None:
-            continue
-        asset_id = _asset_id(row.asset_external_id)
+        asset_id = _checkout_asset_id(row.checkout_external_id)
         if asset_id is None:
             continue
-        overdue.append(
-            OverdueGearUsage(
+        unsynced.append(
+            UnsyncedGearUsage(
                 journal_id=row.journal_id,
                 asset_id=asset_id,
-                checkout_at=_local_date(row.checkout_date, zone),
-                checkin_at=checkin_at,
-                usage_dates=AssetUsageDates.from_instants(
-                    row.checkout_date, row.checkin_date, zone
-                ),
+                checkout_at=row.checkout_date,
             )
         )
-    return overdue
+    unsynced.sort(
+        key=lambda usage: (usage.asset_id, usage.checkout_at, usage.journal_id)
+    )
+    return unsynced

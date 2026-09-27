@@ -87,7 +87,15 @@ def _create_sync_service(
     snipeit_user_id: str | None,
     worker_settings: SnipeItWorkerSettings,
     session_factory: Any,  # noqa: ARG001
+    *,
+    wait_on_limit: bool = True,
 ) -> Any:
+    """Build a user's sync service over the shared limiter of their instance.
+
+    By default its client waits for the limiter's budget, so a burst of events
+    slows to Snipe-IT's pace instead of failing. Batch jobs pass
+    ``wait_on_limit=False``: they defer themselves on ``SnipeItRateLimitError``.
+    """
     from cryptography.fernet import Fernet
 
     from snipeit_api_client import SnipeItAPIClient
@@ -99,6 +107,7 @@ def _create_sync_service(
     api_client = SnipeItAPIClient.create(
         base_url=base_url,
         api_key=api_key,
+        wait_on_limit=wait_on_limit,
     )
 
     return SnipeItSyncService(
@@ -137,7 +146,11 @@ async def _get_settings(session_factory: Any, user_id: str) -> _SnipeItSettings 
 
 
 async def _open_sync_service(session_factory: Any, user_id: str) -> Any:
-    """Build a user's sync service, or raise ``_NotConfiguredError``."""
+    """Build a batch job's sync service, or raise ``_NotConfiguredError``.
+
+    Its client raises on a spent budget rather than wait: the batch jobs defer
+    themselves on ``SnipeItRateLimitError`` (see ``_rate_limit_defer``).
+    """
     snipeit = await _get_settings(session_factory, user_id)
     if snipeit is None:
         raise _NotConfiguredError("Snipe-IT settings not configured")
@@ -153,6 +166,7 @@ async def _open_sync_service(session_factory: Any, user_id: str) -> Any:
         snipeit_user_id=snipeit.snipeit_user_id,
         worker_settings=settings,
         session_factory=session_factory,
+        wait_on_limit=False,
     )
 
 
@@ -489,26 +503,36 @@ async def sync_snipeit_maintenance_batch(
     )
 
 
+# The most (journal, asset) pairs one sweep run attempts per user. Each costs
+# up to about 8 Snipe-IT calls, so at 120 calls a minute 40 pairs take under
+# three minutes, inside arq's 300s job timeout. The pairs come oldest first, so
+# the next run carries on where this one stopped.
+SWEEP_MAX_PAIRS = 40
+
+
 @trace_arq_job
 async def periodic_checkin_all_snipeit_accounts(
     ctx: dict,  # type: ignore[type-arg]
 ) -> dict[str, int]:
-    """Periodic safety-net that checks in assets whose usage period has ended.
+    """Periodic safety net that finishes the gear usage pushes left unfinished.
 
-    For every user with Snipe-IT configured, finds successful checkouts that
-    have no successful check-in yet and whose resolved check-in date has passed,
-    then returns those assets in Snipe-IT, backdated to the local check-in date
-    when it is before today. Complements the event-driven triggers
-    (journal deletion / update / immediate-on-create) by catching usage windows
-    that only become past with the passage of time.
+    For every user with Snipe-IT configured, reconciles each (journal, asset)
+    pair ``fetch_unsynced_gear_usage`` selects: a checkout that failed or was
+    abandoned, and a check-in that is due. That is what repairs the pushes an
+    event gave up on (e.g. when Snipe-IT kept rate limiting it), and it catches
+    usage windows that only end with the passage of time.
+
+    An asset's pairs come oldest first, and after one fails the asset's later
+    pairs are left for the next run: with the earlier usage still out, their
+    checkouts could only fail. A user still rate limited after the client's
+    retries is left for the next run too.
     """
     session_factory = ctx["session_factory"]
     worker_settings: SnipeItWorkerSettings = settings
 
     from sqlalchemy import text
 
-    from snipeit_api_client import SnipeItAPIError
-    from snipeit_sync_service import fetch_overdue_gear_usage
+    from snipeit_sync_service import fetch_unsynced_gear_usage
 
     async with session_factory() as session:
         result = await session.execute(
@@ -520,82 +544,84 @@ async def periodic_checkin_all_snipeit_accounts(
         )
         settings_rows = result.fetchall()
 
-    accounts_found = len(settings_rows)
-    checked_in = 0
-
+    reconciled = 0
     for row in settings_rows:
         user_id = row.user_id
-        base_url = row.base_url
-        snipeit_user_id = row.snipeit_user_id
 
         auth_data = await _get_auth_data(session_factory, user_id)
         if not auth_data:
             continue
 
-        overdue_usages = await fetch_overdue_gear_usage(session_factory, user_id)
-        if not overdue_usages:
+        unsynced = await fetch_unsynced_gear_usage(session_factory, user_id)
+        if not unsynced:
             continue
 
         sync_service = _create_sync_service(
             user_id=user_id,
             auth_data=auth_data,
-            base_url=base_url,
-            snipeit_user_id=snipeit_user_id,
+            base_url=row.base_url,
+            snipeit_user_id=row.snipeit_user_id,
             worker_settings=worker_settings,
             session_factory=session_factory,
         )
-
         try:
-            for overdue in overdue_usages:
-                try:
-                    did_checkin = await sync_service.push_checkin_create(
-                        overdue.pair,
-                        session_factory=session_factory,
-                        note=overdue.note,
-                        checkin_at=overdue.snipeit_checkin_at(),
-                        usage_dates=overdue.usage_dates,
-                    )
-                    if did_checkin:
-                        checked_in += 1
-                        # The checkout may be recorded on a date the journal has
-                        # since changed; with the asset back, re-record it. Only
-                        # this pair: the sweep never pushes the journal's others.
-                        await sync_service.reconcile_gear_usage(
-                            journal_id=overdue.journal_id,
-                            session_factory=session_factory,
-                            asset_id=overdue.asset_id,
-                        )
-                except SnipeItAPIError as exc:
-                    if exc.status_code in (403, 404):
-                        logger.debug(
-                            "Skipped periodic checkin (not found/forbidden)",
-                            journal_id=overdue.journal_id,
-                            user_id=user_id,
-                            status_code=exc.status_code,
-                        )
-                    else:
-                        logger.warning(
-                            "Periodic checkin failed",
-                            journal_id=overdue.journal_id,
-                            user_id=user_id,
-                            exc_info=True,
-                        )
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Periodic checkin failed",
-                        journal_id=overdue.journal_id,
-                        user_id=user_id,
-                        exc_info=True,
-                    )
+            reconciled += await _sweep_user(
+                sync_service, unsynced, session_factory, user_id
+            )
         finally:
             await sync_service._api_client.close()
 
     logger.info(
-        "Completed periodic Snipe-IT check-in sweep",
-        accounts_found=accounts_found,
-        checked_in=checked_in,
+        "Completed periodic Snipe-IT gear usage sweep",
+        accounts_found=len(settings_rows),
+        reconciled=reconciled,
     )
-    return {"accounts_found": accounts_found, "checked_in": checked_in}
+    return {"accounts_found": len(settings_rows), "reconciled": reconciled}
+
+
+async def _sweep_user(
+    sync_service: Any, unsynced: list[Any], session_factory: Any, user_id: str
+) -> int:
+    """Reconcile one user's unsynced pairs in order; return how many succeeded.
+
+    At most ``SWEEP_MAX_PAIRS`` are attempted. A pair skipped because its asset
+    already failed this run is not an attempt, so an asset stuck with many
+    unfinished pairs costs one attempt and leaves the run to the others.
+    """
+    failed_assets: set[int] = set()
+    attempted = 0
+    reconciled = 0
+    for usage in unsynced:
+        if attempted == SWEEP_MAX_PAIRS:
+            break
+        if usage.asset_id in failed_assets:
+            continue
+        attempted += 1
+        try:
+            await sync_service.reconcile_gear_usage(
+                journal_id=usage.journal_id,
+                session_factory=session_factory,
+                asset_id=usage.asset_id,
+            )
+        except SnipeItRateLimitError:
+            logger.warning(
+                "Snipe-IT still rate limited; leaving the rest for the next sweep",
+                user_id=user_id,
+                journal_id=usage.journal_id,
+            )
+            break
+        except Exception:  # noqa: BLE001
+            failed_assets.add(usage.asset_id)
+            logger.warning(
+                "Periodic gear usage reconcile failed",
+                user_id=user_id,
+                journal_id=usage.journal_id,
+                snipeit_asset_id=usage.asset_id,
+                exc_info=True,
+            )
+        else:
+            reconciled += 1
+    return reconciled
 
 
 # Each periodic run enqueues these orchestrators for every account. Snipe-IT
@@ -768,8 +794,9 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     defaults, so they apply unchanged. Two periodic jobs share the periodic-sync
     cadence: the asset and maintenance import
     (``periodic_sync_all_snipeit_accounts``) and the check-in sweep
-    (``periodic_checkin_all_snipeit_accounts``), which returns assets whose usage
-    period has ended. The fan-out reconciler (``reconcile_in_progress_parents``)
+    (``periodic_checkin_all_snipeit_accounts``), which finishes the gear usage
+    checkouts and check-ins left unfinished, including returning assets whose
+    usage period has ended. The fan-out reconciler (``reconcile_in_progress_parents``)
     always runs, finalising orchestrator parents from their batch rows. Only the
     functions list, consumer wiring, cron schedule, and documented overrides live
     here.
@@ -790,9 +817,10 @@ class WorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
 
     # Cron schedule: the periodic asset/maintenance import and the check-in
     # sweep (shared helper; both empty when periodic sync is disabled). The
-    # import runs half an hour after the sweep: each job has its own rate
-    # limiter, so running together they could exceed Snipe-IT's limit, and a
-    # rate-limited check-in waits for the next sweep. The fan-out reconciler
+    # import runs half an hour after the sweep: they share one rate limit
+    # budget (see ``rate_limiter_for``), so running together would only slow
+    # both down, and a sweep that still ends rate limited resumes on the next
+    # run. The fan-out reconciler
     # runs every few minutes regardless, since manual syncs fan out too.
     cron_jobs = [
         *generate_cron_jobs(

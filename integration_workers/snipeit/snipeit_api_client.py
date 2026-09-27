@@ -14,6 +14,7 @@ token in the ``Authorization`` header.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -27,9 +28,21 @@ from snipeit_models import (
     SnipeItMaintenanceListResponse,
     SnipeItMaintenanceWriteResponse,
 )
-from snipeit_rate_limiter import SnipeItRateLimiter, SnipeItRateLimitError
+from snipeit_rate_limiter import (
+    SnipeItRateLimiter,
+    SnipeItRateLimitError,
+    rate_limiter_for,
+)
 
 logger = structlog.get_logger()
+
+# A 429 from Snipe-IT's throttle is retried this many times before it is raised.
+# Each wait is Snipe-IT's Retry-After, or an exponential backoff without one,
+# and never longer than the cap: the stream consumer handles one event at a
+# time, so a long sleep here holds up every other event.
+_RATE_LIMIT_RETRIES = 2
+_RATE_LIMIT_BACKOFF_BASE = 2.0
+_RATE_LIMIT_MAX_WAIT = 30.0
 
 
 class SnipeItAPIError(Exception):
@@ -53,15 +66,22 @@ class SnipeItAPIClient:
     Args:
         client: Pre-configured ``httpx.AsyncClient`` (injected for testability).
         rate_limiter: Optional ``SnipeItRateLimiter`` instance (defaults to 120 req/min).
+        wait_on_limit: When the limiter's budget is spent, wait for a slot
+            rather than raise ``SnipeItRateLimitError``. Callers that can only
+            retry an event wholesale wait; batch jobs that defer themselves on
+            the error leave it off.
     """
 
     def __init__(
         self,
         client: httpx.AsyncClient,
         rate_limiter: SnipeItRateLimiter | None = None,
+        *,
+        wait_on_limit: bool = False,
     ) -> None:
         self._client = client
         self._rate_limiter = rate_limiter or SnipeItRateLimiter()
+        self._wait_on_limit = wait_on_limit
 
     @classmethod
     def create(
@@ -69,17 +89,23 @@ class SnipeItAPIClient:
         base_url: str,
         api_key: str,
         requests_per_minute: int = 120,
+        *,
+        wait_on_limit: bool = False,
     ) -> SnipeItAPIClient:
         """Factory: create a client with a new ``httpx.AsyncClient``.
 
         Convenience constructor for production use. For testing, inject
-        the client directly via the constructor.
+        the client directly via the constructor. The client shares the
+        worker's limiter for this API key on this Snipe-IT instance (see
+        :func:`rate_limiter_for`), so every client using the key spends one
+        budget.
 
         Args:
             base_url: Snipe-IT instance base URL
                 (e.g. ``https://snipeit.example.com``).
             api_key: Snipe-IT personal access token (API key).
             requests_per_minute: Rate limit for pre-emptive throttling.
+            wait_on_limit: See the class docstring.
         """
         client = httpx.AsyncClient(
             base_url=f"{base_url.rstrip('/')}/api/v1/",
@@ -92,7 +118,8 @@ class SnipeItAPIClient:
         )
         return cls(
             client=client,
-            rate_limiter=SnipeItRateLimiter(requests_per_minute=requests_per_minute),
+            rate_limiter=rate_limiter_for(base_url, api_key, requests_per_minute),
+            wait_on_limit=wait_on_limit,
         )
 
     # -- Public API methods --
@@ -490,7 +517,7 @@ class SnipeItAPIClient:
         path: str,
         params: dict[str, Any] | None = None,
     ) -> Any:
-        """Execute a GET request with rate limiting.
+        """Execute a GET request.
 
         Args:
             path: API path relative to base URL (e.g. ``hardware``).
@@ -501,78 +528,69 @@ class SnipeItAPIClient:
         Returns:
             Parsed JSON response body.
         """
-        # Pre-emptive rate limit check and record
-        self._rate_limiter.acquire()
-
-        response = await self._client.get(path, params=params)
-
-        _raise_for_response(response)
-
-        return response.json()
+        return await self._request("GET", path, params=params)
 
     async def _patch(
         self,
         path: str,
         json_data: dict[str, Any],
     ) -> Any:
-        """Execute a PATCH request with rate limiting.
-
-        Args:
-            path: API path relative to base URL (e.g. ``hardware/1``).
-            json_data: JSON payload for the update.
-
-        Returns:
-            Parsed JSON response body.
-        """
-        # Pre-emptive rate limit check and record
-        self._rate_limiter.acquire()
-
-        response = await self._client.patch(path, json=json_data)
-
-        _raise_for_response(response)
-
-        return response.json()
+        """Execute a PATCH request (e.g. ``hardware/1``) with a JSON payload."""
+        return await self._request("PATCH", path, json=json_data)
 
     async def _post(
         self,
         path: str,
         json_data: dict[str, Any],
     ) -> Any:
-        """Execute a POST request with rate limiting.
-
-        Args:
-            path: API path relative to base URL (e.g. ``maintenances``).
-            json_data: JSON payload for the creation.
-
-        Returns:
-            Parsed JSON response body.
-        """
-        # Pre-emptive rate limit check and record
-        self._rate_limiter.acquire()
-
-        response = await self._client.post(path, json=json_data)
-
-        _raise_for_response(response)
-
-        return response.json()
+        """Execute a POST request (e.g. ``maintenances``) with a JSON payload."""
+        return await self._request("POST", path, json=json_data)
 
     async def _delete(self, path: str) -> Any:
-        """Execute a DELETE request with rate limiting.
+        """Execute a DELETE request (e.g. ``maintenances/1``)."""
+        return await self._request("DELETE", path)
 
-        Args:
-            path: API path relative to base URL (e.g. ``maintenances/1``).
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Send one request within the rate limit and return its JSON body.
 
-        Returns:
-            Parsed JSON response body.
+        Shared by every verb, so a verb added later cannot quietly skip the
+        rate limiting or the error handling the others do.
+
+        A 429 is sent again after a wait (see ``_RATE_LIMIT_RETRIES``). That is
+        safe for a POST too: Snipe-IT's throttle rejects a request before it
+        reaches the controller. Nothing else is retried here, since a POST that
+        timed out or failed with a 5xx may have landed.
         """
-        # Pre-emptive rate limit check and record
-        self._rate_limiter.acquire()
+        send = getattr(self._client, method.lower())
+        for attempt in range(_RATE_LIMIT_RETRIES + 1):
+            if self._wait_on_limit:
+                await self._rate_limiter.wait_for_slot()
+            else:
+                self._rate_limiter.acquire()
 
-        response = await self._client.delete(path)
-
-        _raise_for_response(response)
-
-        return response.json()
+            response = await send(path, **kwargs)
+            try:
+                _raise_for_response(response)
+            except SnipeItRateLimitError as exc:
+                if attempt == _RATE_LIMIT_RETRIES:
+                    raise
+                wait = min(
+                    exc.retry_after
+                    if exc.retry_after is not None
+                    else _RATE_LIMIT_BACKOFF_BASE ** (attempt + 1),
+                    _RATE_LIMIT_MAX_WAIT,
+                )
+                logger.info(
+                    "Snipe-IT rate limited a request; retrying",
+                    method=method,
+                    path=path,
+                    wait_seconds=wait,
+                    attempt=attempt + 1,
+                )
+                await asyncio.sleep(wait)
+                continue
+            return response.json()
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _raise_for_response(response: httpx.Response) -> None:

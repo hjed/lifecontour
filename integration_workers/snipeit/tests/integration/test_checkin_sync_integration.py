@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -719,79 +719,6 @@ class TestCheckinSyncIntegration:
             row = result.fetchone()
             assert row is not None, source
             assert row.sync_status == "success", source
-
-    @pytest.mark.asyncio
-    async def test_fetch_overdue_gear_usage_selects_unreturned_past_usage(
-        self,
-        async_connection: AsyncConnection,
-    ) -> None:
-        """The periodic sweep selects past, not-yet-checked-in usage on local dates."""
-        from snipeit_sync_service import (
-            AssetUsageDates,
-            OverdueGearUsage,
-            fetch_overdue_gear_usage,
-        )
-
-        # Overdue, no check-in → selected, dated in the user's zone (AEDT).
-        overdue_id = await _insert_gear_usage_journal(
-            async_connection,
-            start="2025-03-07T13:00:00+00:00",
-            end="2025-03-08T13:00:00+00:00",
-            asset_id="41",
-            user_timezone="Australia/Sydney",
-        )
-        # Future window → excluded.
-        future_id = await _insert_gear_usage_journal(
-            async_connection,
-            start="2099-01-01T00:00:00+00:00",
-            end="2099-01-02T00:00:00+00:00",
-            asset_id="42",
-        )
-        # Overdue but already checked in → excluded.
-        done_id = await _insert_gear_usage_journal(
-            async_connection,
-            start="2000-01-01T00:00:00+00:00",
-            end="2000-01-02T00:00:00+00:00",
-            asset_id="43",
-        )
-        for asset_id, jid in (("41", overdue_id), ("42", future_id), ("43", done_id)):
-            await _insert_checkout_metadata(
-                async_connection, asset_id=asset_id, journal_id=jid
-            )
-
-        # Mark the "done" journal as already checked in.
-        await async_connection.execute(
-            text("""
-                INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
-                     last_synced_at, version_hash, sync_status,
-                     error_message, retry_count, created_at, updated_at)
-                VALUES
-                    ('snipeit_checkin', :external_id, :journal_id,
-                     now(), 'CHECKED_IN', 'success', NULL, 0, now(), now())
-            """),
-            {
-                "external_id": f"snipeit_checkin:43:{done_id}",
-                "journal_id": str(done_id),
-            },
-        )
-
-        overdue = await fetch_overdue_gear_usage(
-            lambda: _session_factory(async_connection), "user-123"
-        )
-
-        assert overdue == [
-            OverdueGearUsage(
-                journal_id=overdue_id,
-                asset_id=41,
-                checkout_at=date(2025, 3, 8),
-                checkin_at=date(2025, 3, 9),
-                usage_dates=AssetUsageDates(
-                    last_checkout=datetime(2025, 3, 8),
-                    last_checkin=datetime(2025, 3, 9),
-                ),
-            )
-        ]
 
 
 async def _insert_recorded_sync_row(

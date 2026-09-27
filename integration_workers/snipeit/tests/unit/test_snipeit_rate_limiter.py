@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from snipeit_rate_limiter import SnipeItRateLimiter, SnipeItRateLimitError
+from snipeit_rate_limiter import (
+    SnipeItRateLimiter,
+    SnipeItRateLimitError,
+    rate_limiter_for,
+)
 
 
 class TestSnipeItRateLimiter:
@@ -55,3 +59,66 @@ class TestSnipeItRateLimiter:
 
         with pytest.raises(SnipeItRateLimitError):
             limiter.acquire()
+
+
+class TestWaitForSlot:
+    """``wait_for_slot`` waits out a full window instead of raising."""
+
+    @pytest.mark.asyncio
+    async def test_returns_at_once_while_within_the_limit(self) -> None:
+        limiter = SnipeItRateLimiter(requests_per_minute=2)
+        with patch("snipeit_rate_limiter.asyncio.sleep") as sleep:
+            await limiter.wait_for_slot()
+            await limiter.wait_for_slot()
+        sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sleeps_until_the_window_resets_then_counts_the_request(
+        self,
+    ) -> None:
+        clock = [1000.0]
+        with patch("snipeit_rate_limiter.time.monotonic", side_effect=lambda: clock[0]):
+            limiter = SnipeItRateLimiter(requests_per_minute=1)
+            await limiter.wait_for_slot()
+            clock[0] += 20
+
+            async def advance(seconds: float) -> None:
+                clock[0] += seconds
+
+            with patch(
+                "snipeit_rate_limiter.asyncio.sleep", side_effect=advance
+            ) as sleep:
+                await limiter.wait_for_slot()
+
+            sleep.assert_awaited_once_with(40)
+            # The slot it waited for is taken: the next caller waits again.
+            with pytest.raises(SnipeItRateLimitError):
+                limiter.acquire()
+
+
+class TestSharedRateLimiter:
+    """Every client using one API key on one instance counts against one budget.
+
+    Snipe-IT throttles each API key, so another key on the same instance, e.g.
+    another user's, has a budget of its own.
+    """
+
+    def test_one_key_on_one_instance_shares_a_limiter(self) -> None:
+        first = rate_limiter_for("https://snipe.example.com/", "key-1")
+        assert rate_limiter_for("https://snipe.example.com", "key-1") is first
+
+    def test_another_key_on_the_same_instance_has_its_own(self) -> None:
+        assert rate_limiter_for("https://snipe.example.com", "key-1") is not (
+            rate_limiter_for("https://snipe.example.com", "key-2")
+        )
+
+    def test_another_instance_has_its_own(self) -> None:
+        assert rate_limiter_for("https://a.example.com", "key-1") is not (
+            rate_limiter_for("https://b.example.com", "key-1")
+        )
+
+    def test_the_api_key_is_not_kept_in_the_clear(self) -> None:
+        from snipeit_rate_limiter import _shared_limiters
+
+        rate_limiter_for("https://snipe.example.com", "secret-api-key")
+        assert not any("secret-api-key" in key for key in _shared_limiters)
