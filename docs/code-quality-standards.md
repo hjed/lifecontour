@@ -9,7 +9,7 @@ All linting and code quality tools in this project run the **same standardized c
 - ✅ CI Pipeline (`.github/workflows/ci.yml`)
 - ✅ Local Development Script (`./scripts/dev.sh lint`)
 - ✅ AI Guidelines (`docs/ai-guidelines.md`)
-- ✅ Pre-commit Hooks (`.pre-commit-config.yaml`)
+- ✅ Pre-commit Hooks (`.pre-commit-config.yaml`), including gitleaks secret scanning
 
 ## Virtual Environment Standardization
 
@@ -75,6 +75,46 @@ pnpm format:check     # Prettier formatting verification
 - Validate YAML/JSON/TOML syntax
 - Check for merge conflict markers
 - Prevent large files (>1MB) from being committed
+
+### Secret Scanning (gitleaks)
+
+gitleaks blocks new secrets in two places, both using the committed `.gitleaks.toml` and
+`.gitleaksignore`:
+
+- **Pre-commit:** the upstream `gitleaks` hook (`gitleaks git --pre-commit --redact --staged --verbose`)
+  scans staged changes. pre-commit builds gitleaks itself, so no separate install is needed.
+- **CI:** the `secret-scan` job scans the commits each event introduces; see
+  [CI/CD Setup → Secret scanning](ci-cd-setup.md#secret-scanning-secret-scan).
+
+The hook `rev` and `GITLEAKS_VERSION` in `ci.yml` pin the same version (the audited
+v8.30.1). Change both together; `core_shared/tests/unit/test_secret_scan.py` fails if
+they differ.
+
+**Running the gitleaks tests locally.** The `gitleaks`-marked integration tests need the
+binary on `PATH` (or in `GITLEAKS_BIN`):
+
+```bash
+v=8.30.1  # GITLEAKS_VERSION in ci.yml; check the archive against GITLEAKS_SHA256
+curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v$v/gitleaks_${v}_linux_x64.tar.gz" \
+  | tar -xz -C ~/.local/bin gitleaks
+cd core_shared && uv run pytest -m gitleaks
+```
+
+**When gitleaks flags something:**
+
+1. **A real credential:** don't allowlist it. Remove it, and if it was ever committed,
+   revoke or rotate it at the provider first. History is not rewritten, so add the
+   finding's `Fingerprint` (from a `--report-format json` report) to `.gitleaksignore`
+   and record the rotation in
+   [the credential audit](security/open-source-release-audit.md).
+2. **A false positive or a dev/test placeholder:** add it to an `[[allowlists]]` entry in
+   `.gitleaks.toml`:
+   - always set `targetRules` (a global allowlist's `paths` skip the whole file in
+     gitleaks 8.30, real keys included; a test enforces this);
+   - pair a path with a value regex under `condition = "AND"`, so a real key added to the
+     same file is still caught;
+   - `regexes` match the extracted secret, not the whole line; anchor them.
+3. Re-run `gitleaks git --redact` (or the hook) to confirm the finding is gone.
 
 ## Shared Worker Tooling Configuration
 

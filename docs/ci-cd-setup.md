@@ -31,6 +31,8 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 - `frontend-lint`: Runs ESLint, TypeScript check, and Prettier
 - `frontend-test`: Runs Jest tests with coverage
 - `build-test`: Tests Docker builds for both components
+- `secret-scan`: Runs gitleaks over the commits the event introduces; fails on any new
+  finding. See [Secret scanning](#secret-scanning-secret-scan)
 
 **Features:**
 - Parallel execution for faster feedback
@@ -65,6 +67,51 @@ job. This is deliberate to save Actions budget — do not remove it.
   Re-running the skipped PR run does not work: it replays the same event.
 - When the PR below merges, the retarget fires no CI event; the new bottom layer runs
   on its next push, or dispatch it manually.
+- **No stack layer merges without a passing `secret-scan` run on its head**, either as
+  the bottom layer or through `gh workflow run ci.yml --ref <branch>`. A dispatched run
+  scans the branch's full history, so it covers every layer below it too. The pre-commit
+  hook (and GitHub push protection once the repository is public) are backstops that do
+  not depend on CI.
+- Fork PRs are never upper layers: a PR's base must be an upstream branch, so every fork PR
+  targets `main` and runs the full in-gate CI, `secret-scan` included, once its first-run
+  workflow approval is given. External contributors submit dependent changes as sequential
+  PRs against `main`; to stack them, the maintainer pushes the layers to upstream branches.
+
+#### Secret scanning (`secret-scan`)
+
+The job installs the gitleaks CLI at the version pinned in `ci.yml` (`GITLEAKS_VERSION`,
+verified against `GITLEAKS_SHA256`) and runs `scripts/secret_scan.py` over a
+`fetch-depth: 0` checkout. The script picks the commit range from the event and runs
+`gitleaks git --redact` with the committed `.gitleaks.toml` and `.gitleaksignore`:
+
+| Event | Range scanned |
+| --- | --- |
+| `pull_request` | `base.sha..head.sha` |
+| `push` | `before..after`; the full history of `after` when `before` is the zero SHA (new branch or tag) or no longer exists (force-push) |
+| `workflow_dispatch`, `workflow_call` (release tags), anything else | the full history of `HEAD` |
+
+- It has no path filter and `needs: changes`, so it runs on every in-gate event and
+  skips on upper stack layers like every other job.
+- Before scanning, it runs the `gitleaks`-marked integration tests
+  (`core_shared/tests/integration/test_secret_scan_gitleaks.py`), which prove the committed
+  config still catches a fake AWS key, including in allowlisted files.
+- Output is redacted because Actions logs are public: a finding shows its rule, file,
+  line and commit, never the value.
+- It uses the CLI rather than `gitleaks-action`, so it needs no `GITHUB_TOKEN` or other
+  secret.
+- The pre-commit hook pins the same version; a unit test
+  (`core_shared/tests/unit/test_secret_scan.py`) fails if the two drift.
+- A finding is fixed by removing the secret (and rotating it if it was real), or, for a
+  false positive, by allowlisting it; see
+  [Code Quality Standards → Secret Scanning](code-quality-standards.md#secret-scanning-gitleaks).
+
+#### Workflow security rules
+
+- **Never use `pull_request_target` with a checkout of PR code.** It runs with the base
+  repository's secrets and a write token, so checking out and running a fork's code in it
+  hands that code the secrets.
+- Workflows that run on PRs reference no repository secrets, so fork PRs run CI unchanged.
+  The only secret in any workflow is `GITHUB_TOKEN` in `release.yml`, which runs on tags.
 
 ### 2. Security Scanning (`.github/workflows/security.yml`)
 
@@ -76,10 +123,11 @@ job. This is deliberate to save Actions budget — do not remove it.
 - `codeql-analysis`: GitHub's CodeQL analysis
 - `docker-security`: Trivy vulnerability scanning
 
-Secret scanning (gitleaks in pre-commit and a `secret-scan` CI job, added in ITER19-001 Phase 2)
-uses the committed `.gitleaks.toml` (allowlist) and `.gitleaksignore` (fingerprints of rotated
-credentials). The pre-release credential audit,
-including how to re-run it, is recorded in
+Secret scanning is not part of this workflow: it runs on every commit through the gitleaks
+pre-commit hook and the `secret-scan` job in `ci.yml` (see
+[Secret scanning](#secret-scanning-secret-scan)), using the committed `.gitleaks.toml`
+(allowlist) and `.gitleaksignore` (fingerprints of rotated credentials). The pre-release
+credential audit, including how to re-run it, is recorded in
 [Open-Source Release Credential Audit](./security/open-source-release-audit.md).
 
 ### 4. Dependency Updates (`.github/workflows/dependency-update.yml`)

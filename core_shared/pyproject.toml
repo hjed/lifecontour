@@ -89,6 +89,7 @@ addopts = [
 markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
+    "gitleaks: runs the real gitleaks binary (install it; see docs/code-quality-standards.md)",
 ]
 
 [tool.coverage.run]

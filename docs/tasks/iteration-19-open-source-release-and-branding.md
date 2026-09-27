@@ -289,7 +289,7 @@ new ones permanently.
   - Both commands and their summary counts are recorded in the audit doc.
 - **Docs:** `docs/security/open-source-release-audit.md` (new).
 
-**Phase 2 — Guardrails: gitleaks in pre-commit and CI.** PR ~120 lines.
+**Phase 2 — Guardrails: gitleaks in pre-commit and CI.** PR ~120 lines. ✅ DONE — shipped as a two-PR stack (~430 + ~270 lines, including tests). The upstream gitleaks hook and a `secret-scan` job (`needs: changes`, no path filter) both pin gitleaks v8.30.1; the CLI is sha256-verified and used rather than the Action, so no token is needed. `scripts/secret_scan.py` scans PR `base..head` and push `before..after`, and falls back to full history on dispatch, `workflow_call`, zero-SHA and force-push events. Output is redacted. Verification: the full-history scan (2,955 commits) is clean; a staged fake AWS key is blocked by the hook; gitleaks-marked integration tests in the job prove the committed allowlist still catches real-looking keys in allowlisted files. The CONTRIBUTING wording of the stack-scan rule stays with ITER19-002 Phase 4.
 
 - **Pre-commit:** add the `gitleaks` hook (pinned rev, ≥ v8.25 and the same as or newer than the audit's v8.30.1) to `.pre-commit-config.yaml`, using the
   committed config.
