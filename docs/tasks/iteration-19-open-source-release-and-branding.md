@@ -188,8 +188,11 @@ Established by reviewing the current code during spec planning:
   else waits on it until the flip.
 - **ITER19-002 (Licensing & Contributions)** is independent and can run in parallel from the
   start.
-- **ITER19-003 (Brand Identity)** is independent. Its Phase 1 SVGs are needed by ITER19-004
-  Phase 3 (README lockup).
+- **ITER19-003 (Brand Identity)**:
+  - The name-agnostic mark can be drawn at any time, but Phase 1 **merges only after the name
+    adoption gate** (ITER19-004 Phase 0), because it commits the "Lifecontour" wordmark in
+    `lockup.svg` and the brand guide.
+  - Phase 1's SVGs are needed by ITER19-004 Phase 3 (the README lockup).
 - **ITER19-004 (Rename)** requires the **name adoption gate** (Phase 0, manual) before any rename
   PR merges. Phase 3 needs ITER19-003 Phase 1, and Phase 4 follows Phase 1.
 - **ITER19-005 (Repository Rename & Go Public)** comes last.
@@ -200,7 +203,7 @@ Established by reviewing the current code during spec planning:
 |---|---|---|
 | ITER19-001 Credential Audit & Guardrails | — | -002, -003, -004 |
 | ITER19-002 Licensing & Contributions | — | -001, -003, -004 |
-| ITER19-003 Brand Identity | — | -001, -002, -004 (Phases 1–2) |
+| ITER19-003 Brand Identity | Name adoption gate (-004 P0), for P1's wordmark | -001, -002, -004 (Phases 1–2) |
 | ITER19-004 Rename to Lifecontour | Name adoption gate; -003 P1 (for P3); P1 (for P4) | -001, -002 |
 | ITER19-005 Repository Rename & Go Public | -004 (P1); all + -001 gate (P2) | — |
 
@@ -209,8 +212,9 @@ flowchart LR
   A1[001 P1 history audit] --> A3[001 P3 GitHub-side audit]
   A1 --> A2[001 P2 gitleaks guardrails]
   B1[002 P1 LICENSE] --> B2[002 P2 SPDX, TRADEMARKS, CoC, SECURITY] --> B3[002 P3 licence audit] --> B4[002 P4 CONTRIBUTING + CLA]
-  C1[003 P1 brand SVGs] --> C2[003 P2 app icons]
-  G[004 P0 name gate] --> D1[004 P1 frontend rename]
+  G[004 P0 name gate] --> C1[003 P1 brand SVGs + wordmark]
+  C1 --> C2[003 P2 app icons]
+  G --> D1[004 P1 frontend rename]
   G --> D2[004 P2 backend/MCP/worker rename]
   C1 --> D3[004 P3 Python packages + docs]
   G --> D3
@@ -301,6 +305,15 @@ new ones permanently.
   - **push:** `before..after`;
   - **tag** (via `release.yml:21`) and **workflow_dispatch** (upper stack layers): the full
     history of the ref. The allowlist and ignore file keep this clean.
+- **Stacked PRs.** The job inherits the stack gate, so upper layers skip it. The gate stays as it
+  is (AGENTS.md). The rule instead is that **no stack layer merges without a passing
+  `secret-scan` run on its head**: either as the bottom layer, or via
+  `gh workflow run ci.yml --ref <branch>`. Dispatching an upper layer scans its full history, so
+  it covers every layer below it too.
+  - `docs/ci-cd-setup.md` and CONTRIBUTING state this rule.
+  - The maintainer confirms it in the PR checklist.
+  - The pre-commit hook and, after the flip, GitHub push protection remain as backstops that do
+    not depend on CI.
 - If the gitleaks GitHub Action is chosen over the CLI, it needs `GITHUB_TOKEN`. That works on
   fork PRs (read-only) and is recorded against the "no repository secrets on PRs" invariant. The
   CLI avoids the question.
@@ -310,8 +323,9 @@ new ones permanently.
   - In CI: the job passes on the phase's own PR.
 - **Docs:**
   - `docs/code-quality-standards.md`: the new hook, and how to allowlist a false positive.
-  - `docs/ci-cd-setup.md`: the `secret-scan` job, plus the rule "never use `pull_request_target`
-    with a checkout of PR code".
+  - `docs/ci-cd-setup.md`: the `secret-scan` job; the rule that every stack layer needs a passing
+    scan on its head before it merges; and the rule "never use `pull_request_target` with a
+    checkout of PR code".
 
 **Phase 3 — GitHub-side content audit.** PR ~80 lines (audit record only).
 
@@ -420,9 +434,11 @@ compatibility, protect the name and logo, and publish a CLA-backed contribution 
   Apache-2.0; the Inter font is OFL.
 - Keep the OpenStreetMap ODbL attribution (`osm_tile_source.py:40`).
 - Any incompatible or unknown licence is raised to the owner and blocks ITER19-005 Phase 2.
-- **Verification:** the per-ecosystem totals equal the package counts in the lockfiles
-  (`backend/uv.lock`, the `core_shared` and worker locks, and the production tree of
-  `pnpm-lock.yaml`).
+- **Verification:** the per-ecosystem totals equal the **resolved production dependency sets**,
+  not the whole lockfiles, which also hold dev-only tools such as pytest, mypy and ruff:
+  - `uv export --no-dev --frozen` for the backend, `core_shared` and each worker;
+  - `pnpm list --prod --depth Infinity --json`, de-duplicated, for the frontend.
+  - Record the commands and counts in the audit doc.
 
 **Phase 4 — CONTRIBUTING, CLA, templates.** PR ~350 lines.
 
@@ -435,14 +451,16 @@ compatibility, protect the name and logo, and publish a CLA-backed contribution 
     gates, and discloses AI assistance; agents follow `AGENTS.md`;
   - test-first; rebase, never merge `main`; pre-commit;
   - quality commands, linking `docs/code-quality-standards.md` and the testing strategy;
-  - the stacked-PR note: only the bottom layer runs CI, and the maintainer dispatches upper layers.
+  - the stacked-PR note: only the bottom layer runs CI, and the maintainer dispatches upper
+    layers. No layer merges without a passing `secret-scan` on its head.
 - **`CLA.md`:** an individual CLA adapted from the Apache ICLA. The contributor grants the owner a
   perpetual, worldwide, royalty-free, irrevocable copyright and patent licence, including the
   right to sublicense and relicense under any terms, and keeps their own copyright. Include a
   short plain-English summary.
 - **`.github/pull_request_template.md` (extend):** linked issue, diff size, tests run, an
   AI-assistance disclosure with "I reviewed every AI-generated line" and "automated review run",
-  and CLA acknowledgement.
+  CLA acknowledgement, and a maintainer checkbox: "`secret-scan` passed on this head (bottom
+  layer or dispatched)".
 - **`.github/ISSUE_TEMPLATE/` (extend):** `feature_request.md` becomes the "discuss first"
   proposal. Add `config.yml` that disables blank issues and links security reports to
   `SECURITY.md`.
@@ -464,7 +482,8 @@ dark.
 **Specification Reference:**
 - [Part 5: Brand Identity](../product-specifications/open-source-release-and-branding-product-specification.md#part-5-brand-identity)
 
-**Dependencies:** None.
+**Dependencies:** The name adoption gate (ITER19-004 Phase 0) before Phase 1 merges, because it
+commits the "Lifecontour" wordmark. Drafting the mark can start earlier.
 
 **Deliverable:**
 
@@ -692,7 +711,8 @@ repository's protections, and flip visibility.
   URLs are updated.
 - A release produces `ghcr.io/hjed/lifecontour-*` images. Production is redeployed from them and
   verified. The old packages are kept for rollback.
-- The app shows a "Source code" link to the public repository (AGPL §13).
+- The app shows a "Source code" link to the public repository (AGPL §13) on the public login
+  page and in the user menu, so it can be reached signed in or out.
 - The GHCR packages are public, linked to the repository.
 - After the flip: secret scanning and push protection, private vulnerability reporting, and
   Dependabot alerts are enabled. A ruleset on `main` requires PRs, passing checks, and the CLA
@@ -708,8 +728,11 @@ repository's protections, and flip visibility.
   - `git remote set-url` in each local checkout and worktree.
   - Re-bind the SonarCloud project and update its key.
 - **In the PR:**
-  - `SOURCE_CODE_URL` in `frontend/src/lib/constants.ts`, and a "Source code" item in
-    `components/auth/UserMenu.tsx` (an external link, `rel="noopener noreferrer"`).
+  - `SOURCE_CODE_URL` in `frontend/src/lib/constants.ts`, and a "Source code" link on **both**
+    surfaces a network user can reach:
+    - the **login page**, which is public, so unauthenticated visitors can reach it;
+    - `components/auth/UserMenu.tsx`, for signed-in users.
+    Both are external links with `rel="noopener noreferrer"`.
   - Update the repository-URL text:
     - `docs/mcp-setup.md:155`;
     - `cd personal-management-system` at `README.md:20`, `release.yml:194` and
@@ -720,8 +743,11 @@ repository's protections, and flip visibility.
 - **Tests (red first):**
   - RTL, **new** `components/auth/__tests__/UserMenu.test.tsx` (none exists today): `UserMenu`
     renders a "Source code" link to `SOURCE_CODE_URL` that opens in a new tab.
-  - e2e, **new** in an app-shell spec: open the user menu and assert the link is visible with the
-    right href, on `firefox` and `Mobile Chrome`. No existing e2e opens the user menu.
+  - RTL: `LoginPage.test.tsx` asserts that the login page renders the same link.
+  - e2e, on `firefox` and `Mobile Chrome`:
+    - in `auth/login.spec.ts`, **signed out**, the login page shows the link with the right href;
+    - in an app-shell spec (new; no existing e2e opens the user menu), open the user menu and
+      assert the link.
 - **After merge (manual):**
   - Tag a release, and confirm `release.yml` publishes `ghcr.io/hjed/lifecontour-*`.
   - Update the production deployment's image references and redeploy.
@@ -800,7 +826,7 @@ Planning decisions made in this document (not requiring product input, recorded 
 |---|---|---|---|---|
 | ITER19-001: Credential Audit & Guardrails | Audit record, `.gitleaks.toml`, gitleaks pre-commit + CI | — | — | — |
 | ITER19-002: Licensing & Contributions | LICENSE/SPDX, licence audit, TRADEMARKS, CoC, SECURITY, CONTRIBUTING, CLA, templates | — | — | — |
-| ITER19-003: Brand Identity | `branding/` assets + guide, app icons | ✅ | — | — |
+| ITER19-003: Brand Identity | `branding/` assets + guide, app icons | ✅ | — | Name gate (-004 P0) |
 | ITER19-004: Rename to Lifecontour | Name everywhere (UI, API, MCP, workers, packages, design-sync), from one constant per stack | ✅ | ✅ (server name) | Name gate; -003 P1 |
 | ITER19-005: Repository Rename & Go Public | Repo/images/deploy renamed, source link, public with protections | ✅ | — | All |
 
@@ -819,7 +845,7 @@ Planning decisions made in this document (not requiring product input, recorded 
 
 1. Start ITER19-001 Phase 1 and ITER19-004 Phase 0 immediately; the credential audit and the name
    gate are the two long-lead items.
-2. Run ITER19-002 and ITER19-003 in parallel.
+2. Run ITER19-002 in parallel. Run ITER19-003 once the name gate has passed.
 3. Then ITER19-004 Phases 1–4.
 4. Then ITER19-005 Phase 1, with the deploy step.
 5. ITER19-005 Phase 2 flips the repository last.

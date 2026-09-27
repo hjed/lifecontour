@@ -114,8 +114,8 @@ The project intends to be AGPL, but it has never applied a licence. There is no 
   `CONTRIBUTING.md`. `LICENSE` stays byte-identical to the GNU text, with no preamble. Per-file
   headers are **not** required.
 - **AGPL §13 source offer:** the app shows a "Source code" link, pointing to the public repository,
-  in an always-reachable place (settings/about or the user menu). This makes it easy for anyone
-  running a modified copy to comply.
+  on the public login page and in the user menu, so it can be reached signed in or out. This makes
+  it easy for anyone running a modified copy to comply.
 - **Dependency licence audit:** every runtime dependency (Python and npm) is checked for
   compatibility with AGPL-3.0, and the result is recorded. Any incompatible dependency blocks the
   release until it is replaced.
@@ -271,6 +271,8 @@ for the audit) found:
 
 - A **gitleaks pre-commit hook** in `.pre-commit-config.yaml`.
 - A **gitleaks CI job** in `ci.yml` behind `needs: changes`, which fails the PR on a new finding.
+  Upper stack layers skip CI by design, so no layer merges without a passing scan on its head,
+  either as the bottom layer or dispatched manually.
 - After the flip:
   - **GitHub secret scanning and push protection** are enabled (free for public repositories).
   - **Private vulnerability reporting** and **Dependabot alerts** are enabled.
