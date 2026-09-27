@@ -90,16 +90,6 @@ jest.mock('@/lib/constants', () => ({
     SESSION: 'auth_session',
     CSRF_TOKEN: 'csrf_token',
   },
-  // Product naming and UI copy come from the real module so they cannot drift
-  APP_NAME:
-    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
-      .APP_NAME,
-  APP_TAGLINE:
-    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
-      .APP_TAGLINE,
-  UI_TEXT:
-    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
-      .UI_TEXT,
   VALIDATION_MESSAGES: {
     REQUIRED_FIELD: 'This field is required',
   },
