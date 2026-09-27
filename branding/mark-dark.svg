@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="lifecontour-mark-title" aria-describedby="lifecontour-mark-desc">
+  <title id="lifecontour-mark-title">Lifecontour</title>
+  <desc id="lifecontour-mark-desc">An open logbook with a person on the left page and a winding creek on the right page.</desc>
+  <style>
+    .book { stroke: #8CC7B2; }
+    .creek { stroke: #7CC4E4; }
+    .person { stroke: #E8B27A; }
+    circle.person { fill: #E8B27A; }
+  </style>
+  <g fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path class="book" d="M32 17C24 11 14 10 6 12V48C14 46 24 47 32 53C40 47 50 46 58 48V12C50 10 40 11 32 17V53"/>
+    <circle class="person" cx="19" cy="24" r="4"/>
+    <path class="person" d="M11 41C11 32 27 32 27 41"/>
+    <path class="creek" d="M51 17C38 21 54 29 45 33S36 41 49 45"/>
+  </g>
+</svg>

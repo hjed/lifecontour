@@ -322,7 +322,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md) · [Home Dashboard Wireframe](./design/home-dashboard-wireframe.md) (W1–W33, cited by the dashboard acceptance criteria)
 
 ### [Iteration 19: Open-Source Release & Branding](./tasks/iteration-19-open-source-release-and-branding.md)
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); ITER19-002 Phase 1 (`LICENSE`) done; ITER19-001 Phase 1 (history audit) done, gate met
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); ITER19-002 Phase 1 (`LICENSE`) done; ITER19-001 Phase 1 (history audit) done, gate met; ITER19-003 Phase 1 (brand assets and guide) done
 **Dependencies:** None on product features. It operates on repository metadata, user-facing naming, and the GitHub/GHCR/SonarCloud configuration
 **Goal:** Publish the repository as the open-source project **Lifecontour**: AGPL-3.0-or-later with a CLA-backed contribution model, a credential-clean history with permanent secret scanning, the new name everywhere the product names itself, and a line-art brand mark as the favicon
 
