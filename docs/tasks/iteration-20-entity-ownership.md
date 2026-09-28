@@ -261,18 +261,32 @@ Producers gain the field first. The backend keeps ignoring it until Phase 3.
 
 #### Phase 3: Owned contacts — schema and writers (migrate + contract on the entity)
 
-**PR Size:** ~500 lines. **If over budget, split:** 3a = migration + migration test + table/repository
-mapping; 3b = creation sites, events, inbound consumer, entity contract. 3a alone is green because
-the column is backfilled and the repository writes `user_id` from the entity's transitional field.
+**PR Size:** ~500 lines. **If over budget, split so that `NOT NULL` lands with the writers, never
+before them:** 3a = migration adding the column **nullable**, the backfill, the index, the table /
+repository mapping, the fixtures and the migration test; 3b = every creation site, the events, the
+inbound consumer, the entity contract **and** a second migration that applies `SET NOT NULL`. 3a
+alone is green and deployable because a REST/MCP contact created before 3b still inserts with
+`user_id = NULL` (the transitional entity field) and is picked up by 3b's `SET NOT NULL` step only
+after that migration re-runs the same owner assignment over rows still `NULL`. What is never allowed
+is the reverse: a `NOT NULL` column in production while a construction site can still produce
+`None`.
 
 > **Migration number:** indicative `0121_add_user_id_to_contacts.py` (`down_revision = "0120"`).
 
 - [ ] Migration `0121`: add `user_id VARCHAR(50)` nullable → assign every row per the `0106`
-  derivation (single distinct non-synthetic owner across `REPAIRED_TABLES`; a dev-only database uses
-  its synthetic owner; no contacts → no-op; >1 real owner → `RuntimeError` naming them unless
-  `-x contacts_owner=<id>` is passed) → `ALTER COLUMN SET NOT NULL` → `idx_contacts_user_id`.
-  Downgrade drops the index and column. Logs every decision through the `alembic.runtime.migration`
-  logger.
+  derivation, **widened to every owner-bearing table as evidence**: `0106`'s `REPAIRED_TABLES` plus
+  the credential and settings tables it deliberately left out of *repair* (`user_google_auth`,
+  `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `user_settings`, `sync_jobs`,
+  `calendar_sync_tokens`, `pending_entity_mappings`, `contact_suggestion_ignores`). Those are only
+  ever written by the authenticated user, which is exactly what makes them evidence of who that user
+  is, and they cover the installation `0106` could not: one that has only ever used contacts (through
+  a Google sync, say) and holds no journal, task or calendar. Rules: a single distinct non-synthetic
+  owner → assign; only a synthetic owner (dev, CI, e2e) → assign it; no contacts → no-op; contacts
+  but **no owner evidence at all, or more than one real owner** → `RuntimeError` naming what was
+  found, unless `-x contacts_owner=<id>` is passed → `ALTER COLUMN SET NOT NULL` →
+  `idx_contacts_user_id`. Downgrade drops the index and column. Logs every decision through the
+  `alembic.runtime.migration` logger. The derivation is written once as a helper module beside the
+  migrations so `0122`–`0125` reuse it rather than re-deriving.
 - [ ] `contact_tables.py`: `user_id` column. `SqlContactRepository.save` writes it; the three row
   mappers (`contact_repository.py:78,1528,1665`) and `upcoming_important_date_repository.py:161`
   read it.
@@ -298,8 +312,10 @@ the column is backfilled and the repository writes `user_id` from the entity's t
 **Required Test Coverage:**
 - [ ] **Integration (migration):** `backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py`
   on the `test_reassign_synthetic_owner_migration.py` harness — rows assigned to the single real
-  owner; dev-only database assigned to `dev-user`; ambiguous ownership refuses; `-x contacts_owner`
-  overrides; empty database upgrades and downgrades; existing rows otherwise untouched.
+  owner; owner found from a credential/settings table alone (contacts-only installation);
+  dev-only database assigned to `dev-user`; contacts with no owner evidence refuse; ambiguous
+  ownership refuses; `-x contacts_owner` overrides both refusals; empty database upgrades and
+  downgrades; existing rows otherwise untouched.
 - [ ] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
   (`test_contact_repository_integration.py`).
 - [ ] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
@@ -679,12 +695,23 @@ is keyed by the owner; no runtime single-user fallback remains.
   `repoint_contact_links` write `user_id` (from the entity being linked).
 - [ ] Worker upserts stamp the job's `user_id`: Google `_upsert_sync_metadata`, Immich
   `_upsert_sync_metadata` and album `upsert_link`, Snipe-IT and Strava sync-metadata writes.
+- [ ] **No cross-owner overwrite while the key is still global.** Until Phase 15 swaps the unique
+  key, an upsert still conflicts on `(integration_source, external_id)`, and today's
+  `ON CONFLICT … DO UPDATE` would hand user A's link to user B (it already re-points `internal_id`
+  that way — this is the existing behaviour, not a regression, but stamping owners must not make it
+  silent). Every writer therefore updates only when the existing row has no owner yet or the same
+  owner: the backend `upsert` raises the existing `IntegrationLinkCollision`, and the worker SQL adds
+  `WHERE sync_metadata.user_id IS NULL OR sync_metadata.user_id = EXCLUDED.user_id` to its
+  `DO UPDATE` and treats zero affected rows as a collision (logged, the item marked failed, the sync
+  continues). Phase 15's key swap removes the limitation.
 - [ ] Reads unchanged in this phase (still by `(source, external_id)`).
 
 **Required Test Coverage:**
 - [ ] **Integration (migration, first):** each entity type backfills from its owner; orphan rows
   take the derived owner and are logged; re-run is idempotent; downgrade drops the column.
-- [ ] **Integration (backend repository) + unit (each worker):** every writer sets `user_id`.
+- [ ] **Integration (backend repository) + unit (each worker):** every writer sets `user_id`; an
+  upsert for the same `(source, external_id)` by a different owner raises / reports a collision and
+  leaves the first owner's row intact.
 
 **E2E:** not applicable.
 

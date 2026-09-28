@@ -194,10 +194,13 @@ parent that does (all `journal_*` data tables, routes, task link tables, templat
 A migration adds `contacts.user_id`, assigns every existing row to the site's one real user, then
 makes the column `NOT NULL` and indexes it. The owner is derived exactly as migration `0106` does:
 the single distinct `user_id` across the owner-bearing tables that is not a synthetic identity
-(`debug-client`, `dev-user`). A database whose only owner is a synthetic identity (local dev, CI,
-e2e) assigns rows to that identity. A database with no contacts does nothing. A database with more
-than one real owner **refuses** and names them, unless the operator passes the owner explicitly
-(`alembic -x contacts_owner=<user_id>`), matching the `-x` precedent of migration `0092`.
+(`debug-client`, `dev-user`) — including the credential and settings tables, which `0106` excluded
+from *repair* but which are the evidence that covers an installation that has only ever used
+contacts. A database whose only owner is a synthetic identity (local dev, CI, e2e) assigns rows to
+that identity. A database with no contacts does nothing. A database with contacts but no owner
+evidence, or with more than one real owner, **refuses** and names what it found, unless the
+operator passes the owner explicitly (`alembic -x contacts_owner=<user_id>`), matching the `-x`
+precedent of migration `0092`.
 
 ### Outcome
 
