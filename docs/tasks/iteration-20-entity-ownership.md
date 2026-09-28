@@ -136,6 +136,11 @@ Established by reviewing the current code during spec planning:
   (`worker.py:142`). Immich `process_contact_event` prefers `event_data["user_id"]` and otherwise
   falls back to `get_all_user_ids` (`integration_workers/immich/worker.py:659`, comment "single-user
   by design"); `_fetch_user_contacts` reads all contacts (`immich_sync_service.py:848`).
+  **`ContactMerged` never reaches that generic branch:** both workers dispatch it first to a
+  dedicated `_process_contact_merged_event` (Google `worker.py:3476` → `:3338`; Immich
+  `worker.py:633` → `:535`). The Google merge handler selects every `user_google_auth` row
+  (`:3383`) and runs the remote delete of the source contact for each — a destructive cross-user
+  request unless it, too, is scoped.
 - **Inbound consumer** (`backend/app/core/integrations/outbox_event_processor.py:646`): idempotency by
   `sync_metadata.find_by_external_id(source, external_id)` (global), email reconciliation via
   `find_by_email` (global), `_get_or_create_tag` (global, `:443`).
@@ -662,12 +667,21 @@ is keyed by the owner; no runtime single-user fallback remains.
   the "single-user by design" comment; skip without an owner.
 - [ ] Immich `_fetch_user_contacts(user_id)` (`immich_sync_service.py:843`) filters by owner so the
   name-match auto-link (`:639`) only considers the owner's contacts; `ContactNameMatcher` unchanged.
+- [ ] **Merge events, in both workers.** `_process_contact_merged_event` (Google `worker.py:3338`,
+  Immich `worker.py:535`) is dispatched ahead of the generic branch and has its own account loop, so
+  it is scoped separately: it reads `event_data["user_id"]` (the survivor's owner, carried on
+  `ContactMerged` since Phase 3), reconciles the source's remote record only in **that** user's
+  account(s), and skips with a warning when the event names no owner. The remote delete of a
+  merged-away contact is the one destructive outbound call in these workers, so it is the one that
+  must never run against another user's account.
 
 **Required Test Coverage:**
 - [ ] **Unit (Google, first):** two `user_google_auth` rows, an event owned by one → exactly one
-  push; no owner → skipped, no API call (`test_worker.py`).
-- [ ] **Unit (Immich):** same shape; auto-link candidates exclude another user's contact
-  (`test_immich_sync_service.py`).
+  push; no owner → skipped, no API call (`test_worker.py`). The same two cases for a
+  `ContactMerged` event: exactly one remote delete, against the owner's account only; no owner →
+  no delete call.
+- [ ] **Unit (Immich):** same shape for both the generic branch and `_process_contact_merged_event`;
+  auto-link candidates exclude another user's contact (`test_immich_sync_service.py`).
 - [ ] **Integration (workers):** `find_contacts_to_push` returns only the owner's contacts
   (`test_tag_push_integration.py` / the outbound push integration suite).
 
