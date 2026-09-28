@@ -1,6 +1,7 @@
 """Unit tests for application settings (app.infrastructure.config)."""
 
 import pytest
+from core_shared.product import PRODUCT_NAME, PRODUCT_URL
 from pydantic import ValidationError
 
 from app.infrastructure.config import Settings
@@ -142,3 +143,13 @@ class TestTestOnlySwitches:
         settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
         assert settings.enabled_test_only_switches == []
+
+
+class TestLogbookTileUserAgent:
+    """OSM's tile policy needs an agent that names the product and a contact URL."""
+
+    def test_default_identifies_product_and_project_url(self) -> None:
+        settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+        assert PRODUCT_NAME in settings.logbook_tile_user_agent
+        assert PRODUCT_URL in settings.logbook_tile_user_agent

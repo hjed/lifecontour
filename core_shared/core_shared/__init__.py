@@ -1,5 +1,5 @@
 """
-Core shared package for Personal Management System integrations.
+Core shared package for Lifecontour integrations.
 
 This package contains shared models, database utilities, and common patterns
 used across the main application and integration workers.
@@ -59,6 +59,7 @@ from core_shared.models import (
     SyncMetadata,
     SyncStatus,
 )
+from core_shared.product import PRODUCT_NAME, PRODUCT_TAGLINE, PRODUCT_URL
 from core_shared.stream_client import StreamClient, StreamEvent
 from core_shared.stream_consumer import (
     EventHandler,
@@ -138,6 +139,10 @@ __all__ = [
     "DEFAULT_KEEP_RESULT",
     "DEFAULT_MAX_TRIES",
     "DEFAULT_HEALTH_CHECK_INTERVAL",
+    # Product identity
+    "PRODUCT_NAME",
+    "PRODUCT_TAGLINE",
+    "PRODUCT_URL",
     # Stream consumer / route registration
     "StreamClient",
     "StreamConsumer",

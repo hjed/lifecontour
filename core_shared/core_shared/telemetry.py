@@ -1,5 +1,5 @@
 """
-OpenTelemetry instrumentation setup for Personal Management System.
+OpenTelemetry instrumentation setup for Lifecontour.
 """
 
 from collections.abc import Callable

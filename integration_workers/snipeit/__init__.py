@@ -1,1 +1,1 @@
-"""Snipe-IT Integration Worker for Personal Management System."""
+"""Snipe-IT Integration Worker for Lifecontour."""

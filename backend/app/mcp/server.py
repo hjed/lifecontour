@@ -9,6 +9,7 @@ instructions.
 import json
 
 import structlog
+from core_shared.product import PRODUCT_NAME
 from dishka import AsyncContainer
 from dishka.integrations.starlette import setup_dishka
 from fastmcp import FastMCP
@@ -110,9 +111,9 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
 
     # Create FastMCP server with AI-optimized instructions
     mcp: FastMCP[None] = FastMCP(
-        name="Personal Management System",
-        instructions="""
-        This server provides AI access to personal management data and operations.
+        name=PRODUCT_NAME,
+        instructions=f"""
+        This server provides AI access to the data and operations of a {PRODUCT_NAME} instance.
 
         Available domains:
         - Contacts: Retrieve contact information, search contacts, manage relationships

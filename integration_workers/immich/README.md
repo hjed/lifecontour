@@ -1,7 +1,7 @@
 # Immich Integration Worker
 
-ARQ-based worker for syncing Immich people/albums with the Personal Management
-System (two-way contact sync, album-as-journal import, and outbound contact
+ARQ-based worker for syncing Immich people/albums with Lifecontour (two-way
+contact sync, album-as-journal import, and outbound contact
 edits).
 
 ## Architecture

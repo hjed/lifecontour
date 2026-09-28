@@ -1,5 +1,5 @@
 """
-Shared database utilities for Personal Management System integrations.
+Shared database utilities for Lifecontour integrations.
 
 Provides common database connection and session management utilities
 that can be used across the main application and integration workers.

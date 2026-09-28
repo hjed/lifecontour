@@ -1,5 +1,5 @@
 """
-Personal CRM & Journal System - FastAPI Backend
+Lifecontour - FastAPI Backend
 
 Main application entry point with FastAPI configuration,
 middleware setup, and route registration.
@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
+from core_shared.product import PRODUCT_NAME, PRODUCT_TAGLINE
 from core_shared.telemetry import setup_telemetry
 from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
@@ -66,7 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings: Settings = app.state.settings
     logger = structlog.get_logger()
 
-    logger.info("Starting Personal Management System Backend", version="0.1.0")
+    logger.info("Starting backend", product=PRODUCT_NAME, version="0.1.0")
     if settings.enabled_test_only_switches:
         logger.warning(
             "Test-only switches are enabled; they must never be set outside test/CI",
@@ -277,7 +278,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await container.close()
         logger.info("Dishka container closed")
 
-        logger.info("Shutting down Personal Management System Backend")
+        logger.info("Shutting down backend", product=PRODUCT_NAME)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -316,8 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             combined_lifespan = combine_lifespans(lifespan, mcp_lifespan)
 
     app = FastAPI(
-        title="Personal CRM & Journal System",
-        description="A personal relationship management and journaling system with AI integration",
+        title=PRODUCT_NAME,
+        description=PRODUCT_TAGLINE,
         version="0.1.0",
         docs_url="/api/docs" if settings.debug else None,
         redoc_url="/api/redoc" if settings.debug else None,

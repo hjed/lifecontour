@@ -1,10 +1,10 @@
 # Core Shared Package
 
-Shared models and utilities for Personal Management System integrations.
+Shared models and utilities for Lifecontour integrations.
 
 ## Overview
 
-The `core_shared` package contains SQLAlchemy models, database utilities, and common patterns used across the main Personal Management System application and integration workers. This package enables:
+The `core_shared` package contains SQLAlchemy models, database utilities, and common patterns used across the main Lifecontour application and integration workers. This package enables:
 
 - **Shared Data Models**: Common SQLAlchemy models for sync metadata and external references
 - **Database Utilities**: Connection management and engine configuration

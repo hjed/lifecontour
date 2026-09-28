@@ -1,7 +1,7 @@
 # Snipe-IT Integration Worker
 
 ARQ-based worker for syncing Snipe-IT assets and maintenance records with the
-Personal Management System (bidirectional gear sync, maintenance-as-journal
+Lifecontour (bidirectional gear sync, maintenance-as-journal
 import, and gear checkout sync).
 
 ## Architecture

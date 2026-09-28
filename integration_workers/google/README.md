@@ -1,6 +1,6 @@
 # Google Contacts Integration Worker
 
-ARQ-based worker for syncing contacts between the Personal Management System and Google Contacts.
+ARQ-based worker for syncing contacts between Lifecontour and Google Contacts.
 
 ## Features
 

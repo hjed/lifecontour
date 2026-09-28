@@ -1,5 +1,5 @@
 """
-Database utilities for Personal Management System integrations.
+Database utilities for Lifecontour integrations.
 
 Provides both sync and async database connection and session management
 utilities for the main application and integration workers.

@@ -1,6 +1,6 @@
 # Integration Tests
 
-This document describes how to run integration tests for the Personal Management System backend.
+This document describes how to run integration tests for Lifecontour backend.
 
 ## Prerequisites
 
