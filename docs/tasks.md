@@ -40,6 +40,7 @@ Read these first when working on the active product-alignment streams:
 - **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
 - **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven activity history across contacts and journals
 - **[Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md)** - the journal-anchored Tasks entity and the home dashboard that replaces the placeholder home page
+- **[Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)** - every entity owned by exactly one user (contacts first), owner-scoped reads/writes across REST, MCP, search and integrations, and the single-user data migration
 
 ---
 
@@ -336,6 +337,20 @@ Read these first when working on the active product-alignment streams:
 - ITER19-005: Repository rename and go public — `hjed/lifecontour`, GHCR images and prod deploy moved, "Source code" link (AGPL §13), CLA Assistant, rulesets, public GHCR packages, visibility flip, secret scanning and push protection
 
 **Reference:** [Open-Source Release & Branding Product Specification](./product-specifications/open-source-release-and-branding-product-specification.md)
+
+### [Iteration 20: Entity Ownership (user_id)](./tasks/iteration-20-entity-ownership.md)
+**Status:** 🔴 PLANNED — 5 sub-iterations, 17 phases (one PR each); per-phase progress is tracked in the [iteration document](./tasks/iteration-20-entity-ownership.md)
+**Dependencies:** Iteration 15 (`sync_metadata` as the sole link store), Iteration 18 (owner-scoped repository contract; recorded contact-ownership divergence), Iteration 13 (contact merge), Iteration 12 (event-driven history), Iteration 14 (shared worker fixtures), migration `0106` (owner derivation)
+**Goal:** Give every user-created or user-synced entity exactly one owner, enforced in SQL on every read and write across REST, MCP, search, history, dashboards and all four integration workers — starting with **contacts** — and assign every existing row to the site's one real user
+
+**Sub-Iterations:**
+- ITER20-001: Contacts own a user — consolidated test seeding, owner on the shared entity and worker sync events, `contacts.user_id` migration with the `0106` derivation, scoped repository/service/REST, REST and MCP cross-user isolation suites, owner-filtered contact search
+- ITER20-002: Lookup tables own a user — contact tags, custom date types, journal tags with `UNIQUE(user_id, name)` and owner-scoped management across REST, MCP and inbound sync
+- ITER20-003: Ownership across entities — journal participants, task contacts, relationships, merge, athlete mappings, suggestions, Immich conflicts and history treat a foreign contact as not found
+- ITER20-004: Integrations scoped to the owner — outbound pushes reach only the owner's accounts, per-user worker reads, `sync_metadata` keyed by `(user_id, integration_source, external_id)` (expand → contract), the single-user timezone fallback removed
+- ITER20-005: Closure — architecture documents, divergence resolution, grep gates
+
+**Reference:** [Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)
 
 ---
 
