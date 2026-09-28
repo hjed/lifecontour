@@ -229,6 +229,7 @@ alembic downgrade -1
 ### Development Guides
 - **[Contacts Product Specification](docs/product-specifications/contacts-product-specification.md)** - Target product behaviour for the contacts improvement stream
 - **[Journals Product Specification](docs/product-specifications/journals-product-specification.md)** - Target product behaviour for the journals improvement stream
+- **[Entity Ownership Product Specification](docs/product-specifications/entity-ownership-product-specification.md)** - Target behaviour for per-user ownership of contacts, tags and integration links
 - **[Code Quality Standards](docs/code-quality-standards.md)** - Linting, formatting, and testing standards
 - **[Testing Strategy](docs/architecture/testing-strategy.md)** - Comprehensive testing patterns and fixture-based E2E testing
 - **[E2E Testing Guide](frontend/tests/e2e/FIXTURE_SYSTEM_GUIDE.md)** - Advanced fixture system with real OAuth authentication
