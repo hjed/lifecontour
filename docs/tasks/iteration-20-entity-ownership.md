@@ -146,7 +146,21 @@ Established by reviewing the current code during spec planning:
   `find_by_email` (global), `_get_or_create_tag` (global, `:443`).
 - **`sync_metadata`** unique index `idx_sync_metadata_integration_external (integration_source, external_id)`
   (`0003_add_integration_tables.py:99`); no `user_id`. Snipe-IT asset ids are per-instance, so two
-  users' instances collide today.
+  users' instances collide today. **Seven writers name that key as their `ON CONFLICT` target:**
+  backend `SyncMetadataRepository.upsert` (`sync_metadata_repository.py:199`) and
+  `link_journal_if_unlinked` (`:634`, the additive journal-merge path, `DO NOTHING`), the album
+  `upsert_link` (`album_sync_read_repository.py:120`), Google `_upsert_sync_metadata`
+  (`google/worker.py:1369`), Immich `_upsert_sync_metadata` (`immich_sync_service.py:883`),
+  Snipe-IT (`snipeit_sync_service.py:649`) and the Strava link write. Every one must move to the
+  per-user key *before* the global index goes, or PostgreSQL rejects the write for naming a
+  conflict target that no longer exists.
+- **Outbound contact events are fourteen, not four:** `CONTACT_PUSH_EVENT_TYPES`
+  (`core_shared/core_shared/models/contacts/event_types.py:27`) routes the four lifecycle events
+  **and** `TagAssigned`, `TagRemoved`, `ContactMethodAdded/Deleted`, `ContactAddressAdded/Deleted`,
+  `ContactNoteAdded`, `ImportantDateAdded/Updated/Deleted` to both workers' `process_contact_event`.
+  Separately, Google `process_tag_event` (`google/worker.py:3071`) handles `TagUpdated` /
+  `TagDeleted` with its own every-`user_google_auth` loop (`:3103`), renaming or deleting the
+  matching contact group in each account.
 - **Timezone helper** `get_default_timezone()` (`user_settings_repository.py:79`) reads the most
   recently updated `user_settings` row; callers: `inbound_event_consumer.py:255,386`,
   `summary_consumer.py:261`. `get_timezone(user_id)` (`:72`) already exists and stays. The owner is
@@ -308,9 +322,15 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   - Inbound consumer (`outbox_event_processor.py:646, 883`): the owner is
     `payload.user_id` (or `contact_data.user_id`); missing →
     `PermanentOutboxEventProcessingError("contact sync event names no owner")`.
-- [ ] Backend events `ContactCreated`, `ContactUpdated`, `ContactDeleted`, `ContactMerged`
-  (`core/contacts/models/events.py`) gain `user_id` in `event_data`, supplied by `ContactService`
-  from the entity.
+- [ ] **Every event in `CONTACT_PUSH_EVENT_TYPES`** (`core/contacts/models/events.py` — the four
+  lifecycle events plus `TagAssigned`, `TagRemoved`, `ContactMethodAdded/Deleted`,
+  `ContactAddressAdded/Deleted`, `ContactNoteAdded`, `ImportantDateAdded/Updated/Deleted`) gains
+  `user_id` in `event_data`, supplied by the publishing service from the aggregate it has already
+  loaded. Phase 13 refuses to push an event with no owner, so a child mutation that emits only its
+  own event would otherwise stop syncing. `ContactMerged` carries the survivor's owner. A unit test
+  iterates `CONTACT_PUSH_EVENT_TYPES` and asserts each constructor's payload names `user_id`, so a
+  new pushed type cannot land without one (the subscription-list-vs-handlers assertion pattern).
+  Mechanical, ~2 lines per class; it is 3b work if the phase splits.
 - [ ] Test fixtures: `contact_fixtures.py` factories and `ContactFactory` default
   `user_id=TEST_USER_ID`; `seed_contact` (Phase 1) writes the column.
 
@@ -489,6 +509,12 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   `update_contact_tag`, `delete_contact_tag`, `merge_contact_tags` pass the acting user.
 - [ ] Inbound `_get_or_create_tag` and `_resolve_contact_tags` (`outbox_event_processor.py:443, 525`)
   resolve within the event's owner.
+- [ ] `TagUpdated` and `TagDeleted` (`core/contacts/models/events.py`) carry the tag's `user_id`, and
+  Google `process_tag_event` (`google/worker.py:3071`) is scoped **in this phase, not Phase 13**:
+  it renames or deletes the contact group only in `user_google_auth WHERE user_id = :user_id`, and
+  skips with a warning when the event names no owner. From this phase two users can hold a tag of
+  the same name, so the every-account loop would start renaming or deleting another user's group
+  the moment the migration lands; the fix cannot trail the schema change.
 - [ ] Search indexer tag-change handling unchanged (it re-fetches the contact, which now carries the
   owner).
 
@@ -501,7 +527,8 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   `CROSS_USER_REQUESTS`; assigning a foreign tag to an owned contact is 404.
 - [ ] **Integration (MCP):** tag tools added to `test_mcp_contact_ownership.py`.
 - [ ] **Unit:** processor creates the tag for the event's owner and never matches another user's
-  tag of the same name.
+  tag of the same name; Google `process_tag_event` with two `user_google_auth` rows and a
+  `TagUpdated` / `TagDeleted` owned by one → exactly one account touched; no owner → no API call.
 
 **E2E:** regression — contact tag management specs stay green.
 
@@ -703,29 +730,36 @@ is keyed by the owner; no runtime single-user fallback remains.
   entity by `internal_entity_type` (`contact` → `contacts.user_id`, `journal` → `journals.user_id`,
   `gear_item` → `gear_items.user_id` via `internal_uuid`; a NULL entity type is derived from
   `integration_source` with the `0089` mapping); rows still unresolved (orphans) take the
-  single-owner derivation or `-x sync_metadata_owner`; every unresolved row is logged. Non-unique
-  index `(user_id, integration_source, external_id)`.
-- [ ] `SyncMetadata` model column; `SyncMetadataRepository.upsert`, `upsert_contact_link`,
-  `repoint_contact_links` write `user_id` (from the entity being linked).
-- [ ] Worker upserts stamp the job's `user_id`: Google `_upsert_sync_metadata`, Immich
-  `_upsert_sync_metadata` and album `upsert_link`, Snipe-IT and Strava sync-metadata writes.
-- [ ] **No cross-owner overwrite while the key is still global.** Until Phase 15 swaps the unique
-  key, an upsert still conflicts on `(integration_source, external_id)`, and today's
-  `ON CONFLICT … DO UPDATE` would hand user A's link to user B (it already re-points `internal_id`
-  that way — this is the existing behaviour, not a regression, but stamping owners must not make it
-  silent). Every writer therefore updates only when the existing row has no owner yet or the same
-  owner: the backend `upsert` raises the existing `IntegrationLinkCollision`, and the worker SQL adds
-  `WHERE sync_metadata.user_id IS NULL OR sync_metadata.user_id = EXCLUDED.user_id` to its
-  `DO UPDATE` and treats zero affected rows as a collision (logged, the item marked failed, the sync
-  continues). Phase 15's key swap removes the limitation.
+  single-owner derivation or `-x sync_metadata_owner`; every unresolved row is logged. Then create
+  the **per-user unique index `uq_sync_metadata_user_source_external (user_id, integration_source,
+  external_id)` now**, alongside the global one — valid while the column is nullable because
+  PostgreSQL treats NULLs as distinct, and required now so that writers have a conflict target to
+  move to before Phase 15 drops the global index.
+- [ ] `SyncMetadata` model column. **Every one of the seven writers** listed in *Grounding
+  Findings* stamps `user_id` **and moves its `ON CONFLICT` target to
+  `(user_id, integration_source, external_id)`** in this phase: backend `upsert`,
+  `upsert_contact_link`, `repoint_contact_links` and `link_journal_if_unlinked` (the journal's
+  owner, read from the survivor row — this path was missed in the first draft and would otherwise
+  keep inserting owner-less rows after the backfill), the album `upsert_link`, and the Google,
+  Immich, Snipe-IT and Strava upserts (the job's user). No writer may still name the global key
+  when Phase 15 drops it.
+- [ ] **The still-present global index is the cross-owner guard.** With writers conflicting on the
+  per-user key, a same-owner re-sync updates as before, and a write for the same
+  `(integration_source, external_id)` by a *different* owner finds no per-user conflict, attempts
+  the insert, and trips `idx_sync_metadata_integration_external` — an `IntegrityError` the backend
+  surfaces as the existing `IntegrationLinkCollision` and the workers log as a failed item (the sync
+  continues). Today's `DO UPDATE` silently re-points such a row to the later writer, so this is a
+  strict improvement, and no `WHERE` clause on the update is needed.
 - [ ] Reads unchanged in this phase (still by `(source, external_id)`).
 
 **Required Test Coverage:**
 - [ ] **Integration (migration, first):** each entity type backfills from its owner; orphan rows
   take the derived owner and are logged; re-run is idempotent; downgrade drops the column.
-- [ ] **Integration (backend repository) + unit (each worker):** every writer sets `user_id`; an
-  upsert for the same `(source, external_id)` by a different owner raises / reports a collision and
-  leaves the first owner's row intact.
+- [ ] **Integration (backend repository) + unit (each worker):** every writer sets `user_id` and
+  conflicts on the per-user key (a same-owner re-sync updates in place; `link_journal_if_unlinked`
+  stamps the journal's owner); an upsert for the same `(source, external_id)` by a different owner
+  raises / reports a collision and leaves the first owner's row intact. A grep gate in the PR:
+  no `ON CONFLICT (integration_source, external_id)` remains outside `migrations/`.
 
 **E2E:** not applicable.
 
@@ -741,9 +775,12 @@ is keyed by the owner; no runtime single-user fallback remains.
 
 > **Migration number:** indicative `0126_sync_metadata_user_scoped_unique_key.py`.
 
-- [ ] Migration `0126`: `SET NOT NULL`; drop `idx_sync_metadata_integration_external`; create unique
-  `uq_sync_metadata_user_source_external (user_id, integration_source, external_id)`; drop the
-  Phase 14 non-unique index. Downgrade reverses (refusing if two owners hold the same external id).
+- [ ] Migration `0126`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
+  not-yet-deployed writer during the Phase 14 rollout); `SET NOT NULL`; drop
+  `idx_sync_metadata_integration_external`. The per-user unique index already exists and every
+  writer already conflicts on it (Phase 14), so dropping the global index invalidates no conflict
+  target and no sync write fails across the deploy. Downgrade recreates the global index (refusing
+  if two owners now hold the same external id) and makes the column nullable again.
 - [ ] `SyncMetadataRepository.find_by_external_id(user_id, source, external_id)`, `find_and_lock`,
   `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`;
   the inbound consumer's idempotency check uses the event's owner; MCP
