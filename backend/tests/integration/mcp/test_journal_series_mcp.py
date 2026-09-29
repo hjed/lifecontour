@@ -16,6 +16,11 @@ from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
+from tests.integration.series_merge_seeding import (
+    seed_member,
+    seed_series,
+    series_exists,
+)
 
 USER_ID = "test-user-123"
 
@@ -224,3 +229,68 @@ class TestJournalSeriesToolsIntegration:
         db_series = await repo.find_by_id(UUID(series_id), USER_ID)
         assert db_series is not None
         assert db_series.name == "Keep this name"
+
+
+class TestSeriesMergeToolsIntegration:
+    """The series-merge MCP tools behave like their REST counterparts."""
+
+    @pytest.mark.asyncio
+    async def test_preview_series_merge_reports_same_day_pairs(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        source_journal = await seed_member(
+            clean_database,
+            source,
+            title="Old",
+            start=datetime(2026, 8, 3, 9, tzinfo=UTC),
+        )
+        destination_journal = await seed_member(
+            clean_database,
+            destination,
+            title="New",
+            start=datetime(2026, 8, 3, 9, tzinfo=UTC),
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_tool(
+                client,
+                "preview_series_merge",
+                {
+                    "destination_series_id": str(destination),
+                    "source_series_id": str(source),
+                    "policies": {"title": "skip_if_different"},
+                },
+            )
+
+        assert "error" not in payload
+        assert payload["days"] == [
+            {
+                "date": "2026-08-03",
+                "kind": "skipped",
+                "source_journal_ids": [source_journal],
+                "destination_journal_ids": [destination_journal],
+                "differing_fields": ["title"],
+                "skip_reason": "title",
+            }
+        ]
+        assert await series_exists(clean_database, source)
+
+    @pytest.mark.asyncio
+    async def test_preview_series_merge_rejects_the_same_series(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        series = await seed_series(clean_database, "Standup")
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_tool(
+                client,
+                "preview_series_merge",
+                {
+                    "destination_series_id": str(series),
+                    "source_series_id": str(series),
+                },
+            )
+
+        assert "error" in payload

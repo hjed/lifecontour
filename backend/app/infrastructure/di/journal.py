@@ -194,6 +194,9 @@ from app.core.journal.services.journal_external_link_service import (
 )
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_search_service import JournalSearchService
+from app.core.journal.services.journal_series_merge_service import (
+    JournalSeriesMergeService,
+)
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_hierarchy_service import (
@@ -693,6 +696,22 @@ class JournalProvider(Provider):
     ) -> JournalSeriesService:
         """Provide a JournalSeriesService instance."""
         return JournalSeriesService(series_repo=series_repo, journal_repo=journal_repo)
+
+    @provide(scope=Scope.REQUEST)
+    def journal_series_merge_service(
+        self,
+        series_repo: JournalSeriesRepository,
+        journal_repo: JournalRepository,
+        calendar_info_repo: CalendarInfoRepository,
+        date_resolver: JournalDateResolver,
+    ) -> JournalSeriesMergeService:
+        """Provide a JournalSeriesMergeService instance."""
+        return JournalSeriesMergeService(
+            series_repo=series_repo,
+            journal_repo=journal_repo,
+            calendar_info_repo=calendar_info_repo,
+            date_resolver=date_resolver,
+        )
 
     @provide(scope=Scope.REQUEST)
     def review_item_service(

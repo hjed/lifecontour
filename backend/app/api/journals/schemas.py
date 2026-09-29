@@ -24,6 +24,11 @@ from app.api.common.schemas import (
     JsonApiResponse,
     JsonApiUpdateRequest,
 )
+from app.core.journal.models.series_merge import (
+    SeriesDayOutcomeKind,
+    SeriesFieldPolicy,
+    SeriesMergeField,
+)
 
 # Constants for field descriptions
 DISPLAY_ORDER_DESC = "Display order"
@@ -726,6 +731,107 @@ class JournalSeriesUpdateRequest(BaseModel):
     """Request model for updating a journal series."""
 
     data: JournalSeriesUpdateData = Field(..., description="Series update data")
+
+
+class SeriesMergePoliciesSchema(BaseModel):
+    """Which side survives in every merged pair, per field."""
+
+    title: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+    content: SeriesFieldPolicy = Field(
+        default=SeriesFieldPolicy.COMBINE,
+        description="`combine` concatenates both journals' content",
+    )
+    timing: SeriesFieldPolicy = Field(
+        default=SeriesFieldPolicy.DESTINATION,
+        description="The date range with the event's clock times, zone and all-day flag",
+    )
+    location: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+    event_description: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+
+
+class JournalSeriesMergeAttributes(BaseModel):
+    """Attributes for previewing or performing a series merge."""
+
+    source_series_id: str = Field(
+        ..., description="The series merged into (and deleted by) this one"
+    )
+    policies: SeriesMergePoliciesSchema = Field(
+        default_factory=SeriesMergePoliciesSchema,
+        description="Series-wide field policies applied to every same-day pair",
+    )
+
+
+class JournalSeriesMergeData(BaseModel):
+    """Data for previewing or performing a series merge."""
+
+    type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
+    attributes: JournalSeriesMergeAttributes = Field(
+        ..., description="Series merge attributes"
+    )
+
+
+class JournalSeriesMergePreviewRequest(JsonApiCreateRequest[JournalSeriesMergeData]):
+    """Request model for previewing a series merge."""
+
+    pass
+
+
+LocalDate = date
+
+
+class SeriesMergeDay(BaseModel):
+    """The outcome for one local day of a series merge."""
+
+    # ``LocalDate``, not ``date``: annotations are evaluated lazily, and in the
+    # class body ``date`` would name this very field.
+    date: LocalDate = Field(..., description="The local day, in the user's timezone")
+    kind: SeriesDayOutcomeKind = Field(..., description="What happens on this day")
+    source_journal_ids: list[int] = Field(..., description="Source series members")
+    destination_journal_ids: list[int] = Field(
+        ..., description="Destination series members"
+    )
+    differing_fields: list[SeriesMergeField] = Field(
+        ..., description="Fields both journals hold different values for"
+    )
+    skip_reason: SeriesMergeField | None = Field(
+        default=None, description="The skip-if-different field that stopped the pair"
+    )
+
+
+class SeriesMergeJournalSummary(BaseModel):
+    """A journal named by a series merge day."""
+
+    id: int
+    title: str
+    event_date_range_start: datetime
+    location: str | None = None
+
+
+class JournalSeriesMergePlanAttributes(BaseModel):
+    """A planned or performed series merge."""
+
+    source_series_id: str
+    destination_series_id: str
+    days: list[SeriesMergeDay]
+    journals: dict[str, SeriesMergeJournalSummary] = Field(
+        ..., description="Every journal a day names, keyed by id"
+    )
+
+
+class JournalSeriesMergePlanResource(BaseModel):
+    """Series merge plan resource following JSON API specification."""
+
+    type: str = Field(
+        default="journal-series-merge-plan", description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="The destination series ID")
+    attributes: JournalSeriesMergePlanAttributes
+
+
+class JournalSeriesMergePlanResponse(JsonApiResponse[JournalSeriesMergePlanResource]):
+    """Response model for a series merge preview or result."""
+
+    pass
 
 
 class JournalSeriesRelationshipData(BaseModel):
