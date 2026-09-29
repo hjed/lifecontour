@@ -690,9 +690,10 @@ def integration_test_client():
 def test_user():
     """Create a test user for authentication."""
     from app.infrastructure.auth.models import SessionUser
+    from tests.integration.contact_seeding import TEST_USER_ID
 
     return SessionUser(
-        id="test-user-123",
+        id=TEST_USER_ID,
         email="test@example.com",
         name="Test User",
         avatar_url="https://example.com/avatar.jpg",

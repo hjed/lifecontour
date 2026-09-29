@@ -25,7 +25,6 @@ return nothing for an id that never existed.
 
 import pytest
 from core_shared.models.tasks import TaskNotFoundError, TaskStatus
-from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -38,6 +37,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import seed_contacts
 from tests.integration.tasks.task_seeding import (
     COUNT_CONTACT_LINKS_FOR_TASK,
     COUNT_TASKS,
@@ -742,18 +742,7 @@ class TestAVeryLargeContactSet:
         creating_id, due_id = task_anchors
         # Seeded in one statement: 33k round trips would make the test's own
         # setup the slowest thing in the suite.
-        contact_ids = [
-            int(row[0])
-            for row in (
-                await async_connection.execute(
-                    sa_text(
-                        "INSERT INTO contacts (first_name) "
-                        "SELECT 'Contact ' || g FROM generate_series(1, 33000) g "
-                        "RETURNING id"
-                    )
-                )
-            ).fetchall()
-        ]
+        contact_ids = await seed_contacts(async_connection, 33_000)
         assert len(contact_ids) > 32_767, "the fixture must exceed the old limit"
 
         created = await service.create_task(

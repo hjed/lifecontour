@@ -36,6 +36,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from tests.integration import contact_seeding
 from tests.integration.statement_recorder import recorded_statements
 
 URL = "/api/home-dashboard"
@@ -66,22 +67,13 @@ async def seed_contact(
     is_favourite: bool = False,
 ) -> None:
     """A bare contact, with the display fields a row draws."""
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (
-                id, first_name, last_name, photo_url, is_favourite,
-                created_at, updated_at
-            )
-            VALUES (:id, :first_name, :last_name, :photo_url, :is_favourite,
-                    NOW(), NOW())
-        """),
-        {
-            "id": contact_id,
-            "first_name": first_name,
-            "last_name": last_name,
-            "photo_url": photo_url,
-            "is_favourite": is_favourite,
-        },
+    await contact_seeding.seed_contact(
+        connection,
+        contact_id=contact_id,
+        first_name=first_name,
+        last_name=last_name,
+        photo_url=photo_url,
+        is_favourite=is_favourite,
     )
 
 
