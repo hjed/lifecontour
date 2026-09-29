@@ -33,6 +33,9 @@ import {
   AutoMergeResponse,
   BlockingTask,
   JournalHasAnchoredTasksMeta,
+  SeriesMergePair,
+  SeriesMergePlan,
+  SeriesMergePolicies,
 } from '@/types/journals';
 import { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
 import type { HistoryFilters, HistoryListResponse } from '@/types/history';
@@ -2116,6 +2119,138 @@ async function removeJournalFromSeries(
       errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
     );
   }
+}
+
+export const DEFAULT_SERIES_MERGE_POLICIES: SeriesMergePolicies = {
+  title: 'destination',
+  content: 'combine',
+  timing: 'destination',
+  location: 'destination',
+  event_description: 'destination',
+};
+
+function seriesMergeBody(
+  sourceSeriesId: string,
+  policies: SeriesMergePolicies,
+  pairs?: SeriesMergePair[]
+) {
+  return JSON.stringify({
+    data: {
+      type: 'journal-series-merge',
+      attributes: {
+        source_series_id: sourceSeriesId,
+        policies,
+        ...(pairs ? { pairs } : {}),
+      },
+    },
+  });
+}
+
+async function postSeriesMerge(
+  url: string,
+  body: string,
+  fallbackMessage: string
+): Promise<SeriesMergePlan> {
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorData: JsonApiErrorResponse = await response.json();
+    throw new JournalApiError(
+      errorData.errors?.[0]?.detail || fallbackMessage,
+      response.status
+    );
+  }
+
+  const jsonApiResponse: { data: { attributes: SeriesMergePlan } } =
+    await response.json();
+  return jsonApiResponse.data.attributes;
+}
+
+async function previewSeriesMerge(
+  destinationSeriesId: string,
+  sourceSeriesId: string,
+  policies: SeriesMergePolicies
+): Promise<SeriesMergePlan> {
+  return postSeriesMerge(
+    `/api/journals/series/${destinationSeriesId}/merge/preview`,
+    seriesMergeBody(sourceSeriesId, policies),
+    ERROR_MESSAGES.FETCH_FAILED
+  );
+}
+
+async function mergeSeries(
+  destinationSeriesId: string,
+  sourceSeriesId: string,
+  policies: SeriesMergePolicies,
+  pairs: SeriesMergePair[]
+): Promise<SeriesMergePlan> {
+  return postSeriesMerge(
+    `/api/journals/series/${destinationSeriesId}/merge`,
+    seriesMergeBody(sourceSeriesId, policies, pairs),
+    ERROR_MESSAGES.UPDATE_FAILED
+  );
+}
+
+/**
+ * What merging `sourceSeriesId` into `destinationSeriesId` would do under
+ * `policies`. Writes nothing; idle until a source series is chosen.
+ */
+export function useSeriesMergePreview(
+  destinationSeriesId: string,
+  sourceSeriesId: string | null,
+  policies: SeriesMergePolicies
+) {
+  return useQuery({
+    queryKey: [
+      ...journalSeriesKeys.detail(destinationSeriesId),
+      'merge-preview',
+      sourceSeriesId,
+      policies,
+    ],
+    queryFn: () =>
+      previewSeriesMerge(destinationSeriesId, sourceSeriesId ?? '', policies),
+    enabled: !!sourceSeriesId,
+    staleTime: 0,
+  });
+}
+
+export function useMergeSeries() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      destinationSeriesId,
+      sourceSeriesId,
+      policies,
+      pairs,
+    }: {
+      destinationSeriesId: string;
+      sourceSeriesId: string;
+      policies: SeriesMergePolicies;
+      pairs: SeriesMergePair[];
+    }) => mergeSeries(destinationSeriesId, sourceSeriesId, policies, pairs),
+    onSuccess: () => {
+      void invalidateAfterMutation(
+        queryClient,
+        { queryKey: journalSeriesKeys.all },
+        // Pair merges delete source journals and rewrite the survivors.
+        { queryKey: journalKeys.lists() },
+        { queryKey: journalKeys.details() },
+        // ...and re-point the absorbed journals' task links.
+        { queryKey: taskKeys.all },
+        REFRESH_HOME_DASHBOARD
+      );
+      toast.success('Series merged successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
 }
 
 export function useJournalSeries() {

@@ -420,6 +420,56 @@ export interface JournalSeries {
   auto_created?: boolean;
 }
 
+/** A field whose surviving value the user picks for every merged pair. */
+export type SeriesMergeField =
+  'title' | 'content' | 'timing' | 'location' | 'event_description';
+
+/** What survives for one field; `combine` is valid for content only. */
+export type SeriesFieldPolicy =
+  'destination' | 'source' | 'combine' | 'skip_if_different';
+
+export type SeriesMergePolicies = Record<SeriesMergeField, SeriesFieldPolicy>;
+
+/** What happens to the journals of one local day in a series merge. */
+export type SeriesDayOutcomeKind =
+  | 'candidate'
+  | 'skipped'
+  | 'ambiguous'
+  | 'unpaired'
+  | 'already_shared'
+  | 'merged'
+  | 'excluded'
+  | 'failed';
+
+export interface SeriesMergePair {
+  source_journal_id: number;
+  destination_journal_id: number;
+}
+
+export interface SeriesMergeDay {
+  date: string; // yyyy-MM-dd, the user's local day
+  kind: SeriesDayOutcomeKind;
+  source_journal_ids: number[];
+  destination_journal_ids: number[];
+  differing_fields: SeriesMergeField[];
+  skip_reason: SeriesMergeField | null;
+}
+
+export interface SeriesMergeJournalSummary {
+  id: number;
+  title: string;
+  event_date_range_start: string;
+  location?: string | null;
+}
+
+/** A previewed or performed series merge. */
+export interface SeriesMergePlan {
+  source_series_id: string;
+  destination_series_id: string;
+  days: SeriesMergeDay[];
+  journals: Record<string, SeriesMergeJournalSummary>;
+}
+
 // Series reference embedded on a journal detail response
 export interface JournalSeriesRef {
   id: string;

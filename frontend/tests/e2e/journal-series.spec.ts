@@ -5,7 +5,8 @@ import { FRONTEND_TEST_URL } from './utils/frontend-test-config';
 // Helper to create a journal via API
 async function createJournalViaApi(
   request: APIRequestContext,
-  title: string
+  title: string,
+  start: string = new Date().toISOString()
 ): Promise<string> {
   const response = await request.post(`${FRONTEND_TEST_URL}/api/journals`, {
     data: {
@@ -14,10 +15,7 @@ async function createJournalViaApi(
         attributes: {
           title,
           content: '',
-          event_date_range: {
-            start: new Date().toISOString(),
-            end: new Date().toISOString(),
-          },
+          event_date_range: { start, end: start },
         },
       },
     },
@@ -188,5 +186,70 @@ test.describe('Journal Series', () => {
     await expect(
       page.getByText('No journals in this series yet.')
     ).toBeVisible();
+  });
+
+  test('merges another series into this one, merging same-day journals', async ({
+    authenticatedPage,
+    request,
+  }) => {
+    const page = authenticatedPage;
+    const suffix = Date.now();
+    // A fixed past instant: the e2e user has no timezone, so the backend
+    // pairs by the UTC day, and 09:00Z is the same day in UTC.
+    const sameDay = '2025-03-03T09:00:00.000Z';
+    const sourceName = `E2E Series Merge Source - ${suffix}`;
+    const destinationName = `E2E Series Merge Destination - ${suffix}`;
+    const sourceTitle = `E2E Series Merge Old - ${suffix}`;
+    const sourceJournalId = await createJournalViaApi(
+      request,
+      sourceTitle,
+      sameDay
+    );
+    const destinationJournalId = await createJournalViaApi(
+      request,
+      `E2E Series Merge New - ${suffix}`,
+      sameDay
+    );
+    const sourceId = await createSeriesViaApi(request, sourceName);
+    const destinationId = await createSeriesViaApi(request, destinationName);
+    await addToSeriesViaApi(request, sourceJournalId, sourceId);
+    await addToSeriesViaApi(request, destinationJournalId, destinationId);
+
+    await page.goto(`/journals/series/${destinationId}`);
+    await expect(page.getByTestId('series-name')).toHaveText(destinationName);
+    await page.getByTestId('merge-series-button').click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByTestId('merge-series-source').click();
+    await page.getByRole('option', { name: sourceName }).click();
+    await dialog
+      .getByRole('radiogroup', { name: 'Title' })
+      .getByRole('radio', { name: 'Use merged-in series' })
+      .click();
+
+    const day = dialog.getByTestId('series-merge-day-2025-03-03');
+    await expect(day).toContainText('Will merge; title differs');
+    await expect(
+      day.getByRole('checkbox', { name: 'Merge 3 Mar 2025' })
+    ).toBeChecked();
+
+    const mergeResponsePromise = page.waitForResponse(
+      response =>
+        response
+          .url()
+          .endsWith(`/api/journals/series/${destinationId}/merge`) &&
+        response.request().method() === 'POST'
+    );
+    await dialog.getByTestId('confirm-merge-series').click();
+    expect((await mergeResponsePromise).status()).toBe(200);
+
+    await expect(dialog).toBeHidden();
+    const member = page.getByTestId(`series-member-${destinationJournalId}`);
+    await expect(member).toContainText(sourceTitle);
+    await expect(
+      page.getByTestId(`series-member-${sourceJournalId}`)
+    ).toHaveCount(0);
+
+    await page.goto(`/journals/series/${sourceId}`);
+    await expect(page.getByText(/Failed to load series/)).toBeVisible();
   });
 });
