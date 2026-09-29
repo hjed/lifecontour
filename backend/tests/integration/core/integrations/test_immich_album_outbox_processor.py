@@ -28,6 +28,7 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import seed_contact
 
 USER_ID = "album-test-user"
 START = datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=UTC)
@@ -103,13 +104,7 @@ async def _seed_contact_linked_to_person(
     Participant detection resolves people via the canonical sync_metadata link
     store (``get_contact_ids_by_immich_person_ids``), so the link is seeded there.
     """
-    contact_id = (
-        await connection.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-    ).scalar()
-    assert contact_id is not None
+    contact_id = await seed_contact(connection, first_name=first_name)
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
@@ -122,7 +117,7 @@ async def _seed_contact_linked_to_person(
         """),
         {"cid": contact_id, "pid": person_id},
     )
-    return int(contact_id)
+    return contact_id
 
 
 async def _participant_ids(connection: AsyncConnection, journal_id: int) -> set[int]:
@@ -711,11 +706,7 @@ async def test_resync_does_not_remove_manual_participant(
     journal_id = created["journal_id"]
 
     # A manual participant (not an Immich person) is added directly.
-    manual = (
-        await async_connection.execute(
-            text("INSERT INTO contacts (first_name) VALUES ('Manual') RETURNING id")
-        )
-    ).scalar()
+    manual = await seed_contact(async_connection, first_name="Manual")
     await async_connection.execute(
         text("""
             INSERT INTO journal_contact_relationships

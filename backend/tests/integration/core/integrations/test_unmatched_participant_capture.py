@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.core.integrations.journal_sync_seeding import (
     build_processor,
     create_calendar,
@@ -44,11 +45,7 @@ async def _unmatched_rows(
 async def _create_contact_with_email(
     connection: AsyncConnection, email: str, *, archived: bool = False
 ) -> int:
-    contact_id = (
-        await connection.execute(
-            text("INSERT INTO contacts (first_name) VALUES ('Known') RETURNING id")
-        )
-    ).scalar_one()
+    contact_id = await seed_contact(connection, first_name="Known")
     await connection.execute(
         text(
             """
@@ -58,7 +55,7 @@ async def _create_contact_with_email(
         ),
         {"contact_id": contact_id, "email": email, "archived": archived},
     )
-    return int(contact_id)
+    return contact_id
 
 
 async def _linked_contact_ids(connection: AsyncConnection, journal_id: int) -> set[int]:

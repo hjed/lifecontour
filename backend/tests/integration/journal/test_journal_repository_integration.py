@@ -11,6 +11,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.statement_recorder import recorded_statements
 
 
@@ -501,19 +502,11 @@ class TestJournalRepositoryFiltering:
     ):
         """Test filtering journals by contact ID."""
         # Create test contacts
-        await async_connection.execute(
-            text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, :first_name, :last_name)
-            """),
-            {"id": 1, "first_name": "John", "last_name": "Doe"},
+        await seed_contact(
+            async_connection, contact_id=1, first_name="John", last_name="Doe"
         )
-        await async_connection.execute(
-            text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, :first_name, :last_name)
-            """),
-            {"id": 2, "first_name": "Jane", "last_name": "Smith"},
+        await seed_contact(
+            async_connection, contact_id=2, first_name="Jane", last_name="Smith"
         )
 
         # Create journals
@@ -864,12 +857,8 @@ class TestJournalRepositoryFiltering:
         now = datetime.now(UTC)
 
         # Create a contact
-        await async_connection.execute(
-            text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, :first_name, :last_name)
-            """),
-            {"id": 1, "first_name": "John", "last_name": "Doe"},
+        await seed_contact(
+            async_connection, contact_id=1, first_name="John", last_name="Doe"
         )
 
         # Create journals
@@ -935,12 +924,8 @@ class TestJournalRepositoryFiltering:
     ):
         """Test combining date + type=note + contact filters (reproduces E2E test failure)."""
         # Create a contact
-        await async_connection.execute(
-            text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, :first_name, :last_name)
-            """),
-            {"id": 100, "first_name": "Charlie", "last_name": "Brown"},
+        await seed_contact(
+            async_connection, contact_id=100, first_name="Charlie", last_name="Brown"
         )
 
         # Create a NOTE journal (no type-specific data) with contact in February
@@ -1111,12 +1096,8 @@ class TestJournalRepositoryFindIdsByFilters:
         async_connection: AsyncConnection,
     ):
         """The id set matches the rows ``get_all`` returns for the same filters."""
-        await async_connection.execute(
-            text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, :first_name, :last_name)
-            """),
-            {"id": 501, "first_name": "Dana", "last_name": "Scully"},
+        await seed_contact(
+            async_connection, contact_id=501, first_name="Dana", last_name="Scully"
         )
         matching = await journal_repository.save(
             create_test_journal(

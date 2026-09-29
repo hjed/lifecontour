@@ -60,6 +60,7 @@ from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
     SqlOutdoorPlanningDataRepository,
 )
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
+from tests.integration.contact_seeding import seed_contact
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "test-user-456"
@@ -352,12 +353,7 @@ class Seeder:
         return journal_id
 
     async def add_participant(self, journal_id: int) -> None:
-        contact_result = await self.connection.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
-            {"name": "Participant"},
-        )
-        contact_id = contact_result.scalar()
-        assert contact_id is not None
+        contact_id = await seed_contact(self.connection, first_name="Participant")
         await self.relationship_repo.create(
             JournalContactRelationship(
                 journal_id=journal_id,

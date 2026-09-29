@@ -44,6 +44,7 @@ from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.summary_invalidation_consumer import (
     SummaryInvalidationConsumer,
 )
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.infrastructure.events.consumer_harness import (
     BATCH_SIZE,
     patched_consumer_engine,
@@ -360,14 +361,9 @@ class TestAnImportantDateChanging:
         self, async_connection: AsyncConnection, *, days_ahead: int
     ) -> tuple[int, int]:
         occurrence = _today() + timedelta(days=days_ahead)
-        contact_id = (
-            await async_connection.execute(
-                text(
-                    "INSERT INTO contacts (first_name, last_name) "
-                    "VALUES ('Ada', 'Lovelace') RETURNING id"
-                )
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(
+            async_connection, first_name="Ada", last_name="Lovelace"
+        )
         date_id = (
             await async_connection.execute(
                 text(

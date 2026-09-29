@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.summary_consumer import SummaryConsumer
+from tests.integration.contact_seeding import seed_contact
 
 
 @asynccontextmanager
@@ -41,14 +42,11 @@ class TestSummaryConsumerIntegration:
         self, async_connection: AsyncConnection, contact_id: int
     ) -> None:
         """Insert a real contact row for the consumer to reference."""
-        await async_connection.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
-                VALUES (:id, 'Summary', 'Target', NOW(), NOW())
-                """
-            ),
-            {"id": contact_id},
+        await seed_contact(
+            async_connection,
+            contact_id=contact_id,
+            first_name="Summary",
+            last_name="Target",
         )
 
     def _make_consumer(

@@ -22,6 +22,7 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.services.attendance_transition_service import (
     AttendanceTransitionService,
 )
+from tests.integration.contact_seeding import seed_contact
 
 
 @pytest_asyncio.fixture
@@ -42,15 +43,7 @@ async def service(
 
 async def _create_contact(conn: AsyncConnection, name: str = "Test Contact") -> int:
     """Create a test contact and return its ID."""
-    result = await conn.execute(
-        text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
-        {"name": name},
-    )
-    from typing import cast
-
-    contact_id = cast(int, result.scalar())
-    assert contact_id is not None
-    return contact_id
+    return await seed_contact(conn, first_name=name)
 
 
 async def _create_journal(

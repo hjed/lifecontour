@@ -3,6 +3,8 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
+
 
 @pytest.fixture
 async def pending_conflict(
@@ -58,17 +60,15 @@ async def test_list_immich_conflicts_includes_candidate_names(
 ) -> None:
     """Candidate contacts are returned with resolved display names and photos."""
     # Create two real contacts to act as candidates
-    insert_contacts = text("""
-        INSERT INTO contacts (first_name, last_name, photo_url, created_at, updated_at)
-        VALUES
-            ('Nikhil', 'Sharma', 'https://photos/nikhil.jpg',
-             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-            ('Nicole', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING id
-    """)
-    result = await async_connection.execute(insert_contacts)
-    contact_ids = [row.id for row in result.fetchall()]
-    assert len(contact_ids) == 2
+    contact_ids = [
+        await seed_contact(
+            async_connection,
+            first_name="Nikhil",
+            last_name="Sharma",
+            photo_url="https://photos/nikhil.jpg",
+        ),
+        await seed_contact(async_connection, first_name="Nicole"),
+    ]
     missing_id = 999999  # No contact row -> falls back to "Contact {id}"
 
     # Conflict referencing both real contacts plus a missing id, order preserved
@@ -118,13 +118,9 @@ async def test_resolve_immich_conflict_link(
 ) -> None:
     """Verify that a conflict can be resolved by linking an existing contact."""
     # First, create a contact
-    query = text("""
-        INSERT INTO contacts (first_name, last_name, created_at, updated_at)
-        VALUES ('John', 'Doe', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING id
-    """)
-    result = await async_connection.execute(query)
-    contact_id = result.scalar_one()
+    contact_id = await seed_contact(
+        async_connection, first_name="John", last_name="Doe"
+    )
 
     # Resolve the conflict
     response = await authenticated_client.post(

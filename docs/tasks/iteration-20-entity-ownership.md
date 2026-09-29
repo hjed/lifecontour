@@ -212,25 +212,25 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 
 ---
 
-#### Phase 1: Consolidate test seeding of contacts
+#### Phase 1: Consolidate test seeding of contacts ✅ DONE
 
 **PR Size:** ~350 lines across ~55 files (mechanical; test-only)
 
 Before the schema changes, every raw `INSERT INTO contacts` in a test goes through one helper so
 Phase 3 changes the owner in one place, and later phases seed a foreign contact the same way.
 
-- [ ] Add `backend/tests/integration/contact_seeding.py` defining `TEST_USER_ID = "test-user-123"`
+- [x] Add `backend/tests/integration/contact_seeding.py` defining `TEST_USER_ID = "test-user-123"`
   (the `test_user` fixture in `conftest.py:695` reads it, so the two cannot drift) and
   `seed_contact(conn, *, user_id: str = TEST_USER_ID, first_name="Sarah", last_name=None, ...) -> int`
   (generalising `task_seeding.create_contact`). `task_seeding.create_contact`,
   `contact_suggestion_seeding.create_contact`, `upcoming_date_seeding.seed_contact` and the two
   local `seed_contact` helpers (`test_home_dashboard_upcoming_dates.py:59`,
   `test_contact_tools_integration.py:1833`) delegate to it.
-- [ ] Add `seed_contact` to `core_shared/core_shared/testing/` for the 12 worker / `core_shared` test
+- [x] Add `seed_contact` to `core_shared/core_shared/testing/` for the 12 worker / `core_shared` test
   files (Google `test_tag_push_integration.py:22`, Immich reconciliation tests, …).
-- [ ] Replace every remaining raw insert (42 backend files) with the helper. Behaviour of every test
+- [x] Replace every remaining raw insert (42 backend files) with the helper. Behaviour of every test
   is unchanged.
-- [ ] `tests/fixtures/contact_fixtures.py` factories and the `ContactFactory` fixture
+- [x] `tests/fixtures/contact_fixtures.py` factories and the `ContactFactory` fixture
   (`conftest.py:936`) are left as they are (they go through the API / entity, not SQL).
 
 **Required Test Coverage:** none new — the whole existing suite is the coverage; it must pass
@@ -239,8 +239,40 @@ unchanged. Grep gate in the PR description: `INSERT INTO contacts` appears only 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/testing-strategy.md` — name the seeding helpers as the way to create a
+- [x] `docs/architecture/testing-strategy.md` — name the seeding helpers as the way to create a
   contact in an integration test.
+
+**Status:** ✅ DONE — every test-side contact insert goes through `seed_contact` /
+`seed_contacts`; the whole suite passes unchanged (backend unit 4936, backend integration 3408,
+`core_shared` 651, Google 700, Immich 254).
+
+**Decisions (recorded during implementation):**
+- **One seeding module, not two helpers.** The SQL lives once, in `core_shared/core_shared/testing/seeding.py`:
+  `seed_contact` and, for the one test that needs 33,000 rows in a single statement,
+  `seed_contacts`. `backend/tests/integration/contact_seeding.py` defines `TEST_USER_ID` and
+  re-exports both. The backend already depends on `core_shared`, so Phase 3 edits one module.
+- **No `user_id` parameter yet.** The column does not exist until Phase 3, and an accepted but
+  ignored owner would let a test believe it seeded a foreign contact. Phase 3 adds the parameter
+  together with the column (backend default `TEST_USER_ID`; workers pass their own user).
+- **Migration tests keep their raw inserts.** `test_backfill_sync_metadata_migration.py` (0091),
+  `test_dedupe_bug_created_contacts_migration.py` (0092), `test_drop_external_references_migration.py`
+  (0093) and `test_reassign_synthetic_owner_migration.py` (0106) seed a schema pinned at an old
+  revision, which the helper will not match once it writes `user_id`.
+- **The grep gate is a test.** `backend/tests/unit/test_contact_seeding_guard.py` fails on any
+  `INSERT INTO contacts` under `backend/tests`, `core_shared` or `integration_workers/*/tests`
+  outside the helper and the four migration tests, so later phases cannot reintroduce one.
+- **PR size.** The mechanical diff is ~1,470 changed lines, well over the ~350 estimate, so the
+  phase ships as a stack split on directory lines; the guard test lands in the top layer, once
+  the last raw insert is gone.
+
+**Follow-ups (found in Phase 1):**
+- **Phase 3 — worker call sites.** Worker tests act as many different users (`lock-user`,
+  `test-user-immich`, …), so when `seed_contact` gains `user_id`, either the `core_shared` helper
+  takes a default test owner or the ~26 worker call sites (12 files) each name one. Budget it in
+  Phase 3.
+- **Guard coverage in CI.** The guard runs in the backend unit job, whose path filter does not
+  include `integration_workers/**`; a worker-only PR that adds a raw insert passes and turns the
+  next backend PR red. Left as is to avoid running the backend suite for worker-only PRs.
 
 ---
 

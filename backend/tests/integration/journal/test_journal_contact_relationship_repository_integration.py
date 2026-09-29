@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
+from tests.integration.contact_seeding import seed_contact
 
 
 @pytest_asyncio.fixture
@@ -55,18 +56,7 @@ async def sample_journal_and_contact(
     assert journal_id is not None
 
     # Create a contact
-    contact_query = text(
-        """
-        INSERT INTO contacts (first_name)
-        VALUES (:first_name)
-        RETURNING id
-    """
-    )
-    contact_result = await async_connection.execute(
-        contact_query, {"first_name": "Test Contact"}
-    )
-    contact_id = contact_result.scalar()
-    assert contact_id is not None
+    contact_id = await seed_contact(async_connection, first_name="Test Contact")
 
     return journal_id, contact_id
 

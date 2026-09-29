@@ -29,6 +29,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
     ImportantDateNotFoundError,
 )
+from tests.integration.contact_seeding import seed_contact
 
 
 @pytest.mark.integration
@@ -235,33 +236,12 @@ class TestContactRepositoryIntegration:
         self, clean_database: AsyncConnection
     ):
         """Test DB uniqueness uses trimmed/lowercased email semantics."""
-        first_contact_row = (
-            await clean_database.execute(
-                text(
-                    """
-                    INSERT INTO contacts (first_name, last_name)
-                    VALUES (:first_name, :last_name)
-                    RETURNING id
-                    """
-                ),
-                {"first_name": "John", "last_name": "Doe"},
-            )
-        ).fetchone()
-        assert first_contact_row is not None
-
-        second_contact_row = (
-            await clean_database.execute(
-                text(
-                    """
-                    INSERT INTO contacts (first_name, last_name)
-                    VALUES (:first_name, :last_name)
-                    RETURNING id
-                    """
-                ),
-                {"first_name": "Jane", "last_name": "Smith"},
-            )
-        ).fetchone()
-        assert second_contact_row is not None
+        first_contact_id = await seed_contact(
+            clean_database, first_name="John", last_name="Doe"
+        )
+        second_contact_id = await seed_contact(
+            clean_database, first_name="Jane", last_name="Smith"
+        )
 
         await clean_database.execute(
             text(
@@ -270,7 +250,7 @@ class TestContactRepositoryIntegration:
                 VALUES (:contact_id, 'email', :value, true)
                 """
             ),
-            {"contact_id": first_contact_row.id, "value": "  duplicate@example.com  "},
+            {"contact_id": first_contact_id, "value": "  duplicate@example.com  "},
         )
 
         with pytest.raises(IntegrityError):
@@ -281,7 +261,7 @@ class TestContactRepositoryIntegration:
                     VALUES (:contact_id, 'email', :value, true)
                     """
                 ),
-                {"contact_id": second_contact_row.id, "value": "DUPLICATE@example.com"},
+                {"contact_id": second_contact_id, "value": "DUPLICATE@example.com"},
             )
 
     @pytest.mark.asyncio
