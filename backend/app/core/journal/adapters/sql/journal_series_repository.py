@@ -138,10 +138,20 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
     ) -> JournalSeries:
         """Get or atomically create the series for a recurring calendar event.
 
-        Relies on the partial unique index on (calendar_id, recurring_event_id):
-        INSERT ... ON CONFLICT DO NOTHING followed by a SELECT is race-safe and
-        never renames an existing series.
+        A recurrence merged into another series resolves through its alias.
+        Otherwise relies on the partial unique index on
+        (calendar_id, recurring_event_id): INSERT ... ON CONFLICT DO NOTHING
+        followed by a SELECT is race-safe and never renames an existing series.
+
+        The per-key advisory lock orders this against ``alias_recurrences``:
+        without it a sync could read "no alias", the merge could commit and
+        free the unique key, and the INSERT would re-create the merged series.
         """
+        await self._lock_recurrence(calendar_id, recurring_event_id)
+        aliased = await self._find_by_alias(user_id, calendar_id, recurring_event_id)
+        if aliased is not None:
+            return aliased
+
         insert_query = text(
             """
             INSERT INTO journal_series
@@ -186,6 +196,97 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 f"calendar={calendar_id} recurring_event_id={recurring_event_id}"
             )
         return _row_to_series(row)
+
+    async def alias_recurrences(
+        self, absorbed: JournalSeries, into_series_id: UUID
+    ) -> None:
+        """Point ``absorbed``'s recurrences at ``into_series_id`` before a merge.
+
+        Existing aliases are re-pointed so merge chains collapse onto the
+        latest survivor. A manual series, or one whose calendar was deleted,
+        has no recurrence key of its own to alias.
+        """
+        await self.conn.execute(
+            text(
+                """
+                UPDATE journal_series_recurrence_aliases
+                SET series_id = :into_series_id
+                WHERE series_id = :absorbed_id
+                """
+            ),
+            {"into_series_id": into_series_id, "absorbed_id": absorbed.id},
+        )
+        if absorbed.calendar_id is None or absorbed.recurring_event_id is None:
+            return
+        await self._lock_recurrence(absorbed.calendar_id, absorbed.recurring_event_id)
+        await self.conn.execute(
+            text(
+                """
+                INSERT INTO journal_series_recurrence_aliases
+                    (calendar_id, recurring_event_id, series_id, user_id)
+                VALUES
+                    (:calendar_id, :recurring_event_id, :series_id, :user_id)
+                ON CONFLICT (calendar_id, recurring_event_id)
+                    DO UPDATE SET series_id = EXCLUDED.series_id
+                """
+            ),
+            {
+                "calendar_id": absorbed.calendar_id,
+                "recurring_event_id": absorbed.recurring_event_id,
+                "series_id": into_series_id,
+                "user_id": absorbed.user_id,
+            },
+        )
+
+    async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
+        """Move every member of one series into another (shared members dedupe)."""
+        await self.conn.execute(
+            text(
+                """
+                WITH moved AS (
+                    DELETE FROM journal_series_members
+                    WHERE series_id = :from_series_id
+                    RETURNING journal_id
+                )
+                INSERT INTO journal_series_members (series_id, journal_id)
+                SELECT :to_series_id, journal_id FROM moved
+                ON CONFLICT (series_id, journal_id) DO NOTHING
+                """
+            ),
+            {"from_series_id": from_series_id, "to_series_id": to_series_id},
+        )
+
+    async def _lock_recurrence(
+        self, calendar_id: UUID, recurring_event_id: str
+    ) -> None:
+        """Serialise work on one recurrence key until the transaction ends."""
+        await self.conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"journal_series_recurrence:{calendar_id}:{recurring_event_id}"},
+        )
+
+    async def _find_by_alias(
+        self, user_id: str, calendar_id: UUID, recurring_event_id: str
+    ) -> JournalSeries | None:
+        result = await self.conn.execute(
+            text(
+                f"""
+                SELECT {_QUALIFIED_SERIES_COLUMNS}
+                FROM journal_series_recurrence_aliases a
+                JOIN journal_series s ON s.id = a.series_id
+                WHERE a.calendar_id = :calendar_id
+                  AND a.recurring_event_id = :recurring_event_id
+                  AND s.user_id = :user_id
+                """
+            ),
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "user_id": user_id,
+            },
+        )
+        row = result.fetchone()
+        return _row_to_series(row) if row else None
 
     async def add_member(self, series_id: UUID, journal_id: int) -> None:
         """Add a journal to a series (no-op if already a member)."""

@@ -1367,7 +1367,27 @@ class JournalSeriesRepository(ABC):
 
         Keyed by (calendar_id, recurring_event_id); ``name`` is only used when
         the series doesn't exist yet — an existing series is never renamed.
+        A recurrence whose series was merged into another resolves, through
+        its alias, to the series that absorbed it.
         """
+        pass
+
+    @abstractmethod
+    async def alias_recurrences(
+        self, absorbed: JournalSeries, into_series_id: UUID
+    ) -> None:
+        """Point ``absorbed``'s recurrences at ``into_series_id`` before a merge.
+
+        Covers ``absorbed``'s own recurrence key (if it was auto-created) and
+        every alias it already holds from earlier merges, so later syncs of any
+        of them resolve to the absorbing series. Call before deleting
+        ``absorbed``.
+        """
+        pass
+
+    @abstractmethod
+    async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
+        """Move every member of one series into another (shared members dedupe)."""
         pass
 
     @abstractmethod

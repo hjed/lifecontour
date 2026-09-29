@@ -334,3 +334,176 @@ class TestSeriesCascades:
             {"journal_id": journal.id},
         )
         assert membership_count.scalar() == 0
+
+
+@pytest.mark.integration
+class TestMoveMembers:
+    async def test_moves_members_and_dedupes_shared_journals(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        source = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Source")
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+        only_source = await _create_journal(journal_repository, title="Only source")
+        shared = await _create_journal(journal_repository, title="Shared")
+        assert only_source.id is not None and shared.id is not None
+        await series_repository.add_member(_sid(source), only_source.id)
+        await series_repository.add_member(_sid(source), shared.id)
+        await series_repository.add_member(_sid(destination), shared.id)
+
+        await series_repository.move_members(_sid(source), _sid(destination))
+
+        assert await series_repository.get_member_journal_ids(_sid(source)) == []
+        assert set(
+            await series_repository.get_member_journal_ids(_sid(destination))
+        ) == {only_source.id, shared.id}
+
+
+@pytest.mark.integration
+class TestRecurrenceAliases:
+    async def test_aliased_recurrence_resolves_to_the_absorbing_series(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        source = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Source",
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+
+        await series_repository.alias_recurrences(source, _sid(destination))
+        await series_repository.delete(_sid(source), USER_ID)
+        resolved = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Must not re-create the source",
+        )
+
+        assert resolved.id == destination.id
+        assert [s.name for s in await series_repository.find_all(USER_ID)] == [
+            "Destination"
+        ]
+
+    async def test_existing_aliases_follow_a_chained_merge(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        first = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="first-master",
+            name="First",
+        )
+        second = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="second-master",
+            name="Second",
+        )
+        third = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Third")
+        )
+
+        await series_repository.alias_recurrences(first, _sid(second))
+        await series_repository.delete(_sid(first), USER_ID)
+        await series_repository.alias_recurrences(second, _sid(third))
+        await series_repository.delete(_sid(second), USER_ID)
+
+        for master in ("first-master", "second-master"):
+            resolved = await series_repository.get_or_create_by_recurrence(
+                user_id=USER_ID,
+                calendar_id=_cid(calendar),
+                recurring_event_id=master,
+                name="Must not be created",
+            )
+            assert resolved.id == third.id
+
+    async def test_aliases_cascade_when_the_absorbing_series_is_deleted(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        source = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Source",
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+        await series_repository.alias_recurrences(source, _sid(destination))
+        await series_repository.delete(_sid(source), USER_ID)
+
+        await series_repository.delete(_sid(destination), USER_ID)
+        recreated = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Recreated",
+        )
+
+        assert recreated.id not in {source.id, destination.id}
+        assert recreated.name == "Recreated"
+
+    async def test_manual_series_adds_no_alias(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        source = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Manual source")
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+
+        await series_repository.alias_recurrences(source, _sid(destination))
+
+        count = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journal_series_recurrence_aliases")
+        )
+        assert count.scalar() == 0
+
+    async def test_alias_is_not_visible_to_another_user(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        source = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Source",
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+        await series_repository.alias_recurrences(source, _sid(destination))
+        await series_repository.delete(_sid(source), USER_ID)
+
+        other = await series_repository.get_or_create_by_recurrence(
+            user_id=OTHER_USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="source-master",
+            name="Other user's series",
+        )
+
+        assert other.id != destination.id
+        assert other.user_id == OTHER_USER_ID
