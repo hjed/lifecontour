@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,16 +67,9 @@ def _client_for_deleted_remote() -> AsyncMock:
 @pytest_asyncio.fixture
 async def linked_contact_id(db_session: AsyncSession) -> int:
     """A local contact whose Google link points at a deleted person."""
-    result = await db_session.execute(
-        text(
-            """
-            INSERT INTO contacts (first_name, last_name)
-            VALUES ('Recreate', 'Me')
-            RETURNING id
-            """
-        )
+    contact_id: int = await seed_contact(
+        db_session, first_name="Recreate", last_name="Me"
     )
-    contact_id: int = result.scalar_one()
     await db_session.execute(
         text(
             """

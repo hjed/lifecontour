@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,16 +35,9 @@ class TestOutboundDateSync:
     ) -> None:
         """_load_full_contact loads important dates from the database."""
         # Create a contact
-        contact_result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('DateSync', 'Test')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="DateSync", last_name="Test"
         )
-        contact_id = contact_result.scalar_one()
 
         # Add a birthday
         await db_session.execute(
@@ -123,16 +117,9 @@ class TestOutboundDateSync:
         )
 
         # Create contact with birthday
-        contact_result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Birthday', 'Push')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="Birthday", last_name="Push"
         )
-        contact_id = contact_result.scalar_one()
 
         await db_session.execute(
             text(
@@ -214,16 +201,9 @@ class TestOutboundDateSync:
     ) -> None:
         """Outbound push excludes local-only date types from Google payload."""
         # Create contact with local-only date types
-        contact_result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('LocalOnly', 'Dates')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="LocalOnly", last_name="Dates"
         )
-        contact_id = contact_result.scalar_one()
 
         # Add work anniversary (local-only)
         await db_session.execute(

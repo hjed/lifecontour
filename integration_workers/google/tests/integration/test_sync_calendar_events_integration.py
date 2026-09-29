@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 
 from worker import sync_calendar_events
@@ -61,12 +62,12 @@ class TestSyncCalendarEventsIntegration:
         )
 
         # Insert new contact matching the attendee email
-        await db_session.execute(
-            text("""
-                INSERT INTO contacts (id, first_name, created_at, updated_at)
-                VALUES (:contact_id, 'Test', :now, :now)
-            """),
-            {"contact_id": test_contact_id, "now": now},
+        await seed_contact(
+            db_session,
+            first_name="Test",
+            contact_id=test_contact_id,
+            created_at=now,
+            updated_at=now,
         )
 
         # Insert contact method

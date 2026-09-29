@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.http.osm_tile_source import OsmTileSource
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.journal.outdoor_activity_seeding import Seeder
 from tests.pdf_assertions import embedded_image_bytes, external_link_uris
 
@@ -532,18 +533,10 @@ class TestLogbookExportEndpoint:
                 {"id": journal.id},
             )
 
-        frequent_id = (
-            await async_connection.execute(
-                text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
-                {"name": "Frequentflyer"},
-            )
-        ).scalar()
-        occasional_id = (
-            await async_connection.execute(
-                text("INSERT INTO contacts (first_name) VALUES (:name) RETURNING id"),
-                {"name": "Occasionalguest"},
-            )
-        ).scalar()
+        frequent_id = await seed_contact(async_connection, first_name="Frequentflyer")
+        occasional_id = await seed_contact(
+            async_connection, first_name="Occasionalguest"
+        )
 
         for journal_id in journal_ids:
             await async_connection.execute(

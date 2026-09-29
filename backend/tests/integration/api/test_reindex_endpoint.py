@@ -13,6 +13,8 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
+
 
 @pytest.fixture
 def test_settings(test_settings):
@@ -26,17 +28,11 @@ async def sample_contacts(async_connection: AsyncConnection) -> list[int]:
     """Create sample contacts in the database and return their IDs."""
     ids = []
     for i in range(3):
-        result = await async_connection.execute(
-            text("""
-                INSERT INTO contacts (first_name, last_name)
-                VALUES (:first_name, :last_name)
-                RETURNING id
-            """),
-            {"first_name": f"Contact{i + 1}", "last_name": f"Last{i + 1}"},
+        ids.append(
+            await seed_contact(
+                async_connection, first_name=f"Contact{i + 1}", last_name=f"Last{i + 1}"
+            )
         )
-        row = result.fetchone()
-        assert row is not None
-        ids.append(int(row[0]))
     return ids
 
 
@@ -193,16 +189,13 @@ class TestReindexEndpoint:
     ) -> None:
         """Test that re-indexed contacts include methods, notes, and tags."""
         # Create a contact with methods and tags
-        result = await async_connection.execute(
-            text("""
-                INSERT INTO contacts (first_name, last_name, company, job_title)
-                VALUES ('Alice', 'Wonderland', 'Acme Corp', 'Engineer')
-                RETURNING id
-            """)
+        contact_id = await seed_contact(
+            async_connection,
+            first_name="Alice",
+            last_name="Wonderland",
+            company="Acme Corp",
+            job_title="Engineer",
         )
-        contact_row = result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         # Add a contact method
         await async_connection.execute(

@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -227,15 +228,9 @@ class TestGetContactByExternalId:
     async def test_google_people_id_resolves(
         self, authenticated_lifespan_client, clean_database: AsyncConnection
     ) -> None:
-        result = await clean_database.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name, is_favourite) "
-                "VALUES ('Sarah-Jane', 'Petts', false) RETURNING id"
-            )
+        contact_id = await seed_contact(
+            clean_database, first_name="Sarah-Jane", last_name="Petts"
         )
-        row = result.fetchone()
-        assert row is not None
-        contact_id = int(row[0])
         await _link_sync_metadata(
             clean_database,
             source="google",
@@ -260,15 +255,9 @@ class TestGetContactByExternalId:
         self, authenticated_lifespan_client, clean_database: AsyncConnection
     ) -> None:
         """The `source` a contact's own external_links report resolves too."""
-        result = await clean_database.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name, is_favourite) "
-                "VALUES ('Jane', 'Doe', false) RETURNING id"
-            )
+        contact_id = await seed_contact(
+            clean_database, first_name="Jane", last_name="Doe"
         )
-        row = result.fetchone()
-        assert row is not None
-        contact_id = int(row[0])
         await _link_sync_metadata(
             clean_database,
             source="google",

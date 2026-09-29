@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     USER_ID,
@@ -367,11 +368,7 @@ class TestNotComputedIsNotZero:
         due_id = await seed_due_journal(
             async_connection, journal_repository, title="Permit Meeting", tasks=2
         )
-        contact_id = (
-            await async_connection.execute(
-                text("INSERT INTO contacts (first_name) VALUES ('Sarah') RETURNING id")
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(async_connection, first_name="Sarah")
         await async_connection.execute(
             text(
                 "INSERT INTO journal_contact_relationships "

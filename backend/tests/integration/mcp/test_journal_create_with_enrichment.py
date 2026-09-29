@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -276,16 +277,9 @@ class TestCreateJournalWithContacts:
         Reproduces: contact_relationships on create were silently swallowed.
         """
         # Create a test contact
-        contact_result = await clean_database.execute(
-            text("""
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Sarah-Jane', 'Petts')
-                RETURNING id
-            """),
+        contact_id = await seed_contact(
+            clean_database, first_name="Sarah-Jane", last_name="Petts"
         )
-        contact_row = contact_result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
             payload = await _create_journal_via_mcp(
@@ -325,16 +319,9 @@ class TestCreateJournalWithContacts:
         Reproduces: link_journal_to_contact appeared to succeed but contacts were empty.
         """
         # Create a test contact
-        contact_result = await clean_database.execute(
-            text("""
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Sarah-Jane', 'Petts')
-                RETURNING id
-            """),
+        contact_id = await seed_contact(
+            clean_database, first_name="Sarah-Jane", last_name="Petts"
         )
-        contact_row = contact_result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
             # First create a journal
@@ -603,16 +590,9 @@ class TestUpdateJournalWithTypesAndTags:
     ) -> None:
         """Updating a journal to add contact relationships should persist them."""
         # Create a test contact
-        contact_result = await clean_database.execute(
-            text("""
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Test', 'Contact')
-                RETURNING id
-            """),
+        contact_id = await seed_contact(
+            clean_database, first_name="Test", last_name="Contact"
         )
-        contact_row = contact_result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         async with authenticated_lifespan_client() as authenticated_client:
             # Create journal without contacts

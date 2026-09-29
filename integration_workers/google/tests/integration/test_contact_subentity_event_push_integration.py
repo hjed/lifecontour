@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,16 +104,7 @@ async def synced_contact(db_session: AsyncSession) -> dict[str, int]:
         {"token": b"x", "refresh": b"y"},
     )
 
-    result = await db_session.execute(
-        text(
-            """
-            INSERT INTO contacts (first_name, last_name)
-            VALUES ('Sub', 'Entity')
-            RETURNING id
-            """
-        )
-    )
-    contact_id = int(result.scalar_one())
+    contact_id = await seed_contact(db_session, first_name="Sub", last_name="Entity")
 
     await db_session.execute(
         text(

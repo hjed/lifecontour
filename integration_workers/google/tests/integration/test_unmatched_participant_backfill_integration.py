@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,11 +189,7 @@ class TestUnmatchedParticipantBackfill:
         self, db_session: AsyncSession
     ) -> None:
         journal_id = await _seed_synced_event(db_session)
-        contact_id = (
-            await db_session.execute(
-                text("INSERT INTO contacts (first_name) VALUES ('Known') RETURNING id")
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(db_session, first_name="Known")
         await db_session.execute(
             text("""
                 INSERT INTO contact_methods (contact_id, method_type, value)
@@ -230,11 +227,7 @@ class TestUnmatchedParticipantBackfill:
             """),
             {"journal_id": journal_id},
         )
-        contact_id = (
-            await db_session.execute(
-                text("INSERT INTO contacts (first_name) VALUES ('New') RETURNING id")
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(db_session, first_name="New")
         await db_session.execute(
             text("""
                 INSERT INTO contact_methods (contact_id, method_type, value)

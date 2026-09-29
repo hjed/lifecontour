@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.search.search_service import SearchService
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -369,13 +370,9 @@ async def _tag_journal(conn: AsyncConnection, journal_id: int, tag_id: Any) -> N
 async def _link_contact(
     conn: AsyncConnection, journal_id: int, contact_id: int
 ) -> None:
-    await conn.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, last_name)
-            VALUES (:id, 'Dana', 'Scully')
-            ON CONFLICT (id) DO NOTHING
-        """),
-        {"id": contact_id},
+    """Seed contact ``contact_id`` and link it to the journal — once per id."""
+    await seed_contact(
+        conn, first_name="Dana", last_name="Scully", contact_id=contact_id
     )
     await conn.execute(
         text("""

@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,16 +66,7 @@ class TestPushTagEndToEnd:
         )
 
         # --- Setup: Create a contact with a tag ---
-        contact_result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Push', 'E2E')
-                RETURNING id
-                """
-            )
-        )
-        contact_id = contact_result.scalar_one()
+        contact_id = await seed_contact(db_session, first_name="Push", last_name="E2E")
 
         # Add email
         await db_session.execute(
