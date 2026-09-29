@@ -6,12 +6,18 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_series_repository import (
+    SqlJournalSeriesRepository,
+)
 from app.core.settings.models import UserSettings
+from tests.integration.linked_calendar_seeding import link_calendar
 from tests.integration.series_merge_seeding import (
     OTHER_USER_ID,
     USER_ID,
+    journal_exists,
     member_ids,
     seed_calendar,
     seed_member,
@@ -232,3 +238,237 @@ class TestPreviewSeriesMerge:
         )
 
         assert response.status_code == 404
+
+
+def _execute_body(
+    source_series_id: uuid.UUID,
+    pairs: list[tuple[int, int]],
+    policies: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    body = _merge_body(source_series_id, policies)
+    body["data"]["attributes"]["pairs"] = [
+        {"source_journal_id": s, "destination_journal_id": d} for s, d in pairs
+    ]
+    return body
+
+
+def _merge_url(destination_series_id: uuid.UUID) -> str:
+    return f"/api/journals/series/{destination_series_id}/merge"
+
+
+async def _title(connection: AsyncConnection, journal_id: int) -> str:
+    result = await connection.execute(
+        text("SELECT title FROM journals WHERE id = :id"), {"id": journal_id}
+    )
+    title: str = result.scalar_one()
+    return title
+
+
+@pytest.mark.integration
+class TestMergeSeries:
+    async def test_merges_confirmed_pairs_and_absorbs_the_source_series(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        calendar = await seed_calendar(clean_database)
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        paired_source = await seed_member(
+            clean_database,
+            source,
+            title="Old",
+            start=_at(3, 9),
+            calendar_id=calendar,
+            location="Room 1",
+        )
+        paired_destination = await seed_member(
+            clean_database, destination, title="New", start=_at(3, 9)
+        )
+        lonely = await seed_member(
+            clean_database, source, title="Old", start=_at(10, 9)
+        )
+
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(
+                source, [(paired_source, paired_destination)], {"title": "source"}
+            ),
+        )
+
+        assert response.status_code == 200
+        assert [(d["date"], d["kind"]) for d in _days(response.json())] == [
+            ("2026-08-03", "merged"),
+            ("2026-08-10", "unpaired"),
+        ]
+        assert not await journal_exists(clean_database, paired_source)
+        assert await _title(clean_database, paired_destination) == "Old"
+        assert await member_ids(clean_database, destination) == {
+            paired_destination,
+            lonely,
+        }
+        assert not await series_exists(clean_database, source)
+
+    async def test_a_same_calendar_pair_merges_and_keeps_the_targets_link(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        calendar = await seed_calendar(clean_database)
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        paired_source = await seed_member(
+            clean_database, source, title="Old", start=_at(3, 9), calendar_id=calendar
+        )
+        paired_destination = await seed_member(
+            clean_database,
+            destination,
+            title="New",
+            start=_at(3, 9),
+            calendar_id=calendar,
+        )
+        await link_calendar(
+            clean_database,
+            journal_id=paired_source,
+            calendar_id=str(calendar),
+            external_event_id="old-instance",
+        )
+        await link_calendar(
+            clean_database,
+            journal_id=paired_destination,
+            calendar_id=str(calendar),
+            external_event_id="new-instance",
+        )
+
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(source, [(paired_source, paired_destination)]),
+        )
+
+        assert response.status_code == 200
+        assert [d["kind"] for d in _days(response.json())] == ["merged"]
+        links = await clean_database.execute(
+            text(
+                "SELECT external_event_id FROM journal_external_event_links"
+                " WHERE journal_id = :id"
+            ),
+            {"id": paired_destination},
+        )
+        assert [row.external_event_id for row in links] == ["new-instance"]
+
+    async def test_unconfirmed_and_skipped_pairs_are_kept_and_join_the_destination(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        unticked = await seed_member(
+            clean_database, source, title="Standup", start=_at(3, 9)
+        )
+        unticked_partner = await seed_member(
+            clean_database, destination, title="Standup", start=_at(3, 9)
+        )
+        different = await seed_member(
+            clean_database, source, title="Old", start=_at(10, 9)
+        )
+        different_partner = await seed_member(
+            clean_database, destination, title="New", start=_at(10, 9)
+        )
+
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(source, [], {"title": "skip_if_different"}),
+        )
+
+        assert response.status_code == 200
+        assert [d["kind"] for d in _days(response.json())] == ["excluded", "skipped"]
+        assert await member_ids(clean_database, destination) == {
+            unticked,
+            unticked_partner,
+            different,
+            different_partner,
+        }
+        assert not await series_exists(clean_database, source)
+
+    async def test_a_pair_that_is_no_longer_a_candidate_is_refused(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        source_journal = await seed_member(
+            clean_database, source, title="Old", start=_at(3, 9)
+        )
+        # Previewed on the 3rd; moved to the 4th before the merge was sent.
+        destination_journal = await seed_member(
+            clean_database, destination, title="New", start=_at(4, 9)
+        )
+
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(source, [(source_journal, destination_journal)]),
+        )
+
+        assert response.status_code == 409
+        assert await series_exists(clean_database, source)
+        assert await journal_exists(clean_database, source_journal)
+        assert await member_ids(clean_database, destination) == {destination_journal}
+
+    async def test_a_failing_pair_rolls_back_alone(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        parent = await seed_member(clean_database, source, title="Old", start=_at(3, 9))
+        child = await seed_member(
+            clean_database, destination, title="New", start=_at(3, 9)
+        )
+        # A journal cannot absorb its own ancestor: this pair's merge raises.
+        await clean_database.execute(
+            text("UPDATE journals SET parent_id = :parent WHERE id = :child"),
+            {"parent": parent, "child": child},
+        )
+        good_source = await seed_member(
+            clean_database, source, title="Old", start=_at(10, 9)
+        )
+        good_destination = await seed_member(
+            clean_database, destination, title="New", start=_at(10, 9)
+        )
+
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(
+                source, [(parent, child), (good_source, good_destination)]
+            ),
+        )
+
+        assert response.status_code == 200
+        assert [d["kind"] for d in _days(response.json())] == ["failed", "merged"]
+        assert await journal_exists(clean_database, parent)
+        assert not await journal_exists(clean_database, good_source)
+        assert await member_ids(clean_database, destination) == {
+            parent,
+            child,
+            good_destination,
+        }
+
+    async def test_the_source_recurrence_resolves_to_the_destination_afterwards(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        calendar = await seed_calendar(clean_database)
+        source = await seed_series(
+            clean_database,
+            "Old standup",
+            calendar_id=calendar,
+            recurring_event_id="old-master",
+        )
+        destination = await seed_series(clean_database, "Standup")
+
+        response = await integration_api_client.post(
+            _merge_url(destination), json=_execute_body(source, [])
+        )
+
+        assert response.status_code == 200
+        resolved = await SqlJournalSeriesRepository(
+            clean_database
+        ).get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=calendar,
+            recurring_event_id="old-master",
+            name="Must not be created",
+        )
+        assert resolved.id == destination

@@ -221,6 +221,67 @@ calendars table:
 - Optional Google Calendar sync per calendar
 - If journal.calendar_id references a synced calendar, journal is synced to Google Calendar
 
+### Series
+
+A series groups related journals over time. Calendar sync creates one per
+recurring event, keyed by `(calendar_id, recurring_event_id)`. Users create the
+others by hand (a course of physio appointments, say). A journal can belong to
+several series. The tables are `journal_series`, `journal_series_members` and
+`journal_series_recurrence_aliases`.
+
+#### Merging series
+
+Two series sometimes describe one thing, for example a weekly meeting that was
+re-created as a new recurring event. Merging series **S** into series **D**
+works like this (`JournalSeriesMergeService`, REST
+`POST /api/journals/series/{D}/merge[/preview]`, MCP `preview_series_merge` /
+`merge_series`):
+
+1. **The series merges.** Every member of S joins D, then S is deleted. D keeps
+   its name, description and recurrence key.
+2. **Same-day journals can merge.** Each member of each series gets a date: the
+   local day, in the user's configured timezone, that its event starts on. A
+   day with exactly **one** journal from each side is a *candidate*. The
+   candidate pair is merged with the ordinary journal merge, and the D journal
+   survives. Other days are not merged:
+   - `ambiguous`: two or more journals on one side;
+   - `unpaired`: only one side has a journal that day;
+   - `already_shared`: the same journal is in both series.
+3. **Field policies apply to every pair.** For each field the user picks the
+   side that survives: `destination` (the default) or `source`. The fields are
+   `title`, `content`, `timing` (the date range plus the event's clock times,
+   zone and all-day flag), `location` and `event_description`. Content can
+   also be `combine`d, which is its default. `skip_if_different` means a pair
+   whose values differ on that field is not merged; it is reported as
+   `skipped`. A value only one side holds is never a difference: the merge
+   fills it in from that side.
+4. **Preview, then confirm.** The preview writes nothing. The merge call names
+   the candidate pairs the user confirmed, and any candidate left out is
+   `excluded`. The merge plans again from current data. If a confirmed pair is
+   no longer a candidate, the call returns **409** and writes nothing.
+5. **Pairs fail alone.** Each pair merges in its own savepoint. If the journal
+   merge refuses a pair (for example, one journal is the other's ancestor), that
+   pair is reported as `failed` and its source journal still joins D.
+6. **The recurrence follows D.** If S came from a recurring calendar event, its
+   `(calendar_id, recurring_event_id)` goes into
+   `journal_series_recurrence_aliases` against D. Later syncs of that
+   recurrence add their instances to D instead of re-creating S. Aliases that S
+   already held from earlier merges are moved to D, so a chain of merges
+   resolves to the last survivor.
+
+Two journals in the **same calendar** merge exactly as a single-journal merge
+merges them: the survivor keeps its own link for that calendar
+(`journal_external_event_links` and `sync_metadata` both keep one link per
+journal and calendar or service).
+
+Merging a journal, whether on its own or as a pair here, also moves the source
+journal's series memberships to the survivor. Without that, the survivor would
+drop out of any series only the source belonged to.
+
+> **Follow-up:** the merge only pairs journals that exist when it runs. An
+> instance of S's recurrence that syncs in afterwards joins D as a separate
+> journal, even on a day D already has one. It can be merged individually.
+
 ## Type-Specific Data Models
 
 ### Calendar Info (EVENT type)

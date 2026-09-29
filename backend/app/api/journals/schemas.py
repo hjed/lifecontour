@@ -794,6 +794,40 @@ class JournalSeriesMergePreviewRequest(JsonApiCreateRequest[JournalSeriesMergeDa
     model_config = ConfigDict(extra="forbid")
 
 
+class SeriesMergePairSchema(BaseModel):
+    """A same-day pair the user confirmed from a preview."""
+
+    source_journal_id: int
+    destination_journal_id: int
+
+
+class JournalSeriesMergeExecuteAttributes(JournalSeriesMergeAttributes):
+    """Attributes for performing a series merge."""
+
+    pairs: list[SeriesMergePairSchema] = Field(
+        default_factory=list,
+        description=(
+            "Candidate pairs from the preview to merge; other candidates are "
+            "left unmerged. Refused with 409 if any is no longer a candidate."
+        ),
+    )
+
+
+class JournalSeriesMergeExecuteData(BaseModel):
+    """Data for performing a series merge."""
+
+    type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
+    attributes: JournalSeriesMergeExecuteAttributes = Field(
+        ..., description="Series merge attributes"
+    )
+
+
+class JournalSeriesMergeRequest(JsonApiCreateRequest[JournalSeriesMergeExecuteData]):
+    """Request model for performing a series merge."""
+
+    pass
+
+
 LocalDate = date
 
 

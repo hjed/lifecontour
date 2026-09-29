@@ -704,6 +704,7 @@ class JournalProvider(Provider):
         journal_repo: JournalRepository,
         calendar_info_repo: CalendarInfoRepository,
         date_resolver: JournalDateResolver,
+        journal_merge_service: JournalMergeService,
     ) -> JournalSeriesMergeService:
         """Provide a JournalSeriesMergeService instance."""
         return JournalSeriesMergeService(
@@ -711,6 +712,7 @@ class JournalProvider(Provider):
             journal_repo=journal_repo,
             calendar_info_repo=calendar_info_repo,
             date_resolver=date_resolver,
+            journal_merge_service=journal_merge_service,
         )
 
     @provide(scope=Scope.REQUEST)

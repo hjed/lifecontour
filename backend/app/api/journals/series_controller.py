@@ -6,6 +6,7 @@ appointments). Registered before the main journals router so the literal
 ``/journals/series`` paths win over ``/journals/{journal_id}``.
 """
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalValidationError,
 )
@@ -22,6 +23,7 @@ from app.api.journals.schemas import (
     JournalSeriesMergePlanResource,
     JournalSeriesMergePlanResponse,
     JournalSeriesMergePreviewRequest,
+    JournalSeriesMergeRequest,
     JournalSeriesRelationshipRequest,
     JournalSeriesResource,
     JournalSeriesResponse,
@@ -31,7 +33,7 @@ from app.api.journals.schemas import (
 )
 from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.models.repositories import JournalRepository
-from app.core.journal.models.series_merge import SeriesMergePolicies
+from app.core.journal.models.series_merge import SeriesMergePair, SeriesMergePolicies
 from app.core.journal.services.journal_series_merge_service import (
     JournalSeriesMergeService,
     SeriesMergeReport,
@@ -287,5 +289,39 @@ async def preview_journal_series_merge(
         source_series_id=parse_series_id(attributes.source_series_id),
         user_id=user.id,
         policies=SeriesMergePolicies(**dict(attributes.policies)),
+    )
+    return _merge_plan_response(report)
+
+
+@series_router.post("/journals/series/{series_id}/merge")
+@inject
+async def merge_journal_series(
+    series_id: str,
+    merge_request: JournalSeriesMergeRequest,
+    merge_service: FromDishka[JournalSeriesMergeService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> JournalSeriesMergePlanResponse:
+    """Merge another series into this one, deleting it.
+
+    Every member of the source series joins this series, and each confirmed
+    same-day pair is merged into this series' journal. Returns each day's
+    outcome; 409 if a confirmed pair is no longer a merge candidate.
+    """
+    attributes = merge_request.data.attributes
+    report = await merge_service.merge_series(
+        destination_series_id=parse_series_id(series_id),
+        source_series_id=parse_series_id(attributes.source_series_id),
+        user_id=user.id,
+        policies=SeriesMergePolicies(**dict(attributes.policies)),
+        pairs=[
+            SeriesMergePair(p.source_journal_id, p.destination_journal_id)
+            for p in attributes.pairs
+        ],
+        transaction=connection,
+        # A person merged these series in the browser; the journal and task
+        # events the pair merges publish record it as theirs.
+        source=Provenance.UI,
+        changed_by="ui",
     )
     return _merge_plan_response(report)

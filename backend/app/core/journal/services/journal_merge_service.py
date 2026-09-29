@@ -277,6 +277,7 @@ class JournalMergeService:
 
         # 6. Move External Links (deduplicate)
         await self._move_external_links(target_id, source_id, transaction)
+        await self._move_series_memberships(target_id, source_id, transaction)
 
         # 7. Re-point integration links in the canonical link store
         await self._repoint_integration_links(
@@ -579,6 +580,28 @@ class JournalMergeService:
                        created_at, updated_at
                 FROM removed
                 ON CONFLICT (journal_id, calendar_id) DO NOTHING
+            """),
+            {"target_id": target_id, "source_id": source_id},
+        )
+
+    async def _move_series_memberships(
+        self, target_id: int, source_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Keep the survivor in every series the absorbed journal belonged to.
+
+        Memberships cascade when the source is deleted, so a series only the
+        source was in would otherwise lose the journal the merge kept.
+        """
+        await transaction.execute(
+            text("""
+                WITH removed AS (
+                    DELETE FROM journal_series_members
+                    WHERE journal_id = :source_id
+                    RETURNING series_id
+                )
+                INSERT INTO journal_series_members (series_id, journal_id)
+                SELECT series_id, :target_id FROM removed
+                ON CONFLICT (series_id, journal_id) DO NOTHING
             """),
             {"target_id": target_id, "source_id": source_id},
         )
