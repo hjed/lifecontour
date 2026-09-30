@@ -205,7 +205,31 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         Existing aliases are re-pointed so merge chains collapse onto the
         latest survivor. A manual series, or one whose calendar was deleted,
         has no recurrence key of its own to alias.
+
+        Every key ``absorbed`` answers for (its own and each it inherited) is
+        locked first, in a fixed order so two merges cannot deadlock, and held
+        until the transaction ends. A sync for any of them then either
+        committed its membership before this (so moving the members carries
+        it) or waits and resolves to the survivor. Call it **before** moving
+        the members: a sync let through between the move and the delete would
+        add a journal the delete then drops.
         """
+        inherited = await self.conn.execute(
+            text(
+                """
+                SELECT calendar_id, recurring_event_id
+                FROM journal_series_recurrence_aliases
+                WHERE series_id = :absorbed_id
+                """
+            ),
+            {"absorbed_id": absorbed.id},
+        )
+        keys = {(row.calendar_id, row.recurring_event_id) for row in inherited}
+        if absorbed.calendar_id is not None and absorbed.recurring_event_id:
+            keys.add((absorbed.calendar_id, absorbed.recurring_event_id))
+        for calendar_id, recurring_event_id in sorted(keys, key=str):
+            await self._lock_recurrence(calendar_id, recurring_event_id)
+
         await self.conn.execute(
             text(
                 """
@@ -218,7 +242,6 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         )
         if absorbed.calendar_id is None or absorbed.recurring_event_id is None:
             return
-        await self._lock_recurrence(absorbed.calendar_id, absorbed.recurring_event_id)
         await self.conn.execute(
             text(
                 """

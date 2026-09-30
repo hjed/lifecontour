@@ -74,6 +74,27 @@ async def _create_calendar(
     )
 
 
+async def _holds_recurrence_lock(
+    connection: AsyncConnection, calendar_id: uuid.UUID, recurring_event_id: str
+) -> bool:
+    """Whether this transaction holds the advisory lock for a recurrence key."""
+    result = await connection.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_locks
+                WHERE locktype = 'advisory' AND pid = pg_backend_pid()
+                  AND objsubid = 1
+                  AND ((classid::bigint << 32) | objid::bigint)
+                      = hashtextextended(:key, 0)
+            )
+            """
+        ),
+        {"key": f"journal_series_recurrence:{calendar_id}:{recurring_event_id}"},
+    )
+    return bool(result.scalar())
+
+
 @pytest.mark.integration
 class TestJournalSeriesSave:
     async def test_save_creates_series_with_generated_id(
@@ -431,6 +452,53 @@ class TestRecurrenceAliases:
                 name="Must not be created",
             )
             assert resolved.id == third.id
+
+    async def test_holds_every_recurrence_key_it_repoints(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # A sync for any key the absorbed series answers for (its own or one
+        # it inherited) must wait for the merge: otherwise it can add a journal
+        # to the absorbed series after its members moved, and deleting the
+        # series drops that membership.
+        # Seeded directly, as an earlier merge left it: ``save`` and a plain
+        # INSERT take no advisory locks, and a transaction-level lock cannot be
+        # released mid-test, so only the call under test may hold any.
+        calendar = await _create_calendar(calendar_repository)
+        second = await series_repository.save(
+            JournalSeries(
+                user_id=USER_ID,
+                name="Second",
+                calendar_id=_cid(calendar),
+                recurring_event_id="second-master",
+            )
+        )
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_series_recurrence_aliases
+                    (calendar_id, recurring_event_id, series_id, user_id)
+                VALUES (:calendar_id, 'first-master', :series_id, :user_id)
+                """
+            ),
+            {
+                "calendar_id": _cid(calendar),
+                "series_id": _sid(second),
+                "user_id": USER_ID,
+            },
+        )
+        third = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Third")
+        )
+
+        await series_repository.alias_recurrences(second, _sid(third))
+
+        for master in ("first-master", "second-master"):
+            assert await _holds_recurrence_lock(
+                async_connection, _cid(calendar), master
+            ), master
 
     async def test_aliases_cascade_when_the_absorbing_series_is_deleted(
         self,

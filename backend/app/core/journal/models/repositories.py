@@ -1380,8 +1380,9 @@ class JournalSeriesRepository(ABC):
 
         Covers ``absorbed``'s own recurrence key (if it was auto-created) and
         every alias it already holds from earlier merges, so later syncs of any
-        of them resolve to the absorbing series. Call before deleting
-        ``absorbed``.
+        of them resolve to the absorbing series. Every one of those keys is
+        held until the transaction ends, so call it before moving
+        ``absorbed``'s members and deleting it.
         """
         pass
 
