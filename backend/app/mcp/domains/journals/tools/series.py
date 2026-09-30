@@ -299,7 +299,9 @@ async def preview_series_merge(
     "title", "content", "timing" (dates plus the event's clock times and zone),
     "location", "event_description". Policies: "destination" (default),
     "source", "skip_if_different" (don't merge a pair whose values differ), and
-    "combine" (content only — its default — concatenating both).
+    "combine" (content only — its default — concatenating both). When only one
+    journal of a pair is an event, its timing is kept whole whatever the timing
+    policy: the other has no clock times to contribute.
 
     Returns:
         JSON string with "days" (date, kind, source_journal_ids,

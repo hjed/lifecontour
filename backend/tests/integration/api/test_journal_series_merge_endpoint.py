@@ -154,6 +154,36 @@ class TestPreviewSeriesMerge:
 
         assert response.status_code == 400
 
+    @pytest.mark.parametrize(
+        "mistype",
+        [
+            # A misspelt policy field would otherwise preview the defaults.
+            lambda body: body["data"]["attributes"]["policies"].update(
+                {"event-description": "skip_if_different"}
+            ),
+            lambda body: body["data"]["attributes"].update({"policy": {}}),
+            lambda body: body["data"].update({"id": "x"}),
+            lambda body: body.update({"meta": {}}),
+        ],
+        ids=["policy-field", "attribute", "data-member", "envelope-member"],
+    )
+    async def test_unknown_fields_are_refused_at_every_level(
+        self,
+        integration_api_client: AsyncClient,
+        clean_database: AsyncConnection,
+        mistype: Any,
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        body = _merge_body(source, {"title": "source"})
+        mistype(body)
+
+        response = await integration_api_client.post(
+            _preview_url(destination), json=body
+        )
+
+        assert response.status_code == 400
+
     async def test_merging_a_series_into_itself_is_rejected(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
     ) -> None:

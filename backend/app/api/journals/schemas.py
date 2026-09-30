@@ -15,7 +15,7 @@ from core_shared.models.journals import (
     TaskAnchorRole,
 )
 from core_shared.models.tasks import TaskStatus
-from pydantic import BaseModel, Field, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -734,7 +734,14 @@ class JournalSeriesUpdateRequest(BaseModel):
 
 
 class SeriesMergePoliciesSchema(BaseModel):
-    """Which side survives in every merged pair, per field."""
+    """Which side survives in every merged pair, per field.
+
+    Every series-merge request model forbids unknown fields: a misspelt policy
+    field would otherwise preview (and merge) under the defaults, and a
+    misspelt ``pairs`` would merge nothing, both answering 200.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     title: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
     content: SeriesFieldPolicy = Field(
@@ -752,6 +759,8 @@ class SeriesMergePoliciesSchema(BaseModel):
 class JournalSeriesMergeAttributes(BaseModel):
     """Attributes for previewing or performing a series merge."""
 
+    model_config = ConfigDict(extra="forbid")
+
     source_series_id: str = Field(
         ..., description="The series merged into (and deleted by) this one"
     )
@@ -764,6 +773,8 @@ class JournalSeriesMergeAttributes(BaseModel):
 class JournalSeriesMergeData(BaseModel):
     """Data for previewing or performing a series merge."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
     attributes: JournalSeriesMergeAttributes = Field(
         ..., description="Series merge attributes"
@@ -773,7 +784,7 @@ class JournalSeriesMergeData(BaseModel):
 class JournalSeriesMergePreviewRequest(JsonApiCreateRequest[JournalSeriesMergeData]):
     """Request model for previewing a series merge."""
 
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 LocalDate = date
