@@ -125,9 +125,9 @@ class JournalSeriesMergeService:
 
         Each pair merges in its own savepoint, so a pair the single-journal
         merge refuses is reported as ``failed`` and the rest carry on. Then
-        every remaining source member joins the destination, the source's
-        recurrences are aliased to the destination, and the source series is
-        deleted.
+        the source's recurrences are aliased to the destination (locking their
+        keys against a concurrent sync), every remaining source member joins
+        the destination, and the source series is deleted.
 
         Raises:
             JournalValidationError: If the two series are the same.
@@ -159,8 +159,11 @@ class JournalSeriesMergeService:
         days = tuple(_performed(day, confirmed, merged_kinds) for day in plan.days)
 
         assert source_series.id is not None and destination_series.id is not None
-        await self.series_repo.move_members(source_series.id, destination_series.id)
+        # Alias first: it locks every recurrence key the source answers for,
+        # so no sync can add a journal to the source between the move and the
+        # delete, where the delete would drop it.
         await self.series_repo.alias_recurrences(source_series, destination_series.id)
+        await self.series_repo.move_members(source_series.id, destination_series.id)
         await self.series_repo.delete(source_series.id, user_id)
         logger.info(
             "Journal series merged",
