@@ -331,7 +331,7 @@ def overrides_for_pair(
         if content:
             overrides["content"] = content
 
-    timing_from = source if policies.timing is SeriesFieldPolicy.SOURCE else destination
+    timing_from = _timing_side(source, destination, policies)
     date_range = timing_from.journal.event_date_range
     overrides["event_date_range"] = {
         "start": date_range.start.isoformat(),
@@ -357,6 +357,30 @@ def overrides_for_pair(
     if source.calendar_info is not None or destination.calendar_info is not None:
         overrides["type_data"] = {"event": event_overrides}
     return overrides
+
+
+def _timing_side(
+    source: SeriesMember,
+    destination: SeriesMember,
+    policies: SeriesMergePolicies,
+) -> SeriesMember:
+    """The journal whose timing survives: the preferred one, unless only the other is an event.
+
+    Timing is one answer. A journal that is not an event has no clock times,
+    zone or all-day flag, so pinning its date range while the merge keeps the
+    other journal's event row would pair those dates with times from a
+    different occurrence. When only one side holds a complete timing, that
+    side's survives whole: the same "fill what one side lacks" rule every
+    other field follows.
+    """
+    preferred, other = (
+        (source, destination)
+        if policies.timing is SeriesFieldPolicy.SOURCE
+        else (destination, source)
+    )
+    if preferred.calendar_info is None and other.calendar_info is not None:
+        return other
+    return preferred
 
 
 def _chosen(

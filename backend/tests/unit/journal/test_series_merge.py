@@ -418,6 +418,40 @@ class TestOverridesForPair:
 
         assert overrides["content"] == "b"
 
+    @pytest.mark.parametrize(
+        "policy", [SeriesFieldPolicy.DESTINATION, SeriesFieldPolicy.SOURCE]
+    )
+    def test_when_only_one_side_is_an_event_its_timing_survives_whole(
+        self, policy: SeriesFieldPolicy
+    ) -> None:
+        # Whichever side is chosen, a journal that is not an event has no clock
+        # times, zone or all-day flag: pinning its dates beside the other's
+        # event row would pair them with times from a different occurrence.
+        event = _member(
+            1,
+            _at(3, 9),
+            end=_at(3, 10),
+            start_time=datetime.time(19, 0),
+            end_time=datetime.time(20, 0),
+            timezone="Australia/Sydney",
+        )
+        plain = _member(2, _at(3, 1), calendar_id=None)
+        policies = SeriesMergePolicies(timing=policy)
+
+        for source, destination in ((event, plain), (plain, event)):
+            overrides = overrides_for_pair(source, destination, policies)
+
+            assert overrides["event_date_range"] == {
+                "start": _at(3, 9).isoformat(),
+                "end": _at(3, 10).isoformat(),
+            }
+            assert overrides["type_data"]["event"] == {
+                "start_time": "19:00:00",
+                "end_time": "20:00:00",
+                "timezone": "Australia/Sydney",
+                "is_all_day": False,
+            }
+
     def test_timing_without_calendar_info_overrides_only_the_date_range(
         self,
     ) -> None:
