@@ -446,6 +446,90 @@ class TestMergeSeries:
             good_destination,
         }
 
+    @pytest.mark.parametrize(
+        "mistype",
+        [
+            # A misspelt ``pairs`` would otherwise merge no pair at all.
+            lambda body: body["data"]["attributes"].update(
+                {"pair": body["data"]["attributes"].pop("pairs")}
+            ),
+            lambda body: body["data"]["attributes"]["pairs"][0].update(
+                {"target_journal_id": 0}
+            ),
+            lambda body: body["data"].update({"id": "x"}),
+            lambda body: body.update({"meta": {}}),
+        ],
+        ids=["attribute", "pair-member", "data-member", "envelope-member"],
+    )
+    async def test_unknown_fields_are_refused_and_nothing_is_written(
+        self,
+        integration_api_client: AsyncClient,
+        clean_database: AsyncConnection,
+        mistype: Any,
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        source_journal = await seed_member(
+            clean_database, source, title="Old", start=_at(3, 9)
+        )
+        destination_journal = await seed_member(
+            clean_database, destination, title="New", start=_at(3, 9)
+        )
+        body = _execute_body(source, [(source_journal, destination_journal)])
+        mistype(body)
+
+        response = await integration_api_client.post(_merge_url(destination), json=body)
+
+        assert response.status_code == 400
+        assert await series_exists(clean_database, source)
+        assert await journal_exists(clean_database, source_journal)
+
+    async def test_a_pair_with_one_event_keeps_that_events_timing(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        calendar = await seed_calendar(clean_database)
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        event = await seed_member(
+            clean_database, source, title="Event", start=_at(3, 9), calendar_id=calendar
+        )
+        await clean_database.execute(
+            text(
+                "UPDATE journal_calendar_info SET start_time = '19:00',"
+                " end_time = '20:00', timezone = 'Australia/Sydney'"
+                " WHERE journal_id = :id"
+            ),
+            {"id": event},
+        )
+        plain = await seed_member(
+            clean_database, destination, title="Note", start=_at(3, 1)
+        )
+
+        # The destination's timing is preferred, but it is not an event.
+        response = await integration_api_client.post(
+            _merge_url(destination),
+            json=_execute_body(source, [(event, plain)], {"timing": "destination"}),
+        )
+
+        assert response.status_code == 200
+        row = (
+            await clean_database.execute(
+                text(
+                    "SELECT j.event_date_range_start, c.start_time, c.end_time,"
+                    " c.timezone FROM journals j"
+                    " JOIN journal_calendar_info c ON c.journal_id = j.id"
+                    " WHERE j.id = :id"
+                ),
+                {"id": plain},
+            )
+        ).one()
+        assert row.event_date_range_start == _at(3, 9)
+        assert (str(row.start_time), str(row.end_time), row.timezone) == (
+            "19:00:00",
+            "20:00:00",
+            "Australia/Sydney",
+        )
+
     async def test_the_source_recurrence_resolves_to_the_destination_afterwards(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
     ) -> None:

@@ -254,7 +254,10 @@ works like this (`JournalSeriesMergeService`, REST
    also be `combine`d, which is its default. `skip_if_different` means a pair
    whose values differ on that field is not merged; it is reported as
    `skipped`. A value only one side holds is never a difference: the merge
-   fills it in from that side.
+   fills it in from that side. Timing follows the same rule as a whole: when
+   only one journal of a pair is an event, its timing is kept, whatever the
+   timing policy, because the other journal has no clock times, zone or
+   all-day flag to put beside its dates.
 4. **Preview, then confirm.** The preview writes nothing. The merge call names
    the candidate pairs the user confirmed, and any candidate left out is
    `excluded`. The merge plans again from current data. If a confirmed pair is

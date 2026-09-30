@@ -15,7 +15,7 @@ from core_shared.models.journals import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -60,6 +60,9 @@ def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
 
 class SeriesMergePairArgument(BaseModel):
     """A same-day pair from ``preview_series_merge`` to merge."""
+
+    # A misspelt key would otherwise drop the pair's id and fail as "stale".
+    model_config = ConfigDict(extra="forbid")
 
     source_journal_id: int
     destination_journal_id: int

@@ -797,6 +797,8 @@ class JournalSeriesMergePreviewRequest(JsonApiCreateRequest[JournalSeriesMergeDa
 class SeriesMergePairSchema(BaseModel):
     """A same-day pair the user confirmed from a preview."""
 
+    model_config = ConfigDict(extra="forbid")
+
     source_journal_id: int
     destination_journal_id: int
 
@@ -816,6 +818,8 @@ class JournalSeriesMergeExecuteAttributes(JournalSeriesMergeAttributes):
 class JournalSeriesMergeExecuteData(BaseModel):
     """Data for performing a series merge."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
     attributes: JournalSeriesMergeExecuteAttributes = Field(
         ..., description="Series merge attributes"
@@ -825,7 +829,7 @@ class JournalSeriesMergeExecuteData(BaseModel):
 class JournalSeriesMergeRequest(JsonApiCreateRequest[JournalSeriesMergeExecuteData]):
     """Request model for performing a series merge."""
 
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 LocalDate = date

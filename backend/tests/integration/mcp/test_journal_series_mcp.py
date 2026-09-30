@@ -15,6 +15,7 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    post_mcp_tool,
 )
 from tests.integration.series_merge_seeding import (
     journal_exists,
@@ -366,3 +367,28 @@ class TestSeriesMergeToolsIntegration:
         assert "error" in payload
         assert await series_exists(clean_database, pair.source)
         assert await journal_exists(clean_database, pair.source_journal)
+
+    @pytest.mark.asyncio
+    async def test_merge_series_refuses_an_unknown_pair_field(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        pair = await _seed_same_day_pair(clean_database)
+        pairs = _pairs_arg(pair.source_journal, pair.destination_journal)
+        pairs[0]["target_journal_id"] = pair.destination_journal
+
+        async with authenticated_lifespan_client() as client:
+            response = await post_mcp_tool(
+                client,
+                "merge_series",
+                {
+                    "destination_series_id": str(pair.destination),
+                    "source_series_id": str(pair.source),
+                    "pairs": pairs,
+                },
+            )
+
+        # Asserted on the rejection reason: without it the misspelt key is
+        # dropped, and the pair would fail later for the wrong reason.
+        assert '"isError":true' in response.text
+        assert "extra_forbidden" in response.text
+        assert await series_exists(clean_database, pair.source)
