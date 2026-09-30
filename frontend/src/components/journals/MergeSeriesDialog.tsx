@@ -142,11 +142,15 @@ export function MergeSeriesDialog({
     DEFAULT_SERIES_MERGE_POLICIES
   );
   const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
+  // A merge that answered 200 but left some pairs unmerged: shown in place of
+  // the preview, because the user was told those days would merge.
+  const [result, setResult] = useState<SeriesMergePlan | null>(null);
 
   const { data: allSeries } = useJournalSeries();
   const preview = useSeriesMergePreview(
     destinationSeriesId,
-    sourceSeriesId,
+    // Once merged the source series is gone: never preview it again.
+    result ? null : sourceSeriesId,
     policies
   );
   const mergeSeries = useMergeSeries();
@@ -154,7 +158,7 @@ export function MergeSeriesDialog({
   const otherSeries = (allSeries?.data ?? []).filter(
     series => series.id !== destinationSeriesId
   );
-  const plan = sourceSeriesId ? preview.data : undefined;
+  const plan = result ?? (sourceSeriesId ? preview.data : undefined);
   const confirmedPairs = (plan?.days ?? [])
     .filter(day => day.kind === 'candidate')
     .map(dayPair)
@@ -167,6 +171,7 @@ export function MergeSeriesDialog({
     setSourceSeriesId(null);
     setPolicies(DEFAULT_SERIES_MERGE_POLICIES);
     setUnticked(new Set());
+    setResult(null);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -186,13 +191,17 @@ export function MergeSeriesDialog({
   const handleMerge = async () => {
     if (!sourceSeriesId) return;
     try {
-      await mergeSeries.mutateAsync({
+      const merged = await mergeSeries.mutateAsync({
         destinationSeriesId,
         sourceSeriesId,
         policies,
         pairs: confirmedPairs,
       });
-      handleOpenChange(false);
+      if (merged.days.some(day => day.kind === 'failed')) {
+        setResult(merged);
+      } else {
+        handleOpenChange(false);
+      }
     } catch (error) {
       // The series moved since the preview: show the user what a merge
       // would do now instead of closing on one that didn't happen.
@@ -225,31 +234,40 @@ export function MergeSeriesDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className='space-y-2'>
-          <Label htmlFor='merge-series-source'>Series to merge in</Label>
-          <Select
-            // '' keeps the Select controlled while showing the placeholder.
-            value={sourceSeriesId ?? ''}
-            onValueChange={value => setSourceSeriesId(value || null)}
-          >
-            <SelectTrigger
-              id='merge-series-source'
-              aria-label='Series to merge in'
-              data-testid='merge-series-source'
-            >
-              <SelectValue placeholder='Choose a series' />
-            </SelectTrigger>
-            <SelectContent>
-              {otherSeries.map(series => (
-                <SelectItem key={series.id} value={series.id}>
-                  {series.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {result && (
+          <p className='text-sm' role='status'>
+            The series was merged, but some same-day journals could not be
+            merged. They stay in this series as separate journals.
+          </p>
+        )}
 
-        {sourceSeriesId && (
+        {!result && (
+          <div className='space-y-2'>
+            <Label htmlFor='merge-series-source'>Series to merge in</Label>
+            <Select
+              // '' keeps the Select controlled while showing the placeholder.
+              value={sourceSeriesId ?? ''}
+              onValueChange={value => setSourceSeriesId(value || null)}
+            >
+              <SelectTrigger
+                id='merge-series-source'
+                aria-label='Series to merge in'
+                data-testid='merge-series-source'
+              >
+                <SelectValue placeholder='Choose a series' />
+              </SelectTrigger>
+              <SelectContent>
+                {otherSeries.map(series => (
+                  <SelectItem key={series.id} value={series.id}>
+                    {series.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {!result && sourceSeriesId && (
           <fieldset className='space-y-3'>
             <legend className='text-sm font-medium'>
               For journals merged on the same day
@@ -348,17 +366,28 @@ export function MergeSeriesDialog({
         )}
 
         <DialogFooter>
-          <Button variant='outline' onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant='destructive'
-            onClick={handleMerge}
-            disabled={!plan || preview.isFetching || mergeSeries.isPending}
-            data-testid='confirm-merge-series'
-          >
-            Merge series
-          </Button>
+          {result ? (
+            <Button
+              onClick={() => handleOpenChange(false)}
+              data-testid='close-merge-series-result'
+            >
+              Close
+            </Button>
+          ) : (
+            <>
+              <Button variant='outline' onClick={() => handleOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant='destructive'
+                onClick={handleMerge}
+                disabled={!plan || preview.isFetching || mergeSeries.isPending}
+                data-testid='confirm-merge-series'
+              >
+                Merge series
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

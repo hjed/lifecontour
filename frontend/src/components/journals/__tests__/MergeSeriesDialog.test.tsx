@@ -243,4 +243,36 @@ describe('MergeSeriesDialog', () => {
     expect(refetch).toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('keeps the dialog open with the result when a pair could not be merged', async () => {
+    mutateAsync.mockResolvedValue({
+      ...PLAN,
+      days: [
+        { ...PLAN.days[0], kind: 'failed' },
+        { ...PLAN.days[1], kind: 'merged' },
+      ],
+    });
+    const user = await openAndChooseSource();
+
+    await user.click(screen.getByRole('button', { name: /^merge series$/i }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const rows = screen.getAllByTestId(/^series-merge-day-/);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent(/could not be merged/i);
+    expect(rows[1]).toHaveTextContent('Merged');
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^merge series$/i })
+    ).not.toBeInTheDocument();
+    // The source series is gone: its preview must not be fetched again.
+    expect(useSeriesMergePreview).toHaveBeenLastCalledWith(
+      'dest',
+      null,
+      DEFAULT_SERIES_MERGE_POLICIES
+    );
+
+    await user.click(screen.getByTestId('close-merge-series-result'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });

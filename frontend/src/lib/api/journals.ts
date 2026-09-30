@@ -2234,7 +2234,7 @@ export function useMergeSeries() {
       policies: SeriesMergePolicies;
       pairs: SeriesMergePair[];
     }) => mergeSeries(destinationSeriesId, sourceSeriesId, policies, pairs),
-    onSuccess: () => {
+    onSuccess: plan => {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalSeriesKeys.all },
@@ -2245,7 +2245,18 @@ export function useMergeSeries() {
         { queryKey: taskKeys.all },
         REFRESH_HOME_DASHBOARD
       );
-      toast.success('Series merged successfully');
+      // A 200 can still carry pairs the journal merge refused: saying the
+      // merge succeeded would hide days the user was told would merge.
+      const failed = plan.days.filter(day => day.kind === 'failed').length;
+      if (failed) {
+        toast.warning(
+          `Series merged, but ${failed} same-day ${
+            failed === 1 ? 'pair' : 'pairs'
+          } could not be merged`
+        );
+      } else {
+        toast.success('Series merged successfully');
+      }
     },
     onError: (error: Error) => {
       toast.error(error.message);
