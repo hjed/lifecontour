@@ -1467,9 +1467,11 @@ def _process_contacts_batch(
 
 async def _create_transformer(
     client: GoogleAPIClient,
+    user_id: str | int,
 ) -> GoogleContactTransformer:
     """
-    Create a GoogleContactTransformer with a populated name translator.
+    Create a GoogleContactTransformer for the syncing user, with a populated
+    name translator.
 
     Fetches contact groups to build the translation mapping.
     """
@@ -1479,7 +1481,7 @@ async def _create_transformer(
         reserved_group_ids=settings.google_reserved_groups, group_mapping=group_mapping
     )
 
-    return GoogleContactTransformer(translator=translator)
+    return GoogleContactTransformer(user_id=str(user_id), translator=translator)
 
 
 async def _find_existing_external_ids(
@@ -1548,7 +1550,7 @@ async def _perform_full_sync(
     page_token = None
     created_count = 0
     updated_count = 0
-    transformer = await _create_transformer(client)
+    transformer = await _create_transformer(client, user_id)
 
     while True:
         # Check if job has been cancelled
@@ -1598,6 +1600,7 @@ async def _perform_full_sync(
                     external_id=google_person.resource_name,
                     sync_type=sync_type,
                     etag=google_person.etag,
+                    user_id=str(user_id),
                 )
 
                 # Add to session (will be committed with transaction)
@@ -1700,7 +1703,7 @@ async def _perform_incremental_sync(
     updated_count = 0
 
     # Transform and serialize contacts, handling per-item failures
-    transformer = await _create_transformer(client)
+    transformer = await _create_transformer(client, user_id)
     serialized_contacts = _process_contacts_batch(
         contacts_response.connections,
         transformer,
@@ -1735,6 +1738,7 @@ async def _perform_incremental_sync(
                 external_id=google_person.resource_name,
                 sync_type=sync_type,
                 etag=google_person.etag,
+                user_id=str(user_id),
             )
 
             # Add to session (will be committed with transaction)

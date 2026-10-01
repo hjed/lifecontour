@@ -259,6 +259,18 @@ relocated to `SyncMetadataRepository` (`upsert_contact_link`, `repoint_contact_l
 returning `IntegrationLinkCollision`), `IntegrationLinkRepository`
 (`find_contact_with_birthday`) and `SqlContactRepository` (`contact_exists`).
 
+#### Contact Sync Events Name the Owner
+
+`contact.created` / `contact.updated` events (`ContactSyncEventData`, built by
+`OutboxEvent.create_contact_sync_event`) carry the owning user twice: top-level
+`event_data.user_id`, and `event_data.contact_data.user_id` from the serialized
+`Contact` entity. The worker stamps the user it is syncing for — the Google sync
+job's `user_id` (passed to `GoogleContactTransformer`), and `ImmichSyncService`'s
+own `user_id`. Both fields are optional while the backend still ignores them; they
+become required once `contacts.user_id` exists, and from then on the inbound
+consumer fails a contact sync event that names no owner rather than guess one
+([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 2–3).
+
 ### 2. Task Queue System
 
 **Technology**: ARQ (asyncio-based, Redis-backed)

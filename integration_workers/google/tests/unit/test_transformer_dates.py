@@ -29,7 +29,7 @@ from transformer import GoogleContactTransformer
 @pytest.fixture
 def transformer() -> GoogleContactTransformer:
     """Create GoogleContactTransformer instance."""
-    return GoogleContactTransformer()
+    return GoogleContactTransformer(user_id="test-user-google")
 
 
 class TestBirthdayTransformation:

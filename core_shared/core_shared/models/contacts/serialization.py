@@ -42,6 +42,7 @@ def serialize_contact(contact: Contact) -> dict[str, Any]:
     """
     result: dict[str, Any] = {
         "first_name": contact.first_name,
+        "user_id": contact.user_id,
         "last_name": contact.last_name,
         "middle_name": contact.middle_name,
         "nick_name": contact.nick_name,
@@ -230,6 +231,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
 
         return Contact(
             first_name=first_name,
+            user_id=data.get("user_id"),
             last_name=data.get("last_name"),
             middle_name=data.get("middle_name"),
             nick_name=data.get("nick_name"),

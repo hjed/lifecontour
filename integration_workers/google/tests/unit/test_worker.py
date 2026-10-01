@@ -597,6 +597,94 @@ class TestGoogleWorker:
         mock_process.assert_called_once()
         assert mock_session.add.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_create_transformer_stamps_the_job_user(self):
+        """Contacts transformed during a sync belong to the job's user."""
+        from api_models import GooglePerson
+        from worker import _create_transformer
+
+        with patch(
+            "worker._build_contact_group_mapping",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            transformer = await _create_transformer(AsyncMock(), user_id=1)
+
+        contact = transformer.transform_person(
+            GooglePerson(resourceName="people/1", etag="etag-1")
+        )
+        assert contact.user_id == "1"
+
+    @pytest.mark.asyncio
+    async def test_perform_full_sync_events_name_the_job_user(self):
+        """Full-sync contact events carry the job's user as their owner."""
+        from worker import _perform_full_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [{"resourceName": "people/1", "etag": "etag-1"}],
+            "nextSyncToken": "sync-token-123",
+        }
+        processed_contacts = [
+            (MagicMock(resource_name="people/1", etag="etag-1"), {"first_name": "A"})
+        ]
+        mock_create_event = MagicMock(return_value=MagicMock())
+
+        with (
+            patch("worker._process_contacts_batch", return_value=processed_contacts),
+            patch("worker._save_sync_token", new_callable=AsyncMock),
+            patch("worker.OutboxEvent.create_contact_sync_event", mock_create_event),
+            patch(
+                "worker._find_existing_external_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+        ):
+            await _perform_full_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics={"contacts_processed": 0, "errors": 0},
+                user_id=1,
+            )
+
+        assert mock_create_event.call_args.kwargs["user_id"] == "1"
+
+    @pytest.mark.asyncio
+    async def test_perform_incremental_sync_events_name_the_job_user(self):
+        """Incremental-sync contact events carry the job's user as their owner."""
+        from worker import _perform_incremental_sync
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        sync_token_result = MagicMock()
+        sync_token_result.scalar.return_value = "existing-sync-token"
+        mock_session.execute.return_value = sync_token_result
+        mock_client = AsyncMock()
+        mock_client.list_connections.return_value = {
+            "connections": [{"resourceName": "people/1", "etag": "etag-1"}]
+        }
+        processed_contacts = [
+            (MagicMock(resource_name="people/1", etag="etag-1"), {"first_name": "A"})
+        ]
+        mock_create_event = MagicMock(return_value=MagicMock())
+
+        with (
+            patch("worker._process_contacts_batch", return_value=processed_contacts),
+            patch("worker.OutboxEvent.create_contact_sync_event", mock_create_event),
+        ):
+            await _perform_incremental_sync(
+                session=mock_session,
+                client=mock_client,
+                google_account_email="test@example.com",
+                metrics={"contacts_processed": 0, "errors": 0},
+                user_id=1,
+            )
+
+        assert mock_create_event.call_args.kwargs["user_id"] == "1"
+
 
 class TestGoogleAPIClient:
     """Test cases for Google Contacts API client create/update methods."""

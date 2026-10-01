@@ -361,3 +361,22 @@ class TestArchivedSerialization:
         assert restored.methods[0].is_archived is False
         assert restored.addresses is not None
         assert restored.addresses[0].is_archived is False
+
+
+class TestOwnerSerialization:
+    """The contact's owner travels through the outbox payload."""
+
+    def test_round_trip_preserves_user_id(self) -> None:
+        original = Contact(first_name="Owned", user_id="user-1")
+
+        serialized = serialize_contact(original)
+        restored = deserialize_contact(serialized)
+
+        assert serialized["user_id"] == "user-1"
+        assert restored.user_id == "user-1"
+
+    def test_deserialize_without_user_id_key(self) -> None:
+        """A payload published before workers named the owner reads as None."""
+        contact = deserialize_contact({"first_name": "Legacy"})
+
+        assert contact.user_id is None

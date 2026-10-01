@@ -107,6 +107,7 @@ class OutboxEvent(Base):
         external_id: str,
         sync_type: str = "created",
         etag: str | None = None,
+        user_id: str | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -117,6 +118,7 @@ class OutboxEvent(Base):
             external_id: External system's contact ID
             sync_type: Type of sync operation ('created', 'updated', 'deleted')
             etag: External system's version identifier (e.g., Google ETag)
+            user_id: Owner of the synced contact (the integration's user)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -131,6 +133,7 @@ class OutboxEvent(Base):
             sync_timestamp=datetime.now(UTC).isoformat(),
             sync_type=sync_type,
             etag=etag,
+            user_id=user_id,
         )
         return cls(
             event_type=f"contact.{sync_type}",

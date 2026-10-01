@@ -276,37 +276,55 @@ unchanged. Grep gate in the PR description: `INSERT INTO contacts` appears only 
 
 ---
 
-#### Phase 2: Owner on the shared entity and on worker sync events (expand)
+#### Phase 2: Owner on the shared entity and on worker sync events (expand) ✅ DONE
 
 **PR Size:** ~250 lines (`core_shared` + Google + Immich workers)
 
 Producers gain the field first. The backend keeps ignoring it until Phase 3.
 
-- [ ] `core_shared/core_shared/models/contacts/entities.py`: `Contact.user_id: str | None = None`
+- [x] `core_shared/core_shared/models/contacts/entities.py`: `Contact.user_id: str | None = None`
   — **transitional**; the docstring says it becomes required in Phase 3. `serialize_contact` /
   `deserialize_contact` round-trip it.
-- [ ] `ContactSyncEventData.user_id: str | None = None` (`outbox_events.py`) and
+- [x] `ContactSyncEventData.user_id: str | None = None` (`outbox_events.py`) and
   `OutboxEvent.create_contact_sync_event(..., user_id=...)` (`outbox.py`).
-- [ ] Google worker: `GoogleContactTransformer` takes the sync job's `user_id` and stamps it on the
+- [x] Google worker: `GoogleContactTransformer` takes the sync job's `user_id` and stamps it on the
   `Contact` it builds (`transformer.py:86`); every `create_contact_sync_event` call in `worker.py`
   passes `user_id`.
-- [ ] Immich worker: `ImmichSyncService` (already constructed with `user_id`) stamps it on the
+- [x] Immich worker: `ImmichSyncService` (already constructed with `user_id`) stamps it on the
   person-derived `Contact` (`immich_sync_service.py:723`) and on the sync event.
 
 **Required Test Coverage:**
-- [ ] **Unit (`core_shared`):** `serialize_contact` / `deserialize_contact` carry `user_id`; a
+- [x] **Unit (`core_shared`):** `serialize_contact` / `deserialize_contact` carry `user_id`; a
   payload without it deserialises to `None` (transitional).
-- [ ] **Unit (Google):** transformer output and the published outbox payload carry the job's
+- [x] **Unit (Google):** transformer output and the published outbox payload carry the job's
   `user_id` (`integration_workers/google/tests/unit/test_transformer.py`, `test_worker.py`).
-- [ ] **Unit (Immich):** `sync_people_batch` publishes events whose `contact_data.user_id` and
+- [x] **Unit (Immich):** `sync_people_batch` publishes events whose `contact_data.user_id` and
   `user_id` equal the service's user (`test_immich_sync_service.py`).
-- [ ] **Integration (worker):** one outbox row per worker asserted end-to-end to contain `user_id`.
+- [x] **Integration (worker):** one outbox row per worker asserted end-to-end to contain `user_id`.
 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/integration-architecture.md` — `contact.created` / `contact.updated`
+- [x] `docs/architecture/integration-architecture.md` — `contact.created` / `contact.updated`
   payload documents `user_id` (required from Phase 3).
+
+**Status:** ✅ DONE — Google and Immich publish `contact.created` / `contact.updated` with the
+syncing user in `event_data.user_id` and `contact_data.user_id`; the backend still ignores both.
+
+**Decisions (recorded during implementation):**
+- **`Contact.user_id` sits directly after `first_name`** (defaulted to `None`), where Phase 3
+  puts the required field, so the contract step only drops the default. No construction site
+  passes `Contact` fields positionally.
+- **`GoogleContactTransformer` requires `user_id`** (keyword-only), although the shared entity
+  is still transitional: the transformer is worker-local, so the worker cannot build an unowned
+  contact even before Phase 3. `_create_transformer(client, user_id)` normalises the job's
+  `str | int` id with `str()`, as the incremental sync's SQL already does.
+- **The owner travels twice** — top-level `user_id` from the factory and `contact_data.user_id`
+  from the entity. Phase 3's consumer may read either; Phase 3 makes the factory argument
+  required with the entity.
+- **Backend untouched.** `deserialize_contact` now fills `Contact.user_id`, but the repository
+  writes named columns and `ContactService._calculate_changed_fields` compares named fields, so
+  the extra attribute neither persists nor surfaces as a history change.
 
 ---
 

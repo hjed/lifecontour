@@ -722,6 +722,7 @@ class ImmichSyncService:
 
         contact = Contact(
             first_name=first_name,
+            user_id=self._user_id,
             last_name=last_name,
             photo_url=photo_url,
             important_dates=important_dates,
@@ -755,6 +756,7 @@ class ImmichSyncService:
             external_id=external_id,
             sync_type=sync_type,
             etag=version_hash,
+            user_id=self._user_id,
         )
         event_id = await self._insert_outbox_event(event)
         logger.debug(

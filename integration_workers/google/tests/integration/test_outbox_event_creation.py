@@ -66,7 +66,7 @@ def sample_google_person() -> GooglePerson:
 @pytest.fixture
 def serialized_contact(sample_google_person: GooglePerson) -> dict[str, Any]:
     """Contact data serialized to dict format (as stored in outbox events)."""
-    transformer = GoogleContactTransformer()
+    transformer = GoogleContactTransformer(user_id="test-user-google")
     contact = transformer.transform_person(sample_google_person)
     return serialize_contact(contact)
 
@@ -183,7 +183,7 @@ class TestWorkerOutboxEventCreation:
         sample_google_person: GooglePerson,
     ) -> None:
         """Test that transformer produces Contact dict format, not raw Google API format."""
-        transformer = GoogleContactTransformer()
+        transformer = GoogleContactTransformer(user_id="test-user-google")
         contact = transformer.transform_person(sample_google_person)
         serialized = serialize_contact(contact)
 
