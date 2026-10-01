@@ -193,4 +193,26 @@ describe('Table Components', () => {
     expect(rowHeader).toHaveAttribute('scope', 'row');
     expect(rowHeader).toHaveAttribute('data-slot', 'table-row-header');
   });
+
+  it('aligns row headers with the column headers above them', () => {
+    // A <th> centres its text by default, so without an explicit alignment
+    // a row header sits indented under its left-aligned column header.
+    render(
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableRowHeader>Test User</TableRowHeader>
+          </TableRow>
+        </TableBody>
+      </Table>
+    );
+
+    expect(screen.getByRole('columnheader')).toHaveClass('text-left');
+    expect(screen.getByRole('rowheader')).toHaveClass('text-left');
+  });
 });
