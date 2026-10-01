@@ -34,9 +34,9 @@ The OAuth integration uses Hydra as the OAuth2/OpenID Connect provider in develo
 - **Database**: SQLite in-memory (development only)
 - **Configuration**: Auto-creates OAuth client on startup
 
-### 2. OAuth UI (`oauth-ui-dev`)
+### 2. OAuth Login/Consent UI (`oauth-login-consent`)
 - **Port**: 3001
-- **Purpose**: Web interface for managing OAuth clients and users
+- **Purpose**: The login and consent pages Hydra redirects the browser to
 - **Dependencies**: Hydra OAuth Provider
 
 ### 3. Backend (`backend-dev`)

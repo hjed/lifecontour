@@ -151,8 +151,22 @@ credential audit, including how to re-run it, is recorded in
 
 ### Dependabot (`.github/dependabot.yml`)
 - Automated dependency updates for Python, npm, GitHub Actions, and Docker
-- Weekly schedule with PR limits
-- Ignores major version updates for critical packages
+- Weekly schedule with PR limits, except the monthly `oauth-test-infra` group
+- Docker images:
+  - `docker/python-base` (weekly) covers the backend and every integration worker.
+    Their Dockerfiles only `FROM pms-python-base`, a local image Dependabot cannot
+    resolve, so they have no entries of their own.
+  - `docker/frontend` (weekly) stands alone.
+  - `docker-compose.yml` (weekly) covers the off-the-shelf services (Postgres, Redis,
+    MeiliSearch, Jaeger).
+  - `oauth-test-infra` (monthly, one PR) is a multi-ecosystem group of the
+    oauth-login-consent image and npm packages, Hydra (`docker/oauth-provider/Dockerfile`)
+    and nginx. Hydra is pinned in a Dockerfile rather than in compose because a
+    multi-ecosystem job never updates dependencies outside its `patterns`; grouping
+    only Hydra from the compose entry would stop updates for every other compose image.
+- Bumps under `docker/python-base/**` trigger the backend and worker jobs, and bumps to
+  the OAuth infrastructure or `docker-compose.yml` trigger E2E (the `e2e_infra` filter
+  in `ci.yml`).
 
 ### SonarCloud (`sonar-project.properties`)
 - Code quality and security analysis

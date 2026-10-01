@@ -37,8 +37,8 @@ is replaced or the owner grants a section 7 exception in [`LICENSE-EXCEPTIONS.md
 **Out of scope:**
 
 - Python dev extras (pytest, mypy, ruff, …): the production images install `.` without extras.
-- `docker/oauth-login-consent` and `docker/oauth-ui`: dev and test OAuth fixtures (the
-  compose `dev`/`test` profiles), never deployed.
+- `docker/oauth-login-consent`: a dev and test OAuth fixture (the compose `dev`/`test`
+  profiles), never deployed.
 - OS packages in the Docker base images (Debian/Alpine): these are covered by their
   distributions' own licence notices.
 - The project's own packages (`core_shared`, the workers, the backend), which are AGPL.
