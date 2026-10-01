@@ -13,6 +13,9 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    # reduce noise for none security depedencies
+    cooldown:
+      default-days: 4
     open-pull-requests-limit: 5
     assignees:
       - "hjed"
@@ -58,11 +61,8 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    # pnpm v11 defaults minimumReleaseAge to 1 day and rejects installing packages
-    # published more recently than that. Keep this cooldown at least as long so PRs
-    # aren't opened for packages CI can't install yet.
     cooldown:
-      default-days: 3
+      default-days: 4
     open-pull-requests-limit: 3
     assignees:
       - "hjed"
@@ -125,6 +125,8 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 2
+    cooldown:
+      default-days: 5
     assignees:
       - "hjed"
     commit-message:
@@ -170,10 +172,12 @@ updates:
   - package-ecosystem: "docker"
     directory: "/docker/oauth-login-consent"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 2
+    cooldown:
+      default-days: 4
     assignees:
       - "hjed"
     commit-message:
