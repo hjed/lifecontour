@@ -325,7 +325,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md) · [Home Dashboard Wireframe](./design/home-dashboard-wireframe.md) (W1–W33, cited by the dashboard acceptance criteria)
 
 ### [Iteration 19: Open-Source Release & Branding](./tasks/iteration-19-open-source-release-and-branding.md)
-**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 15 phases (one PR each); per-phase progress is tracked in the [iteration document](./tasks/iteration-19-open-source-release-and-branding.md)
+**Status:** 🟡 IN PROGRESS — 5 sub-iterations, 17 phases (one PR each); per-phase progress is tracked in the [iteration document](./tasks/iteration-19-open-source-release-and-branding.md)
 **Dependencies:** None on product features. It operates on repository metadata, user-facing naming, and the GitHub/GHCR/SonarCloud configuration
 **Goal:** Publish the repository as the open-source project **Lifecontour**: AGPL-3.0-or-later with a CLA-backed contribution model, a credential-clean history with permanent secret scanning, the new name everywhere the product names itself, and a line-art brand mark as the favicon
 
@@ -334,7 +334,7 @@ Read these first when working on the active product-alignment streams:
 - ITER19-002: Licensing and contributions — `LICENSE` + SPDX `AGPL-3.0-or-later`, dependency licence audit, TRADEMARKS, Code of Conduct, SECURITY, CONTRIBUTING (issue first, ≤500-line PRs, AI-PR rules), licence-grant CLA, templates
 - ITER19-003: Brand identity — the concept E mark (logbook, person, creek) as `branding/` SVGs with a dark variant and brand guide; app `icon.svg`/`favicon.ico`/`apple-icon.png`
 - ITER19-004: Rename to Lifecontour — frontend, backend/MCP/worker/OSM User-Agent, Python packages and docs, and the frontend package plus design-sync re-sync, each read from one constant per stack
-- ITER19-005: Repository rename and go public — `hjed/lifecontour`, GHCR images and prod deploy moved, "Source code" link (AGPL §13), CLA Assistant, rulesets, public GHCR packages, visibility flip, secret scanning and push protection
+- ITER19-005: Repository rename and go public — `hjed/lifecontour`, GHCR images and prod deploy moved, "Source code" link (AGPL §13), frontend image hardening, CLA Assistant, rulesets, public GHCR packages, visibility flip, secret scanning and push protection
 
 **Reference:** [Open-Source Release & Branding Product Specification](./product-specifications/open-source-release-and-branding-product-specification.md)
 

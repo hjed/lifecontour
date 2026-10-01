@@ -12,7 +12,8 @@ commit only.
 | Part | Scope | Status |
 |---|---|---|
 | Phase 1 | Git history (every ref) and the current tree | ✅ Complete: 0 real credentials, gate met |
-| Phase 3 | GitHub-side content (PR/issue text, Actions logs and artifacts, releases, GHCR layers) | Not started |
+| Phase 3 | GitHub-side content (PR/issue text, Actions logs and artifacts, releases, GHCR layers) | ✅ Complete: 0 real credentials, gate met at the cutoff |
+| Phase 4 | Pre-flip delta rescan of everything after the Phase 3 cutoff; the final release gate | Not started |
 
 ## Phase 1: Git history and current tree
 
@@ -172,5 +173,209 @@ fingerprinted in `.gitleaksignore` (a real credential).
 
 ## Phase 3: GitHub-side content
 
-Not started. It will cover PR and issue bodies and comments, retained Actions logs and artifacts,
-releases, any wiki, and every published GHCR image layer.
+**Date:** 2026-09-29 to 2026-10-01
+
+This phase covers the content GitHub holds outside git. The public flip reveals all of it, and the
+Phase 1 scans never saw it.
+
+### Cutoff
+
+Everything created up to this cutoff was scanned. ITER19-001 Phase 4 rescans anything newer before
+the flip (see [Re-running](#re-running-and-the-pre-flip-delta-rescan)).
+
+| Surface | Cutoff |
+|---|---|
+| PR and issue text, comments, edits | Exported 2026-09-29T11:34:18Z; newest item 2026-09-28T23:30:04Z |
+| Actions runs | Listed 2026-09-29; newest run ID `36498328009` (2026-09-28T23:30:05Z) |
+| Actions artifacts | Newest artifact ID `10928618934` (2026-09-27T10:25:01Z) |
+| GHCR | Enumerated 2026-10-01; newest version 2026-09-27T05:43:41Z; highest version ID `1300319802` |
+
+### What was scanned
+
+| Surface | Scope | Count |
+|---|---|---|
+| Issue and PR titles and bodies | `issues?state=all` (PRs included) | 1,594 (68 issues, 1,526 PRs) |
+| Conversation comments | `issues/comments` | 4,180 |
+| PR review comments | `pulls/comments` | 5,272 |
+| PR review bodies | GraphQL `reviews` | 3,098 reviews, 1,712 with a body |
+| **Edit history** (public, shows text removed by an edit) | GraphQL `userContentEdits { diff }` on every edited body, comment and review | 2,428 edited items, 6,130 revisions |
+| Title renames | GraphQL `RenamedTitleEvent` | 65 |
+| Check-run output (SonarCloud, Greptile, Augment, our own) | `commits/{sha}/check-runs`, every PR head SHA | 22,916 check runs over 1,526 SHAs; 0 commit statuses |
+| Commit and tag messages (Phase 1 scanned diffs only) | A fresh mirror: `git log --all --format=%B`; annotated tag objects | 4,790 commits; 115 tags, all lightweight |
+| Actions run logs | `runs/{id}/attempts/{n}/logs`, every attempt of every run | 7,311 runs, 7,520 attempts: 418 retrieved (263 with content, 155 empty), 6,893 expired (`410`), 209 never had logs (`404`: skipped, cancelled or startup failures) |
+| Actions artifacts | Every artifact, extracted recursively | 136: 99 Playwright reports, 36 buildx `.dockerbuild` records, 1 Bandit report |
+| Releases | Notes and assets | 115 releases, 0 assets, 0 drafts |
+| GHCR | Every version (tagged and untagged) of every package in the namespace | 8 container packages, 2,482 versions → 830 indexes and 1,652 manifests → 6,763 unique blobs: 1,520 configs, 830 attestations, 1 empty, 4,412 layers (88.5 GB). The layers hold 11,481,046 files, 414,087 of them unique (35.7 GB), all scanned |
+| Wiki, Discussions, Pages, Projects | Repository settings, GraphQL `projectsV2` | Disabled, or 0 projects |
+| Commit comments | `repos/…/comments` | 0 |
+
+Two settings matter for the counts:
+
+- **Log retention is 10 days** (`actions/permissions/artifact-and-log-retention`), so most logs are
+  gone. Every run was still tried, because a few older runs kept their logs.
+- **Packages not built by the current workflow are included**: the retired
+  `personal-management-system-google-contacts-worker` (57 versions) and `-python-base`. No npm,
+  Maven, RubyGems or NuGet packages exist.
+
+### Method
+
+- **Export, then unpack everything.**
+  - Each body, comment, review, revision, release note and check output is written to its own
+    file as unescaped text, as well as the JSON export. A PEM key inside a JSON string has escaped
+    newlines, which the private-key rules miss.
+  - Logs and artifacts are extracted recursively before scanning: zips, gzip, tar, the nested
+    `trace.zip`, the base64 zip that Playwright embeds in `index.html`, and the OCI blobs inside a
+    `.dockerbuild`. gitleaks `dir` does not open archives by default (`--max-archive-depth` is 0),
+    and TruffleHog skips archives over its size and time limits without saying so.
+- **GHCR by unique blob.**
+  - Every version's manifest is resolved through the registry API. Indexes are resolved to their
+    child manifests, which include buildx's provenance attestation manifests.
+  - Each unique blob is fetched once and its digest is checked. That gives 1,520 image configs,
+    830 in-toto attestations, 1 empty blob and 4,412 layers (88.5 GB compressed).
+  - Configs (ENV, labels, build history) and attestations (build arguments) are scanned as raw
+    JSON.
+  - Layers are streamed in batches. Each regular file is hashed, and only the first copy of a file
+    across all layers is written for scanning. A file with the same bytes produces the same
+    findings, so identical dependency files rebuilt in every version are scanned once.
+  - Each layer is scanned on its own, so a file that a later layer deletes is still seen.
+- **Scanners:** the same pinned images as Phase 1, on every surface:
+  - gitleaks with the committed `.gitleaks.toml`, plus a second run with the default rules (no
+    config in the target root);
+  - TruffleHog with verification on and `--results=verified,unknown,unverified`, so a key it
+    cannot verify is still reported.
+- **Cross-check:** `trufflehog docker --image ghcr.io/hjed/<package>@sha256:<digest>` on the
+  newest tagged version of each of the 8 packages. This is the task's suggested command, run by
+  digest. It covers one platform of one version, so it confirms the blob pipeline rather than
+  replacing it.
+
+### Coverage canaries
+
+Fake credentials were made for the canaries: a randomised `AKIA…` key with a secret, and a freshly
+generated RSA key. They were placed in scratch copies only, and scanned with the same flags as the
+real runs. Both scanners flagged every placement, and both gitleaks runs did too:
+
+- a raw comment file (PEM);
+- the JSON comment export;
+- an unzipped log;
+- a `trace.zip` inside an artifact zip;
+- the base64 zip embedded in a Playwright `index.html`;
+- a gzip blob inside a `.dockerbuild`;
+- a layer `.tar.gz` (also through the GHCR pipeline's own extractor);
+- an image config `Env`.
+
+### Findings
+
+TruffleHog **verified 0** credentials on every surface. Every unverified result and every gitleaks
+finding falls into one of the classes below. Each class was confirmed in bulk by a script over the
+reports, which checks each hit's surrounding text, never by sampling. No values are recorded.
+
+| Surface | Scanner and rule | Hits | Classification |
+|---|---|---|---|
+| PR and issue text and edit history | gitleaks `sourcegraph-access-token` (any 40-hex string) | 3,968 | False positive: git commit SHAs. 3,362 sit in GitHub commit or compare URLs, 352 in Dependabot "Commits" lists (`<li><sha> …`), and 254 are JSON duplicates of those |
+| | TruffleHog `GitHubOauth2` | 429 | False positive: in the JSON export, a contributor handle after an escaped `\n` (or a SHA prefix) matched as the "client ID", and a commit SHA as the "secret" |
+| | TruffleHog `URI` | 24 | False positive: an upstream release note's example `https://user:p%40ss@host` |
+| | TruffleHog `Strava` / `Postgres` | 4 / 3 | Placeholder: test activity IDs; `postgres:postgres` and `user:pw` from test fixtures (the Phase 1 shapes) |
+| Actions logs | gitleaks default `generic-api-key` | 164 | False positive: e2e tag names `NavParent-<ts>` / `NavChild-<ts>`, already allowlisted by value shape (the committed config reports 0) |
+| | TruffleHog `Dockerhub` | 116 | False positive: buildx builder names (UUIDs) |
+| Actions artifacts | gitleaks default `generic-api-key` | 98 | False positive: the same e2e tag names in Playwright report output (the committed config reports 0) |
+| | TruffleHog `Box`, `TLy`, `Teletype`, `Aiven`, `Miro`, `Juro`, `Qase`, `UnifyID` | 124 | False positive: substrings of base64 data (embedded images and trace data) or a `sha256:` digest in a buildx log |
+| GHCR configs | gitleaks `generic-api-key` | 204 | False positive: `ENV GPG_KEY`, inherited from the official `python:*-slim` base. It is the public fingerprint of the Python release-signing key, identical to `python:3.12-slim` |
+| GHCR attestations | — | 0 | Clean |
+| GHCR layers | gitleaks `generic-api-key`, `private-key`, `sourcegraph-access-token`, `curl-auth-header`; TruffleHog (22 detectors, mostly `Circle`, `FlatIO`, `Box`, `Alchemy`) | 457 / 13,291 | False positive, third-party content: the dependency trees (`site-packages`, `node_modules`, the `uv` and `pnpm` caches and stores), OS packages (`/usr`, `dpkg`, Alpine `APKINDEX`) and the Node base image's yarn. These are libraries' own test keys, PEM-parsing code, doc examples and base64 or index data. None is in our own packages (`core_shared`, `personal_management_*`, the workers) |
+| | gitleaks `generic-api-key`; TruffleHog `Parsers`, `Box`, `Atera` | 8 / 117 | False positive: binary build caches (`.next/cache/{webpack,turbopack}`, `/tmp/node-compile-cache`) |
+| | TruffleHog `Postgres` | 10 | Placeholder: `user:pw@dbhost` in the worker and `core_shared` unit tests, and `postgres:postgres` in the frontend's `.env.example` (the Phase 1 shapes) |
+| | gitleaks `generic-api-key` | 610 | **Next.js build-generated keys.** See [the next section](#nextjs-build-generated-keys) |
+| GHCR cross-check (`trufflehog docker`, 8 images) | TruffleHog | 664 | 0 verified. The same classes as the layer scan (third-party, binary caches, test placeholders), which confirms the blob pipeline |
+
+GitHub's log masking was active: the retrieved logs contain 12,619 `***` redactions.
+
+### Next.js build-generated keys
+
+Every frontend image carries keys that `next build` generates at random for that build:
+
+- `previewModeSigningKey` and `previewModeEncryptionKey`, in `.next/prerender-manifest.json` and
+  `.next/cache/.previewinfo`;
+- the Server Actions `encryptionKey`, in `.next/server/server-reference-manifest.json` and
+  `.next/cache/.rscinfo`.
+
+They are not provider credentials, but they are secret to the deployment that runs that image.
+Publishing an image therefore publishes its keys.
+
+- **What they protect:**
+  - The preview keys sign and encrypt draft-mode (preview) data.
+  - The Server Actions key encrypts the variables a Server Action closes over.
+- **Exposure:** the app uses neither feature. `frontend/src` has no `"use server"`, `draftMode` or
+  `previewData`. Knowing the keys gives nothing to forge or decrypt.
+- **Can they be disabled?** No. Every `next build` writes them, and the App Router has no switch
+  to turn off Server Actions or draft mode.
+  - The Server Actions key can be overridden: at runtime Next.js reads
+    `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` first and falls back to the baked-in key only when the
+    variable is unset.
+  - The preview keys have no runtime override. They protect only data that `draftMode().enable()`
+    creates, and the app never calls it. Holding the manifest lets a client send a
+    `__prerender_bypass` cookie, which makes prerendered pages render on demand. It exposes no
+    data, because authenticated data still needs a session.
+- **Decision (owner, 2026-10-01):** accepted. They are not credentials and guard unused features,
+  so they do not block the gate. ITER19-005 Phase 1b
+  ([#1661](https://github.com/hjed/personal-management-system/issues/1661)) hardens the frontend
+  image before the packages go public:
+  - set `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` from the production environment, so no baked-in key is
+    ever used (including those in images already published);
+  - build a multi-stage `standalone` image. It drops `.next/cache` (which holds second copies in
+    `.previewinfo` and `.rscinfo`), the dev dependencies and the pnpm store.
+
+### Residual risks
+
+- **Screenshots and videos** in the Playwright artifacts (91 images, 2 videos) cannot be
+  text-scanned. They show the e2e app with test data and test users only.
+- **Actions caches** (139 caches, 4.2 GB, including buildx `type=gha` layer caches) were not
+  scanned. Once the repository is public, fork-PR workflows can restore base-branch caches.
+  Decision: purge every cache just before the flip (an ITER19-005 Phase 2 pre-flip item). They
+  rebuild on the next CI run.
+- **Images ship build caches**: `/root/.cache/uv`, the pnpm store and `.next/cache`. They hold
+  only dependency and build output, and the scans found nothing of ours in them apart from the
+  Next.js keys above. ITER19-005 Phase 1b removes them from the frontend image; trimming the Python
+  images is image-size hygiene, not a release blocker.
+
+### Remediation
+
+- **Real credentials found:** 0. Nothing needed rotating, and nothing was deleted (no run log,
+  artifact, comment revision or package version).
+
+### Gate status (Phase 3)
+
+**✅ Met at the cutoff.**
+
+- There are 0 real credentials on any GitHub-side surface, and TruffleHog verified 0.
+- The only open items are the pre-flip actions:
+  - the delta rescan, which is ITER19-001 Phase 4 and the final gate;
+  - the frontend image hardening, ITER19-005 Phase 1b;
+  - the Actions cache purge, an ITER19-005 Phase 2 pre-flip step.
+
+### Re-running and the pre-flip delta rescan
+
+The export and scan scripts were one-off tools. The procedure is:
+
+1. **Text:**
+   - Paginate `issues?state=all`, `issues/comments` and `pulls/comments`.
+   - Use GraphQL for reviews, `lastEditedAt` and renames, then fetch `userContentEdits { diff }`
+     for each edited node by ID.
+   - Fetch check runs for each PR head SHA.
+   - Write one unescaped file per item.
+2. **Actions:**
+   - List runs in weekly `created=` windows; a filtered list stops at 1,000 results.
+   - Fetch `runs/{id}/attempts/{n}/logs` for every attempt, and every artifact zip.
+   - Extract recursively.
+3. **GHCR:**
+   - List `/user/packages` for every package type, and every version of each package.
+   - Resolve the manifests, fetch each unique blob, and stream the layers with file-hash dedupe.
+4. **Scan and triage:**
+   - Run the canary set first.
+   - Scan with gitleaks (committed config and default rules) and TruffleHog
+     (`verified,unknown,unverified`).
+   - Triage by the classes above.
+
+For the delta rescan (ITER19-001 Phase 4), restrict each step to content newer than
+[the cutoff](#cutoff). That means
+items created or edited since then, runs and artifacts with higher IDs, and package versions with
+higher IDs, including the `lifecontour-*` packages. Then record the counts in a new section.
