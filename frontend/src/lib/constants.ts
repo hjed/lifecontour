@@ -9,6 +9,9 @@
 export const APP_NAME = 'Lifecontour';
 export const APP_TAGLINE = 'Your journal, people and adventures — self-hosted.';
 
+// AGPL §13 source offer
+export const SOURCE_CODE_URL = 'https://github.com/hjed/lifecontour';
+
 // API Endpoints
 export const API_ENDPOINTS = {
   AUTH: {
@@ -159,6 +162,9 @@ export const UI_TEXT = {
   PRIVACY_NOTICE:
     'By signing in, you agree to our terms of service and privacy policy.',
   SELF_HOSTED_NOTICE: `This is a private, self-hosted ${APP_NAME} instance.`,
+  PROJECT_LINKS: 'Project links',
+  SOURCE_CODE: 'Source code',
+  OPENS_IN_NEW_TAB: '(opens in a new tab)',
   LOADING: 'Loading',
   CHECKING_AUTH: 'Checking your authentication status',
   PLEASE_WAIT: 'Please wait...',
@@ -169,6 +175,11 @@ export const UI_TEXT = {
   PROBLEM_SIGNING_IN: 'There was a problem signing you in',
   TRY_AGAIN: 'Try signing in again',
 } as const;
+
+// External project links shown on the login page and in the user menu
+export const PROJECT_LINKS = [
+  { href: SOURCE_CODE_URL, label: UI_TEXT.SOURCE_CODE },
+] as const;
 
 // Error Messages
 export const ERROR_MESSAGES = {

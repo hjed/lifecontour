@@ -170,6 +170,12 @@ jest.mock('@/lib/constants', () => ({
   UI_TEXT:
     jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
       .UI_TEXT,
+  SOURCE_CODE_URL:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .SOURCE_CODE_URL,
+  PROJECT_LINKS:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .PROJECT_LINKS,
 }));
 
 // Export mock functions for test access

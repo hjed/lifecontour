@@ -2,5 +2,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/hjed/personal-management-system/security/policy
+    url: https://github.com/hjed/lifecontour/security/policy
     about: Never open a public issue for a vulnerability. Report it privately as described in SECURITY.md.

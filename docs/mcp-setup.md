@@ -152,7 +152,7 @@ Revocation surfaces indirectly at the next refresh, which the IdP refuses, so th
 exposure window after a revocation is roughly the upstream access-token lifetime.
 Shortening that lifetime shortens the window; detecting revocation sooner needs
 introspection or a userinfo probe per request, tracked in
-[#1322](https://github.com/hjed/personal-management-system/issues/1322).
+[#1322](https://github.com/hjed/lifecontour/issues/1322).
 
 This requires the `openid` scope, which `OAUTH_SCOPES` includes by default. A
 token that reaches the server with no `sub` claim is **refused** — it does not

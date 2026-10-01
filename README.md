@@ -16,8 +16,8 @@ A personal relationship management and journaling system with AI integration thr
 
 1. **Clone and setup:**
    ```bash
-   git clone <repository-url>
-   cd personal-management-system
+   git clone https://github.com/hjed/lifecontour.git
+   cd lifecontour
    ./scripts/dev.sh setup
    ```
 
@@ -111,7 +111,7 @@ docker compose --profile prod --env-file .env.prod up -d
 ### Project Structure
 
 ```
-personal-management-system/
+lifecontour/
 ├── backend/                 # Python FastAPI application
 │   ├── app/
 │   │   ├── core/           # Domain logic (contacts, calendar, journal)

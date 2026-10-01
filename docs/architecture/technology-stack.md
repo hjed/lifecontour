@@ -99,7 +99,7 @@ This document outlines the technology choices optimized for AI assistant underst
 
 ### Clear Separation Architecture
 ```
-personal-management-system/
+lifecontour/
 ├── backend/                      # Python FastAPI application
 │   ├── app/
 |   |   |── core/                 # Core Domain Logic

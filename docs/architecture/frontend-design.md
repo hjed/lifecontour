@@ -66,6 +66,14 @@ depends on are therefore asserted in
 - Use semantic HTML elements and ARIA roles
 - Test with screen readers and keyboard-only navigation
 
+### Project Links (Source Code)
+
+- The AGPL §13 source offer is a "Source code" link to `SOURCE_CODE_URL`, listed in
+  `PROJECT_LINKS` in `src/lib/constants.ts`.
+- Project links appear on the public login page, so signed-out visitors can reach them, and in
+  the signed-in user menu (`components/auth/UserMenu.tsx`). They open in a new tab with
+  `rel="noopener noreferrer"` and a visually hidden "(opens in a new tab)".
+
 ### Loading State Guidelines
 
 - Use shadcn/ui `Skeleton` component for loading states
@@ -106,7 +114,7 @@ Mutation handlers must refresh the cache through
   mutation; when it settles, React Query caches its pre-mutation rows, clears
   `isInvalidated` and stamps a fresh `dataUpdatedAt`, so the app-wide five-minute
   `staleTime` suppresses any refetch and the user keeps seeing data they just
-  changed ([#1203](https://github.com/hjed/personal-management-system/issues/1203)).
+  changed ([#1203](https://github.com/hjed/lifecontour/issues/1203)).
   The helper cancels first, which has no such guard.
 - **Pass every key set in one call** — `invalidateAfterMutation(queryClient, { queryKey: a }, { queryKey: b })`
   — not one call per key. All the key sets must be cancelled before any of them

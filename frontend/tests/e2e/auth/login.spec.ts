@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from '../fixtures';
-import { APP_NAME, UI_TEXT } from '../../../src/lib/constants';
+import { APP_NAME, SOURCE_CODE_URL, UI_TEXT } from '../../../src/lib/constants';
 
 test.describe('Login Page - Unauthenticated Users', () => {
   test.describe('Page Rendering', () => {
@@ -34,6 +34,23 @@ test.describe('Login Page - Unauthenticated Users', () => {
       // Check login form is present - look for the login card
       const loginCard = unauthenticatedPage.locator('[class*="max-w-md"]');
       await expect(loginCard).toBeVisible();
+    });
+
+    test('offers the source code while signed out', async ({
+      unauthenticatedPage,
+    }) => {
+      await unauthenticatedPage.goto('/auth/login');
+
+      const projectLinks = unauthenticatedPage.getByRole('navigation', {
+        name: UI_TEXT.PROJECT_LINKS,
+      });
+
+      const sourceLink = projectLinks.getByRole('link', {
+        name: UI_TEXT.SOURCE_CODE,
+      });
+      await expect(sourceLink).toHaveAttribute('href', SOURCE_CODE_URL);
+      await expect(sourceLink).toHaveAttribute('target', '_blank');
+      await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
     test('should display OAuth provider buttons', async ({

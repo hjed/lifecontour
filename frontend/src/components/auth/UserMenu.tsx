@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { LogOut, User, Settings } from 'lucide-react';
+import { Code, LogOut, User, Settings } from 'lucide-react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import {
@@ -21,6 +21,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { PROJECT_LINKS, SOURCE_CODE_URL, UI_TEXT } from '@/lib/constants';
+
+const PROJECT_LINK_ICONS = {
+  [SOURCE_CODE_URL]: Code,
+} as const;
 
 export function UserMenu() {
   const { state, logout } = useAuth();
@@ -90,6 +95,24 @@ export function UserMenu() {
             <span>Settings</span>
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {PROJECT_LINKS.map(({ href, label }) => {
+          const Icon = PROJECT_LINK_ICONS[href];
+          return (
+            <DropdownMenuItem key={href} asChild>
+              <a
+                href={href}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='w-full cursor-pointer'
+              >
+                <Icon className='mr-2 h-4 w-4' aria-hidden='true' />
+                <span>{label}</span>
+                <span className='sr-only'> {UI_TEXT.OPENS_IN_NEW_TAB}</span>
+              </a>
+            </DropdownMenuItem>
+          );
+        })}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={handleLogout}

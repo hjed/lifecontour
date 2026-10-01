@@ -191,7 +191,7 @@ jobs:
             ```bash
             # Clone the repository
             git clone https://github.com/${{ github.repository }}.git
-            cd personal-management-system
+            cd ${{ github.event.repository.name }}
 
             # Checkout this version
             git checkout ${{ steps.version.outputs.version }}

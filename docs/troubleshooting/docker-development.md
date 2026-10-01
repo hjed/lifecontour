@@ -13,8 +13,8 @@ This guide explains how to set up and use the complete Docker-based development 
 
 ```bash
 # Clone the repository (if you haven't already)
-git clone <repository-url>
-cd personal-management-system
+git clone https://github.com/hjed/lifecontour.git
+cd lifecontour
 
 # Start all services
 ./scripts/dev.sh docker-start

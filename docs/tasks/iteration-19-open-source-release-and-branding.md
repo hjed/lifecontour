@@ -796,7 +796,20 @@ repository's protections, and flip visibility.
 
 **Phase Breakdown:**
 
-**Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines.
+**Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines. 🟡 IN PROGRESS
+
+- **Progress:** split into two stacked PRs to stay within 500 lines.
+  - **1a:**
+    - `SOURCE_CODE_URL` and a "Source code" link on the login page (inside a "Project links"
+      `nav`) and in the user menu. Both are driven by `PROJECT_LINKS`, and both are covered by RTL
+      tests and e2e (`auth/login.spec.ts` signed out, and the new `app-shell.spec.ts`).
+    - The repository-URL text points at `hjed/lifecontour`. `release.yml` now uses
+      `cd ${{ github.event.repository.name }}`.
+    - `sonar-project.properties` is deleted.
+    - `docs/ci-cd-setup.md` documents that the images follow `github.repository` and that
+      SonarCloud runs as Automatic Analysis.
+  - **1b (stacked):** the third-party notices.
+  - The manual repository-rename and deploy steps are a checklist in the 1a PR.
 
 - **Before merge (manual):**
   - Rename the repository to `hjed/lifecontour`.
