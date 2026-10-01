@@ -47,7 +47,7 @@ dependencies = [
     # which crashes with "cannot pickle '_asyncio.Future' object" when a live
     # fastmcp MCP ClientSession is passed as a tool (the documented pattern).
     # Lift the cap once google-genai fixes the AFC deep-copy regression.
-    "google-genai>=2.18.1,<2.25.0",
+    "google-genai>=2.18.1,<2.26.0",
     "opentelemetry-instrumentation-logging>=0.62b1",
     "opentelemetry-instrumentation-redis>=0.62b1",
     "reportlab>=5.0.0",
