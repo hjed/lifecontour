@@ -58,6 +58,7 @@ def contact_sync_data() -> dict[str, Any]:
         "sync_timestamp": datetime.now(UTC).isoformat(),
         "sync_type": "created",
         "etag": "abc123",
+        "user_id": "user-1",
     }
 
 
@@ -195,15 +196,24 @@ class TestContactSyncEventData:
             ContactSyncEventData.model_validate(contact_sync_data)
         assert "sync_type" in str(exc_info.value)
 
-    def test_user_id_optional(self, contact_sync_data: dict[str, Any]) -> None:
-        """A payload without an owner still parses (required from Phase 3)."""
-        model = ContactSyncEventData.model_validate(contact_sync_data)
-        assert model.user_id is None
-
     def test_user_id_parses(self, contact_sync_data: dict[str, Any]) -> None:
-        contact_sync_data["user_id"] = "user-1"
         model = ContactSyncEventData.model_validate(contact_sync_data)
         assert model.user_id == "user-1"
+
+    def test_missing_user_id_rejected(self, contact_sync_data: dict[str, Any]) -> None:
+        """A synced contact must name its owner; the backend never guesses."""
+        del contact_sync_data["user_id"]
+        with pytest.raises(ValidationError) as exc_info:
+            ContactSyncEventData.model_validate(contact_sync_data)
+        assert "user_id" in str(exc_info.value)
+
+    @pytest.mark.parametrize("blank", [None, ""])
+    def test_blank_user_id_rejected(
+        self, contact_sync_data: dict[str, Any], blank: str | None
+    ) -> None:
+        contact_sync_data["user_id"] = blank
+        with pytest.raises(ValidationError):
+            ContactSyncEventData.model_validate(contact_sync_data)
 
 
 class TestCreateContactSyncEvent:
@@ -218,15 +228,6 @@ class TestCreateContactSyncEvent:
         )
 
         assert event.event_data["user_id"] == "user-1"
-
-    def test_event_data_user_id_defaults_to_none(self) -> None:
-        event = OutboxEvent.create_contact_sync_event(
-            contact_data={"first_name": "Alice"},
-            integration_source="google",
-            external_id="people/c1",
-        )
-
-        assert event.event_data["user_id"] is None
 
 
 # ── SyncCompletedEventData Tests ──────────────────────────────────────

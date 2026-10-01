@@ -16,7 +16,7 @@ This document outlines the database approach and initial schema for Lifecontour.
 ```sql
 CREATE TABLE contacts (
     id SERIAL PRIMARY KEY,
-    user_id VARCHAR(50), -- owner; set on insert, never changed (NOT NULL from 0124)
+    user_id VARCHAR(50) NOT NULL, -- owner; set on insert, never changed
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100),
     middle_name VARCHAR(100),
@@ -41,6 +41,12 @@ list to the schema):
 - no contacts → nothing to assign;
 - contacts but no owner evidence, or more than one real owner → the migration refuses and names
   what it found. The operator then names the owner: `alembic -x contacts_owner=<user_id> upgrade head`.
+
+Migration `0123` then assigned, by the same rule (owned contacts now counting as evidence), any
+contact created while the column was nullable, and made it `NOT NULL`. Every creation path stamps
+the acting user: REST and MCP the signed-in user, the inbound consumer the sync event's
+`user_id`, suggestion accept and Immich-conflict "create" the acting user, a merge the survivor's
+owner.
 
 Later revisions that give an unowned table an owner reuse the same helper, each with its own
 literal list of evidence tables.

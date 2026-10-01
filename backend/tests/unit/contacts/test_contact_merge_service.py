@@ -442,6 +442,21 @@ class TestContactMergeScalarPolicy:
         assert saved.last_name == "Keep"
 
 
+class TestContactMergeOwner:
+    """A merge keeps the survivor's owner; it never adopts the source's."""
+
+    @pytest.mark.asyncio
+    async def test_the_merged_contact_keeps_the_survivors_owner(
+        self, merge_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        saved = cast(Contact, mock_contact_repo.save.await_args.args[0])
+        assert saved.user_id == SURVIVOR_OWNER
+
+
 class TestContactMergeSideEffects:
     """The merge publishes a ContactUpdated audit event and a summary refresh.
 

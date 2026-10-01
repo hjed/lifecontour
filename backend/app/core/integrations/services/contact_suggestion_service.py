@@ -139,7 +139,9 @@ class ContactSuggestionService:
             ContactValidationError: If ``email`` is not an email address.
         """
         email = canonical_email(email)
-        contact = await self._contact_holding(email, target, transaction, provenance)
+        contact = await self._contact_holding(
+            user_id, email, target, transaction, provenance
+        )
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required after save")
 
@@ -206,6 +208,7 @@ class ContactSuggestionService:
 
     async def _contact_holding(
         self,
+        user_id: str,
         email: str,
         target: AcceptTarget,
         transaction: AsyncConnection,
@@ -217,6 +220,7 @@ class ContactSuggestionService:
                 return await self.contact_service.create_contact(
                     Contact(
                         first_name=first_name,
+                        user_id=user_id,
                         last_name=last_name,
                         methods=[
                             ContactMethod(

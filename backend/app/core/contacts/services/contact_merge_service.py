@@ -321,4 +321,9 @@ class ContactMergeService:
                     override_changes[field] = (survivor_value, override_value)
             else:
                 resolved[field] = survivor_value or getattr(source, field)
-        return Contact(id=survivor.id, **resolved), override_changes
+        # ``resolved`` is a dict, so mypy cannot see a missing owner here: name
+        # it explicitly. A merge never re-owns the survivor.
+        return (
+            Contact(id=survivor.id, user_id=survivor.user_id, **resolved),
+            override_changes,
+        )

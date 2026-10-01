@@ -28,8 +28,8 @@ contacts_table = Table(
     "contacts",
     metadata,
     Column("id", Integer, primary_key=True),
-    # The owner. Nullable until every writer stamps one (migration 0124).
-    Column("user_id", String(50), nullable=True),
+    # The owner: set when the contact is created, never changed.
+    Column("user_id", String(50), nullable=False),
     Column("first_name", String(100), nullable=False),
     Column("last_name", String(100), nullable=True),
     Column("middle_name", String(100), nullable=True),

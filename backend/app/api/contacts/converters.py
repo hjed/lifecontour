@@ -384,8 +384,9 @@ class ContactRequestConverter:
     @staticmethod
     def from_create_request(
         request_data: ContactCreateData,
+        user_id: str,
     ) -> Contact:
-        """Convert API create request to domain entity."""
+        """Convert API create request to a domain entity owned by ``user_id``."""
         attrs = request_data.attributes
 
         # Convert embedded entities
@@ -416,6 +417,7 @@ class ContactRequestConverter:
 
         return Contact(
             first_name=attrs.first_name,
+            user_id=user_id,
             last_name=attrs.last_name,
             middle_name=attrs.middle_name,
             nick_name=attrs.nick_name,
@@ -475,6 +477,8 @@ class ContactRequestConverter:
         updated_contact = Contact(
             id=existing_contact.id,
             first_name=attrs.first_name,
+            # A contact's owner never changes.
+            user_id=existing_contact.user_id,
             last_name=attrs.last_name,
             middle_name=attrs.middle_name,
             nick_name=attrs.nick_name,

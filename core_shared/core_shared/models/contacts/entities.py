@@ -303,13 +303,12 @@ class ContactSummary:
 class Contact:
     """Contact aggregate root entity.
 
-    ``user_id`` names the contact's owner. It is optional only while every
-    producer learns to send it; it becomes required once the ``contacts``
-    table carries the column and every construction site names an owner.
+    ``user_id`` names the contact's owner: set when the contact is created and
+    never changed.
     """
 
     first_name: str
-    user_id: str | None = None
+    user_id: str
     id: int | None = None
     last_name: str | None = None
     middle_name: str | None = None

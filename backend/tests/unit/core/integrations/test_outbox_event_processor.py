@@ -326,6 +326,86 @@ class TestOutboxEventProcessor:
         assert result["event_type"] == "contact.updated"
         assert result["contact_id"] == 123
 
+    @pytest.mark.asyncio
+    async def test_created_contact_is_owned_by_the_event_owner(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ) -> None:
+        """The event's top-level owner wins over anything in ``contact_data``."""
+        contact_created_event.event_data["contact_data"]["user_id"] = "someone-else"
+        mock_contact_service.create_contact.return_value = Contact(
+            id=123, first_name="John", user_id=SYNC_OWNER
+        )
+        mock_contact_service.get_contact_by_email.return_value = None
+
+        await processor.process_event(contact_created_event)
+
+        created = mock_contact_service.create_contact.call_args[0][0]
+        assert created.user_id == SYNC_OWNER
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "event_fixture", ["contact_created_event", "contact_updated_event"]
+    )
+    @pytest.mark.parametrize("owner", [None, ""])
+    async def test_an_event_naming_no_owner_fails_permanently(
+        self,
+        request: pytest.FixtureRequest,
+        processor: OutboxEventProcessor,
+        mock_contact_service: AsyncMock,
+        event_fixture: str,
+        owner: str | None,
+    ) -> None:
+        """Never guess whose contact it is, and never retry: it cannot succeed."""
+        event: OutboxEvent = request.getfixturevalue(event_fixture)
+        if owner is None:
+            del event.event_data["user_id"]
+        else:
+            event.event_data["user_id"] = owner
+
+        with pytest.raises(PermanentOutboxEventProcessingError, match="no owner"):
+            await processor.process_event(event)
+
+        mock_contact_service.create_contact.assert_not_called()
+        mock_contact_service.update_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_updated_contact_keeps_its_stored_owner(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ) -> None:
+        """A sync never re-owns a contact; the stored owner is the aggregate's."""
+        existing = Contact(id=123, first_name="John", user_id="stored-owner")
+        mock_contact_service.find_contact_by_external_reference.return_value = existing
+        mock_contact_service.get_contact_by_id.return_value = existing
+        mock_contact_service.update_contact.return_value = existing
+
+        await processor.process_event(contact_updated_event)
+
+        updated = mock_contact_service.update_contact.call_args[0][0]
+        assert updated.user_id == "stored-owner"
+
+    @pytest.mark.asyncio
+    async def test_an_email_reconciled_contact_keeps_its_stored_owner(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ) -> None:
+        existing = Contact(id=55, first_name="John", user_id="stored-owner")
+        mock_contact_service.get_contact_by_email.return_value = existing
+        mock_contact_service.get_contact_by_id.return_value = existing
+        mock_contact_service.update_contact.return_value = existing
+
+        await processor.process_event(contact_created_event)
+
+        reconciled = mock_contact_service.update_contact.call_args[0][0]
+        assert (reconciled.id, reconciled.user_id) == (55, "stored-owner")
+
     def _setup_contact_and_reference_mocks(
         self,
         mock_contact_service: AsyncMock,

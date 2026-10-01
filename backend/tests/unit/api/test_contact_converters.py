@@ -28,6 +28,7 @@ from app.api.contacts.schemas import (
     ContactMethodResource,
     ContactNoteAttributes,
     ContactNoteResource,
+    ContactUpdateData,
 )
 from tests.integration.contact_seeding import TEST_USER_ID
 
@@ -385,9 +386,10 @@ class TestContactRequestConverter:
         )
         data = ContactCreateData(attributes=attrs)
 
-        contact = ContactRequestConverter.from_create_request(data)
+        contact = ContactRequestConverter.from_create_request(data, "owner-1")
 
         assert contact.id is None
+        assert contact.user_id == "owner-1"
         assert contact.first_name == "John"
         assert contact.last_name == "Doe"
         assert contact.middle_name == "William"
@@ -395,3 +397,14 @@ class TestContactRequestConverter:
         assert not contact.methods
         assert not contact.addresses
         assert not contact.notes
+
+    def test_from_update_request_keeps_the_existing_owner(self) -> None:
+        """An update cannot re-own a contact: the stored owner carries over."""
+        existing = Contact(id=7, first_name="John", user_id="owner-1")
+        data = ContactUpdateData(
+            id="7", attributes=ContactAttributes(first_name="Johnny")
+        )
+
+        contact = ContactRequestConverter.from_update_request(data, existing)
+
+        assert (contact.first_name, contact.user_id) == ("Johnny", "owner-1")

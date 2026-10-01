@@ -147,7 +147,7 @@ class SqlUpcomingImportantDateRepository(UpcomingImportantDateRepository):
 
 
 def _display_name(
-    user_id: str | None,
+    user_id: str,
     first_name: str,
     middle_name: str | None,
     last_name: str | None,

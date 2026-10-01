@@ -204,8 +204,8 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 **Specification Reference:** Parts 1, 2, 5; Part 6 "Sync events name the owner".
 
 **Acceptance Criteria (task-level):**
-- [ ] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
-- [ ] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
+- [x] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
+- [x] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
 - [ ] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
 - [ ] Contact search, global search and search suggestions return only the acting user's contacts.
 - [ ] Worker-published contact sync events and backend contact events carry `user_id`.
@@ -342,7 +342,7 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
 
 > **Migration number:** indicative `0121_add_user_id_to_contacts.py` (`down_revision = "0120"`).
 
-- [ ] Migration `0121`: add `user_id VARCHAR(50)` nullable → assign every row per the `0106`
+- [x] Migration `0121`: add `user_id VARCHAR(50)` nullable → assign every row per the `0106`
   derivation, **widened to every owner-bearing table as evidence**: `0106`'s `REPAIRED_TABLES` plus
   the credential and settings tables it deliberately left out of *repair* (`user_google_auth`,
   `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `user_settings`, `sync_jobs`,
@@ -356,10 +356,10 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   `idx_contacts_user_id`. Downgrade drops the index and column. Logs every decision through the
   `alembic.runtime.migration` logger. The derivation is written once as a helper module beside the
   migrations so `0122`–`0125` reuse it rather than re-deriving.
-- [ ] `contact_tables.py`: `user_id` column. `SqlContactRepository.save` writes it; the three row
+- [x] `contact_tables.py`: `user_id` column. `SqlContactRepository.save` writes it; the three row
   mappers (`contact_repository.py:78,1528,1665`) and `upcoming_important_date_repository.py:161`
   read it.
-- [ ] **Contract:** `Contact.user_id: str` (required, placed after `first_name`). mypy then names
+- [x] **Contract:** `Contact.user_id: str` (required, placed after `first_name`). mypy then names
   every construction site; each passes the owner:
   - REST: `ContactRequestConverter` (`api/contacts/converters.py:417,475`) receives the
     `SessionUser` id from the controller.
@@ -381,17 +381,17 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   iterates `CONTACT_PUSH_EVENT_TYPES` and asserts each constructor's payload names `user_id`, so a
   new pushed type cannot land without one (the subscription-list-vs-handlers assertion pattern).
   Mechanical, ~2 lines per class; it is 3b work if the phase splits.
-- [ ] Test fixtures: `contact_fixtures.py` factories and `ContactFactory` default
+- [x] Test fixtures: `contact_fixtures.py` factories and `ContactFactory` default
   `user_id=TEST_USER_ID`; `seed_contact` (Phase 1) writes the column.
 
 **Required Test Coverage:**
-- [ ] **Integration (migration):** `backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py`
+- [x] **Integration (migration):** `backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py`
   on the `test_reassign_synthetic_owner_migration.py` harness — rows assigned to the single real
   owner; owner found from a credential/settings table alone (contacts-only installation);
   dev-only database assigned to `dev-user`; contacts with no owner evidence refuse; ambiguous
   ownership refuses; `-x contacts_owner` overrides both refusals; empty database upgrades and
   downgrades; existing rows otherwise untouched.
-- [ ] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
+- [x] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
   (`test_contact_repository_integration.py`).
 - [ ] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
   and rejects a payload without one; each of the four events carries `user_id`
@@ -402,18 +402,24 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
 the API, which now stamps it).
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/database-design.md` — `contacts.user_id` in the Contacts Table section; the
+- [x] `docs/architecture/database-design.md` — `contacts.user_id` in the Contacts Table section; the
   migration's owner derivation.
-- [ ] `docs/architecture/integration-architecture.md` — inbound consumer rejects contact events
+- [x] `docs/architecture/integration-architecture.md` — inbound consumer rejects contact events
   without an owner.
 
-**Delivery:** split three ways, because the contract alone breaks 288 test construction sites
-(mypy, 40 backend files) on top of the hand-built sync-event payloads:
+**Delivery:** a four-layer stack, each layer deployable on its own. The contract alone breaks 288
+test construction sites (mypy, 40 backend files) on top of the hand-built sync-event payloads, so
+that mechanical test change lands first, while the field is still optional:
 - **3a ✅ DONE** — `0123` (nullable column, owner assignment, `idx_contacts_user_id`), the shared
   `app/migrations/owner_derivation.py`, `contacts_table` column and index, repository INSERT and
   row mappers, `seed_contact(user_id=…)` (required in `core_shared`; the backend wrapper defaults
   to `TEST_USER_ID`), `run_alembic(..., x_args=…)`.
-- **3b** — required `Contact.user_id`, every writer, the inbound consumer, `0124` (`SET NOT NULL`).
+- **3b-prep ✅ DONE** — test-only: every test `Contact(...)`, the contact factories (`user_id`
+  defaulting to `TEST_USER_ID`) and the hand-built sync payloads name an owner. No production code.
+- **3b ✅ DONE** — required `Contact.user_id`, `ContactSyncEventData.user_id` and
+  `create_contact_sync_event(user_id=…)`; every writer stamps an owner (REST and MCP the acting
+  user, Immich-conflict "create" on both surfaces, suggestion accept, the merge survivor); the
+  inbound consumer's owner handling; `0124` (`SET NOT NULL`).
 - **3c** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event. **Must merge before Phase 13.**
   Safe after `NOT NULL`: nothing before Phase 13 reads the owner from an event.
 
@@ -437,6 +443,17 @@ the API, which now stamps it).
   whose developer is the `DISABLE_AUTH` user. Refusing would make every such developer pass `-x`.
 - **The owner is written on INSERT only.** `save` never updates `user_id`, so neither an update
   converter nor a sync event can re-own a contact.
+- **The inbound consumer: the top-level `user_id` is authoritative, a stored contact keeps its
+  owner.** A payload failing validation (an owner-less one included) is now a
+  `PermanentOutboxEventProcessingError`; before, pydantic's `ValidationError` fell through to the
+  transient branch and retried forever. A new contact takes the event's top-level owner, whatever
+  `contact_data` says (`contact_data` is not rewritten, so version hashes are unchanged). An update
+  through the link store, or a create reconciled by email, keeps the **stored** owner and logs a
+  mismatch rather than refusing: refusing cross-owner links is Phases 14–15's per-user link store.
+- **`ContactMergeService._merge_scalars` names the survivor's owner explicitly.** It builds the
+  merged contact with `Contact(id=…, **resolved)`; mypy cannot see a missing required argument
+  through `**dict`, so this one site would have raised `TypeError` on every merge with no type
+  error to warn of it.
 - **`mcp/domains/integrations/tools.py:429` is the Immich conflict "create"**, not the athlete
   mapping (which creates no contact) — the construction-site list above names it wrongly.
 

@@ -600,6 +600,7 @@ class ContactService:
             updated_contact = Contact(
                 id=current_contact.id,
                 first_name=current_contact.first_name,
+                user_id=current_contact.user_id,
                 last_name=current_contact.last_name,
                 middle_name=current_contact.middle_name,
                 nick_name=current_contact.nick_name,

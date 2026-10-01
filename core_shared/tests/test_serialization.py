@@ -5,6 +5,8 @@ Tests round-trip serialize/deserialize for contact important dates,
 ensuring the outbox pipeline correctly preserves date data.
 """
 
+import pytest
+
 from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
@@ -17,6 +19,7 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.contacts.serialization import (
+    ContactDeserializationError,
     deserialize_contact,
     serialize_contact,
 )
@@ -390,8 +393,10 @@ class TestOwnerSerialization:
         assert serialized["user_id"] == "user-1"
         assert restored.user_id == "user-1"
 
-    def test_deserialize_without_user_id_key(self) -> None:
-        """A payload published before workers named the owner reads as None."""
-        contact = deserialize_contact({"first_name": "Legacy"})
-
-        assert contact.user_id is None
+    @pytest.mark.parametrize("payload", [{}, {"user_id": None}, {"user_id": " "}])
+    def test_deserialize_refuses_a_contact_without_an_owner(
+        self, payload: dict[str, object]
+    ) -> None:
+        """Every contact has an owner; a payload that names none is malformed."""
+        with pytest.raises(ContactDeserializationError, match="user_id"):
+            deserialize_contact({"first_name": "Unowned", **payload})

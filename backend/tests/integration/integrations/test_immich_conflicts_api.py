@@ -3,7 +3,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 
 @pytest.fixture
@@ -188,13 +188,17 @@ async def test_resolve_immich_conflict_create(
     contact_id = row.resolved_contact_id
     assert contact_id is not None
 
-    # Verify the new contact was created with the person's name
-    contact_query = text("SELECT first_name, last_name FROM contacts WHERE id = :id")
+    # Verify the new contact was created with the person's name, for the user
+    # who resolved the conflict
+    contact_query = text(
+        "SELECT user_id, first_name, last_name FROM contacts WHERE id = :id"
+    )
     c_res = await async_connection.execute(contact_query, {"id": contact_id})
     c_row = c_res.fetchone()
     assert c_row is not None
     assert c_row.first_name == "John"
     assert c_row.last_name == "Doe"
+    assert c_row.user_id == TEST_USER_ID
 
     # Check that the canonical sync_metadata link was created.
     ref_query = text("""

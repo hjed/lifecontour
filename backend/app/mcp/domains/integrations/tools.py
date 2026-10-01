@@ -426,7 +426,9 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 first_name = first_name or "Unnamed"
                 last_name = last_name_parsed or ""
 
-                new_contact = Contact(first_name=first_name, last_name=last_name)
+                new_contact = Contact(
+                    first_name=first_name, user_id=user_id, last_name=last_name
+                )
                 saved_contact = await contact_service.create_contact(
                     contact=new_contact,
                     transaction=connection,

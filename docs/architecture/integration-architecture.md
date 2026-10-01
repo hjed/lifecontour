@@ -266,10 +266,21 @@ returning `IntegrationLinkCollision`), `IntegrationLinkRepository`
 `event_data.user_id`, and `event_data.contact_data.user_id` from the serialized
 `Contact` entity. The worker stamps the user it is syncing for — the Google sync
 job's `user_id` (passed to `GoogleContactTransformer`), and `ImmichSyncService`'s
-own `user_id`. Both fields are optional while the backend still ignores them; they
-become required once `contacts.user_id` exists, and from then on the inbound
-consumer fails a contact sync event that names no owner rather than guess one
-([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 2–3).
+own `user_id`. The top-level field is required (`ContactSyncEventData.user_id`,
+non-empty) and is the one the backend reads:
+
+- **No owner, no contact.** `OutboxEventProcessor` fails a contact sync event that
+  names no owner with `PermanentOutboxEventProcessingError` ("contact sync event
+  names no owner") rather than guess one or retry; so does any other payload that
+  fails validation.
+- **A new contact is the event owner's.** The processor builds the inbound
+  contact with the top-level `user_id`, whatever `contact_data` carries;
+  `deserialize_contact` itself refuses a payload without an owner.
+- **A stored contact keeps its owner.** When the event updates an existing
+  contact — found through the link store, or reconciled by email on
+  `contact.created` — the stored owner wins and a mismatch is logged. Refusing a
+  cross-owner link belongs to the per-user link store
+  ([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 14–15).
 
 ### 2. Task Queue System
 
