@@ -184,6 +184,20 @@ class TestPreviewSeriesMerge:
 
         assert response.status_code == 400
 
+    async def test_a_different_resource_type_is_refused(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        body = _merge_body(source)
+        body["data"]["type"] = "journals"
+
+        response = await integration_api_client.post(
+            _preview_url(destination), json=body
+        )
+
+        assert response.status_code == 400
+
     async def test_merging_a_series_into_itself_is_rejected(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
     ) -> None:

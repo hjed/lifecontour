@@ -770,12 +770,19 @@ class JournalSeriesMergeAttributes(BaseModel):
     )
 
 
+SERIES_MERGE_RESOURCE_TYPE: Literal["journal-series-merge"] = "journal-series-merge"
+
+
 class JournalSeriesMergeData(BaseModel):
     """Data for previewing or performing a series merge."""
 
     model_config = ConfigDict(extra="forbid")
 
-    type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
+    # JSON:API: a request naming another resource type is refused, not
+    # silently processed as a merge.
+    type: Literal["journal-series-merge"] = Field(
+        default=SERIES_MERGE_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
     attributes: JournalSeriesMergeAttributes = Field(
         ..., description="Series merge attributes"
     )
