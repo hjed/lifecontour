@@ -136,6 +136,12 @@ class JournalSeriesMergeService:
             JournalMergeConflictError: If a confirmed pair is no longer a
                 merge candidate.
         """
+        # Before either series is read: a merge sharing a series with this one
+        # (A into B while B merges into C) then runs wholly before or after it,
+        # and never deletes a series the other is still moving rows into.
+        await self.series_repo.lock_for_merge(
+            [destination_series_id, source_series_id], user_id
+        )
         source_series, destination_series = await self._load_series(
             destination_series_id, source_series_id, user_id
         )

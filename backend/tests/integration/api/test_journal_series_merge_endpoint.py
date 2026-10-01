@@ -484,6 +484,19 @@ class TestMergeSeries:
         assert await series_exists(clean_database, source)
         assert await journal_exists(clean_database, source_journal)
 
+    async def test_a_different_resource_type_is_refused_and_nothing_is_written(
+        self, integration_api_client: AsyncClient, clean_database: AsyncConnection
+    ) -> None:
+        source = await seed_series(clean_database, "Old standup")
+        destination = await seed_series(clean_database, "Standup")
+        body = _execute_body(source, [])
+        body["data"]["type"] = "journals"
+
+        response = await integration_api_client.post(_merge_url(destination), json=body)
+
+        assert response.status_code == 400
+        assert await series_exists(clean_database, source)
+
     async def test_a_pair_with_one_event_keeps_that_events_timing(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
     ) -> None:

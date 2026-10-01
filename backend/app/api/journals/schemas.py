@@ -820,7 +820,9 @@ class JournalSeriesMergeExecuteData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: str = Field(default="journal-series-merge", description=RESOURCE_TYPE_DESC)
+    type: Literal["journal-series-merge"] = Field(
+        default=SERIES_MERGE_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
     attributes: JournalSeriesMergeExecuteAttributes = Field(
         ..., description="Series merge attributes"
     )

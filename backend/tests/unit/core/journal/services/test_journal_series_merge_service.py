@@ -19,13 +19,15 @@ USER_ID = "user-1"
 NO_TRANSACTION = cast(AsyncConnection, None)
 
 
-async def test_recurrences_are_aliased_before_the_members_move() -> None:
-    """Aliasing locks every recurrence key the source answers for.
+async def test_series_are_locked_first_and_aliased_before_the_members_move() -> None:
+    """The series-level writes run in the one order that keeps them safe.
 
-    Those locks are what keep a concurrent sync from adding a journal to the
-    source series after its members have moved, where deleting the series
-    would drop it. So the aliasing, and the locks it takes, must come before
-    the move, and the delete last.
+    Both series rows are locked before either is read, so a merge sharing a
+    series with this one runs before or after it, never interleaved. Aliasing
+    locks every recurrence key the source answers for, which keeps a
+    concurrent sync from adding a journal to the source after its members
+    have moved, where deleting the series would drop it. So the aliasing comes
+    before the move, and the delete last.
     """
     source = JournalSeries(id=uuid.uuid4(), user_id=USER_ID, name="Old")
     destination = JournalSeries(id=uuid.uuid4(), user_id=USER_ID, name="New")
@@ -39,6 +41,8 @@ async def test_recurrences_are_aliased_before_the_members_move() -> None:
     date_resolver = AsyncMock()
     date_resolver.timezone_for.return_value = ZoneInfo("UTC")
     calls = MagicMock()
+    calls.attach_mock(series_repo.lock_for_merge, "lock_for_merge")
+    calls.attach_mock(series_repo.find_by_id, "find_by_id")
     calls.attach_mock(series_repo.alias_recurrences, "alias_recurrences")
     calls.attach_mock(series_repo.move_members, "move_members")
     calls.attach_mock(series_repo.delete, "delete")
@@ -59,8 +63,15 @@ async def test_recurrences_are_aliased_before_the_members_move() -> None:
         transaction=NO_TRANSACTION,
     )
 
-    assert [name for name, _args, _kwargs in calls.mock_calls] == [
+    names = [name for name, _args, _kwargs in calls.mock_calls]
+    assert names == [
+        "lock_for_merge",
+        "find_by_id",
+        "find_by_id",
         "alias_recurrences",
         "move_members",
         "delete",
     ]
+    series_repo.lock_for_merge.assert_awaited_once_with(
+        [destination.id, source.id], USER_ID
+    )
