@@ -185,7 +185,8 @@ Established by reviewing the current code during spec planning:
 ## Dependency and Parallelisation Notes
 
 - **ITER19-001 (Credential Audit)** starts first. Its Phase 1 result is the release gate; nothing
-  else waits on it until the flip.
+  else waits on it until the flip. Phase 4 (the delta rescan) runs late, after ITER19-005
+  Phases 1 and 1b publish the final images and before Phase 2 makes them public.
 - **ITER19-002 (Licensing & Contributions)** is independent and can run in parallel from the
   start.
 - **ITER19-003 (Brand Identity)** is independent. Phase 1's SVGs are needed by ITER19-004 Phase 3
@@ -194,15 +195,16 @@ Established by reviewing the current code during spec planning:
   Decisions). Phase 3 needs ITER19-003 Phase 1, and Phase 4 follows Phase 1.
 - **ITER19-005 (Repository Rename & Go Public)** comes last.
   - Phase 1 needs ITER19-004 merged.
-  - Phase 2 (the flip) needs every other phase merged and ITER19-001's gate passed.
+  - Phase 1b (frontend image hardening) follows Phase 1.
+  - Phase 2 (the flip) needs every other phase merged, including ITER19-001 Phase 4, the gate.
 
 | Sub-iteration | Depends on | Can parallelise with |
 |---|---|---|
-| ITER19-001 Credential Audit & Guardrails | — | -002, -003, -004 |
+| ITER19-001 Credential Audit & Guardrails | — (P4: -005 P1, P1b) | -002, -003, -004 |
 | ITER19-002 Licensing & Contributions | — | -001, -003, -004 |
 | ITER19-003 Brand Identity | — | -001, -002, -004 (Phases 1–2) |
 | ITER19-004 Rename to Lifecontour | -003 P1 (for P3); P1 (for P4) | -001, -002 |
-| ITER19-005 Repository Rename & Go Public | -004 (P1); all + -001 gate (P2) | — |
+| ITER19-005 Repository Rename & Go Public | -004 (P1); P1 (P1b); all + -001 P4 gate (P2) | — |
 
 ```mermaid
 flowchart LR
@@ -215,7 +217,9 @@ flowchart LR
   C1 --> D3[004 P3 Python packages + docs]
   D1 --> D4[004 P4 frontend package + design-sync]
   D1 & D2 & D3 & D4 --> E1[005 P1 repo rename + deploy + source link]
-  A2 & A3 & B4 & C2 & E1 --> E2[005 P2 configure + flip]
+  E1 --> E1b[005 P1b frontend image hardening]
+  A3 & E1b --> A4[001 P4 pre-flip delta rescan]
+  A2 & A4 & B4 & C2 --> E2[005 P2 configure + flip]
 ```
 
 ## Task Breakdown
@@ -238,7 +242,7 @@ new ones permanently.
 **Specification Reference:**
 - [Part 3: Security Audit & Guardrails](../product-specifications/open-source-release-and-branding-product-specification.md#part-3-security-audit--guardrails)
 
-**Dependencies:** None.
+**Dependencies:** None, except that Phase 4 needs ITER19-005 Phases 1 and 1b.
 
 **Deliverable:**
 
@@ -330,7 +334,7 @@ new ones permanently.
     scan on its head before it merges; and the rule "never use `pull_request_target` with a
     checkout of PR code".
 
-**Phase 3 — GitHub-side content audit.** PR ~80 lines (audit record only).
+**Phase 3 — GitHub-side content audit.** PR ~80 lines (audit record only). ✅ DONE — every GitHub-side surface was exported, fully unpacked, and scanned with gitleaks and TruffleHog. That covered PR and issue text with its edit history, check output, commit messages, all Actions attempts and artifacts, releases, and all 2,482 GHCR versions (6,763 unique blobs). There were 0 verified and 0 real credentials. Next.js build-generated keys in the frontend images were accepted as non-credentials, since the app uses neither feature they protect; hardening the image is ITER19-005 Phase 1b. The record and its cutoff are in [docs/security/open-source-release-audit.md](../security/open-source-release-audit.md#phase-3-github-side-content), and Phase 4 rescans everything newer.
 
 - **PR and issue text:** scan all PR and issue bodies, comments, and review comments. Export them
   via `gh api` paginated, then run `gitleaks dir <export>` over the export.
@@ -349,6 +353,22 @@ new ones permanently.
   Phase 1.
 - **Verification:** the audit doc's GitHub-side section lists each surface scanned, its count, and
   zero unresolved real findings.
+
+**Phase 4 — Pre-flip delta rescan.** PR ~40 lines (audit record only).
+
+Phase 3 has a cutoff. Content keeps arriving after it: PRs, issues and edits, Actions logs (kept for 10 days) and artifacts, and the new `lifecontour-*` images from ITER19-005 Phases 1 and 1b. This phase closes the gap just before the packages and the repository go public.
+
+- **Depends on** ITER19-005 Phases 1 and 1b merged and released. **Blocks** ITER19-005 Phase 2.
+- **Scope:** everything newer than the Phase 3 cutoff, following
+  [the audit's re-run steps](../security/open-source-release-audit.md#re-running-and-the-pre-flip-delta-rescan):
+  - issues, PRs, comments and reviews created or edited since the cutoff, with their edit history and check output;
+  - Actions runs and artifacts with IDs above the cutoff;
+  - every GHCR version above the cutoff version ID, in both the old packages and the `lifecontour-*` packages;
+  - commit messages on new refs.
+- **Same method as Phase 3:** run the canaries first, unpack everything, and scan with pinned gitleaks (committed config and default rules) and TruffleHog (`verified,unknown,unverified`). Triage into the existing classes. Rotate any real credential first.
+- **Frontend check:** confirm that the hardened image (Phase 1b) no longer ships `.next/cache`, and that production sets `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.
+- **Verification:** the audit doc gets a "Phase 4: pre-flip delta" section with a new cutoff, the per-surface counts, the triage, and zero unresolved real findings. This section is the release gate that ITER19-005 Phase 2 checks.
+- **Docs:** `docs/security/open-source-release-audit.md`.
 
 ---
 
@@ -772,7 +792,8 @@ repository's protections, and flip visibility.
 **Dependencies:**
 
 - Phase 1 needs ITER19-004.
-- Phase 2 needs every other phase merged and ITER19-001's gate passed.
+- Phase 1b needs Phase 1.
+- Phase 2 needs every other phase merged, including ITER19-001 Phase 4, the delta-rescan gate.
 
 **Deliverable:**
 
@@ -838,6 +859,20 @@ repository's protections, and flip visibility.
 - **Docs:** `docs/ci-cd-setup.md` gets the new image paths and a note that they follow
   `github.repository`.
 
+**Phase 1b — Frontend image hardening.** PR ~150 lines.
+
+Tracked in [#1661](https://github.com/hjed/personal-management-system/issues/1661). The ITER19-001 Phase 3 audit found Next.js build-generated keys in every frontend image (see [the audit](../security/open-source-release-audit.md#nextjs-build-generated-keys)): the preview-mode signing and encryption keys, and the Server Actions `encryptionKey`. The app uses neither feature, and Next.js cannot be told not to generate them. This phase makes sure nothing relies on the baked-in copies before the packages go public.
+
+- **Depends on** Phase 1, which owns the release and image paths. Must be released before Phase 2.
+- **Runtime key:** production supplies `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` (`openssl rand -base64 32`). Next.js reads the variable before the manifest's key, so the key baked into any published image, including old ones, is never used. Document it in the deployment guide and the `.env.example` files.
+- **Standalone image:** `docker/frontend/Dockerfile` becomes a multi-stage build with `output: "standalone"`. The runtime stage copies only `.next/standalone`, `.next/static` and `public`. That drops `.next/cache` (the second copies of the keys), the dev dependencies and the pnpm store. The healthcheck and start script keep working, and the development path keeps working or gets its own target.
+- **Out of scope:** the preview-mode keys. They have no runtime override, they guard only data that `draftMode().enable()` creates (never called), and they stay in `prerender-manifest.json`, which the server needs at runtime.
+- **Tests and verification:**
+  - the `E2E Docker Image Build` and the E2E suite pass against the new image;
+  - a built image is checked to contain no `.next/cache`, and to start with the environment key set;
+  - after release, production health, login and an MCP call are verified.
+- **Docs:** `docs/architecture/deployment-guide.md` (the new environment variable, and the image layout).
+
 **Phase 2 — Configure the public repository and flip.** PR ~100 lines (docs only).
 
 - **Pre-flip:**
@@ -846,6 +881,11 @@ repository's protections, and flip visibility.
   - Require approval for first-time contributors' workflow runs.
   - Create a ruleset on `main`: PR required, the required status checks, the CLA check, and no
     force-push.
+  - Confirm the ITER19-001 Phase 4 gate is met (the delta rescan recorded zero unresolved real
+    findings) and that Phase 1b is released.
+  - **Purge the Actions caches** (`gh cache delete --all`). After the flip, fork-PR workflows can
+    restore base-branch caches, which were never scanned; the audit chose to purge them rather than
+    scan them. They rebuild on the next CI run.
   - Make the GHCR packages public and link them to the repository.
 - **Flip:** set the repository visibility to public.
 - **Post-flip:**
@@ -930,17 +970,18 @@ Planning decisions made in this document (not requiring product input, recorded 
 
 | Sub-iteration | Phases | Est. PRs |
 |---|---|---|
-| ITER19-001: Credential Audit & Guardrails | 3 | 3 |
+| ITER19-001: Credential Audit & Guardrails | 4 | 4 |
 | ITER19-002: Licensing & Contributions | 4 | 4 |
 | ITER19-003: Brand Identity | 2 | 2 |
 | ITER19-004: Rename to Lifecontour | 4 | 4 |
-| ITER19-005: Repository Rename & Go Public | 2 | 2 |
-| **Total** | **15** | **15** |
+| ITER19-005: Repository Rename & Go Public | 3 | 3 |
+| **Total** | **17** | **17** |
 
 **Suggested delivery order:**
 
 1. Start ITER19-001 Phase 1 immediately; the credential audit is the long-lead item.
 2. Run ITER19-002 and ITER19-003 in parallel.
 3. Then ITER19-004 Phases 1–4.
-4. Then ITER19-005 Phase 1, with the deploy step.
-5. ITER19-005 Phase 2 flips the repository last.
+4. Then ITER19-005 Phase 1, with the deploy step, and Phase 1b (frontend image hardening).
+5. Then ITER19-001 Phase 4, the pre-flip delta rescan and release gate.
+6. ITER19-005 Phase 2 flips the repository last.
