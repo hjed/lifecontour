@@ -1,5 +1,6 @@
 """SQL implementation of JournalSeriesRepository."""
 
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -196,6 +197,29 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 f"calendar={calendar_id} recurring_event_id={recurring_event_id}"
             )
         return _row_to_series(row)
+
+    async def lock_for_merge(
+        self, series_ids: Sequence[UUID], user_id: str
+    ) -> set[UUID]:
+        """Lock the user's series rows a merge reads and writes, until commit.
+
+        Rows are locked in id order so two merges sharing a series cannot
+        deadlock. Without this, merging A into B and B into C at the same time
+        lets the second read B before the first commits, then delete B,
+        cascading away the alias and members the first moved into it.
+        """
+        result = await self.conn.execute(
+            text(
+                """
+                SELECT id FROM journal_series
+                WHERE id = ANY(:series_ids) AND user_id = :user_id
+                ORDER BY id
+                FOR UPDATE
+                """
+            ),
+            {"series_ids": list(series_ids), "user_id": user_id},
+        )
+        return {row.id for row in result}
 
     async def alias_recurrences(
         self, absorbed: JournalSeries, into_series_id: UUID

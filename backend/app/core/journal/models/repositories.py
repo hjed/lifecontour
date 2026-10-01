@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -1369,6 +1370,18 @@ class JournalSeriesRepository(ABC):
         the series doesn't exist yet — an existing series is never renamed.
         A recurrence whose series was merged into another resolves, through
         its alias, to the series that absorbed it.
+        """
+        pass
+
+    @abstractmethod
+    async def lock_for_merge(
+        self, series_ids: Sequence[UUID], user_id: str
+    ) -> set[UUID]:
+        """Lock the user's series rows a merge reads and writes, until commit.
+
+        Taken before a series merge reads either series, so two merges that
+        share a series run one after the other and the second sees what the
+        first committed. Returns the ids actually held (the user's own).
         """
         pass
 

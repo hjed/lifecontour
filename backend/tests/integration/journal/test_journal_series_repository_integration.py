@@ -386,6 +386,28 @@ class TestMoveMembers:
 
 
 @pytest.mark.integration
+class TestLockForMerge:
+    async def test_locks_the_users_series_and_returns_the_ids_it_holds(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        mine = await series_repository.save(JournalSeries(user_id=USER_ID, name="A"))
+        also_mine = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="B")
+        )
+        theirs = await series_repository.save(
+            JournalSeries(user_id=OTHER_USER_ID, name="C")
+        )
+
+        locked = await series_repository.lock_for_merge(
+            [_sid(also_mine), _sid(mine), _sid(theirs)], USER_ID
+        )
+
+        assert locked == {_sid(mine), _sid(also_mine)}
+
+
+@pytest.mark.integration
 class TestRecurrenceAliases:
     async def test_aliased_recurrence_resolves_to_the_absorbing_series(
         self,
