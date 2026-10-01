@@ -7,7 +7,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
   Separator,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { CalendarDays, MapPin } from 'lucide-react';
 
 /**

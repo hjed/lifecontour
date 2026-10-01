@@ -1,4 +1,4 @@
-import { Label, Textarea } from 'personal-management-frontend';
+import { Label, Textarea } from 'lifecontour-frontend';
 
 export function Basic() {
   return (

@@ -5,7 +5,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { CircleAlert, Heart, MapPin, Star } from 'lucide-react';
 
 export function Variants() {

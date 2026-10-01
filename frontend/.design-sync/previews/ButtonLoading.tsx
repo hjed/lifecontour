@@ -1,4 +1,4 @@
-import { Button, ButtonLoading } from 'personal-management-frontend';
+import { Button, ButtonLoading } from 'lifecontour-frontend';
 
 export function InButtons() {
   return (

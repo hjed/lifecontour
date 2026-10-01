@@ -14,7 +14,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import {
   ChevronDown,
   Download,

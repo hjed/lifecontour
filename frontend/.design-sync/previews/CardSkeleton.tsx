@@ -1,4 +1,4 @@
-import { CardSkeleton } from 'personal-management-frontend';
+import { CardSkeleton } from 'lifecontour-frontend';
 
 export function Single() {
   return <CardSkeleton className='max-w-sm' />;

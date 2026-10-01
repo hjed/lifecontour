@@ -1,4 +1,4 @@
-import { Toggle } from 'personal-management-frontend';
+import { Toggle } from 'lifecontour-frontend';
 import { Bold, Italic, List, Pin, Star } from 'lucide-react';
 
 export function Variants() {

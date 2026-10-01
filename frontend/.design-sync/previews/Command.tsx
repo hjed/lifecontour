@@ -7,7 +7,7 @@ import {
   CommandList,
   CommandSeparator,
   CommandShortcut,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import {
   BookOpen,
   CalendarPlus,

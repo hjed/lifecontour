@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { ActivityItem } from 'personal-management-frontend';
+import { ActivityItem } from 'lifecontour-frontend';
 import type { HistoryResource } from '@/types/history';
 
 /**

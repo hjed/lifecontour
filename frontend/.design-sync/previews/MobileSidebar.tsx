@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { MobileSidebar } from 'personal-management-frontend';
+import { MobileSidebar } from 'lifecontour-frontend';
 
 /**
  * The drawer's open state is component-private (`Sheet` is driven by a

@@ -1,4 +1,4 @@
-import { Button, ThemeToggle } from 'personal-management-frontend';
+import { Button, ThemeToggle } from 'lifecontour-frontend';
 import { Bell, Plus } from 'lucide-react';
 
 export function Default() {

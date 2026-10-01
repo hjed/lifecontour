@@ -1,7 +1,7 @@
 {
   "projectId": "95fe076e-27f1-4d11-aa8a-3cbe1c6f60ef",
-  "pkg": "personal-management-frontend",
-  "globalName": "PMS",
+  "pkg": "lifecontour-frontend",
+  "globalName": "Lifecontour",
   "shape": "package",
   "buildCmd": "node .design-sync/prepare.mjs",
   "tsconfig": "tsconfig.json",

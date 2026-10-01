@@ -9,7 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Separator,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 export function Expanded() {

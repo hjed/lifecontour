@@ -1,8 +1,4 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from 'personal-management-frontend';
+import { Alert, AlertDescription, AlertTitle } from 'lifecontour-frontend';
 import { CircleAlert, CircleCheck, Info, RefreshCw } from 'lucide-react';
 
 export function Variants() {

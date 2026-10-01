@@ -1,4 +1,4 @@
-import { Label, Switch } from 'personal-management-frontend';
+import { Label, Switch } from 'lifecontour-frontend';
 
 export function States() {
   return (

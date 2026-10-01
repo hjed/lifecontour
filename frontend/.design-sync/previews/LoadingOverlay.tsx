@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
   LoadingOverlay,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 function EntryCard() {
   return (

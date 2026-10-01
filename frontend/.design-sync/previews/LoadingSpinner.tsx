@@ -4,7 +4,7 @@ import {
   CardHeader,
   CardTitle,
   LoadingSpinner,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function Sizes() {
   return (

@@ -7,7 +7,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 /**
  * Destructive confirmation — the pattern used before deleting a journal entry.

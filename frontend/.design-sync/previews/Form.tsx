@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 type EntryValues = {
   title: string;

@@ -1,10 +1,4 @@
-import {
-  Checkbox,
-  Input,
-  Label,
-  Switch,
-  Textarea,
-} from 'personal-management-frontend';
+import { Checkbox, Input, Label, Switch, Textarea } from 'lifecontour-frontend';
 import { Lock } from 'lucide-react';
 
 export function WithInput() {

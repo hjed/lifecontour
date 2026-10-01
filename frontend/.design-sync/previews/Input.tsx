@@ -1,4 +1,4 @@
-import { Input, Label } from 'personal-management-frontend';
+import { Input, Label } from 'lifecontour-frontend';
 import { Search } from 'lucide-react';
 
 export function Basic() {

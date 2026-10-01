@@ -1,4 +1,4 @@
-import { TableSkeleton } from 'personal-management-frontend';
+import { TableSkeleton } from 'lifecontour-frontend';
 
 export function Default() {
   return <TableSkeleton />;

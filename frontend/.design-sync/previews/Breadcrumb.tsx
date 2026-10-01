@@ -1,4 +1,4 @@
-import { Breadcrumb } from 'personal-management-frontend';
+import { Breadcrumb } from 'lifecontour-frontend';
 
 /**
  * Derived from the current route. The preview harness pins the pathname to

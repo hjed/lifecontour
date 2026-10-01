@@ -7,7 +7,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function Basic() {
   return (

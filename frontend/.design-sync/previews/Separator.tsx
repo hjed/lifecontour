@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
   Separator,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function InCard() {
   return (

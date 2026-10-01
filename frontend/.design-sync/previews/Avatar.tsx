@@ -7,7 +7,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 // Inline data URI so the image path renders without a network request.
 const PORTRAIT =

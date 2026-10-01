@@ -1,5 +1,5 @@
-import { ActivityFeed } from 'personal-management-frontend';
-import type { UseHistoryHook } from 'personal-management-frontend';
+import { ActivityFeed } from 'lifecontour-frontend';
+import type { UseHistoryHook } from 'lifecontour-frontend';
 import type { HistoryListResponse } from '@/types/history';
 
 /**

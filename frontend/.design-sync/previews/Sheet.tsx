@@ -10,7 +10,7 @@ import {
   SheetFooter,
   SheetHeader,
   SheetTitle,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { GitMerge, Zap } from 'lucide-react';
 
 const reviewItems = [

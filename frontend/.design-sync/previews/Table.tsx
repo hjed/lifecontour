@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function JournalEntries() {
   const entries = [

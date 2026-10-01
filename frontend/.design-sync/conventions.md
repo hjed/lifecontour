@@ -1,14 +1,15 @@
 ## How to build with this system
 
-These are the real components from the Personal Management System app (a
-personal CRM + journal): shadcn/ui "new-york" primitives on Radix, styled with
-Tailwind CSS v4 and a semantic CSS-variable theme. Australian English and metric
-units throughout; dates read like `14 July 2026`.
+These are the real components from the Lifecontour app (a self-hosted journal,
+people and adventures app): shadcn/ui "new-york" primitives on Radix, styled
+with Tailwind CSS v4 and a semantic CSS-variable theme. Australian English and
+metric units throughout; dates read like `14 July 2026`.
 
 ### Wrap the tree in `DesignSyncProvider`
 
 ```jsx
-const { DesignSyncProvider, Card, CardHeader, CardTitle, Button } = window.PMS;
+const { DesignSyncProvider, Card, CardHeader, CardTitle, Button } =
+  window.Lifecontour;
 
 <DesignSyncProvider>{/* your design here */}</DesignSyncProvider>;
 ```
@@ -65,8 +66,8 @@ There is no exported `cn()` helper — pass plain `className` strings.
   `variant?: "default" | "secondary" | "destructive" | "outline" | "link" | "ghost"`
   and `size?: "default" | "sm" | "lg" | "icon"`).
 
-Compound components ship all their parts on `window.PMS` even though only the
-parent has a card: `Card` + `CardHeader` / `CardTitle` / `CardDescription` /
+Compound components ship all their parts on `window.Lifecontour` even though
+only the parent has a card: `Card` + `CardHeader` / `CardTitle` / `CardDescription` /
 `CardContent` / `CardFooter`; `Dialog` + `DialogTrigger` / `DialogContent` /
 `DialogHeader` / `DialogTitle` / `DialogDescription` / `DialogFooter`; likewise
 for `Select`, `DropdownMenu`, `ContextMenu`, `Table`, `Sheet`, `Command`,
@@ -85,7 +86,7 @@ const {
   CardContent,
   Badge,
   Button,
-} = window.PMS;
+} = window.Lifecontour;
 
 <DesignSyncProvider>
   <div className='bg-background text-foreground grid gap-4 p-6 sm:grid-cols-2'>
