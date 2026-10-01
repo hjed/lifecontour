@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { MergeSeriesDialog } from '@/components/journals/MergeSeriesDialog';
 import {
   useDeleteJournalSeries,
   useJournalSeriesDetail,
@@ -98,16 +99,22 @@ export default function JournalSeriesDetailPage() {
                   </p>
                 )}
               </div>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={handleDeleteSeries}
-                className='text-destructive gap-2'
-                data-testid='delete-series-button'
-              >
-                <Trash2 className='h-4 w-4' />
-                Delete Series
-              </Button>
+              <div className='flex flex-wrap justify-end gap-1'>
+                <MergeSeriesDialog
+                  destinationSeriesId={seriesId}
+                  destinationSeriesName={series.name}
+                />
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={handleDeleteSeries}
+                  className='text-destructive gap-2'
+                  data-testid='delete-series-button'
+                >
+                  <Trash2 className='h-4 w-4' />
+                  Delete Series
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className='mb-2 text-sm font-medium'>

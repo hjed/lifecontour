@@ -6,6 +6,7 @@ appointments). Registered before the main journals router so the literal
 ``/journals/series`` paths win over ``/journals/{journal_id}``.
 """
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalValidationError,
 )
@@ -18,13 +19,25 @@ from app.api.common.schemas import JsonApiLinks, get_request_base_url
 from app.api.journals.schemas import (
     JournalSeriesCreateRequest,
     JournalSeriesListResponse,
+    JournalSeriesMergePlanAttributes,
+    JournalSeriesMergePlanResource,
+    JournalSeriesMergePlanResponse,
+    JournalSeriesMergePreviewRequest,
+    JournalSeriesMergeRequest,
     JournalSeriesRelationshipRequest,
     JournalSeriesResource,
     JournalSeriesResponse,
     JournalSeriesUpdateRequest,
+    SeriesMergeDay,
+    SeriesMergeJournalSummary,
 )
 from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.models.repositories import JournalRepository
+from app.core.journal.models.series_merge import SeriesMergePair, SeriesMergePolicies
+from app.core.journal.services.journal_series_merge_service import (
+    JournalSeriesMergeService,
+    SeriesMergeReport,
+)
 from app.core.journal.services.journal_series_service import (
     JournalSeriesService,
     parse_series_id,
@@ -55,6 +68,43 @@ def _to_resource(
         links=JsonApiLinks(self=f"{base_url}/api/journals/series/{series.id}")
         if series.id
         else None,
+    )
+
+
+def _merge_plan_response(report: SeriesMergeReport) -> JournalSeriesMergePlanResponse:
+    destination_id = str(report.destination_series.id)
+    return JournalSeriesMergePlanResponse(
+        data=JournalSeriesMergePlanResource(
+            id=destination_id,
+            attributes=JournalSeriesMergePlanAttributes(
+                source_series_id=str(report.source_series.id),
+                destination_series_id=destination_id,
+                days=[
+                    SeriesMergeDay(
+                        date=day.date,
+                        kind=day.kind,
+                        source_journal_ids=list(day.source_journal_ids),
+                        destination_journal_ids=list(day.destination_journal_ids),
+                        differing_fields=list(day.differing_fields),
+                        skip_reason=day.skip_reason,
+                    )
+                    for day in report.days
+                ],
+                journals={
+                    str(journal_id): SeriesMergeJournalSummary(
+                        id=journal_id,
+                        title=member.journal.title,
+                        event_date_range_start=member.journal.event_date_range.start,
+                        location=(
+                            member.calendar_info.location
+                            if member.calendar_info
+                            else None
+                        ),
+                    )
+                    for journal_id, member in report.members.items()
+                },
+            ),
+        )
     )
 
 
@@ -217,3 +267,61 @@ async def remove_journal_from_series(
         user_id=user.id,
         transaction=connection,
     )
+
+
+@series_router.post("/journals/series/{series_id}/merge/preview")
+@inject
+async def preview_journal_series_merge(
+    series_id: str,
+    merge_request: JournalSeriesMergePreviewRequest,
+    merge_service: FromDishka[JournalSeriesMergeService],
+    user: FromDishka[SessionUser],
+) -> JournalSeriesMergePlanResponse:
+    """Preview merging another series into this one. Writes nothing.
+
+    Every day either series has a member on is reported: a day with exactly one
+    journal per side is a merge candidate unless a skip-if-different policy
+    stops it.
+    """
+    attributes = merge_request.data.attributes
+    report = await merge_service.preview_merge(
+        destination_series_id=parse_series_id(series_id),
+        source_series_id=parse_series_id(attributes.source_series_id),
+        user_id=user.id,
+        policies=SeriesMergePolicies(**dict(attributes.policies)),
+    )
+    return _merge_plan_response(report)
+
+
+@series_router.post("/journals/series/{series_id}/merge")
+@inject
+async def merge_journal_series(
+    series_id: str,
+    merge_request: JournalSeriesMergeRequest,
+    merge_service: FromDishka[JournalSeriesMergeService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],
+) -> JournalSeriesMergePlanResponse:
+    """Merge another series into this one, deleting it.
+
+    Every member of the source series joins this series, and each confirmed
+    same-day pair is merged into this series' journal. Returns each day's
+    outcome; 409 if a confirmed pair is no longer a merge candidate.
+    """
+    attributes = merge_request.data.attributes
+    report = await merge_service.merge_series(
+        destination_series_id=parse_series_id(series_id),
+        source_series_id=parse_series_id(attributes.source_series_id),
+        user_id=user.id,
+        policies=SeriesMergePolicies(**dict(attributes.policies)),
+        pairs=[
+            SeriesMergePair(p.source_journal_id, p.destination_journal_id)
+            for p in attributes.pairs
+        ],
+        transaction=connection,
+        # A person merged these series in the browser; the journal and task
+        # events the pair merges publish record it as theirs.
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return _merge_plan_response(report)

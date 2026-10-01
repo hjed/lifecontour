@@ -684,6 +684,11 @@ user's local date, resolved through `UserSettingsRepository.get_timezone` + `res
   `UserSettingsRepository`. A caller resolving many journals should take `timezone_for` **once** and use
   the pure functions, rather than paying a settings read per journal.
 
+Series merge pairs journals by this date: a source and a destination member that start on the same local
+day in the user's configured zone are a merge candidate (`plan_series_merge`,
+`backend/app/core/journal/models/series_merge.py`, which takes the zone once from `timezone_for`). See
+*Merging series* in the [Journal System Specification](../journal-system-specification.md#merging-series).
+
 **The journal list does not currently use this timezone.** `groupJournalsByDay`
 (`frontend/src/lib/journal-grouping.ts`) buckets journals with `format(parseISO(start), 'yyyy-MM-dd')`,
 which renders in the **browser's** timezone. The two agree whenever the browser matches the configured

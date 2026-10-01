@@ -25,6 +25,7 @@ from app.core.integrations.journal_outbox_event_processor import (
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
 )
+from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.core.integrations.journal_sync_seeding import (
     MASTER_ID,
     USER_ID,
@@ -98,6 +99,48 @@ class TestSeriesAutoLinkingOnCreate:
             await series_repo.get_series_for_journal(result["journal_id"], USER_ID)
             == []
         )
+
+
+@pytest.mark.integration
+class TestSeriesAutoLinkingAfterSeriesMerge:
+    async def test_new_instance_of_a_merged_recurrence_joins_the_survivor(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        first = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20260801T090000Z",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        series_repo = SqlJournalSeriesRepository(async_connection)
+        [merged_away] = await series_repo.get_series_for_journal(
+            first["journal_id"], USER_ID
+        )
+        survivor = await series_repo.save(
+            JournalSeries(user_id=USER_ID, name="Survivor")
+        )
+        assert survivor.id is not None and merged_away.id is not None
+        await series_repo.alias_recurrences(merged_away, survivor.id)
+        await series_repo.delete(merged_away.id, USER_ID)
+
+        later = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20260808T090000Z",
+                recurring_event_id=MASTER_ID,
+            )
+        )
+
+        later_series = await series_repo.get_series_for_journal(
+            later["journal_id"], USER_ID
+        )
+        assert [s.id for s in later_series] == [survivor.id]
+        assert [s.name for s in await series_repo.find_all(USER_ID)] == ["Survivor"]
 
 
 @pytest.mark.integration

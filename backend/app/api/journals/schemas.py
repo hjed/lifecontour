@@ -15,7 +15,7 @@ from core_shared.models.journals import (
     TaskAnchorRole,
 )
 from core_shared.models.tasks import TaskStatus
-from pydantic import BaseModel, Field, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
@@ -23,6 +23,11 @@ from app.api.common.schemas import (
     JsonApiLinks,
     JsonApiResponse,
     JsonApiUpdateRequest,
+)
+from app.core.journal.models.series_merge import (
+    SeriesDayOutcomeKind,
+    SeriesFieldPolicy,
+    SeriesMergeField,
 )
 
 # Constants for field descriptions
@@ -726,6 +731,165 @@ class JournalSeriesUpdateRequest(BaseModel):
     """Request model for updating a journal series."""
 
     data: JournalSeriesUpdateData = Field(..., description="Series update data")
+
+
+class SeriesMergePoliciesSchema(BaseModel):
+    """Which side survives in every merged pair, per field.
+
+    Every series-merge request model forbids unknown fields: a misspelt policy
+    field would otherwise preview (and merge) under the defaults, and a
+    misspelt ``pairs`` would merge nothing, both answering 200.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+    content: SeriesFieldPolicy = Field(
+        default=SeriesFieldPolicy.COMBINE,
+        description="`combine` concatenates both journals' content",
+    )
+    timing: SeriesFieldPolicy = Field(
+        default=SeriesFieldPolicy.DESTINATION,
+        description="The date range with the event's clock times, zone and all-day flag",
+    )
+    location: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+    event_description: SeriesFieldPolicy = Field(default=SeriesFieldPolicy.DESTINATION)
+
+
+class JournalSeriesMergeAttributes(BaseModel):
+    """Attributes for previewing or performing a series merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_series_id: str = Field(
+        ..., description="The series merged into (and deleted by) this one"
+    )
+    policies: SeriesMergePoliciesSchema = Field(
+        default_factory=SeriesMergePoliciesSchema,
+        description="Series-wide field policies applied to every same-day pair",
+    )
+
+
+SERIES_MERGE_RESOURCE_TYPE: Literal["journal-series-merge"] = "journal-series-merge"
+
+
+class JournalSeriesMergeData(BaseModel):
+    """Data for previewing or performing a series merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # JSON:API: a request naming another resource type is refused, not
+    # silently processed as a merge.
+    type: Literal["journal-series-merge"] = Field(
+        default=SERIES_MERGE_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: JournalSeriesMergeAttributes = Field(
+        ..., description="Series merge attributes"
+    )
+
+
+class JournalSeriesMergePreviewRequest(JsonApiCreateRequest[JournalSeriesMergeData]):
+    """Request model for previewing a series merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SeriesMergePairSchema(BaseModel):
+    """A same-day pair the user confirmed from a preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_journal_id: int
+    destination_journal_id: int
+
+
+class JournalSeriesMergeExecuteAttributes(JournalSeriesMergeAttributes):
+    """Attributes for performing a series merge."""
+
+    pairs: list[SeriesMergePairSchema] = Field(
+        default_factory=list,
+        description=(
+            "Candidate pairs from the preview to merge; other candidates are "
+            "left unmerged. Refused with 409 if any is no longer a candidate."
+        ),
+    )
+
+
+class JournalSeriesMergeExecuteData(BaseModel):
+    """Data for performing a series merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["journal-series-merge"] = Field(
+        default=SERIES_MERGE_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: JournalSeriesMergeExecuteAttributes = Field(
+        ..., description="Series merge attributes"
+    )
+
+
+class JournalSeriesMergeRequest(JsonApiCreateRequest[JournalSeriesMergeExecuteData]):
+    """Request model for performing a series merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+LocalDate = date
+
+
+class SeriesMergeDay(BaseModel):
+    """The outcome for one local day of a series merge."""
+
+    # ``LocalDate``, not ``date``: annotations are evaluated lazily, and in the
+    # class body ``date`` would name this very field.
+    date: LocalDate = Field(..., description="The local day, in the user's timezone")
+    kind: SeriesDayOutcomeKind = Field(..., description="What happens on this day")
+    source_journal_ids: list[int] = Field(..., description="Source series members")
+    destination_journal_ids: list[int] = Field(
+        ..., description="Destination series members"
+    )
+    differing_fields: list[SeriesMergeField] = Field(
+        ..., description="Fields both journals hold different values for"
+    )
+    skip_reason: SeriesMergeField | None = Field(
+        default=None, description="The skip-if-different field that stopped the pair"
+    )
+
+
+class SeriesMergeJournalSummary(BaseModel):
+    """A journal named by a series merge day."""
+
+    id: int
+    title: str
+    event_date_range_start: datetime
+    location: str | None = None
+
+
+class JournalSeriesMergePlanAttributes(BaseModel):
+    """A planned or performed series merge."""
+
+    source_series_id: str
+    destination_series_id: str
+    days: list[SeriesMergeDay]
+    journals: dict[str, SeriesMergeJournalSummary] = Field(
+        ..., description="Every journal a day names, keyed by id"
+    )
+
+
+class JournalSeriesMergePlanResource(BaseModel):
+    """Series merge plan resource following JSON API specification."""
+
+    type: str = Field(
+        default="journal-series-merge-plan", description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="The destination series ID")
+    attributes: JournalSeriesMergePlanAttributes
+
+
+class JournalSeriesMergePlanResponse(JsonApiResponse[JournalSeriesMergePlanResource]):
+    """Response model for a series merge preview or result."""
+
+    pass
 
 
 class JournalSeriesRelationshipData(BaseModel):

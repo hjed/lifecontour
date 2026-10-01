@@ -1,11 +1,13 @@
 import { test, expect } from './fixtures';
-import { APIRequestContext } from '@playwright/test';
+import { APIRequestContext, Page } from '@playwright/test';
 import { FRONTEND_TEST_URL } from './utils/frontend-test-config';
 
 // Helper to create a journal via API
 async function createJournalViaApi(
   request: APIRequestContext,
-  title: string
+  title: string,
+  start: string = new Date().toISOString(),
+  parentId?: string
 ): Promise<string> {
   const response = await request.post(`${FRONTEND_TEST_URL}/api/journals`, {
     data: {
@@ -14,10 +16,8 @@ async function createJournalViaApi(
         attributes: {
           title,
           content: '',
-          event_date_range: {
-            start: new Date().toISOString(),
-            end: new Date().toISOString(),
-          },
+          event_date_range: { start, end: start },
+          ...(parentId ? { parent_id: parentId } : {}),
         },
       },
     },
@@ -61,6 +61,68 @@ async function addToSeriesViaApi(
     }
   );
   expect(response.ok()).toBeTruthy();
+}
+
+interface SameDayMergeSeed {
+  sourceId: string;
+  destinationId: string;
+  sourceName: string;
+  sourceJournalId: string;
+  destinationJournalId: string;
+  sourceTitle: string;
+}
+
+/**
+ * Two series with one journal each on the same UTC day (the e2e user has no
+ * timezone, so the backend pairs by UTC day). With `destinationIsChild` the
+ * destination journal is the source journal's child, and a journal cannot
+ * absorb its own ancestor, so the pair's merge is refused.
+ */
+async function seedSameDayMerge(
+  request: APIRequestContext,
+  label: string,
+  sameDay: string,
+  destinationIsChild = false
+): Promise<SameDayMergeSeed> {
+  const suffix = Date.now();
+  const sourceName = `E2E Series ${label} Source - ${suffix}`;
+  const sourceTitle = `E2E Series ${label} Old - ${suffix}`;
+  const sourceJournalId = await createJournalViaApi(
+    request,
+    sourceTitle,
+    sameDay
+  );
+  const destinationJournalId = await createJournalViaApi(
+    request,
+    `E2E Series ${label} New - ${suffix}`,
+    sameDay,
+    destinationIsChild ? sourceJournalId : undefined
+  );
+  const sourceId = await createSeriesViaApi(request, sourceName);
+  const destinationId = await createSeriesViaApi(
+    request,
+    `E2E Series ${label} Destination - ${suffix}`
+  );
+  await addToSeriesViaApi(request, sourceJournalId, sourceId);
+  await addToSeriesViaApi(request, destinationJournalId, destinationId);
+  return {
+    sourceId,
+    destinationId,
+    sourceName,
+    sourceJournalId,
+    destinationJournalId,
+    sourceTitle,
+  };
+}
+
+/** Open the merge dialog on the destination's page with the source chosen. */
+async function openMergeDialog(page: Page, seed: SameDayMergeSeed) {
+  await page.goto(`/journals/series/${seed.destinationId}`);
+  await page.getByTestId('merge-series-button').click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByTestId('merge-series-source').click();
+  await page.getByRole('option', { name: seed.sourceName }).click();
+  return dialog;
 }
 
 test.describe('Journal Series', () => {
@@ -188,5 +250,81 @@ test.describe('Journal Series', () => {
     await expect(
       page.getByText('No journals in this series yet.')
     ).toBeVisible();
+  });
+
+  test('merges another series into this one, merging same-day journals', async ({
+    authenticatedPage,
+    request,
+  }) => {
+    const page = authenticatedPage;
+    const seed = await seedSameDayMerge(
+      request,
+      'Merge',
+      '2025-03-03T09:00:00.000Z'
+    );
+
+    const dialog = await openMergeDialog(page, seed);
+    await dialog
+      .getByRole('radiogroup', { name: 'Title' })
+      .getByRole('radio', { name: 'Use merged-in series' })
+      .click();
+
+    const day = dialog.getByTestId('series-merge-day-2025-03-03');
+    await expect(day).toContainText('Will merge; title differs');
+    await expect(
+      day.getByRole('checkbox', { name: 'Merge 3 Mar 2025' })
+    ).toBeChecked();
+
+    const mergeResponsePromise = page.waitForResponse(
+      response =>
+        response
+          .url()
+          .endsWith(`/api/journals/series/${seed.destinationId}/merge`) &&
+        response.request().method() === 'POST'
+    );
+    await dialog.getByTestId('confirm-merge-series').click();
+    expect((await mergeResponsePromise).status()).toBe(200);
+
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.getByTestId(`series-member-${seed.destinationJournalId}`)
+    ).toContainText(seed.sourceTitle);
+    await expect(
+      page.getByTestId(`series-member-${seed.sourceJournalId}`)
+    ).toHaveCount(0);
+
+    await page.goto(`/journals/series/${seed.sourceId}`);
+    await expect(page.getByText(/Failed to load series/)).toBeVisible();
+  });
+
+  test('shows which same-day journals could not be merged', async ({
+    authenticatedPage,
+    request,
+  }) => {
+    const page = authenticatedPage;
+    const seed = await seedSameDayMerge(
+      request,
+      'Merge Fail',
+      '2025-03-10T09:00:00.000Z',
+      true
+    );
+
+    const dialog = await openMergeDialog(page, seed);
+    const day = dialog.getByTestId('series-merge-day-2025-03-10');
+    await expect(day).toContainText('Will merge');
+
+    await dialog.getByTestId('confirm-merge-series').click();
+
+    await expect(day).toContainText('could not be merged');
+    await expect(dialog.getByRole('status')).toContainText(
+      'some same-day journals could not be merged'
+    );
+    await dialog.getByTestId('close-merge-series-result').click();
+    await expect(dialog).toBeHidden();
+    for (const journalId of [seed.sourceJournalId, seed.destinationJournalId]) {
+      await expect(
+        page.getByTestId(`series-member-${journalId}`)
+      ).toBeVisible();
+    }
   });
 });

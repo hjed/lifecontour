@@ -9,6 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.contact_seeding import seed_contact
+from tests.integration.series_merge_seeding import (
+    add_to_series,
+    member_ids,
+    seed_member,
+    seed_series,
+)
 from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_journal,
@@ -1524,3 +1530,36 @@ async def test_merge_endpoint_honours_an_explicit_null_timezone_override(
     ).fetchone()
     assert row is not None
     assert row.timezone is None
+
+
+@pytest.mark.asyncio
+async def test_merge_carries_the_sources_series_memberships_to_the_target(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+) -> None:
+    """A merged-away journal's series keep the journal that absorbed it.
+
+    Series memberships cascade when a journal is deleted, so without moving
+    them a merge silently dropped the survivor out of every series only the
+    source belonged to. A series both already share keeps one membership.
+    """
+    only_source = await seed_series(async_connection, "Physio")
+    shared = await seed_series(async_connection, "Health")
+    target_id = await seed_member(
+        async_connection,
+        shared,
+        title="Survivor",
+        start=datetime(2026, 8, 3, tzinfo=UTC),
+    )
+    source_id = await seed_member(
+        async_connection,
+        only_source,
+        title="Absorbed",
+        start=datetime(2026, 8, 3, tzinfo=UTC),
+    )
+    await add_to_series(async_connection, shared, source_id)
+
+    await _merge(authenticated_client, target_id, source_id)
+
+    assert await member_ids(async_connection, only_source) == {target_id}
+    assert await member_ids(async_connection, shared) == {target_id}

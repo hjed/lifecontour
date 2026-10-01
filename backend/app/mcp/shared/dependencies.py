@@ -39,6 +39,9 @@ from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
 from app.core.journal.services.journal_search_service import JournalSearchService
+from app.core.journal.services.journal_series_merge_service import (
+    JournalSeriesMergeService,
+)
 from app.core.journal.services.journal_series_service import JournalSeriesService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
@@ -302,6 +305,14 @@ async def get_journal_write_service() -> JournalWriteService:
 async def get_journal_series_service() -> JournalSeriesService:
     """Resolve the journal series service for the current MCP request."""
     return cast(JournalSeriesService, await _resolve_dependency(JournalSeriesService))
+
+
+async def get_journal_series_merge_service() -> JournalSeriesMergeService:
+    """Resolve the journal series merge service for the current MCP request."""
+    return cast(
+        JournalSeriesMergeService,
+        await _resolve_dependency(JournalSeriesMergeService),
+    )
 
 
 async def get_activity_template_service() -> ActivityTemplateService:

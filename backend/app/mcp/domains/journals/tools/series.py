@@ -9,15 +9,22 @@ members, and inspect them.
 import json
 from typing import Any
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalValidationError,
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.models.journal_series import JournalSeries
+from app.core.journal.models.series_merge import SeriesMergePair, SeriesMergePolicies
+from app.core.journal.services.journal_series_merge_service import (
+    JournalSeriesMergeService,
+    SeriesMergeReport,
+)
 from app.core.journal.services.journal_series_service import (
     JournalSeriesService,
     parse_series_id,
@@ -32,6 +39,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_series_merge_service,
     get_journal_series_service,
     mcp_depends,
 )
@@ -47,6 +55,47 @@ def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
         "auto_created": series.auto_created,
         "created_at": series.created_at.isoformat() if series.created_at else None,
         "updated_at": series.updated_at.isoformat() if series.updated_at else None,
+    }
+
+
+class SeriesMergePairArgument(BaseModel):
+    """A same-day pair from ``preview_series_merge`` to merge."""
+
+    # A misspelt key would otherwise drop the pair's id and fail as "stale".
+    model_config = ConfigDict(extra="forbid")
+
+    source_journal_id: int
+    destination_journal_id: int
+
+
+def _merge_report_to_dict(report: SeriesMergeReport) -> dict[str, Any]:
+    return {
+        "source_series_id": str(report.source_series.id),
+        "destination_series_id": str(report.destination_series.id),
+        "days": [
+            {
+                "date": day.date.isoformat(),
+                "kind": day.kind.value,
+                "source_journal_ids": list(day.source_journal_ids),
+                "destination_journal_ids": list(day.destination_journal_ids),
+                "differing_fields": [f.value for f in day.differing_fields],
+                "skip_reason": day.skip_reason.value if day.skip_reason else None,
+            }
+            for day in report.days
+        ],
+        "journals": {
+            str(journal_id): {
+                "id": journal_id,
+                "title": member.journal.title,
+                "event_date_range_start": (
+                    member.journal.event_date_range.start.isoformat()
+                ),
+                "location": (
+                    member.calendar_info.location if member.calendar_info else None
+                ),
+            }
+            for journal_id, member in report.members.items()
+        },
     }
 
 
@@ -240,6 +289,96 @@ async def remove_journal_from_series(
     )
 
 
+@tool(annotations=READ_ONLY)
+@mcp_unified_error_handler("preview_series_merge", "journal")
+async def preview_series_merge(
+    destination_series_id: str,
+    source_series_id: str,
+    policies: dict[str, str] | None = None,
+    merge_service: JournalSeriesMergeService = mcp_depends(
+        get_journal_series_merge_service
+    ),
+) -> str:
+    """
+    Preview merging the source series into the destination series. Writes nothing.
+
+    A merge moves every source member into the destination and deletes the
+    source series. A source and a destination journal whose events start on the
+    same local day (the user's timezone) can also be merged into one journal,
+    the destination's surviving.
+
+    ``policies`` maps a field to what survives in every merged pair. Fields:
+    "title", "content", "timing" (dates plus the event's clock times and zone),
+    "location", "event_description". Policies: "destination" (default),
+    "source", "skip_if_different" (don't merge a pair whose values differ), and
+    "combine" (content only — its default — concatenating both). When only one
+    journal of a pair is an event, its timing is kept whole whatever the timing
+    policy: the other has no clock times to contribute.
+
+    Returns:
+        JSON string with "days" (date, kind, source_journal_ids,
+        destination_journal_ids, differing_fields, skip_reason) and "journals"
+        ({id: {title, event_date_range_start, location}}). A day's kind is
+        "candidate" (will merge), "skipped" (a skip_if_different field differs),
+        "ambiguous" (more than one journal on a side; not merged), "unpaired"
+        or "already_shared" (the journal is in both series).
+    """
+    user_id = await get_current_user_id()
+    report = await merge_service.preview_merge(
+        destination_series_id=parse_series_id(destination_series_id),
+        source_series_id=parse_series_id(source_series_id),
+        user_id=user_id,
+        policies=SeriesMergePolicies.from_mapping(policies),
+    )
+    return json.dumps(_merge_report_to_dict(report), indent=2)
+
+
+@tool(annotations=DESTRUCTIVE_WRITE)
+@mcp_unified_error_handler("merge_series", "journal")
+async def merge_series(
+    destination_series_id: str,
+    source_series_id: str,
+    pairs: list[SeriesMergePairArgument] | None = None,
+    policies: dict[str, str] | None = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    merge_service: JournalSeriesMergeService = mcp_depends(
+        get_journal_series_merge_service
+    ),
+) -> str:
+    """
+    Merge the source series into the destination series, deleting the source.
+
+    Call preview_series_merge first. Every source member joins the destination
+    series. Each pair in ``pairs`` — "candidate" days from the preview, as
+    {source_journal_id, destination_journal_id} — is merged into the
+    destination journal using ``policies`` (same meaning as in the preview);
+    candidates left out are not merged. If any pair is no longer a candidate
+    (the data changed since the preview) nothing is written and an error is
+    returned: preview again. Later calendar syncs of a recurring source series
+    add their instances to the destination.
+
+    Returns:
+        JSON string shaped like preview_series_merge's, where each merged day's
+        kind is "merged", a confirmed pair the journal merge refused is
+        "failed", and an unconfirmed candidate is "excluded".
+    """
+    user_id = await get_current_user_id()
+    report = await merge_service.merge_series(
+        destination_series_id=parse_series_id(destination_series_id),
+        source_series_id=parse_series_id(source_series_id),
+        user_id=user_id,
+        policies=SeriesMergePolicies.from_mapping(policies),
+        pairs=[
+            SeriesMergePair(p.source_journal_id, p.destination_journal_id)
+            for p in pairs or []
+        ],
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return json.dumps(_merge_report_to_dict(report), indent=2)
+
+
 def register_journal_series_tools(mcp: FastMCP[None]) -> None:
     """Register journal series MCP tools with the FastMCP server."""
     mcp.add_tool(create_series)
@@ -249,3 +388,5 @@ def register_journal_series_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(delete_series)
     mcp.add_tool(add_journal_to_series)
     mcp.add_tool(remove_journal_from_series)
+    mcp.add_tool(preview_series_merge)
+    mcp.add_tool(merge_series)

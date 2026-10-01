@@ -58,6 +58,7 @@ DESTRUCTIVE_TOOLS = frozenset(
         # Journal series
         "delete_series",
         "remove_journal_from_series",
+        "merge_series",
         # Tasks
         "delete_task",
         "unlink_task_from_contact",

@@ -1,7 +1,7 @@
 """Integration tests for MCP journal series tools."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import pytest
@@ -15,6 +15,14 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    post_mcp_tool,
+)
+from tests.integration.series_merge_seeding import (
+    journal_exists,
+    member_ids,
+    seed_member,
+    seed_series,
+    series_exists,
 )
 
 USER_ID = "test-user-123"
@@ -224,3 +232,163 @@ class TestJournalSeriesToolsIntegration:
         db_series = await repo.find_by_id(UUID(series_id), USER_ID)
         assert db_series is not None
         assert db_series.name == "Keep this name"
+
+
+class _SameDayPair(NamedTuple):
+    source: UUID
+    destination: UUID
+    source_journal: int
+    destination_journal: int
+
+
+async def _seed_same_day_pair(connection: AsyncConnection) -> _SameDayPair:
+    """Two series with one journal each on 3 August, titled differently."""
+    source = await seed_series(connection, "Old standup")
+    destination = await seed_series(connection, "Standup")
+    start = datetime(2026, 8, 3, 9, tzinfo=UTC)
+    source_journal = await seed_member(connection, source, title="Old", start=start)
+    destination_journal = await seed_member(
+        connection, destination, title="New", start=start
+    )
+    return _SameDayPair(source, destination, source_journal, destination_journal)
+
+
+def _pairs_arg(source_journal: int, destination_journal: int) -> list[dict[str, int]]:
+    return [
+        {
+            "source_journal_id": source_journal,
+            "destination_journal_id": destination_journal,
+        }
+    ]
+
+
+async def _call_series_tool(
+    client: Any,
+    name: str,
+    source: UUID,
+    destination: UUID,
+    **arguments: object,
+) -> dict[str, Any]:
+    return await _call_tool(
+        client,
+        name,
+        {
+            "destination_series_id": str(destination),
+            "source_series_id": str(source),
+            **arguments,
+        },
+    )
+
+
+class TestSeriesMergeToolsIntegration:
+    """The series-merge MCP tools behave like their REST counterparts."""
+
+    @pytest.mark.asyncio
+    async def test_preview_series_merge_reports_same_day_pairs(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        pair = await _seed_same_day_pair(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_series_tool(
+                client,
+                "preview_series_merge",
+                pair.source,
+                pair.destination,
+                policies={"title": "skip_if_different"},
+            )
+
+        assert "error" not in payload
+        assert payload["days"] == [
+            {
+                "date": "2026-08-03",
+                "kind": "skipped",
+                "source_journal_ids": [pair.source_journal],
+                "destination_journal_ids": [pair.destination_journal],
+                "differing_fields": ["title"],
+                "skip_reason": "title",
+            }
+        ]
+        assert await series_exists(clean_database, pair.source)
+
+    @pytest.mark.asyncio
+    async def test_preview_series_merge_rejects_the_same_series(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        series = await seed_series(clean_database, "Standup")
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_series_tool(
+                client, "preview_series_merge", series, series
+            )
+
+        assert "error" in payload
+
+    @pytest.mark.asyncio
+    async def test_merge_series_merges_confirmed_pairs_and_deletes_the_source(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        pair = await _seed_same_day_pair(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _call_series_tool(
+                client,
+                "merge_series",
+                pair.source,
+                pair.destination,
+                pairs=_pairs_arg(pair.source_journal, pair.destination_journal),
+                policies={"title": "source"},
+            )
+
+        assert "error" not in payload
+        assert [day["kind"] for day in payload["days"]] == ["merged"]
+        assert not await series_exists(clean_database, pair.source)
+        assert not await journal_exists(clean_database, pair.source_journal)
+        assert await member_ids(clean_database, pair.destination) == {
+            pair.destination_journal
+        }
+
+    @pytest.mark.asyncio
+    async def test_merge_series_refuses_a_stale_pair(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        pair = await _seed_same_day_pair(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            # A pair that was never a candidate: a journal paired with itself.
+            payload = await _call_series_tool(
+                client,
+                "merge_series",
+                pair.source,
+                pair.destination,
+                pairs=_pairs_arg(pair.source_journal, pair.source_journal),
+            )
+
+        assert "error" in payload
+        assert await series_exists(clean_database, pair.source)
+        assert await journal_exists(clean_database, pair.source_journal)
+
+    @pytest.mark.asyncio
+    async def test_merge_series_refuses_an_unknown_pair_field(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        pair = await _seed_same_day_pair(clean_database)
+        pairs = _pairs_arg(pair.source_journal, pair.destination_journal)
+        pairs[0]["target_journal_id"] = pair.destination_journal
+
+        async with authenticated_lifespan_client() as client:
+            response = await post_mcp_tool(
+                client,
+                "merge_series",
+                {
+                    "destination_series_id": str(pair.destination),
+                    "source_series_id": str(pair.source),
+                    "pairs": pairs,
+                },
+            )
+
+        # Asserted on the rejection reason: without it the misspelt key is
+        # dropped, and the pair would fail later for the wrong reason.
+        assert '"isError":true' in response.text
+        assert "extra_forbidden" in response.text
+        assert await series_exists(clean_database, pair.source)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -1367,7 +1368,40 @@ class JournalSeriesRepository(ABC):
 
         Keyed by (calendar_id, recurring_event_id); ``name`` is only used when
         the series doesn't exist yet — an existing series is never renamed.
+        A recurrence whose series was merged into another resolves, through
+        its alias, to the series that absorbed it.
         """
+        pass
+
+    @abstractmethod
+    async def lock_for_merge(
+        self, series_ids: Sequence[UUID], user_id: str
+    ) -> set[UUID]:
+        """Lock the user's series rows a merge reads and writes, until commit.
+
+        Taken before a series merge reads either series, so two merges that
+        share a series run one after the other and the second sees what the
+        first committed. Returns the ids actually held (the user's own).
+        """
+        pass
+
+    @abstractmethod
+    async def alias_recurrences(
+        self, absorbed: JournalSeries, into_series_id: UUID
+    ) -> None:
+        """Point ``absorbed``'s recurrences at ``into_series_id`` before a merge.
+
+        Covers ``absorbed``'s own recurrence key (if it was auto-created) and
+        every alias it already holds from earlier merges, so later syncs of any
+        of them resolve to the absorbing series. Every one of those keys is
+        held until the transaction ends, so call it before moving
+        ``absorbed``'s members and deleting it.
+        """
+        pass
+
+    @abstractmethod
+    async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
+        """Move every member of one series into another (shared members dedupe)."""
         pass
 
     @abstractmethod
