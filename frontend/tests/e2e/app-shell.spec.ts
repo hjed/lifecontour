@@ -3,10 +3,16 @@
  */
 
 import { test, expect } from './fixtures';
-import { SOURCE_CODE_URL, UI_TEXT } from '../../src/lib/constants';
+import {
+  SOURCE_CODE_URL,
+  THIRD_PARTY_NOTICES_PATH,
+  UI_TEXT,
+} from '../../src/lib/constants';
 
 test.describe('User menu', () => {
-  test('offers the source code', async ({ authenticatedPage }) => {
+  test('offers the source code and third-party notices', async ({
+    authenticatedPage,
+  }) => {
     const page = authenticatedPage;
     await page.goto('/');
 
@@ -21,5 +27,12 @@ test.describe('User menu', () => {
     await expect(sourceLink).toHaveAttribute('href', SOURCE_CODE_URL);
     await expect(sourceLink).toHaveAttribute('target', '_blank');
     await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+    const noticesLink = menu.getByRole('menuitem', {
+      name: UI_TEXT.THIRD_PARTY_NOTICES,
+    });
+    await expect(noticesLink).toHaveAttribute('href', THIRD_PARTY_NOTICES_PATH);
+    await expect(noticesLink).toHaveAttribute('target', '_blank');
+    await expect(noticesLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 });

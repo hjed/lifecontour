@@ -66,13 +66,23 @@ depends on are therefore asserted in
 - Use semantic HTML elements and ARIA roles
 - Test with screen readers and keyboard-only navigation
 
-### Project Links (Source Code)
+### Source Code and Third-Party Notices
 
-- The AGPL §13 source offer is a "Source code" link to `SOURCE_CODE_URL`, listed in
-  `PROJECT_LINKS` in `src/lib/constants.ts`.
-- Project links appear on the public login page, so signed-out visitors can reach them, and in
-  the signed-in user menu (`components/auth/UserMenu.tsx`). They open in a new tab with
+- The AGPL §13 source offer is a "Source code" link to `SOURCE_CODE_URL`. A "Third-party notices"
+  link sits beside it, pointing to `THIRD_PARTY_NOTICES_PATH`. Both come from `PROJECT_LINKS`
+  in `src/lib/constants.ts`.
+- They appear on the public login page, so signed-out visitors can reach them, and in the
+  signed-in user menu (`components/auth/UserMenu.tsx`). Both open in a new tab with
   `rel="noopener noreferrer"` and a visually hidden "(opens in a new tab)".
+- `public/third-party-notices.txt` is generated, not committed:
+  - `scripts/third-party-notices.ts` builds it from `pnpm licenses list --prod --json` and each
+    package's own licence file. Minified bundles drop licence headers, so this is where those
+    notices survive.
+  - It runs from the `predev` and `prebuild` scripts, which cover `pnpm dev`, CI's
+    `pnpm build` and the Docker image build. Each entry reproduces the package's licence file
+    and, where one ships, its `NOTICE`.
+  - `prebuild` fails the build if it cannot generate the file. `predev` passes `--best-effort`
+    and only warns, so a dev server whose pnpm store it cannot read still starts.
 
 ### Loading State Guidelines
 

@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { Code, LogOut, User, Settings } from 'lucide-react';
+import { Code, LogOut, Scale, User, Settings } from 'lucide-react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import {
@@ -21,10 +21,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { PROJECT_LINKS, SOURCE_CODE_URL, UI_TEXT } from '@/lib/constants';
+import {
+  PROJECT_LINKS,
+  SOURCE_CODE_URL,
+  THIRD_PARTY_NOTICES_PATH,
+  UI_TEXT,
+} from '@/lib/constants';
 
 const PROJECT_LINK_ICONS = {
   [SOURCE_CODE_URL]: Code,
+  [THIRD_PARTY_NOTICES_PATH]: Scale,
 } as const;
 
 export function UserMenu() {
