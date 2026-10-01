@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
+from core_shared.product import PRODUCT_NAME, PRODUCT_URL
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -174,7 +175,7 @@ class Settings(BaseSettings):
         "subdomains) for server-side batch fetching.",
     )
     logbook_tile_user_agent: str = Field(
-        default="PersonalManagementSystem/1.0 (outdoor-logbook-pdf)",
+        default=f"{PRODUCT_NAME} (+{PRODUCT_URL}; outdoor-logbook-pdf)",
         description="User-Agent sent with every basemap tile request. OSM's "
         "tile-usage policy requires a valid, identifying User-Agent.",
     )

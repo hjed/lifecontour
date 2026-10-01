@@ -1,6 +1,6 @@
-# Personal Management System - Backend
+# Lifecontour - Backend
 
-Python FastAPI backend for the Personal CRM & Journal System with PostgreSQL database, MCP protocol support, and integrations with Google Calendar, Google Contacts, and Immich.
+Python FastAPI backend for Lifecontour with PostgreSQL database, MCP protocol support, and integrations with Google Calendar, Google Contacts, and Immich.
 
 ## Quick Start
 

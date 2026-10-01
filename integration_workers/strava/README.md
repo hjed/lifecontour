@@ -1,7 +1,7 @@
 # Strava Integration Worker
 
 ARQ-based worker that processes Strava webhook events and activity sync tasks for
-the Personal Management System, and launches a Redis Streams consumer for domain
+Lifecontour, and launches a Redis Streams consumer for domain
 event fan-out.
 
 ## Configuration

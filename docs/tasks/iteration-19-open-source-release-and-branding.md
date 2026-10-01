@@ -658,7 +658,14 @@ docs), it says **Lifecontour**, read from one constant per stack.
   - `rtk proxy git grep -n -e "Personal Management System" -e "Personal CRM" -e "\bPMS\b" -- frontend/src frontend/tests`
     returns only the two absence tests.
 
-**Phase 2 — Backend, MCP, worker and outbound identity.** PR ~300 lines.
+**Phase 2 — Backend, MCP, worker and outbound identity.** PR ~300 lines. ✅ DONE
+
+- **Progress:** `PRODUCT_NAME`, `PRODUCT_TAGLINE` and `PRODUCT_URL` live in
+  `core_shared/core_shared/product.py` as `Final[str]`. The FastAPI title and description, the
+  startup and shutdown logs, the MCP server name and instructions, the Snipe-IT OpenAPI field
+  text, the tile User-Agent default and the Strava GPX `creator` all read them. The backend,
+  `core_shared` and worker docstrings and READMEs no longer name the old product. The worker
+  `pyproject.toml` descriptions stay for Phase 3.
 
 - **Constants:**
   - Add `PRODUCT_NAME = "Lifecontour"`, `PRODUCT_TAGLINE` and

@@ -1,5 +1,5 @@
 """
-Shared Prometheus metrics for Personal Management System.
+Shared Prometheus metrics for Lifecontour.
 
 Provides golden signal metrics (latency, traffic, errors, saturation) for
 integration workers and backend services.

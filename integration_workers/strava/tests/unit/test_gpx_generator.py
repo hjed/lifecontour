@@ -10,6 +10,8 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from core_shared.product import PRODUCT_NAME
+
 from gpx_generator import generate_gpx
 from strava_models import StravaActivityStream, StravaStreamSet
 
@@ -57,6 +59,22 @@ class TestGpxGeneration:
         assert ele.text == "50.0"
         time_elem = trkpts[0].find(f"{{{GPX_NS}}}time")
         assert time_elem is not None
+
+    def test_generate_gpx_creator_is_product_name(self) -> None:
+        """Downloaded GPX files name the product that generated them."""
+        streams = StravaStreamSet(
+            latlng=_make_stream("latlng", [[-33.8688, 151.2093]]),
+            altitude=None,
+            time=None,
+        )
+        result = generate_gpx(
+            streams=streams,
+            activity_name="Morning Hike",
+            start_date="2026-05-01T06:30:00Z",
+        )
+
+        assert result is not None
+        assert ET.fromstring(result).attrib["creator"] == PRODUCT_NAME
 
     def test_generate_gpx_without_altitude(self) -> None:
         """Stream set without altitude produces trkpt without <ele> elements."""

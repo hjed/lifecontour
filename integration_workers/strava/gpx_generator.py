@@ -13,6 +13,8 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 
+from core_shared.product import PRODUCT_NAME
+
 from strava_models import StravaStreamSet
 
 _GPX_NS = "http://www.topografix.com/GPX/1/1"
@@ -57,7 +59,7 @@ def generate_gpx(
         f"{{{_GPX_NS}}}gpx",
         {
             "version": "1.1",
-            "creator": "PersonalManagementSystem",
+            "creator": PRODUCT_NAME,
             f"{{{_XSI_NS}}}schemaLocation": _GPX_SCHEMA,
         },
     )

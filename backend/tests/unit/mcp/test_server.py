@@ -6,6 +6,8 @@ Tests the FastMCP server configuration and initialization.
 
 from unittest.mock import patch
 
+from core_shared.product import PRODUCT_NAME
+
 from app.infrastructure.di.container import create_container
 from app.mcp.server import create_mcp_app, create_mcp_server
 
@@ -20,6 +22,14 @@ class TestMCPServer:
         # Should create FastMCP instance
         assert server is not None
         assert hasattr(server, "tool")  # Should have tool decorator
+
+    def test_server_is_named_after_the_product(self) -> None:
+        """MCP clients display the server name, so it is the product name."""
+        server = create_mcp_server()
+
+        assert server.name == PRODUCT_NAME
+        assert server.instructions is not None
+        assert PRODUCT_NAME in server.instructions
 
     def test_create_mcp_server_with_auth_none(self):
         """Test MCP server creation with auth=None (dev mode)."""

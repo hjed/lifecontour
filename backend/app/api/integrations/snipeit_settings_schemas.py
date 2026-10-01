@@ -5,6 +5,7 @@ These schemas define the request/response shapes for the
 ``GET`` and ``PUT /api/integrations/snipeit/settings`` endpoints.
 """
 
+from core_shared.product import PRODUCT_NAME
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -17,7 +18,7 @@ class SnipeItSettingsRequest(BaseModel):
     )
     snipeit_user_id: str | None = Field(
         default=None,
-        description="Snipe-IT user ID to map this PMS user to",
+        description=f"Snipe-IT user ID to map this {PRODUCT_NAME} user to",
     )
 
 
@@ -30,7 +31,7 @@ class SnipeItSettingsAttributes(BaseModel):
     )
     snipeit_user_id: str | None = Field(
         default=None,
-        description="Snipe-IT user ID mapped to this PMS user",
+        description=f"Snipe-IT user ID mapped to this {PRODUCT_NAME} user",
     )
 
 

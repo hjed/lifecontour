@@ -1,5 +1,5 @@
 """
-Shared structured logging configuration for Personal Management System.
+Shared structured logging configuration for Lifecontour.
 
 Provides consistent, structured logging across all services (backend, workers)
 with support for trace/job/worker IDs and JSON output for production.

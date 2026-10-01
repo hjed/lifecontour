@@ -2,7 +2,7 @@
 Pydantic response models for the Immich REST API.
 
 These models represent the JSON responses from Immich's API endpoints.
-Only fields relevant to the Personal Management System integration are
+Only fields relevant to the Lifecontour integration are
 included; ``model_config`` is set to ignore extra fields so new Immich
 API additions don't break deserialization.
 

@@ -2,7 +2,7 @@
 MeiliSearch client configuration and connection management.
 
 Provides a configured MeiliSearch client with proper settings
-for the personal management system search functionality.
+for Lifecontour search functionality.
 """
 
 from functools import lru_cache
