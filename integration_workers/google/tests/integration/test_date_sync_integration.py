@@ -25,6 +25,10 @@ from worker import (
     push_local_contacts_to_google,
 )
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 
 @pytest.mark.asyncio
 class TestOutboundDateSync:
@@ -36,7 +40,7 @@ class TestOutboundDateSync:
         """_load_full_contact loads important dates from the database."""
         # Create a contact
         contact_id = await seed_contact(
-            db_session, first_name="DateSync", last_name="Test"
+            db_session, first_name="DateSync", last_name="Test", user_id=CONTACT_OWNER
         )
 
         # Add a birthday
@@ -118,7 +122,7 @@ class TestOutboundDateSync:
 
         # Create contact with birthday
         contact_id = await seed_contact(
-            db_session, first_name="Birthday", last_name="Push"
+            db_session, first_name="Birthday", last_name="Push", user_id=test_user
         )
 
         await db_session.execute(
@@ -202,7 +206,7 @@ class TestOutboundDateSync:
         """Outbound push excludes local-only date types from Google payload."""
         # Create contact with local-only date types
         contact_id = await seed_contact(
-            db_session, first_name="LocalOnly", last_name="Dates"
+            db_session, first_name="LocalOnly", last_name="Dates", user_id=CONTACT_OWNER
         )
 
         # Add work anniversary (local-only)

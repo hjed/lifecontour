@@ -16,6 +16,7 @@ This document outlines the database approach and initial schema for Lifecontour.
 ```sql
 CREATE TABLE contacts (
     id SERIAL PRIMARY KEY,
+    user_id VARCHAR(50), -- owner; set on insert, never changed (NOT NULL from 0123)
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100),
     middle_name VARCHAR(100),
@@ -23,7 +24,24 @@ CREATE TABLE contacts (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+CREATE INDEX idx_contacts_user_id ON contacts(user_id);
 ```
+
+**Ownership.** A contact belongs to exactly one user. `SqlContactRepository.save` writes
+`user_id` only when it inserts a contact, so no update re-owns one. Migration `0122` added the
+column and assigned every existing contact to the site's one user, derived by
+`app/migrations/owner_derivation.py` from every table that already records a `user_id` (the
+content tables `0106` repaired plus the credential, settings and integration-state tables):
+
+- exactly one real owner → that owner;
+- only synthetic owners (`dev-user`, `debug-client`: local dev, CI, e2e) → that owner, preferring
+  `dev-user` when both are present;
+- no contacts → nothing to assign;
+- contacts but no owner evidence, or more than one real owner → the migration refuses and names
+  what it found. The operator then names the owner: `alembic -x contacts_owner=<user_id> upgrade head`.
+
+Later revisions that give an unowned table an owner reuse the same helper, each with its own
+literal list of evidence tables.
 
 #### Contact Methods Table
 ```sql

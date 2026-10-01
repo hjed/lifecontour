@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker import process_contact_event
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 _REMOTE = "people/c-subentity-1"
 _NEW_ETAG = "etag-after-push"
 
@@ -104,7 +108,9 @@ async def synced_contact(db_session: AsyncSession) -> dict[str, int]:
         {"token": b"x", "refresh": b"y"},
     )
 
-    contact_id = await seed_contact(db_session, first_name="Sub", last_name="Entity")
+    contact_id = await seed_contact(
+        db_session, user_id=CONTACT_OWNER, first_name="Sub", last_name="Entity"
+    )
 
     await db_session.execute(
         text(

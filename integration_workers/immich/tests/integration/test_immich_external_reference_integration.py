@@ -20,6 +20,9 @@ from sqlalchemy import text
 from immich_models import ImmichPerson
 from immich_sync_service import ImmichSyncService
 
+# The user these tests act as, and so the owner of the contacts they seed.
+CONTACT_OWNER = "test-user-immich"
+
 
 @pytest.fixture
 def sync_service(async_connection: Any) -> ImmichSyncService:
@@ -81,7 +84,10 @@ class TestCreateVsUpdateReadsSyncMetadata:
         name-matching and creating a duplicate.
         """
         contact_id = await seed_contact(
-            async_connection, first_name="Synced", last_name="Person"
+            async_connection,
+            first_name="Synced",
+            last_name="Person",
+            user_id=CONTACT_OWNER,
         )
         person_id = "sync-meta-existing-1"
 
@@ -145,7 +151,10 @@ class TestAutoLinkDualWrite:
     ) -> None:
         """A single name match writes the canonical sync_metadata link."""
         contact_id = await seed_contact(
-            async_connection, first_name="Autolink", last_name="Onlywrite"
+            async_connection,
+            first_name="Autolink",
+            last_name="Onlywrite",
+            user_id=CONTACT_OWNER,
         )
         person_id = "auto-link-person-1"
 

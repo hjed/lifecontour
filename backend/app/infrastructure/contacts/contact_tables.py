@@ -28,6 +28,8 @@ contacts_table = Table(
     "contacts",
     metadata,
     Column("id", Integer, primary_key=True),
+    # The owner. Nullable until every writer stamps one (migration 0123).
+    Column("user_id", String(50), nullable=True),
     Column("first_name", String(100), nullable=False),
     Column("last_name", String(100), nullable=True),
     Column("middle_name", String(100), nullable=True),
@@ -48,6 +50,8 @@ contacts_table = Table(
         nullable=False,
     ),
 )
+
+Index("idx_contacts_user_id", contacts_table.c.user_id)
 
 # Contact methods table (email, phone, etc.)
 contact_methods_table = Table(

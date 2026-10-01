@@ -20,11 +20,7 @@ Immich -> Google -> Immich loop before ``external_references`` is dropped:
 Runs against an isolated throwaway database so the shared session DB is untouched.
 """
 
-import os
-import subprocess
-import sys
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -32,29 +28,7 @@ from sqlalchemy import Row, text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-_BACKEND_DIR = Path(__file__).resolve().parents[3]
-
-
-def _run_alembic_x(
-    database_url: str, command: str, target: str, x_args: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    """Run ``alembic [-x k=v ...] <command> <target>`` and return the result.
-
-    Unlike the shared ``run_alembic`` fixture this exposes ``-x`` arguments (for
-    the dry-run / threshold-guard paths) and returns the process so the caller can
-    assert on success *or* failure.
-    """
-    cmd = [sys.executable, "-m", "alembic"]
-    for key, value in (x_args or {}).items():
-        cmd += ["-x", f"{key}={value}"]
-    cmd += [command, target]
-    return subprocess.run(
-        cmd,
-        cwd=str(_BACKEND_DIR),
-        capture_output=True,
-        text=True,
-        env={**os.environ, "ENVIRONMENT": "test", "DATABASE_URL": database_url},
-    )
+from tests.integration.migration_helpers import RunAlembic
 
 
 async def _insert_contact(conn: AsyncConnection, first: str, last: str) -> int:
@@ -237,7 +211,7 @@ class TestDedupeBugCreatedContactsMigration:
     async def test_merges_bug_pair_and_is_idempotent(
         self,
         throwaway_database: URL,
-        run_alembic: Callable[[str, str, str], None],
+        run_alembic: RunAlembic,
     ) -> None:
         url = throwaway_database.render_as_string(hide_password=False)
 
@@ -365,15 +339,14 @@ class TestDedupeBugCreatedContactsMigration:
     async def test_dry_run_makes_no_changes(
         self,
         throwaway_database: URL,
-        run_alembic: Callable[[str, str, str], None],
+        run_alembic: RunAlembic,
     ) -> None:
         url = throwaway_database.render_as_string(hide_password=False)
 
         run_alembic(url, "upgrade", "0091")
         ids = await _seed(url)
 
-        result = _run_alembic_x(url, "upgrade", "0092", {"dedupe_dry_run": "true"})
-        assert result.returncode == 0, result.stderr
+        run_alembic(url, "upgrade", "0092", x_args={"dedupe_dry_run": "true"})
 
         # Both contacts still exist; no link moved onto the survivor.
         assert (
@@ -399,7 +372,7 @@ class TestDedupeBugCreatedContactsMigration:
     async def test_threshold_guard_aborts_without_force(
         self,
         throwaway_database: URL,
-        run_alembic: Callable[[str, str, str], None],
+        run_alembic: RunAlembic,
     ) -> None:
         url = throwaway_database.render_as_string(hide_password=False)
 
@@ -407,8 +380,8 @@ class TestDedupeBugCreatedContactsMigration:
         ids = await _seed(url)
 
         # One real pair exceeds a max of 0 -> abort, no changes.
-        blocked = _run_alembic_x(url, "upgrade", "0092", {"dedupe_max": "0"})
-        assert blocked.returncode != 0
+        with pytest.raises(RuntimeError):
+            run_alembic(url, "upgrade", "0092", x_args={"dedupe_max": "0"})
         assert (
             await _scalar(
                 url,
@@ -419,8 +392,7 @@ class TestDedupeBugCreatedContactsMigration:
         )
 
         # With force the same run proceeds and merges.
-        forced = _run_alembic_x(
-            url, "upgrade", "0092", {"dedupe_max": "0", "dedupe_force": "true"}
+        run_alembic(
+            url, "upgrade", "0092", x_args={"dedupe_max": "0", "dedupe_force": "true"}
         )
-        assert forced.returncode == 0, forced.stderr
         assert await _links_for(url, ids["survivor"]) == {"immich", "google"}

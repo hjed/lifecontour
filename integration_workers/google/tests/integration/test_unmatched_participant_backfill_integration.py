@@ -189,7 +189,9 @@ class TestUnmatchedParticipantBackfill:
         self, db_session: AsyncSession
     ) -> None:
         journal_id = await _seed_synced_event(db_session)
-        contact_id = await seed_contact(db_session, first_name="Known")
+        contact_id = await seed_contact(
+            db_session, user_id=TEST_USER, first_name="Known"
+        )
         await db_session.execute(
             text("""
                 INSERT INTO contact_methods (contact_id, method_type, value)
@@ -227,7 +229,7 @@ class TestUnmatchedParticipantBackfill:
             """),
             {"journal_id": journal_id},
         )
-        contact_id = await seed_contact(db_session, first_name="New")
+        contact_id = await seed_contact(db_session, user_id=TEST_USER, first_name="New")
         await db_session.execute(
             text("""
                 INSERT INTO contact_methods (contact_id, method_type, value)

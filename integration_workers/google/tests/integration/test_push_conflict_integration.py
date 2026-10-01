@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker import push_contacts_to_google
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 
 @pytest_asyncio.fixture
 async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[type-arg]
@@ -26,7 +30,9 @@ async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[t
         Dict with contact IDs and tag info for assertions.
     """
     # Create a contact
-    contact_id = await seed_contact(db_session, first_name="Push", last_name="Test")
+    contact_id = await seed_contact(
+        db_session, user_id=CONTACT_OWNER, first_name="Push", last_name="Test"
+    )
 
     # Add an email method
     await db_session.execute(
@@ -244,7 +250,7 @@ class TestPushContactsWithRealDB:
         """
         # Create a contact with NO tags
         contact_id = await seed_contact(
-            db_session, first_name="NoTag", last_name="Push"
+            db_session, first_name="NoTag", last_name="Push", user_id=CONTACT_OWNER
         )
         await db_session.flush()
 

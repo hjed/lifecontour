@@ -18,6 +18,10 @@ from worker import (
     _load_tag_names_for_contacts_batch,
 )
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 
 @pytest_asyncio.fixture
 async def contact_with_tags(db_session: AsyncSession) -> dict[str, int]:
@@ -27,7 +31,9 @@ async def contact_with_tags(db_session: AsyncSession) -> dict[str, int]:
         Dict with contact_id and tag IDs for assertions.
     """
     # Create a contact
-    contact_id = await seed_contact(db_session, first_name="Test", last_name="TagPush")
+    contact_id = await seed_contact(
+        db_session, user_id=CONTACT_OWNER, first_name="Test", last_name="TagPush"
+    )
 
     # Create tags
     result = await db_session.execute(
@@ -90,7 +96,7 @@ class TestLoadTagNamesForContactIntegration:
         """Test that an empty list is returned for a contact with no tags."""
         # Create a contact with no tags
         contact_id = await seed_contact(
-            db_session, first_name="NoTag", last_name="Contact"
+            db_session, first_name="NoTag", last_name="Contact", user_id=CONTACT_OWNER
         )
         await db_session.flush()
 
@@ -109,7 +115,9 @@ class TestLoadTagNamesForContactIntegration:
     async def test_returns_sorted_tag_names(self, db_session: AsyncSession) -> None:
         """Test that tag names are returned in alphabetical order."""
         # Create contact
-        contact_id = await seed_contact(db_session, first_name="Sort", last_name="Test")
+        contact_id = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="Sort", last_name="Test"
+        )
 
         # Create tags in non-alphabetical order
         for tag_name in ["zebra", "alpha", "middle"]:
@@ -151,7 +159,9 @@ class TestLoadFullContactIntegration:
     ) -> None:
         """Test that _load_full_contact returns methods, addresses, notes, and tags."""
         # Create a contact with a method, address, note, and tag
-        contact_id = await seed_contact(db_session, first_name="Full", last_name="Load")
+        contact_id = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="Full", last_name="Load"
+        )
 
         # Add email method
         await db_session.execute(
@@ -211,7 +221,7 @@ class TestLoadFullContactIntegration:
     async def test_load_full_contact_empty_tags(self, db_session: AsyncSession) -> None:
         """Test that _load_full_contact returns empty tags for tagless contact."""
         contact_id = await seed_contact(
-            db_session, first_name="NoTag", last_name="Full"
+            db_session, first_name="NoTag", last_name="Full", user_id=CONTACT_OWNER
         )
         await db_session.flush()
 
@@ -232,9 +242,13 @@ class TestLoadTagNamesForContactsBatchIntegration:
     ) -> None:
         """Test that batch loading retrieves tags for several contacts."""
         # Create two contacts
-        cid1 = await seed_contact(db_session, first_name="Batch", last_name="One")
+        cid1 = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="Batch", last_name="One"
+        )
 
-        cid2 = await seed_contact(db_session, first_name="Batch", last_name="Two")
+        cid2 = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="Batch", last_name="Two"
+        )
 
         # Create tags
         t1 = (
@@ -267,7 +281,9 @@ class TestLoadTagNamesForContactsBatchIntegration:
         self, db_session: AsyncSession
     ) -> None:
         """Test that contacts with no tags get empty lists in batch result."""
-        cid = await seed_contact(db_session, first_name="NoTag", last_name="Batch")
+        cid = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="NoTag", last_name="Batch"
+        )
         await db_session.flush()
 
         result = await _load_tag_names_for_contacts_batch(db_session, [cid])
@@ -290,7 +306,9 @@ class TestLoadFullContactArchived:
     ) -> None:
         from worker import _transform_contact_to_google_person
 
-        contact_id = await seed_contact(db_session, first_name="Arch")
+        contact_id = await seed_contact(
+            db_session, user_id=CONTACT_OWNER, first_name="Arch"
+        )
         await db_session.execute(
             text(
                 """

@@ -30,6 +30,7 @@ ALLOWED = frozenset(
         # The helper itself.
         "core_shared/core_shared/testing/seeding.py",
         # Migration tests seeding a schema at a pinned revision.
+        "backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py",
         "backend/tests/integration/integrations/test_backfill_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_dedupe_bug_created_contacts_migration.py",
         "backend/tests/integration/integrations/test_drop_external_references_migration.py",

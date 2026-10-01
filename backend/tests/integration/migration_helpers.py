@@ -6,8 +6,27 @@ helpers wrap that pattern so each test only has to say what it expects the
 schema to look like.
 """
 
+from collections.abc import Mapping
+from typing import Protocol
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+
+class RunAlembic(Protocol):
+    """The ``run_alembic`` fixture: ``alembic [-x k=v ...] <command> <target>``.
+
+    Raises ``RuntimeError`` carrying alembic's output when the command fails.
+    """
+
+    def __call__(
+        self,
+        database_url: str,
+        command: str,
+        target: str,
+        *,
+        x_args: Mapping[str, str] | None = None,
+    ) -> None: ...
 
 
 async def table_exists(engine_url: str, table: str) -> bool:

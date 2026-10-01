@@ -64,6 +64,7 @@ class TestSyncCalendarEventsIntegration:
         # Insert new contact matching the attendee email
         await seed_contact(
             db_session,
+            user_id=test_user,
             first_name="Test",
             contact_id=test_contact_id,
             created_at=now,

@@ -64,7 +64,7 @@ class SqlContactRepository(ContactRepository):
         # Get contact basic info
         contact_query = text(
             """
-            SELECT id, first_name, last_name, middle_name, nick_name, company, job_title, photo_url, is_favourite, created_at, updated_at
+            SELECT id, user_id, first_name, last_name, middle_name, nick_name, company, job_title, photo_url, is_favourite, created_at, updated_at
             FROM contacts WHERE id = :contact_id
         """
         )
@@ -78,6 +78,7 @@ class SqlContactRepository(ContactRepository):
         contact = Contact(
             id=contact_row.id,
             first_name=contact_row.first_name,
+            user_id=contact_row.user_id,
             last_name=contact_row.last_name,
             middle_name=contact_row.middle_name,
             nick_name=contact_row.nick_name,
@@ -487,17 +488,19 @@ class SqlContactRepository(ContactRepository):
         """Save a contact (insert or update)."""
         try:
             if contact.id is None:
-                # Insert new contact
+                # Insert new contact. ``user_id`` is written here only: a
+                # contact's owner is set at creation and never changed.
                 query = text(
                     """
-                    INSERT INTO contacts (first_name, last_name, middle_name, nick_name, company, job_title, photo_url, is_favourite)
-                    VALUES (:first_name, :last_name, :middle_name, :nick_name, :company, :job_title, :photo_url, :is_favourite)
+                    INSERT INTO contacts (user_id, first_name, last_name, middle_name, nick_name, company, job_title, photo_url, is_favourite)
+                    VALUES (:user_id, :first_name, :last_name, :middle_name, :nick_name, :company, :job_title, :photo_url, :is_favourite)
                     RETURNING id, created_at, updated_at
                 """
                 )
                 result = await self.conn.execute(
                     query,
                     {
+                        "user_id": contact.user_id,
                         "first_name": contact.first_name,
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
@@ -1513,8 +1516,8 @@ class SqlContactRepository(ContactRepository):
         # Single query to get all contact data
         query = text(
             """
-            SELECT id, first_name, last_name, middle_name, nick_name, company, job_title,
-                   is_favourite, created_at, updated_at
+            SELECT id, user_id, first_name, last_name, middle_name, nick_name, company,
+                   job_title, is_favourite, created_at, updated_at
             FROM contacts
             WHERE is_favourite = true
             ORDER BY first_name, last_name
@@ -1528,6 +1531,7 @@ class SqlContactRepository(ContactRepository):
             contact = Contact(
                 id=row.id,
                 first_name=row.first_name,
+                user_id=row.user_id,
                 last_name=row.last_name,
                 middle_name=row.middle_name,
                 nick_name=row.nick_name,
@@ -1629,8 +1633,9 @@ class SqlContactRepository(ContactRepository):
         """Get contacts filtered by favourite status and/or tags."""
         query_parts = [
             """
-            SELECT DISTINCT c.id, c.first_name, c.last_name, c.middle_name, c.nick_name,
-                   c.company, c.job_title, c.photo_url, c.is_favourite, c.created_at, c.updated_at
+            SELECT DISTINCT c.id, c.user_id, c.first_name, c.last_name, c.middle_name,
+                   c.nick_name, c.company, c.job_title, c.photo_url, c.is_favourite,
+                   c.created_at, c.updated_at
             FROM contacts c
             """
         ]
@@ -1665,6 +1670,7 @@ class SqlContactRepository(ContactRepository):
             contact = Contact(
                 id=row.id,
                 first_name=row.first_name,
+                user_id=row.user_id,
                 last_name=row.last_name,
                 middle_name=row.middle_name,
                 nick_name=row.nick_name,

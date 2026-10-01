@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker import sync_google_contacts
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 _EMAIL = "push-before-pull@example.com"
 _REMOTE = "people/c-push-before-pull"
 
@@ -97,7 +101,11 @@ async def contact_edited_since_last_sync(db_session: AsyncSession) -> int:
     )
 
     contact_id = await seed_contact(
-        db_session, first_name="Pending", last_name="Push", updated_at=now
+        db_session,
+        first_name="Pending",
+        last_name="Push",
+        updated_at=now,
+        user_id=CONTACT_OWNER,
     )
 
     await db_session.execute(

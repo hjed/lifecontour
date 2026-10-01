@@ -407,6 +407,39 @@ the API, which now stamps it).
 - [ ] `docs/architecture/integration-architecture.md` — inbound consumer rejects contact events
   without an owner.
 
+**Delivery:** split three ways, because the contract alone breaks 288 test construction sites
+(mypy, 40 backend files) on top of the hand-built sync-event payloads:
+- **3a ✅ DONE** — `0122` (nullable column, owner assignment, `idx_contacts_user_id`), the shared
+  `app/migrations/owner_derivation.py`, `contacts_table` column and index, repository INSERT and
+  row mappers, `seed_contact(user_id=…)` (required in `core_shared`; the backend wrapper defaults
+  to `TEST_USER_ID`), `run_alembic(..., x_args=…)`.
+- **3b** — required `Contact.user_id`, every writer, the inbound consumer, `0123` (`SET NOT NULL`).
+- **3c** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event. **Must merge before Phase 13.**
+  Safe after `NOT NULL`: nothing before Phase 13 reads the owner from an event.
+
+**Decisions (recorded during implementation):**
+- **Migration numbers:** `0122` (column) and `0123` (`NOT NULL`) — `main` took `0121` for
+  journal-series recurrence aliases — so the indicative numbers of later phases shift by two.
+- **One derivation helper, literal evidence per revision.** `derive_owner` reads the operator
+  override first, then the evidence each migration passes as its own literal tuple (revision
+  files cannot import each other, and literals keep a revision's meaning fixed). `0122`'s evidence
+  is `0106`'s `REPAIRED_TABLES` plus `user_google_auth`, `user_google_integration`,
+  `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`,
+  `user_settings`, `sync_jobs`, `calendar_sync_tokens`, `pending_entity_mappings`,
+  `contact_suggestion_ignores`.
+- **Both synthetic owners, no real one → `dev-user`.** The spec covers one synthetic owner;
+  `debug-client` can no longer be produced, so a database holding both is a legacy local one
+  whose developer is the `DISABLE_AUTH` user. Refusing would make every such developer pass `-x`.
+- **The owner is written on INSERT only.** `save` never updates `user_id`, so neither an update
+  converter nor a sync event can re-own a contact.
+- **`mcp/domains/integrations/tools.py:429` is the Immich conflict "create"**, not the athlete
+  mapping (which creates no contact) — the construction-site list above names it wrongly.
+
+**Follow-ups (found in Phase 3):**
+- Worker integration suites run `upgrade head` without resetting the schema, so a stale *local*
+  test database holding contacts and no owner evidence makes `0122` refuse; recreate the
+  container or pass `-x contacts_owner`. CI starts from fresh containers.
+
 ---
 
 #### Phase 4: Owned contacts — scoped reads and writes (repository, service, REST)

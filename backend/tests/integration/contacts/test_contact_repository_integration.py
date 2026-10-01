@@ -29,7 +29,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
     ImportantDateNotFoundError,
 )
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 
 @pytest.mark.integration
@@ -604,6 +604,58 @@ class TestContactRepositoryIntegration:
 
         # Assert
         assert count == 2
+
+
+@pytest.mark.integration
+class TestContactOwnerPersistence:
+    """``contacts.user_id`` is written once, on insert, and read back everywhere."""
+
+    OTHER_OWNER = "other-user-456"
+
+    @pytest.fixture
+    def contact_repo(self, clean_database: AsyncConnection) -> SqlContactRepository:
+        return SqlContactRepository(clean_database)
+
+    @pytest.mark.asyncio
+    async def test_save_persists_the_owner(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        saved = await contact_repo.save(Contact(first_name="Ada", user_id=TEST_USER_ID))
+
+        assert saved.id is not None
+        found = await contact_repo.find_by_id(saved.id)
+        assert found is not None
+        assert found.user_id == TEST_USER_ID
+
+    @pytest.mark.asyncio
+    async def test_list_reads_carry_the_owner(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        await contact_repo.save(
+            Contact(first_name="Ada", user_id=TEST_USER_ID, is_favourite=True)
+        )
+
+        favourites = await contact_repo.get_favourite_contacts()
+        filtered = await contact_repo.get_contacts_by_filters(is_favourite=True)
+
+        assert [c.user_id for c in favourites] == [TEST_USER_ID]
+        assert [c.user_id for c in filtered] == [TEST_USER_ID]
+
+    @pytest.mark.asyncio
+    async def test_saving_an_existing_contact_never_changes_its_owner(
+        self, contact_repo: SqlContactRepository
+    ) -> None:
+        """A contact's owner is set at creation; an update cannot re-own it."""
+        saved = await contact_repo.save(Contact(first_name="Ada", user_id=TEST_USER_ID))
+        assert saved.id is not None
+
+        saved.user_id = self.OTHER_OWNER
+        saved.last_name = "Lovelace"
+        await contact_repo.save(saved)
+
+        found = await contact_repo.find_by_id(saved.id)
+        assert found is not None
+        assert (found.last_name, found.user_id) == ("Lovelace", TEST_USER_ID)
 
 
 @pytest.mark.integration
