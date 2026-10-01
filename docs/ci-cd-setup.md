@@ -1,6 +1,6 @@
 # CI/CD Setup Documentation
 
-This document describes the Continuous Integration and Continuous Deployment (CI/CD) setup for the Personal Management System.
+This document describes the Continuous Integration and Continuous Deployment (CI/CD) setup for Lifecontour.
 
 ## Overview
 
@@ -147,6 +147,18 @@ credential audit, including how to re-run it, is recorded in
 - `build-and-push-images`: Builds and pushes Docker images
 - `create-release`: Creates GitHub release with changelog
 
+**Images:** `build-and-push-images` publishes one image per service to
+`ghcr.io/<github.repository>-<service>` (`backend`, `frontend`, `google-worker`,
+`strava-worker`, `snipeit-worker`, `immich-worker`), plus the shared `python-base` image they
+build on. Each is tagged with the release version. Today
+that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.2.3`.
+
+- The path follows `github.repository` (`IMAGE_NAME` in `release.yml`), so renaming the
+  repository renames the images. It is deliberately not pinned
+  ([spec](./product-specifications/open-source-release-and-branding-product-specification.md#decision-images-follow-the-repository-name)).
+- After a rename, update the production deployment's image references at the next release.
+  Packages published under the old name stay pullable, which keeps rollback possible.
+
 ## Configuration Files
 
 ### Dependabot (`.github/dependabot.yml`)
@@ -154,10 +166,13 @@ credential audit, including how to re-run it, is recorded in
 - Weekly schedule with PR limits
 - Ignores major version updates for critical packages
 
-### SonarCloud (`sonar-project.properties`)
-- Code quality and security analysis
-- Coverage integration
-- Quality gate enforcement
+### SonarCloud
+- Code quality and security analysis, with a quality gate on every PR
+- Runs as SonarCloud **Automatic Analysis** (the GitHub App), not an Actions step, so there is
+  no workflow or token for it in this repository
+- Automatic Analysis reads only `.sonarcloud.properties`, which this repository does not have,
+  so the project's settings live in the SonarCloud UI. The scanner-CLI file
+  `sonar-project.properties` was never read and has been removed.
 
 ### Issue Templates
 - Bug report template with environment details
@@ -177,7 +192,6 @@ credential audit, including how to re-run it, is recorded in
 Add these secrets to your GitHub repository:
 
 ```
-SONAR_TOKEN          # SonarCloud authentication token
 CODECOV_TOKEN        # Codecov token (for private repos)
 ```
 
@@ -191,8 +205,7 @@ CODECOV_TOKEN        # Codecov token (for private repos)
 **SonarCloud:**
 1. Sign up at https://sonarcloud.io
 2. Import your repository
-3. Generate and add SONAR_TOKEN
-4. Update `sonar-project.properties` with your organization
+3. Keep Automatic Analysis enabled; no token or properties file is needed
 
 ### 3. Dependabot Configuration
 

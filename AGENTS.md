@@ -228,7 +228,7 @@ Generated and gitignored: `ds-bundle/`, `.ds-sync/`, `types/`, `index.d.ts`,
 #### Project Structure (Clear Language Separation)
 
 ```text
-personal-management-system/
+lifecontour/
 ├── backend/                      # Python FastAPI application
 ├── core_shared/              # Shared python models, schemas, db logic (private package)
 ├── integration_workers/      # Isolated workers for each integration

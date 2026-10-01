@@ -5,7 +5,7 @@
  * These tests define the expected behavior before implementation.
  */
 
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import {
   renderWithProviders,
   userEvent,
@@ -14,7 +14,7 @@ import {
   TEST_CONSTANTS,
 } from '@/test-utils';
 import LoginPage from '@/app/auth/login/page';
-import { APP_NAME, UI_TEXT } from '@/lib/constants';
+import { APP_NAME, SOURCE_CODE_URL, UI_TEXT } from '@/lib/constants';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -92,6 +92,21 @@ describe('LoginPage', () => {
     // Check form structure - look for the login card container
     const loginCard = screen.getByRole('heading', { level: 1 }).closest('div');
     expect(loginCard).toBeInTheDocument();
+  });
+
+  it('offers the source code to signed-out visitors', () => {
+    renderWithProviders(<LoginPage />);
+
+    const projectLinks = within(
+      screen.getByRole('navigation', { name: 'Project links' })
+    );
+
+    const sourceLink = projectLinks.getByRole('link', {
+      name: 'Source code (opens in a new tab)',
+    });
+    expect(sourceLink).toHaveAttribute('href', SOURCE_CODE_URL);
+    expect(sourceLink).toHaveAttribute('target', '_blank');
+    expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   // Helper function to test OAuth provider login

@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { UI_TEXT, API_ENDPOINTS } from '@/lib/constants';
+import { UI_TEXT, API_ENDPOINTS, PROJECT_LINKS } from '@/lib/constants';
 import { GitBranch, Key } from 'lucide-react';
 
 // Provider interface for backend response
@@ -156,6 +156,24 @@ function LoginContent() {
             <p>{UI_TEXT.PRIVACY_NOTICE}</p>
             <p className='mt-2'>{UI_TEXT.SELF_HOSTED_NOTICE}</p>
           </div>
+
+          <nav
+            aria-label={UI_TEXT.PROJECT_LINKS}
+            className='text-muted-foreground flex justify-center gap-4 text-sm'
+          >
+            {PROJECT_LINKS.map(({ href, label }) => (
+              <a
+                key={href}
+                href={href}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='hover:text-foreground focus-visible:ring-ring rounded-sm underline underline-offset-4 focus-visible:ring-2 focus-visible:outline-none'
+              >
+                {label}
+                <span className='sr-only'> {UI_TEXT.OPENS_IN_NEW_TAB}</span>
+              </a>
+            ))}
+          </nav>
         </CardContent>
       </Card>
     </div>
