@@ -102,7 +102,6 @@ Each file was reviewed by hand for values that grant access.
 | `docker-compose.yml` (`ENCRYPTION_KEY` default on the google/strava/immich/snipeit workers) | A generated Fernet key, also used by `test_strava_oauth.py` and `test_strava_webhook_integration.py` | Placeholder: production sets its own `ENCRYPTION_KEY` (owner-confirmed, see [Resolved items](#resolved-items)) |
 | `docker/oauth-provider/{hydra.yml,hydra-test.yml,init-oauth.sh}`, `scripts/fix-oauth-client.sh` | Local Hydra (`dev: true`), `dev-client-secret` | Placeholder |
 | `docker/database/init*.sql` | No passwords | Clean |
-| `docker/oauth-ui/server.js` | Local mock-login test users | Placeholder |
 | `.github/workflows/*` | Only `secrets.GITHUB_TOKEN` (in `release.yml`); CI service passwords `postgres` / `testpass`, `test_client_secret` | Placeholder |
 | `frontend/tests/e2e/auth.setup.ts`, `frontend/tests/e2e/fixtures/*`, `backend/tests/fixtures/*`, `core_shared/core_shared/testing/fixtures.py` | No credentials; a local test DB URL | Placeholder |
 

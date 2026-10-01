@@ -49,7 +49,7 @@ The development environment includes these services:
 ### Supporting Services
 
 - **`oauth-provider`**: Hydra OAuth2/OIDC provider for authentication
-- **`oauth-ui`**: Hydra admin UI for OAuth management
+- **`oauth-login-consent`**: Login and consent UI that Hydra redirects to
 - **`jaeger`**: OpenTelemetry tracing for observability
 
 ## 🛠️ Development Commands
@@ -310,7 +310,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # View OAuth provider logs
 ./scripts/dev.sh docker-logs oauth-provider
-./scripts/dev.sh docker-logs oauth-ui
+./scripts/dev.sh docker-logs oauth-login-consent
 ```
 
 ### Resetting the Environment

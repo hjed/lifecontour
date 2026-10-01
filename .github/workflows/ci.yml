@@ -43,6 +43,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       core_shared: ${{ steps.filter.outputs.core_shared }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      e2e_infra: ${{ steps.filter.outputs.e2e_infra }}
       worker_google: ${{ steps.filter.outputs.worker_google }}
       worker_immich: ${{ steps.filter.outputs.worker_immich }}
       worker_snipeit: ${{ steps.filter.outputs.worker_snipeit }}
@@ -62,6 +63,7 @@ jobs:
               - 'backend/**/Dockerfile*'
               - 'backend/**/docker-compose*.yml'
               - 'backend/**/docker-compose*.yaml'
+              - 'docker/python-base/**'
               - 'core_shared/**/*.py'
               - 'core_shared/**/*.toml'
               - 'core_shared/**/uv.lock'
@@ -75,6 +77,7 @@ jobs:
               - 'integration_workers/google/**/Dockerfile*'
               - 'integration_workers/google/**/docker-compose*.yml'
               - 'integration_workers/google/**/docker-compose*.yaml'
+              - 'docker/python-base/**'
               - 'ruff.toml'
               - 'mypy.ini'
               - 'pytest.ini'
@@ -85,6 +88,7 @@ jobs:
               - 'integration_workers/snipeit/**/Dockerfile*'
               - 'integration_workers/snipeit/**/docker-compose*.yml'
               - 'integration_workers/snipeit/**/docker-compose*.yaml'
+              - 'docker/python-base/**'
               - 'ruff.toml'
               - 'mypy.ini'
               - 'pytest.ini'
@@ -95,6 +99,7 @@ jobs:
               - 'integration_workers/immich/**/Dockerfile*'
               - 'integration_workers/immich/**/docker-compose*.yml'
               - 'integration_workers/immich/**/docker-compose*.yaml'
+              - 'docker/python-base/**'
               - 'ruff.toml'
               - 'mypy.ini'
               - 'pytest.ini'
@@ -105,12 +110,18 @@ jobs:
               - 'integration_workers/strava/**/Dockerfile*'
               - 'integration_workers/strava/**/docker-compose*.yml'
               - 'integration_workers/strava/**/docker-compose*.yaml'
+              - 'docker/python-base/**'
               - 'ruff.toml'
               - 'mypy.ini'
               - 'pytest.ini'
             core_shared:
               - 'core_shared/**/*.py'
               - 'core_shared/**/*.toml'
+            # Test infrastructure only the E2E suite exercises.
+            e2e_infra:
+              - 'docker/oauth-login-consent/**'
+              - 'docker/oauth-provider/**'
+              - 'docker-compose.yml'
             frontend:
               - 'frontend/**/*.ts'
               - 'frontend/**/*.tsx'
@@ -847,7 +858,8 @@ jobs:
       (github.event_name == 'workflow_call' ||
        needs.changes.outputs.backend == 'true' ||
        needs.changes.outputs.core_shared == 'true' ||
-       needs.changes.outputs.frontend == 'true')
+       needs.changes.outputs.frontend == 'true' ||
+       needs.changes.outputs.e2e_infra == 'true')
 
     steps:
       - name: Checkout code

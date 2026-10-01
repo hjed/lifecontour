@@ -157,11 +157,11 @@ else
     print_error "Hydra OAuth provider is not healthy"
 fi
 
-# Check OAuth UI
-if check_service_health "oauth-ui-dev"; then
-    test_endpoint "http://localhost:3001" "OAuth UI" "200"
+# Check OAuth login/consent UI
+if check_service_health "oauth-login-consent"; then
+    test_endpoint "http://localhost:3001/health" "OAuth login/consent UI" "200"
 else
-    print_warning "OAuth UI is not healthy"
+    print_warning "OAuth login/consent UI is not healthy"
 fi
 
 # Check Backend

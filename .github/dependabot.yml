@@ -1,4 +1,20 @@
 version: 2
+
+multi-ecosystem-groups:
+  # Test-only dependencies; monthly is enough.
+  oauth-test-infra:
+    schedule:
+      interval: "monthly"
+      time: "09:00"
+    assignees:
+      - "hjed"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "docker"
+
 updates:
   # Python backend dependencies (using uv)
   - package-ecosystem: "uv"
@@ -137,8 +153,11 @@ updates:
       - "github-actions"
 
   # Docker dependencies
+  # Covers the backend and every integration worker: their Dockerfiles only
+  # `FROM pms-python-base`, a local image Dependabot cannot resolve, so the real
+  # base image is tracked here.
   - package-ecosystem: "docker"
-    directory: "/docker/backend"
+    directory: "/docker/python-base"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -169,23 +188,25 @@ updates:
       - "dependencies"
       - "docker"
 
+  # OAuth and test infrastructure: one monthly PR via the oauth-test-infra
+  # group. Every entry matches "*" because a multi-ecosystem job never
+  # updates dependencies its patterns leave out.
   - package-ecosystem: "docker"
-    directory: "/docker/oauth-login-consent"
-    schedule:
-      interval: "monthly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 2
+    directories:
+      - "/docker/oauth-login-consent"
+      - "/docker/oauth-provider"
+      - "/docker/nginx"
+    patterns: ["*"]
+    multi-ecosystem-group: "oauth-test-infra"
     cooldown:
       default-days: 4
-    assignees:
-      - "hjed"
-    commit-message:
-      prefix: "chore(docker)"
-      include: "scope"
-    labels:
-      - "dependencies"
-      - "docker"
+
+  - package-ecosystem: "npm"
+    directory: "/docker/oauth-login-consent"
+    patterns: ["*"]
+    multi-ecosystem-group: "oauth-test-infra"
+    cooldown:
+      default-days: 4
 
   - package-ecosystem: "docker-compose"
     directory: "/"

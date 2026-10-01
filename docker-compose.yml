@@ -129,7 +129,9 @@ services:
       - personal-management
 
   oauth-provider:
-    image: oryd/hydra:v26.2.0
+    build:
+      context: docker/oauth-provider
+      dockerfile: Dockerfile
     container_name: ${CONTAINER_PREFIX:-pms}-oauth
     profiles: [dev, test, prod]
     user: "65532:65532"
