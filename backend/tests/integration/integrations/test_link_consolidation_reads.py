@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactRepository
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
 )
@@ -27,14 +28,7 @@ async def _insert_email_less_contact(
     conn: AsyncConnection, first_name: str, last_name: str
 ) -> int:
     """Insert a contact with no email method and return its id."""
-    result = await conn.execute(
-        text(
-            "INSERT INTO contacts (first_name, last_name) "
-            "VALUES (:first_name, :last_name) RETURNING id"
-        ),
-        {"first_name": first_name, "last_name": last_name},
-    )
-    return int(result.scalar_one())
+    return await seed_contact(conn, first_name=first_name, last_name=last_name)
 
 
 async def _seed_sync_metadata(

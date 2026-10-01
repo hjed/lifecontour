@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,16 +26,7 @@ async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[t
         Dict with contact IDs and tag info for assertions.
     """
     # Create a contact
-    result = await db_session.execute(
-        text(
-            """
-            INSERT INTO contacts (first_name, last_name)
-            VALUES ('Push', 'Test')
-            RETURNING id
-            """
-        )
-    )
-    contact_id = result.scalar_one()
+    contact_id = await seed_contact(db_session, first_name="Push", last_name="Test")
 
     # Add an email method
     await db_session.execute(
@@ -251,16 +243,9 @@ class TestPushContactsWithRealDB:
         ``contactGroups/myContacts`` and demote the contact.
         """
         # Create a contact with NO tags
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('NoTag', 'Push')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="NoTag", last_name="Push"
         )
-        contact_id = result.scalar_one()
         await db_session.flush()
 
         mock_client = _make_mock_google_client()

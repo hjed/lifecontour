@@ -20,6 +20,7 @@ from app.core.contacts.adapters.sql.contact_importance_repository import (
     SqlContactImportanceRepository,
 )
 from app.core.contacts.models.importance import IMPORTANCE_WINDOW_DAYS
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.statement_recorder import recorded_statements
 
 pytestmark = pytest.mark.asyncio
@@ -42,12 +43,13 @@ async def _contact(
     updated_at: datetime = NOW,
 ) -> None:
     """A bare contact, with its own timestamps under the test's control."""
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, is_favourite, created_at, updated_at)
-            VALUES (:id, 'Contact', :is_favourite, :updated_at, :updated_at)
-        """),
-        {"id": contact_id, "is_favourite": is_favourite, "updated_at": updated_at},
+    await seed_contact(
+        connection,
+        contact_id=contact_id,
+        first_name="Contact",
+        is_favourite=is_favourite,
+        created_at=updated_at,
+        updated_at=updated_at,
     )
 
 

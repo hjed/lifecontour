@@ -2,11 +2,11 @@
 
 import pytest
 from core_shared.models.contacts.entities import Contact
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactEditEventRepository
 from app.core.contacts.models.repositories import ContactEditEvent
+from tests.integration.contact_seeding import seed_contact
 
 
 @pytest.mark.integration
@@ -23,18 +23,11 @@ class TestContactEditEventRepositoryIntegration:
         """Test storing a domain event."""
         # Arrange
         contact = Contact(id=1, first_name="John", last_name="Doe")
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (:id, :first_name, :last_name)
-                """
-            ),
-            {
-                "id": contact.id,
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-            },
+        await seed_contact(
+            clean_database,
+            contact_id=contact.id,
+            first_name=contact.first_name,
+            last_name=contact.last_name,
         )
 
         event = ContactEditEvent(
@@ -71,13 +64,8 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test storing event without correlation ID."""
         # Arrange
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (2, 'Jane', 'Doe')
-                """
-            )
+        await seed_contact(
+            clean_database, contact_id=2, first_name="Jane", last_name="Doe"
         )
 
         event = ContactEditEvent(
@@ -109,13 +97,8 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test storing event with complex JSON data."""
         # Arrange
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe')
-                """
-            )
+        await seed_contact(
+            clean_database, contact_id=1, first_name="John", last_name="Doe"
         )
 
         complex_data = {
@@ -154,14 +137,16 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test getting events for a specific contact."""
         # Arrange - Create contacts for events
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith')
-                """
+        for contact_id, first_name, last_name in [
+            (1, "John", "Doe"),
+            (2, "Jane", "Smith"),
+        ]:
+            await seed_contact(
+                clean_database,
+                contact_id=contact_id,
+                first_name=first_name,
+                last_name=last_name,
             )
-        )
 
         events = [
             ContactEditEvent(
@@ -211,13 +196,8 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test getting events for contact with limit."""
         # Arrange - Create multiple events for same contact
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe')
-                """
-            )
+        await seed_contact(
+            clean_database, contact_id=1, first_name="John", last_name="Doe"
         )
 
         for i in range(10):
@@ -246,14 +226,16 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test getting events by type."""
         # Arrange - Create events of different types
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith')
-                """
+        for contact_id, first_name, last_name in [
+            (1, "John", "Doe"),
+            (2, "Jane", "Smith"),
+        ]:
+            await seed_contact(
+                clean_database,
+                contact_id=contact_id,
+                first_name=first_name,
+                last_name=last_name,
             )
-        )
 
         events = [
             ContactEditEvent(
@@ -307,16 +289,22 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test getting events by type with limit."""
         # Arrange - Create multiple events of same type
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith'), (3, 'Bob', 'Johnson'),
-                       (4, 'Alice', 'Williams'), (5, 'Charlie', 'Brown'), (6, 'David', 'Davis'),
-                       (7, 'Eve', 'Evans'), (8, 'Frank', 'Franklin')
-                """
+        for contact_id, first_name, last_name in [
+            (1, "John", "Doe"),
+            (2, "Jane", "Smith"),
+            (3, "Bob", "Johnson"),
+            (4, "Alice", "Williams"),
+            (5, "Charlie", "Brown"),
+            (6, "David", "Davis"),
+            (7, "Eve", "Evans"),
+            (8, "Frank", "Franklin"),
+        ]:
+            await seed_contact(
+                clean_database,
+                contact_id=contact_id,
+                first_name=first_name,
+                last_name=last_name,
             )
-        )
 
         for i in range(8):
             day = f"{i + 1:02d}"
@@ -343,14 +331,17 @@ class TestContactEditEventRepositoryIntegration:
     ):
         """Test getting events by correlation ID."""
         # Arrange - Create events with same correlation ID
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe'), (2, 'Jane', 'Smith'), (3, 'Bob', 'Johnson')
-                """
+        for contact_id, first_name, last_name in [
+            (1, "John", "Doe"),
+            (2, "Jane", "Smith"),
+            (3, "Bob", "Johnson"),
+        ]:
+            await seed_contact(
+                clean_database,
+                contact_id=contact_id,
+                first_name=first_name,
+                last_name=last_name,
             )
-        )
 
         correlation_id = "batch-operation-123"
         events = [
@@ -402,13 +393,8 @@ class TestContactEditEventRepositoryIntegration:
     async def test_event_ordering(self, event_repo, clean_database: AsyncConnection):
         """Test that events are returned in correct order (most recent first)."""
         # Arrange - Create events with different timestamps
-        await clean_database.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name)
-                VALUES (1, 'John', 'Doe')
-                """
-            )
+        await seed_contact(
+            clean_database, contact_id=1, first_name="John", last_name="Doe"
         )
 
         events = [

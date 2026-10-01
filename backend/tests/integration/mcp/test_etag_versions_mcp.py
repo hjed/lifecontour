@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -59,16 +60,7 @@ async def journal_id(clean_database: AsyncConnection) -> int:
 
 @pytest.fixture
 async def contact_id(clean_database: AsyncConnection) -> int:
-    result = await clean_database.execute(
-        text(
-            """
-            INSERT INTO contacts (first_name, last_name)
-            VALUES ('Ada', 'Lovelace')
-            RETURNING id
-            """
-        )
-    )
-    return int(result.scalar_one())
+    return await seed_contact(clean_database, first_name="Ada", last_name="Lovelace")
 
 
 @pytest.mark.integration

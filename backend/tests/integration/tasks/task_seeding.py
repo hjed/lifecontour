@@ -47,8 +47,9 @@ from app.infrastructure.di.journal import JournalProvider
 from app.infrastructure.di.settings import SettingsProvider
 from app.infrastructure.di.tasks import TaskProvider
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
-USER_ID = "test-user-123"
+USER_ID = TEST_USER_ID
 # A second, unrelated owner. Owner scoping is only worth asserting against real
 # rows belonging to someone else, never against a merely absent id.
 OTHER_USER_ID = "other-user-456"
@@ -246,13 +247,7 @@ async def mark_journal_as_event(
 
 async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:
     """Create a contact and return its id."""
-    contact_id = (
-        await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:first_name) RETURNING id"),
-            {"first_name": first_name},
-        )
-    ).scalar_one()
-    return int(contact_id)
+    return await seed_contact(conn, first_name=first_name)
 
 
 async def count(conn: AsyncConnection, sql: str, params: dict[str, int | str]) -> int:

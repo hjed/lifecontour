@@ -27,6 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.search.search_indexer import SearchIndexer
+from tests.integration.contact_seeding import seed_contact
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,25 +47,26 @@ async def _seed_full_contact(connection: AsyncConnection, *, now: datetime) -> N
     ``contacts.updated_at`` so the last-activity instant has a single
     unambiguous answer.
     """
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (
-                id, first_name, last_name, middle_name, nick_name,
-                company, job_title, is_favourite, created_at, updated_at
-            )
-            VALUES (
-                :id, 'Ada', 'Lovelace', 'Byron', 'Countess',
-                'Analytical Engines', 'Mathematician', true, :created_at, :now
-            )
-        """),
-        {"id": CONTACT_ID, "created_at": now - timedelta(days=365), "now": now},
+    await seed_contact(
+        connection,
+        contact_id=CONTACT_ID,
+        first_name="Ada",
+        last_name="Lovelace",
+        middle_name="Byron",
+        nick_name="Countess",
+        company="Analytical Engines",
+        job_title="Mathematician",
+        is_favourite=True,
+        created_at=now - timedelta(days=365),
+        updated_at=now,
     )
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
-            VALUES (:id, 'Charles', 'Babbage', :now, :now)
-        """),
-        {"id": RELATED_CONTACT_ID, "now": now},
+    await seed_contact(
+        connection,
+        contact_id=RELATED_CONTACT_ID,
+        first_name="Charles",
+        last_name="Babbage",
+        created_at=now,
+        updated_at=now,
     )
 
     # Ordered by is_primary DESC then created_at ASC, so the primary email leads
@@ -379,12 +381,12 @@ async def test_archived_emails_and_phones_are_searchable(
     archived one is out of use, so it is skipped for that.
     """
     now = datetime.now(UTC)
-    await async_connection.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, created_at, updated_at)
-            VALUES (:id, 'Ada', :now, :now)
-        """),
-        {"id": CONTACT_ID, "now": now},
+    await seed_contact(
+        async_connection,
+        contact_id=CONTACT_ID,
+        first_name="Ada",
+        created_at=now,
+        updated_at=now,
     )
     await async_connection.execute(
         text("""

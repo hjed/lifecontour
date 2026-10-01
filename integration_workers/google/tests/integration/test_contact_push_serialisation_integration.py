@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,16 +99,9 @@ class TestCronRereadsTheLinkUnderTheLock:
         still says ``create``, but the link now exists, so the push must update
         the linked person rather than create a duplicate.
         """
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Race', 'Loser')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="Race", last_name="Loser"
         )
-        contact_id = int(result.scalar_one())
 
         # What find_contacts_to_push returned before the event path ran.
         stale = [
@@ -168,16 +162,9 @@ class TestCronRereadsTheLinkUnderTheLock:
         self, db_session: AsyncSession
     ) -> None:
         """The re-read does not suppress a genuine create."""
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Genuinely', 'New')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="Genuinely", last_name="New"
         )
-        contact_id = int(result.scalar_one())
         await db_session.flush()
 
         mock_client = _mock_google_client()

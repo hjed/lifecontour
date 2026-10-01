@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.search.search_indexer import SearchIndexer
+from tests.integration.contact_seeding import seed_contact
 
 pytestmark = pytest.mark.asyncio
 
@@ -22,12 +23,13 @@ async def test_fetch_complete_contact_data_captures_signals(
     # Setup test data
     # 1. Create contact
     contact_id = 1
-    await async_connection.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, created_at, updated_at)
-            VALUES (:id, 'Signal Test Contact', :now, :now)
-        """),
-        {"id": contact_id, "now": datetime.now(UTC)},
+    now = datetime.now(UTC)
+    await seed_contact(
+        async_connection,
+        contact_id=contact_id,
+        first_name="Signal Test Contact",
+        created_at=now,
+        updated_at=now,
     )
 
     # 2. Add summary
@@ -41,12 +43,13 @@ async def test_fetch_complete_contact_data_captures_signals(
 
     # 3. Add disabled summary for another contact (to test robustness)
     contact_id2 = 2
-    await async_connection.execute(
-        text("""
-            INSERT INTO contacts (id, first_name, created_at, updated_at)
-            VALUES (:id, 'Disabled Summary Contact', :now, :now)
-        """),
-        {"id": contact_id2, "now": datetime.now(UTC)},
+    now = datetime.now(UTC)
+    await seed_contact(
+        async_connection,
+        contact_id=contact_id2,
+        first_name="Disabled Summary Contact",
+        created_at=now,
+        updated_at=now,
     )
     await async_connection.execute(
         text("""

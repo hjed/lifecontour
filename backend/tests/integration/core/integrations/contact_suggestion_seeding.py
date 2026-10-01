@@ -14,7 +14,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-USER_ID = "test-user-123"
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
+
+USER_ID = TEST_USER_ID
 OTHER_USER_ID = "test-user-456"
 
 
@@ -119,17 +121,7 @@ async def create_contact(
 
     The email is the primary one, or - with ``archived`` - an archived one.
     """
-    contact_id = int(
-        (
-            await connection.execute(
-                text(
-                    "INSERT INTO contacts (first_name) VALUES (:first_name)"
-                    " RETURNING id"
-                ),
-                {"first_name": first_name},
-            )
-        ).scalar_one()
-    )
+    contact_id = await seed_contact(connection, first_name=first_name)
     if email is not None:
         await connection.execute(
             text(

@@ -238,6 +238,31 @@ Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tes
 - Test validation error handling
 - Use realistic test data
 
+### Seeding Contacts in Integration Tests
+
+An integration test that needs a contact row **seeds it with `seed_contact`**, never with its own
+`INSERT INTO contacts`:
+
+| Suite | Import |
+|---|---|
+| Backend | `from tests.integration.contact_seeding import TEST_USER_ID, seed_contact` |
+| Workers | `from core_shared.testing.seeding import seed_contact` |
+
+- `seed_contact(conn, *, first_name="Sarah", last_name=None, ..., contact_id=None, created_at=None,
+  updated_at=None) -> int` takes an `AsyncConnection` or an `AsyncSession`, writes only what it is
+  given (an unnamed id comes from the sequence, unnamed timestamps are `now()`) and returns the id.
+  The SQL exists once, in `core_shared/core_shared/testing/seeding.py`, so a change to what a
+  contact row requires lands in one module.
+- `seed_contacts(conn, count, *, first_name_prefix="Contact") -> list[int]` inserts `count`
+  numbered contacts in one statement, for tests that need thousands.
+- `TEST_USER_ID` is the acting user of every authenticated backend test client: the `test_user`
+  fixture reads it.
+- Going through the API or the entity instead (`tests/fixtures/contact_fixtures.py`,
+  `ContactFactory`) is still right when the creation path is part of what the test exercises.
+- `backend/tests/unit/test_contact_seeding_guard.py` fails on a raw contact insert anywhere under
+  `backend/tests`, `core_shared` or `integration_workers/*/tests`. The only exemptions are
+  migration tests, which seed a schema pinned at an older revision the helper does not describe.
+
 ### MCP Integration Testing Guidelines
 
 MCP tools are tested through the mounted app (`authenticated_lifespan_client`),

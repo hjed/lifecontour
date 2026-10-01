@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from core_shared.stream_client import StreamClient
 from redis.asyncio import Redis
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.events.search_indexer_consumer import SearchIndexerConsumer
+from tests.integration.contact_seeding import seed_contact
 
 GROUP_NAME = "search-indexer"
 
@@ -36,14 +36,11 @@ class TestSearchIndexerConsumerIntegration:
         and delegates to SearchIndexer.process_event with the correct OutboxEvent."""
         # 1. Arrange: Insert a real contact into the database so the indexer can find it
         contact_id = 9999
-        await async_connection.execute(
-            text(
-                """
-                INSERT INTO contacts (id, first_name, last_name, created_at, updated_at)
-                VALUES (:id, 'SearchIntegration', 'TestContact', NOW(), NOW())
-                """
-            ),
-            {"id": contact_id},
+        await seed_contact(
+            async_connection,
+            contact_id=contact_id,
+            first_name="SearchIntegration",
+            last_name="TestContact",
         )
 
         # Publish the event to the stream

@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
 )
@@ -131,13 +132,9 @@ class TestLinkConsolidationWrites:
     ) -> None:
         """contact.updated writes synced_tags onto sync_metadata, never external_references."""
         external_id = "people/cUpdate"
-        contact_id_result = await async_connection.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Old', 'Name') RETURNING id"
-            )
+        contact_id = await seed_contact(
+            async_connection, first_name="Old", last_name="Name"
         )
-        contact_id = int(contact_id_result.scalar_one())
         await _seed_google_link(
             async_connection,
             external_id=external_id,
@@ -183,13 +180,9 @@ class TestLinkConsolidationWrites:
         update with tags must establish ``synced_tags`` rather than skip.
         """
         external_id = "people/cNullRef"
-        contact_id_result = await async_connection.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Null', 'Ref') RETURNING id"
-            )
+        contact_id = await seed_contact(
+            async_connection, first_name="Null", last_name="Ref"
         )
-        contact_id = int(contact_id_result.scalar_one())
         # Link present, but no reference_data yet (NULL).
         await async_connection.execute(
             text(

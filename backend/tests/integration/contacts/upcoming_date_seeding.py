@@ -22,6 +22,8 @@ from core_shared.models.contacts.important_date_types import (
 )
 from sqlalchemy import text
 
+from tests.integration import contact_seeding
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -46,25 +48,17 @@ async def seed_contact(
     it is the first of the three importance signals, and a caller ordering two
     contacts on one day needs it at seeding time.
     """
-    await connection.execute(
-        text("""
-            INSERT INTO contacts (
-                id, first_name, middle_name, last_name, nick_name, photo_url,
-                is_favourite, created_at, updated_at
-            )
-            VALUES (:id, :first_name, :middle_name, :last_name, :nick_name,
-                    :photo_url, :is_favourite, :now, :now)
-        """),
-        {
-            "id": contact_id,
-            "first_name": first_name,
-            "middle_name": middle_name,
-            "last_name": last_name,
-            "nick_name": nick_name,
-            "photo_url": photo_url,
-            "is_favourite": is_favourite,
-            "now": now,
-        },
+    await contact_seeding.seed_contact(
+        connection,
+        contact_id=contact_id,
+        first_name=first_name,
+        middle_name=middle_name,
+        last_name=last_name,
+        nick_name=nick_name,
+        photo_url=photo_url,
+        is_favourite=is_favourite,
+        created_at=now,
+        updated_at=now,
     )
 
 

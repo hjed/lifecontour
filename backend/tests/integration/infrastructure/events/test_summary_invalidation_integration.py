@@ -33,7 +33,6 @@ from core_shared.models.journals import (
 )
 from core_shared.models.journals.daily_summary import JournalDailySummary
 from core_shared.stream_client import StreamClient
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.daily_summary_repository import (
@@ -50,6 +49,7 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.infrastructure.events.summary_invalidation_consumer import (
     SummaryInvalidationConsumer,
 )
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.infrastructure.events.consumer_harness import (
     BATCH_SIZE,
     patched_consumer_engine,
@@ -338,14 +338,11 @@ class TestTheOtherWaysADayChanges:
         )
         await _seed_generated_summary(summary_repo, THE_DAY)
 
-        result = await async_connection.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES (:first, :last) RETURNING id"
-            ),
-            {"first": "Ada", "last": f"Lovelace-{uuid.uuid4().hex[:6]}"},
+        contact_id = await seed_contact(
+            async_connection,
+            first_name="Ada",
+            last_name=f"Lovelace-{uuid.uuid4().hex[:6]}",
         )
-        contact_id = result.scalar_one()
 
         assert created.id is not None
         contact_service = JournalContactService(

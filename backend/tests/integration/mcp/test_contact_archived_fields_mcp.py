@@ -6,16 +6,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import call_mcp_tool
 
 
 async def _insert_contact(conn: AsyncConnection) -> dict[str, int]:
     """A contact with a primary email, an archived phone and an archived address."""
-    contact_id = (
-        await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES ('Ada') RETURNING id")
-        )
-    ).scalar_one()
+    contact_id = await seed_contact(conn, first_name="Ada")
     email_id = (
         await conn.execute(
             text(

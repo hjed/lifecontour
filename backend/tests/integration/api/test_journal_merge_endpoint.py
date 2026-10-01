@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_journal,
@@ -911,15 +912,7 @@ async def _create_journal(
 
 async def _create_contact(connection: AsyncConnection, first_name: str) -> int:
     """Create a contact directly and return its id."""
-    from sqlalchemy import text
-
-    result = await connection.execute(
-        text("INSERT INTO contacts (first_name) VALUES (:first_name) RETURNING id"),
-        {"first_name": first_name},
-    )
-    contact_id = result.scalar()
-    assert contact_id is not None
-    return int(contact_id)
+    return await seed_contact(connection, first_name=first_name)
 
 
 async def _add_participant(

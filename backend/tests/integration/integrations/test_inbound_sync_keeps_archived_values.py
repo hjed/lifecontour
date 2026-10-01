@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
 )
@@ -47,11 +48,7 @@ def _event(event_type: str, emails: list[str]) -> OutboxEvent:
 
 async def _seed_contact(conn: AsyncConnection, *, linked: bool) -> dict[str, int]:
     """Ada: an active primary email, an archived email and an archived address."""
-    contact_id = (
-        await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES ('Ada') RETURNING id")
-        )
-    ).scalar_one()
+    contact_id = await seed_contact(conn, first_name="Ada")
     archived_email_id = (
         await conn.execute(
             text(

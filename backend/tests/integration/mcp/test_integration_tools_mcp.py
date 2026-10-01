@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
@@ -89,13 +90,7 @@ async def test_get_strava_athlete_mappings_mcp_tool(
 ):
     """Test get_strava_athlete_mappings MCP tool."""
     # Create contact
-    result = await clean_database.execute(
-        text(
-            "INSERT INTO contacts (first_name, last_name) VALUES ('Athlete', 'One') RETURNING id"
-        )
-    )
-    c1_id = result.scalar()
-    assert c1_id is not None
+    c1_id = await seed_contact(clean_database, first_name="Athlete", last_name="One")
 
     # Insert strava athlete mapping
     await clean_database.execute(

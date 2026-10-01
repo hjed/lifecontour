@@ -17,6 +17,7 @@ from app.core.history.models import (
     UnknownAggregationRootError,
 )
 from app.core.tasks.models.events import contact_field_name, journal_field_name
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, USER_ID, create_task
 
 
@@ -31,11 +32,7 @@ class TestSqlFieldHistoryRepositoryIntegration:
         return SqlFieldHistoryRepository(clean_database)
 
     async def _create_contact(self, conn: AsyncConnection, first_name: str) -> int:
-        result = await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-        return int(result.scalar_one())
+        return await seed_contact(conn, first_name=first_name)
 
     async def _create_method(self, conn: AsyncConnection, contact_id: int) -> int:
         result = await conn.execute(
@@ -567,11 +564,7 @@ class TestAContactsFeedCarriesTheirTaskRecords:
         return SqlFieldHistoryRepository(clean_database)
 
     async def _contact(self, conn: AsyncConnection, first_name: str) -> int:
-        result = await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-        return int(result.scalar_one())
+        return await seed_contact(conn, first_name=first_name)
 
     async def _link_row(
         self,
@@ -926,11 +919,7 @@ class TestADeletedTaskClosesItsOwnStoryOnTheContactsFeed:
 
     @staticmethod
     async def _contact(conn: AsyncConnection, first_name: str) -> int:
-        result = await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-        return int(result.scalar_one())
+        return await seed_contact(conn, first_name=first_name)
 
     @staticmethod
     async def _row(
@@ -1245,11 +1234,7 @@ class TestAContactIsSharedButTheirTasksAreNot:
 
     @staticmethod
     async def _contact(conn: AsyncConnection, first_name: str) -> int:
-        result = await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-        return int(result.scalar_one())
+        return await seed_contact(conn, first_name=first_name)
 
     async def _theirs(
         self,
@@ -1450,11 +1435,7 @@ class TestAMergeCarriesTheTaskRecords:
         return SqlFieldHistoryRepository(clean_database)
 
     async def _contact(self, conn: AsyncConnection, first_name: str) -> int:
-        result = await conn.execute(
-            text("INSERT INTO contacts (first_name) VALUES (:n) RETURNING id"),
-            {"n": first_name},
-        )
-        return int(result.scalar_one())
+        return await seed_contact(conn, first_name=first_name)
 
     async def _task(
         self, conn: AsyncConnection, anchors: tuple[int, int], text_: str = "call back"

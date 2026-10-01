@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 
 from immich_models import ImmichAlbum, ImmichAsset, ImmichAssetPerson
@@ -91,19 +92,6 @@ async def _fetch_outbox_rows(
         for row in result.fetchall()
     ]
     return [r for r in rows if r.event_data.get("external_id") == external_id]
-
-
-async def _insert_contact(connection: Any, first_name: str, last_name: str) -> int:
-    """Insert a minimal contact row and return its id."""
-    result = await connection.execute(
-        text("""
-            INSERT INTO contacts (first_name, last_name, created_at, updated_at)
-            VALUES (:first_name, :last_name, NOW(), NOW())
-            RETURNING id
-        """),
-        {"first_name": first_name, "last_name": last_name},
-    )
-    return int(result.fetchone().id)
 
 
 def _person_dict(
@@ -173,7 +161,9 @@ class TestContactOutboxEmission:
     ) -> None:
         """A linked person with a stale version hash yields ``contact.updated``."""
         person_id = "22222222-2222-4222-8222-222222222222"
-        contact_id = await _insert_contact(async_connection, "Existing", "Person")
+        contact_id = await seed_contact(
+            async_connection, first_name="Existing", last_name="Person"
+        )
 
         # Link the person via the canonical sync_metadata store with a *different*
         # hash so the next sync detects a change.
@@ -200,7 +190,9 @@ class TestContactOutboxEmission:
     ) -> None:
         """A single name match auto-links and emits ``contact.updated``."""
         person_id = "33333333-3333-4333-8333-333333333333"
-        contact_id = await _insert_contact(async_connection, "Linkable", "Match")
+        contact_id = await seed_contact(
+            async_connection, first_name="Linkable", last_name="Match"
+        )
 
         result = await sync_service.sync_people_batch(
             [_person_dict(person_id, "Linkable Match")]

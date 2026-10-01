@@ -40,6 +40,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.statement_recorder import recorded_statements
 
 URL = "/api/home-dashboard"
@@ -306,16 +307,9 @@ class EventSeeder:
         last_name: str | None = None,
         relationship_type: str = "PARTICIPANT",
     ) -> int:
-        result = await self.connection.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES (:first_name, :last_name) RETURNING id
-                """
-            ),
-            {"first_name": first_name, "last_name": last_name},
+        contact_id = await seed_contact(
+            self.connection, first_name=first_name, last_name=last_name
         )
-        contact_id = int(result.scalar_one())
         await self.connection.execute(
             text(
                 """

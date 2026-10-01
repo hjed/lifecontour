@@ -8,6 +8,7 @@ correctly against the actual schema.
 
 import pytest
 import pytest_asyncio
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,16 +27,7 @@ async def contact_with_tags(db_session: AsyncSession) -> dict[str, int]:
         Dict with contact_id and tag IDs for assertions.
     """
     # Create a contact
-    result = await db_session.execute(
-        text(
-            """
-            INSERT INTO contacts (first_name, last_name)
-            VALUES ('Test', 'TagPush')
-            RETURNING id
-            """
-        )
-    )
-    contact_id = result.scalar_one()
+    contact_id = await seed_contact(db_session, first_name="Test", last_name="TagPush")
 
     # Create tags
     result = await db_session.execute(
@@ -97,16 +89,9 @@ class TestLoadTagNamesForContactIntegration:
     ) -> None:
         """Test that an empty list is returned for a contact with no tags."""
         # Create a contact with no tags
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('NoTag', 'Contact')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="NoTag", last_name="Contact"
         )
-        contact_id = result.scalar_one()
         await db_session.flush()
 
         tag_names = await _load_tag_names_for_contact(db_session, contact_id)
@@ -124,16 +109,7 @@ class TestLoadTagNamesForContactIntegration:
     async def test_returns_sorted_tag_names(self, db_session: AsyncSession) -> None:
         """Test that tag names are returned in alphabetical order."""
         # Create contact
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Sort', 'Test')
-                RETURNING id
-                """
-            )
-        )
-        contact_id = result.scalar_one()
+        contact_id = await seed_contact(db_session, first_name="Sort", last_name="Test")
 
         # Create tags in non-alphabetical order
         for tag_name in ["zebra", "alpha", "middle"]:
@@ -175,16 +151,7 @@ class TestLoadFullContactIntegration:
     ) -> None:
         """Test that _load_full_contact returns methods, addresses, notes, and tags."""
         # Create a contact with a method, address, note, and tag
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('Full', 'Load')
-                RETURNING id
-                """
-            )
-        )
-        contact_id = result.scalar_one()
+        contact_id = await seed_contact(db_session, first_name="Full", last_name="Load")
 
         # Add email method
         await db_session.execute(
@@ -243,16 +210,9 @@ class TestLoadFullContactIntegration:
 
     async def test_load_full_contact_empty_tags(self, db_session: AsyncSession) -> None:
         """Test that _load_full_contact returns empty tags for tagless contact."""
-        result = await db_session.execute(
-            text(
-                """
-                INSERT INTO contacts (first_name, last_name)
-                VALUES ('NoTag', 'Full')
-                RETURNING id
-                """
-            )
+        contact_id = await seed_contact(
+            db_session, first_name="NoTag", last_name="Full"
         )
-        contact_id = result.scalar_one()
         await db_session.flush()
 
         full_data = await _load_full_contact(db_session, contact_id)
@@ -272,21 +232,9 @@ class TestLoadTagNamesForContactsBatchIntegration:
     ) -> None:
         """Test that batch loading retrieves tags for several contacts."""
         # Create two contacts
-        r1 = await db_session.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Batch', 'One') RETURNING id"
-            )
-        )
-        cid1 = r1.scalar_one()
+        cid1 = await seed_contact(db_session, first_name="Batch", last_name="One")
 
-        r2 = await db_session.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Batch', 'Two') RETURNING id"
-            )
-        )
-        cid2 = r2.scalar_one()
+        cid2 = await seed_contact(db_session, first_name="Batch", last_name="Two")
 
         # Create tags
         t1 = (
@@ -319,13 +267,7 @@ class TestLoadTagNamesForContactsBatchIntegration:
         self, db_session: AsyncSession
     ) -> None:
         """Test that contacts with no tags get empty lists in batch result."""
-        r = await db_session.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('NoTag', 'Batch') RETURNING id"
-            )
-        )
-        cid = r.scalar_one()
+        cid = await seed_contact(db_session, first_name="NoTag", last_name="Batch")
         await db_session.flush()
 
         result = await _load_tag_names_for_contacts_batch(db_session, [cid])
@@ -348,11 +290,7 @@ class TestLoadFullContactArchived:
     ) -> None:
         from worker import _transform_contact_to_google_person
 
-        contact_id = (
-            await db_session.execute(
-                text("INSERT INTO contacts (first_name) VALUES ('Arch') RETURNING id")
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(db_session, first_name="Arch")
         await db_session.execute(
             text(
                 """

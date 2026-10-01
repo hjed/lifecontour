@@ -44,6 +44,7 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import register_journal_tools
 from app.mcp.domains.journals.tools._shared import create_journal_tool_repositories
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
@@ -497,11 +498,7 @@ class TestJournalToolsIntegration:
             title="Somebody Else's Trip",
             user_id=OTHER_USER_ID,
         )
-        contact_id = (
-            await async_connection.execute(
-                text("INSERT INTO contacts (first_name) VALUES ('Mine') RETURNING id")
-            )
-        ).scalar_one()
+        contact_id = await seed_contact(async_connection, first_name="Mine")
 
         async with authenticated_lifespan_client() as authenticated_client:
             response = await post_mcp_tool(
@@ -781,29 +778,15 @@ class TestJournalToolsIntegration:
         clean_database: AsyncConnection,
     ):
         """Test linking a journal to a contact with real database integration."""
-        from sqlalchemy import text
 
         from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
             SqlJournalContactRelationshipRepository,
         )
 
         # Create a sample contact first
-        contact_query = text("""
-            INSERT INTO contacts (first_name, last_name)
-            VALUES (:first_name, :last_name)
-            RETURNING id
-        """)
-
-        contact_result = await clean_database.execute(
-            contact_query,
-            {
-                "first_name": "Test",
-                "last_name": "Contact",
-            },
+        contact_id = await seed_contact(
+            clean_database, first_name="Test", last_name="Contact"
         )
-        contact_row = contact_result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         # Create a journal-contact relationship
         relationship_repo = SqlJournalContactRelationshipRepository(clean_database)
@@ -833,29 +816,15 @@ class TestJournalToolsIntegration:
         clean_database: AsyncConnection,
     ):
         """Test getting journal relationships for a contact with real database integration."""
-        from sqlalchemy import text
 
         from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
             SqlJournalContactRelationshipRepository,
         )
 
         # Create a sample contact first
-        contact_query = text("""
-            INSERT INTO contacts (first_name, last_name)
-            VALUES (:first_name, :last_name)
-            RETURNING id
-        """)
-
-        contact_result = await clean_database.execute(
-            contact_query,
-            {
-                "first_name": "Test",
-                "last_name": "Contact",
-            },
+        contact_id = await seed_contact(
+            clean_database, first_name="Test", last_name="Contact"
         )
-        contact_row = contact_result.fetchone()
-        assert contact_row is not None
-        contact_id = int(contact_row[0])
 
         # Create a journal-contact relationship
         relationship_repo = SqlJournalContactRelationshipRepository(clean_database)

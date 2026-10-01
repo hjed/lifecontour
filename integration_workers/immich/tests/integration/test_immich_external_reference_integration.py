@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 
 from immich_models import ImmichPerson
@@ -79,13 +80,9 @@ class TestCreateVsUpdateReadsSyncMetadata:
         link and short-circuit to the unchanged/update path instead of
         name-matching and creating a duplicate.
         """
-        result = await async_connection.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Synced', 'Person') RETURNING id"
-            )
+        contact_id = await seed_contact(
+            async_connection, first_name="Synced", last_name="Person"
         )
-        contact_id = int(result.fetchone().id)
         person_id = "sync-meta-existing-1"
 
         person = ImmichPerson(id=person_id, name="Synced Person")
@@ -147,13 +144,9 @@ class TestAutoLinkDualWrite:
         async_connection: Any,
     ) -> None:
         """A single name match writes the canonical sync_metadata link."""
-        result = await async_connection.execute(
-            text(
-                "INSERT INTO contacts (first_name, last_name) "
-                "VALUES ('Autolink', 'Onlywrite') RETURNING id"
-            )
+        contact_id = await seed_contact(
+            async_connection, first_name="Autolink", last_name="Onlywrite"
         )
-        contact_id = int(result.fetchone().id)
         person_id = "auto-link-person-1"
 
         person = ImmichPerson(id=person_id, name="Autolink Onlywrite")

@@ -29,6 +29,7 @@ from app.core.contacts.services import ContactRelationshipService, ContactServic
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
+from tests.integration import contact_seeding
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     post_mcp_tool,
@@ -1837,18 +1838,12 @@ class TestListUpcomingImportantDatesTool:
         first_name: str = "Ada",
         is_favourite: bool = False,
     ) -> None:
-        await connection.execute(
-            text("""
-                INSERT INTO contacts (
-                    id, first_name, last_name, is_favourite, created_at, updated_at
-                )
-                VALUES (:id, :first_name, 'Lovelace', :is_favourite, NOW(), NOW())
-            """),
-            {
-                "id": contact_id,
-                "first_name": first_name,
-                "is_favourite": is_favourite,
-            },
+        await contact_seeding.seed_contact(
+            connection,
+            contact_id=contact_id,
+            first_name=first_name,
+            last_name="Lovelace",
+            is_favourite=is_favourite,
         )
 
     @staticmethod
