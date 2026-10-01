@@ -722,7 +722,7 @@ docs), it says **Lifecontour**, read from one constant per stack.
   - `uv lock --check` passes for each project.
   - The README renders the lockup and badge on GitHub (branch preview).
 
-**Phase 4 — Frontend package rename and design-sync.** PR ~150 lines. 🟡 IN PROGRESS
+**Phase 4 — Frontend package rename and design-sync.** PR ~150 lines. ✅ DONE
 
 - **Progress:** `frontend/package.json` is `lifecontour-frontend`, with the description
   "Lifecontour — Next.js frontend" and author `Harry J E Day`. `config.json` has
@@ -733,7 +733,10 @@ docs), it says **Lifecontour**, read from one constant per stack.
   needed. `src/__tests__/design-sync-config.test.ts` keeps the package name, `pkg`,
   `globalName` (= `APP_NAME`), the preview imports and the agent-facing docs in agreement.
   `pnpm install --frozen-lockfile` (lockfile unchanged), `pnpm quality:check`, the full Jest suite,
-  `next build` and `prepare.mjs` pass. **Remaining:** the `/design-sync` re-publish and re-grade.
+  `next build` and `prepare.mjs` pass. The `/design-sync` re-sync rebuilt the kit as
+  `window.Lifecontour`, re-graded all 47 previews `good` (render check clean), and re-published
+  them to the existing Claude Design project. The re-grade caught `TableRowHeader` rendering
+  centred (a `<th>` default); it now has `text-left` like `TableHead`, with an RTL assertion.
 
 - `frontend/package.json`: name `lifecontour-frontend`, and the description.
 - `frontend/.design-sync/config.json:3-4`: set `"pkg": "lifecontour-frontend"` and
