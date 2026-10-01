@@ -9,7 +9,7 @@ import {
   Input,
   Label,
   Textarea,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function EditEntry() {
   return (

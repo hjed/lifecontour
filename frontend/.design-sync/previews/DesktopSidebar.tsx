@@ -1,4 +1,4 @@
-import { DesktopSidebar, Header } from 'personal-management-frontend';
+import { DesktopSidebar, Header } from 'lifecontour-frontend';
 
 /**
  * The desktop sidebar is `md:fixed` — in the app it pins itself below the

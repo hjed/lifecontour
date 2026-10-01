@@ -1,4 +1,4 @@
-import { Checkbox, Label } from 'personal-management-frontend';
+import { Checkbox, Label } from 'lifecontour-frontend';
 
 export function States() {
   return (

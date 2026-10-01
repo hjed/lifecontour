@@ -1,4 +1,4 @@
-import { Badge, ScrollArea, Separator } from 'personal-management-frontend';
+import { Badge, ScrollArea, Separator } from 'lifecontour-frontend';
 
 const ENTRIES = [
   {

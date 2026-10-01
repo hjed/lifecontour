@@ -1,9 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  Skeleton,
-} from 'personal-management-frontend';
+import { Card, CardContent, CardHeader, Skeleton } from 'lifecontour-frontend';
 
 export function Shapes() {
   return (

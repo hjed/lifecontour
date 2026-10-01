@@ -1,4 +1,4 @@
-import { Breadcrumb, Header } from 'personal-management-frontend';
+import { Breadcrumb, Header } from 'lifecontour-frontend';
 
 /**
  * The app bar as it renders for a signed-in user: home affordance, centred

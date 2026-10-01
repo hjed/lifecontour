@@ -717,7 +717,8 @@ docs), it says **Lifecontour**, read from one constant per stack.
   - `AGENTS.md` project context;
   - `docs/tasks.md:1` heading;
   - `docs/architecture.md` heading;
-  - `frontend/.design-sync/conventions.md` (prose only);
+  - ~~`frontend/.design-sync/conventions.md` (prose only)~~ — done in Phase 4, whose re-sync
+    uploads it as the kit README;
   - `frontend/.env.example:6` (remove the unused `NEXT_PUBLIC_APP_NAME`);
   - `docker/oauth-ui/views/index.ejs:66`.
 - **Left for ITER19-005 Phase 1:** repository-URL text (`cd personal-management-system` at
@@ -728,7 +729,21 @@ docs), it says **Lifecontour**, read from one constant per stack.
   - `uv lock --check` passes for each project.
   - The README renders the lockup and badge on GitHub (branch preview).
 
-**Phase 4 — Frontend package rename and design-sync.** PR ~150 lines.
+**Phase 4 — Frontend package rename and design-sync.** PR ~150 lines. ✅ DONE
+
+- **Progress:** `frontend/package.json` is `lifecontour-frontend`, with the description
+  "Lifecontour — Next.js frontend" and author `Harry J E Day`. `config.json` has
+  `"pkg": "lifecontour-frontend"` and `"globalName": "Lifecontour"`, and all 47 previews import
+  the new package (`ds-entry.ts` re-exports by relative path, so it is unchanged). Every
+  `window.PMS` in `conventions.md`, `NOTES.md` and `process-shim.ts` is now `window.Lifecontour`,
+  and the `conventions.md` prose was renamed here rather than in Phase 3 so only one re-sync is
+  needed. `src/__tests__/design-sync-config.test.ts` keeps the package name, `pkg`,
+  `globalName` (= `APP_NAME`), the preview imports and the agent-facing docs in agreement.
+  `pnpm install --frozen-lockfile` (lockfile unchanged), `pnpm quality:check`, the full Jest suite,
+  `next build` and `prepare.mjs` pass. The `/design-sync` re-sync rebuilt the kit as
+  `window.Lifecontour`, re-graded all 47 previews `good` (render check clean), and re-published
+  them to the existing Claude Design project. The re-grade caught `TableRowHeader` rendering
+  centred (a `<th>` default); it now has `text-left` like `TableHead`, with an RTL assertion.
 
 - `frontend/package.json`: name `lifecontour-frontend`, and the description.
 - `frontend/.design-sync/config.json:3-4`: set `"pkg": "lifecontour-frontend"` and

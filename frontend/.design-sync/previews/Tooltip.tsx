@@ -3,7 +3,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { CalendarDays, Link2, Paperclip, Pencil, Trash2 } from 'lucide-react';
 
 /**

@@ -1,7 +1,8 @@
 {
-  "name": "personal-management-frontend",
+  "name": "lifecontour-frontend",
   "version": "0.1.0",
-  "description": "Personal CRM & Journal System - Next.js Frontend",
+  "description": "Lifecontour — Next.js frontend",
+  "author": "Harry J E Day",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "private": true,

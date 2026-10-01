@@ -9,7 +9,7 @@ import {
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuTrigger,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { Copy, Pencil, Star, Tag, Trash2, UserPlus } from 'lucide-react';
 
 /**

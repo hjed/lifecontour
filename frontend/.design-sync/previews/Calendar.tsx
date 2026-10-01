@@ -1,4 +1,4 @@
-import { Calendar } from 'personal-management-frontend';
+import { Calendar } from 'lifecontour-frontend';
 import { enAU } from 'date-fns/locale';
 
 const JULY_2026 = new Date(2026, 6, 1);

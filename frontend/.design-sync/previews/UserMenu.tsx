@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { UserMenu } from 'personal-management-frontend';
+import { UserMenu } from 'lifecontour-frontend';
 
 /**
  * The menu's open state is component-private (`DropdownMenu` is uncontrolled

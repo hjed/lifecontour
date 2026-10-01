@@ -1,4 +1,4 @@
-import { Sidebar } from 'personal-management-frontend';
+import { Sidebar } from 'lifecontour-frontend';
 
 /**
  * `Sidebar` renders both variants and lets the breakpoint pick one: the

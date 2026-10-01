@@ -1,4 +1,4 @@
-import { ExternalLinksDisplay } from 'personal-management-frontend';
+import { ExternalLinksDisplay } from 'lifecontour-frontend';
 import type { ExternalLink } from '@/lib/external-links';
 
 /** An outdoor journal entry synced from Strava with photos in Immich. */

@@ -4,7 +4,7 @@ import {
   CardHeader,
   CardTitle,
   ListSkeleton,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function Default() {
   return <ListSkeleton className='max-w-md' />;

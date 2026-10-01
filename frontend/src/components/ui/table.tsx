@@ -100,7 +100,7 @@ function TableRowHeader({ className, ...props }: React.ComponentProps<'th'>) {
       data-slot='table-row-header'
       scope='row'
       className={cn(
-        'p-2 align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'p-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
         className
       )}
       {...props}

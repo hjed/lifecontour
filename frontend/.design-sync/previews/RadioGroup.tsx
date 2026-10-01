@@ -1,8 +1,4 @@
-import {
-  Label,
-  RadioGroup,
-  RadioGroupItem,
-} from 'personal-management-frontend';
+import { Label, RadioGroup, RadioGroupItem } from 'lifecontour-frontend';
 
 export function EntryType() {
   return (

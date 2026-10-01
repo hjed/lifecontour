@@ -8,7 +8,7 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 
 export function OpenWithGroups() {
   return (

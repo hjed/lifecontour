@@ -6,7 +6,7 @@
 // `process.nextTick` and friends. Next's own build defines those; a plain
 // esbuild bundle does not, so the bare `process` identifier reaches the browser
 // and throws `ReferenceError: process is not defined` while the bundle is
-// initialising — which leaves `window.PMS` undefined and every component
+// initialising — which leaves `window.Lifecontour` undefined and every component
 // unrenderable.
 //
 // Leaving `env` empty is correct: each of those flags is optional, and Next

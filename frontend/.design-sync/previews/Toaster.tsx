@@ -1,6 +1,6 @@
 import * as React from 'react';
-import * as DS from 'personal-management-frontend';
-import { Toaster } from 'personal-management-frontend';
+import * as DS from 'lifecontour-frontend';
+import { Toaster } from 'lifecontour-frontend';
 import { toast as sonnerToast } from 'sonner';
 
 /**

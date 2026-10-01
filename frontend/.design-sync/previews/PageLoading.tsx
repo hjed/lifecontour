@@ -1,4 +1,4 @@
-import { PageLoading } from 'personal-management-frontend';
+import { PageLoading } from 'lifecontour-frontend';
 
 export function Default() {
   return (

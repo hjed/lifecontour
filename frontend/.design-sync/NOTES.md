@@ -1,4 +1,4 @@
-# design-sync notes — personal-management-frontend
+# design-sync notes — lifecontour-frontend
 
 Repo-specific gotchas for future syncs. Read this before re-running.
 
@@ -62,7 +62,7 @@ Repo-specific gotchas for future syncs. Read this before re-running.
   the API and React Query, not design-system parts.
 - `auth/AuthGuard` is excluded on purpose: a redirect gate that renders nothing.
 - The 40 in-scope files export **158** components (shadcn compounds ship all
-  their parts). All 158 are in the bundle and importable from `window.PMS`; only
+  their parts). All 158 are in the bundle and importable from `window.Lifecontour`; only
   the 47 primaries get cards and `.d.ts` contracts, with parts composed into
   their parent's preview.
 
@@ -145,8 +145,8 @@ the literal `process.env.NODE_ENV`, but `next/link` and the App Router internals
 also read `process.env.__NEXT_ROUTER_BASEPATH`, `process.env.NEXT_RUNTIME`,
 `process.nextTick` and friends. Without the shim the bare `process` identifier
 reaches the browser and throws while the bundle is initialising — which leaves
-`window.PMS` **undefined and every component unrenderable**. This presented as
-`[BUNDLE_EXPORT] 47/47 not a component on window.PMS`.
+`window.Lifecontour` **undefined and every component unrenderable**. This presented as
+`[BUNDLE_EXPORT] 47/47 not a component on window.Lifecontour`.
 
 ## `sonner`: `toast` must be re-exported
 
@@ -240,7 +240,7 @@ categories their stubs name. Adding a component means adding its stub too.
 ## LSP noise (ignore)
 
 Editor diagnostics on `.design-sync/previews/*.tsx` — "Cannot find module
-'personal-management-frontend'" and "'React' refers to a UMD global" — are
+'lifecontour-frontend'" and "'React' refers to a UMD global" — are
 expected. The package specifier is resolved by the converter's shim at
 preview-compile time and JSX runtime comes from esbuild; `.design-sync/` is a
 dot-directory so `tsc -p` never includes it. `pnpm type-check` is unaffected.

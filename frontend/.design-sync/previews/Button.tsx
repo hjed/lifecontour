@@ -1,4 +1,4 @@
-import { Button } from 'personal-management-frontend';
+import { Button } from 'lifecontour-frontend';
 import { Plus, Trash2, Download } from 'lucide-react';
 
 export function Variants() {

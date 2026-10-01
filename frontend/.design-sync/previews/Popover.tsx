@@ -9,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   Separator,
-} from 'personal-management-frontend';
+} from 'lifecontour-frontend';
 import { Plus, Tag } from 'lucide-react';
 
 /**
