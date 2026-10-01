@@ -135,3 +135,17 @@ class TestFullSyncIntegration:
             )
             outbox_count = result_outbox.scalar()
             assert outbox_count == 2
+
+            # Both the event and the contact it carries name the job's user
+            result_owners = await db_session.execute(
+                text(
+                    """
+                    SELECT (event_data::jsonb)->>'user_id',
+                           (event_data::jsonb)->'contact_data'->>'user_id'
+                    FROM outbox_events
+                    WHERE (event_data::jsonb)->>'external_id'
+                          IN ('people/full_sync_1', 'people/full_sync_2')
+                    """
+                )
+            )
+            assert result_owners.all() == [(test_user, test_user)] * 2

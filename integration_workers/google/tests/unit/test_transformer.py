@@ -29,11 +29,22 @@ from api_models import (
 from group_translator import GoogleGroupNameTranslator
 from transformer import GoogleContactTransformer
 
+TEST_USER_ID = "test-user-google"
+
 
 @pytest.fixture
 def transformer() -> GoogleContactTransformer:
     """Create GoogleContactTransformer instance."""
-    return GoogleContactTransformer()
+    return GoogleContactTransformer(user_id=TEST_USER_ID)
+
+
+def test_transform_person_stamps_the_sync_owner(
+    transformer: GoogleContactTransformer, sample_google_person: GooglePerson
+) -> None:
+    """Every contact the transformer builds belongs to the syncing user."""
+    contact = transformer.transform_person(sample_google_person)
+
+    assert contact.user_id == TEST_USER_ID
 
 
 @pytest.fixture
@@ -548,7 +559,9 @@ class TestGoogleContactTransformer:
         translator = GoogleGroupNameTranslator(
             reserved_group_ids=["myContacts"], group_mapping={}
         )
-        transformer = GoogleContactTransformer(translator=translator)
+        transformer = GoogleContactTransformer(
+            user_id=TEST_USER_ID, translator=translator
+        )
 
         person = GooglePerson(
             resourceName="people/c123",
@@ -823,7 +836,9 @@ class TestInboundHierarchySplitting:
             reserved_group_ids=[],
             group_mapping={"contactGroups/abc123": "Family/Extended"},
         )
-        transformer_with_groups = GoogleContactTransformer(translator=translator)
+        transformer_with_groups = GoogleContactTransformer(
+            user_id=TEST_USER_ID, translator=translator
+        )
 
         person = GooglePerson(
             resourceName="people/c123",
@@ -854,7 +869,9 @@ class TestInboundHierarchySplitting:
             reserved_group_ids=[],
             group_mapping={"contactGroups/deep": "A/B/C"},
         )
-        transformer_with_groups = GoogleContactTransformer(translator=translator)
+        transformer_with_groups = GoogleContactTransformer(
+            user_id=TEST_USER_ID, translator=translator
+        )
 
         person = GooglePerson(
             resourceName="people/c123",
@@ -892,7 +909,9 @@ class TestInboundHierarchySplitting:
             reserved_group_ids=["myContacts/special"],
             group_mapping={},
         )
-        transformer_with_reserved = GoogleContactTransformer(translator=translator)
+        transformer_with_reserved = GoogleContactTransformer(
+            user_id=TEST_USER_ID, translator=translator
+        )
 
         person = GooglePerson(
             resourceName="people/c123",
@@ -925,7 +944,9 @@ class TestInboundHierarchySplitting:
                 "contactGroups/lower": "scouts",
             },
         )
-        transformer_with_groups = GoogleContactTransformer(translator=translator)
+        transformer_with_groups = GoogleContactTransformer(
+            user_id=TEST_USER_ID, translator=translator
+        )
 
         person = GooglePerson(
             resourceName="people/c123",

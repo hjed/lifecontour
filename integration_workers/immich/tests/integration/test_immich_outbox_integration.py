@@ -151,6 +151,9 @@ class TestContactOutboxEmission:
         row = rows[0]
         assert row.event_data["integration_source"] == "immich"
         assert row.event_data["sync_type"] == "created"
+        # The event and its contact both name the syncing user as owner.
+        assert row.event_data["user_id"] == USER_ID
+        assert row.event_data["contact_data"]["user_id"] == USER_ID
         # Timestamps round-trip through the real (naive) columns.
         assert row.occurred_at is not None
         assert row.created_at is not None

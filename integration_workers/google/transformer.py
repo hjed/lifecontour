@@ -38,13 +38,20 @@ class GoogleContactTransformer:
     including proper mapping of names, contact methods, addresses, and metadata.
     """
 
-    def __init__(self, translator: GoogleGroupNameTranslator | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        user_id: str,
+        translator: GoogleGroupNameTranslator | None = None,
+    ) -> None:
         """
         Initialize the transformer.
 
         Args:
+            user_id: The syncing user, stamped as the owner of every contact built.
             translator: Translator for Google Contact Groups. If None, an empty one is used.
         """
+        self.user_id = user_id
         self.translator = translator or GoogleGroupNameTranslator(
             reserved_group_ids=[], group_mapping={}
         )
@@ -85,6 +92,7 @@ class GoogleContactTransformer:
 
         contact = Contact(
             first_name=first_name,
+            user_id=self.user_id,
             last_name=last_name,
             middle_name=middle_name,
             nick_name=nick_name,

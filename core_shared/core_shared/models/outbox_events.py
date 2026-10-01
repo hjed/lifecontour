@@ -41,6 +41,11 @@ class ContactSyncEventData(BaseModel):
         default=None,
         description="External system's version identifier (e.g. Google ETag)",
     )
+    user_id: str | None = Field(
+        default=None,
+        description="Owner of the synced contact (the integration's user); "
+        "required once the backend enforces contact ownership",
+    )
 
 
 # ── Sync Completed ───────────────────────────────────────────────────

@@ -389,6 +389,9 @@ class TestSyncPeopleFlow:
             events[0]["event_data"]["contact_data"]["photo_url"]
             == "/api/contacts/42/avatar"
         )
+        # The event and its contact both name the service's user as owner
+        assert events[0]["event_data"]["user_id"] == "user-1"
+        assert events[0]["event_data"]["contact_data"]["user_id"] == "user-1"
 
     @pytest.mark.asyncio
     async def test_single_contact_match_auto_links(
@@ -424,6 +427,9 @@ class TestSyncPeopleFlow:
         events = _extract_outbox_events(mock_connection)
         assert len(events) == 1
         assert events[0]["event_type"] == "contact.updated"
+        # The event and its contact both name the service's user as owner
+        assert events[0]["event_data"]["user_id"] == "user-1"
+        assert events[0]["event_data"]["contact_data"]["user_id"] == "user-1"
 
         contact_data = events[0]["event_data"]["contact_data"]
         assert contact_data["photo_url"] == "/api/contacts/10/avatar"
@@ -539,6 +545,9 @@ class TestSyncPeopleFlow:
         events = _extract_outbox_events(mock_connection)
         assert len(events) == 1
         assert events[0]["event_type"] == "contact.created"
+        # The event and its contact both name the service's user as owner
+        assert events[0]["event_data"]["user_id"] == "user-1"
+        assert events[0]["event_data"]["contact_data"]["user_id"] == "user-1"
 
         contact_data = events[0]["event_data"]["contact_data"]
         assert contact_data["first_name"] == "Bob"
