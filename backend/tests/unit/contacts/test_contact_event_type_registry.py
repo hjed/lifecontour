@@ -140,6 +140,24 @@ class TestPushedEventsCarryTheHandlerPrecondition:
                 "'contact_id' in event_data"
             )
 
+    def test_pushed_events_carry_the_owner(
+        self, declared_event_types: dict[str, set[str]]
+    ) -> None:
+        """Workers push a contact change only to its owner's accounts.
+
+        An event that names no owner is skipped, never fanned out to every
+        connected account, so a pushed event without ``user_id`` would silently
+        stop syncing. No exemptions: ``ContactMerged`` names the survivor's owner.
+        """
+        ownerless = [
+            event_type
+            for event_type in CONTACT_PUSH_EVENT_TYPES
+            if "user_id" not in declared_event_types[event_type]
+        ]
+        assert not ownerless, (
+            f"Pushed contact events carry no 'user_id' in event_data: {ownerless}"
+        )
+
     def test_contact_id_exemptions_are_pushed_events(self) -> None:
         """The exemption list only covers events that are actually pushed."""
         assert set(CONTACT_PUSH_EVENTS_WITHOUT_CONTACT_ID) <= set(

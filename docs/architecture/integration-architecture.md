@@ -284,6 +284,13 @@ non-empty) and is the one the backend reads:
   cross-owner link belongs to the per-user link store
   ([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 14–15).
 
+The other direction carries the owner too. Every contact domain event that workers push
+(`CONTACT_PUSH_EVENT_TYPES`: the lifecycle events, `ContactMerged`, tag membership, methods,
+addresses, notes and important dates) names the contact's owner in `event_data.user_id`, so a
+worker can push the change to that user's accounts only (Phase 13). The publishing service takes
+it from the contact it has already loaded; a merge names the survivor's owner. A registry test
+(`test_contact_event_type_registry.py`) fails if a pushed event is declared without it.
+
 ### 2. Task Queue System
 
 **Technology**: ARQ (asyncio-based, Redis-backed)

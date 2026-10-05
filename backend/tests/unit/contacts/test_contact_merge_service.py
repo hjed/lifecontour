@@ -456,6 +456,25 @@ class TestContactMergeOwner:
         saved = cast(Contact, mock_contact_repo.save.await_args.args[0])
         assert saved.user_id == SURVIVOR_OWNER
 
+    @pytest.mark.asyncio
+    async def test_merge_events_name_the_survivors_owner(
+        self, merge_service, mock_event_publisher, mock_transaction
+    ) -> None:
+        """Workers reconcile a merge only in the owner's accounts."""
+        await merge_service.merge_contacts(
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+        )
+
+        owners = {
+            call.args[0].event_type: call.args[0].event_data.get("user_id")
+            for call in mock_event_publisher.publish.call_args_list
+            if call.args[0].event_type in ("ContactMerged", "ContactUpdated")
+        }
+        assert owners == {
+            "ContactMerged": SURVIVOR_OWNER,
+            "ContactUpdated": SURVIVOR_OWNER,
+        }
+
 
 class TestContactMergeSideEffects:
     """The merge publishes a ContactUpdated audit event and a summary refresh.

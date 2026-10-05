@@ -1,5 +1,6 @@
 """Tests for main ContactService."""
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,7 @@ from core_shared.models.contacts.entities import (
     MethodType,
     Tag,
 )
+from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
 
@@ -923,6 +925,66 @@ class TestContactService:
         # Assert
         assert result == saved_method
         mock_contact_repo.add_method.assert_called_once_with(1, method)
+
+    @staticmethod
+    def _pushed_event_owners(mock_event_publisher: AsyncMock) -> dict[str, Any]:
+        """``{event_type: event_data["user_id"]}`` for every pushed event published."""
+        events = [call.args[0] for call in mock_event_publisher.publish.call_args_list]
+        return {
+            event.event_type: event.event_data.get("user_id")
+            for event in events
+            if event.event_type in CONTACT_PUSH_EVENT_TYPES
+        }
+
+    @pytest.mark.asyncio
+    async def test_created_contact_events_name_its_owner(
+        self, contact_service, mock_contact_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        contact = Contact(user_id="owner-9", first_name="John")
+        mock_contact_repo.save.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+
+        await contact_service.create_contact(contact, mock_transaction)
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactCreated": "owner-9"
+        }
+
+    @pytest.mark.asyncio
+    async def test_child_row_events_name_the_parent_contacts_owner(
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_tag_repo,
+        mock_event_publisher,
+        mock_transaction,
+    ) -> None:
+        """A child mutation publishes only its own event; it still names the owner."""
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.find_by_email.return_value = None
+        mock_contact_repo.add_method.return_value = ContactMethod(
+            method_type=MethodType.EMAIL, value="j@example.com", contact_id=1, id=2
+        )
+        mock_tag_repo.find_by_id.return_value = Tag(name=TagName("work"), id=3)
+
+        await contact_service.add_contact_method(
+            1,
+            ContactMethod(
+                method_type=MethodType.EMAIL, value="j@example.com", contact_id=1
+            ),
+            mock_transaction,
+        )
+        await contact_service.assign_tag_to_contact(1, 3, mock_transaction)
+        await contact_service.delete_contact(1, mock_transaction)
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactMethodAdded": "owner-9",
+            "TagAssigned": "owner-9",
+            "ContactDeleted": "owner-9",
+        }
 
     @pytest.mark.asyncio
     async def test_add_contact_address_success(

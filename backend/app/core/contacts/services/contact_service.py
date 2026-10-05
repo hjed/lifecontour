@@ -632,6 +632,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
 
@@ -728,6 +729,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -819,6 +821,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -909,6 +912,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1017,19 +1021,44 @@ class ContactService:
     ) -> dict[str, list[Any]]:
         """Save all related entities and return them in a dictionary."""
         saved_methods = await self._save_contact_methods(
-            contact_id, contact.methods, transaction, changed_by, source
+            contact_id,
+            contact.methods,
+            transaction,
+            changed_by,
+            source,
+            user_id=contact.user_id,
         )
         saved_addresses = await self._save_contact_addresses(
-            contact_id, contact.addresses, transaction, changed_by, source
+            contact_id,
+            contact.addresses,
+            transaction,
+            changed_by,
+            source,
+            user_id=contact.user_id,
         )
         saved_notes = await self._save_contact_notes(
-            contact_id, contact.notes, transaction, changed_by, source
+            contact_id,
+            contact.notes,
+            transaction,
+            changed_by,
+            source,
+            user_id=contact.user_id,
         )
         saved_tags = await self._save_contact_tags(
-            contact_id, contact.tags, transaction, changed_by, source
+            contact_id,
+            contact.tags,
+            transaction,
+            changed_by,
+            source,
+            user_id=contact.user_id,
         )
         saved_dates = await self._save_contact_important_dates(
-            contact_id, contact.important_dates, transaction, changed_by, source
+            contact_id,
+            contact.important_dates,
+            transaction,
+            changed_by,
+            source,
+            user_id=contact.user_id,
         )
 
         return {
@@ -1083,6 +1112,7 @@ class ContactService:
             source=source,
             changed_by=changed_by,
             transaction=transaction,
+            user_id=contact.user_id,
         )
         await self.event_publisher.publish(event)
 
@@ -1135,6 +1165,7 @@ class ContactService:
                     changed_by,
                     source,
                     affects_history=False,
+                    user_id=current_contact.user_id,
                 ),
             )
             subentity_changes.update(moved)
@@ -1154,6 +1185,7 @@ class ContactService:
                     changed_by,
                     source,
                     affects_history=False,
+                    user_id=current_contact.user_id,
                 ),
             )
             subentity_changes.update(moved)
@@ -1173,6 +1205,7 @@ class ContactService:
                     changed_by,
                     source,
                     affects_history=False,
+                    user_id=current_contact.user_id,
                 ),
             )
             subentity_changes.update(moved)
@@ -1185,6 +1218,7 @@ class ContactService:
                 changed_by,
                 source,
                 affects_history=False,
+                user_id=current_contact.user_id,
             )
 
         if contact.important_dates is not None:
@@ -1195,6 +1229,7 @@ class ContactService:
                 transaction,
                 changed_by,
                 source,
+                user_id=current_contact.user_id,
             )
             subentity_changes.update(moved)
 
@@ -1293,6 +1328,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str,
         source: Provenance,
+        *,
+        user_id: str,
     ) -> tuple[list[ImportantDate], ChangedFields]:
         """Reconcile the important dates, publishing a real edit for a match.
 
@@ -1321,7 +1358,13 @@ class ContactService:
         applied: dict[int, ImportantDate] = {}
         for row, incoming in plan.updates:
             edited, _ = await self._edit_important_date(
-                contact_id, row, incoming, transaction, changed_by, source
+                contact_id,
+                row,
+                incoming,
+                transaction,
+                changed_by,
+                source,
+                user_id=user_id,
             )
             applied[id(incoming)] = edited
 
@@ -1333,6 +1376,7 @@ class ContactService:
             changed_by,
             source,
             affects_history=False,
+            user_id=user_id,
         )
         saved = self._in_submitted_order(submitted, inserts, inserted, applied)
 
@@ -1348,6 +1392,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str,
         source: Provenance,
+        *,
+        user_id: str,
     ) -> tuple[ImportantDate, ChangedFields]:
         """Edit one stored date in place, if anything moved.
 
@@ -1383,6 +1429,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=user_id,
             )
         )
         return saved_date, changed
@@ -1441,6 +1488,7 @@ class ContactService:
             source=source,
             changed_by=changed_by,
             transaction=transaction,
+            user_id=contact.user_id,
         )
         await self.event_publisher.publish(event)
 
@@ -1480,6 +1528,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         affects_history: bool = True,
+        *,
+        user_id: str,
     ) -> list[ContactMethod]:
         """Save contact methods and publish events."""
         saved_methods = []
@@ -1512,6 +1562,7 @@ class ContactService:
                 changed_by=changed_by,
                 affects_history=affects_history,
                 transaction=transaction,
+                user_id=user_id,
             )
             await self.event_publisher.publish(method_event)
 
@@ -1525,6 +1576,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         affects_history: bool = True,
+        *,
+        user_id: str,
     ) -> list[ContactAddress]:
         """Save contact addresses and publish events."""
         saved_addresses = []
@@ -1557,6 +1610,7 @@ class ContactService:
                 changed_by=changed_by,
                 affects_history=affects_history,
                 transaction=transaction,
+                user_id=user_id,
             )
             await self.event_publisher.publish(address_event)
 
@@ -1570,6 +1624,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         affects_history: bool = True,
+        *,
+        user_id: str,
     ) -> list[ContactNote]:
         """Save contact notes and publish events."""
         saved_notes = []
@@ -1595,6 +1651,7 @@ class ContactService:
                 changed_by=changed_by,
                 affects_history=affects_history,
                 transaction=transaction,
+                user_id=user_id,
             )
             await self.event_publisher.publish(note_event)
 
@@ -1608,6 +1665,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         affects_history: bool = True,
+        *,
+        user_id: str,
     ) -> list[Tag]:
         """Save contact tags and publish events."""
         saved_tags = []
@@ -1631,6 +1690,7 @@ class ContactService:
                 changed_by=changed_by,
                 affects_history=affects_history,
                 transaction=transaction,
+                user_id=user_id,
             )
             await self.event_publisher.publish(tag_event)
 
@@ -1644,6 +1704,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         affects_history: bool = True,
+        *,
+        user_id: str,
     ) -> list[ImportantDate]:
         """Save contact important dates and publish events."""
         saved_dates = []
@@ -1669,6 +1731,7 @@ class ContactService:
                 changed_by=changed_by,
                 affects_history=affects_history,
                 transaction=transaction,
+                user_id=user_id,
             )
             await self.event_publisher.publish(date_event)
 
@@ -1699,7 +1762,7 @@ class ContactService:
 
         async def _delete_operation() -> None:
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -1712,6 +1775,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
 
@@ -1753,7 +1817,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -1780,6 +1844,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1804,7 +1869,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -1826,6 +1891,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1869,7 +1935,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -1901,6 +1967,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -1946,7 +2013,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -1977,6 +2044,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -2021,7 +2089,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2040,6 +2108,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -2069,7 +2138,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2091,6 +2160,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -2128,7 +2198,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2149,6 +2219,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -2183,7 +2254,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2203,6 +2274,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)
@@ -2234,7 +2306,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2249,7 +2321,13 @@ class ContactService:
             # body the whole-contact save runs for a matched date, so the feed
             # reads the same whichever surface made the change.
             saved_date, date_changes = await self._edit_important_date(
-                contact_id, existing, date, transaction, changed_by, source
+                contact_id,
+                existing,
+                date,
+                transaction,
+                changed_by,
+                source,
+                user_id=contact.user_id,
             )
             if not date_changes:
                 return existing
@@ -2281,7 +2359,7 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Validate contact exists
-            await self.contact_validation.validate_contact_exists(
+            contact = await self.contact_validation.validate_contact_exists(
                 contact_id, transaction
             )
 
@@ -2302,6 +2380,7 @@ class ContactService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
             await self.contact_repo.touch(contact_id, transaction)

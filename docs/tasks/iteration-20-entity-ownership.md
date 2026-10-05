@@ -208,7 +208,7 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 - [x] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
 - [ ] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
 - [ ] Contact search, global search and search suggestions return only the acting user's contacts.
-- [ ] Worker-published contact sync events and backend contact events carry `user_id`.
+- [x] Worker-published contact sync events and backend contact events carry `user_id`.
 
 ---
 
@@ -372,7 +372,7 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   - Inbound consumer (`outbox_event_processor.py:646, 883`): the owner is
     `payload.user_id` (or `contact_data.user_id`); missing →
     `PermanentOutboxEventProcessingError("contact sync event names no owner")`.
-- [ ] **Every event in `CONTACT_PUSH_EVENT_TYPES`** (`core/contacts/models/events.py` — the four
+- [x] **Every event in `CONTACT_PUSH_EVENT_TYPES`** (`core/contacts/models/events.py` — the four
   lifecycle events plus `TagAssigned`, `TagRemoved`, `ContactMethodAdded/Deleted`,
   `ContactAddressAdded/Deleted`, `ContactNoteAdded`, `ImportantDateAdded/Updated/Deleted`) gains
   `user_id` in `event_data`, supplied by the publishing service from the aggregate it has already
@@ -393,7 +393,7 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   downgrades; existing rows otherwise untouched.
 - [x] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
   (`test_contact_repository_integration.py`).
-- [ ] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
+- [x] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
   and rejects a payload without one; each of the four events carries `user_id`
   (`tests/unit/contacts/test_contact_service.py`, `tests/unit/api/test_contact_converters.py`,
   `tests/unit/core/integrations/test_outbox_event_processor.py`).
@@ -420,7 +420,8 @@ that mechanical test change lands first, while the field is still optional:
   `create_contact_sync_event(user_id=…)`; every writer stamps an owner (REST and MCP the acting
   user, Immich-conflict "create" on both surfaces, suggestion accept, the merge survivor); the
   inbound consumer's owner handling; `0124` (`SET NOT NULL`).
-- **3c** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event. **Must merge before Phase 13.**
+- **3c ✅ DONE** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event (a required keyword on
+  each constructor, so mypy names every publisher). **Must merge before Phase 13.**
   Safe after `NOT NULL`: nothing before Phase 13 reads the owner from an event.
 
 **Decisions (recorded during implementation):**
@@ -453,6 +454,11 @@ that mechanical test change lands first, while the field is still optional:
   `contact_data` says (`contact_data` is not rewritten, so version hashes are unchanged). An update
   through the link store, or a create reconciled by email, keeps the **stored** owner and logs a
   mismatch rather than refusing: refusing cross-owner links is Phases 14–15's per-user link store.
+- **Child-row events take the owner from the contact the service already loads.**
+  `ContactValidationService.validate_contact_exists` now returns the contact it loads; field
+  updates use `current_contact`, bulk saves the aggregate being saved (on update, the *stored*
+  contact), and the private `_save_contact_*` / important-date helpers take a keyword `user_id`.
+  No extra query.
 - **`ContactMergeService._merge_scalars` names the survivor's owner explicitly.** It builds the
   merged contact with `Contact(id=…, **resolved)`; mypy cannot see a missing required argument
   through `**dict`, so this one site would have raised `TypeError` on every merge with no type
@@ -467,6 +473,13 @@ that mechanical test change lands first, while the field is still optional:
   `max_delivery_count` (5). An owner-less sync event therefore costs four pointless retries before
   it reaches the dead-letter table. Pre-existing for every permanent payload error; dead-lettering
   it on first delivery is a `StreamConsumer` change for all consumers (augment review on #1674).
+- `daily_summary_invalidation_service.py` (the `ImportantDate*` / `ContactUpdated` invalidation)
+  still documents "contacts carries no owner column" and fans out to every user with a summary.
+  The events now carry `user_id`; scoping that fan-out belongs with the dashboard reads in Phase 4.
+- `backend/tests/unit/contacts/test_summary_prompt_builder.py::test_prompt_current_time_uses_user_timezone`
+  asserts Sydney renders as `AEST` / `+10:00`, which is false during daylight saving (from
+  2026-10-04 it is `AEDT` / `+11:00`). It fails on `main`, independent of this phase; fix the test
+  to pin "now" or to accept the zone's current abbreviation.
 - Worker integration suites run `upgrade head` without resetting the schema, so a stale *local*
   test database holding contacts and no owner evidence makes `0123` refuse; recreate the
   container or pass `-x contacts_owner`. CI starts from fresh containers.

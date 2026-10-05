@@ -69,11 +69,16 @@ class ContactValidationService:
 
     async def validate_contact_exists(
         self, contact_id: int, _transaction: AsyncConnection
-    ) -> None:
-        """Validate that a contact exists."""
+    ) -> Contact:
+        """Validate that a contact exists, and return it.
+
+        Child-row writes publish their own event, which names the contact's
+        owner, so the caller keeps the contact this check loads.
+        """
         contact = await self.contact_repo.find_by_id(contact_id)
         if not contact:
             raise ContactNotFoundError(contact_id)
+        return contact
 
     async def validate_contact_tag_limit(
         self, contact_id: int, _transaction: AsyncConnection

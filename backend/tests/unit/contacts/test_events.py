@@ -26,6 +26,7 @@ from app.core.contacts.models.events import (
     TagAssigned,
     TagRemoved,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactCreated:
@@ -33,7 +34,9 @@ class TestContactCreated:
 
     def test_create_event_with_last_name(self):
         """Test creating ContactCreated event with last name."""
-        event = ContactCreated(contact_id=1, first_name="John", last_name="Doe")
+        event = ContactCreated(
+            user_id=TEST_USER_ID, contact_id=1, first_name="John", last_name="Doe"
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactCreated"
@@ -45,7 +48,7 @@ class TestContactCreated:
 
     def test_create_event_without_last_name(self):
         """Test creating ContactCreated event without last name."""
-        event = ContactCreated(contact_id=2, first_name="Jane")
+        event = ContactCreated(contact_id=2, first_name="Jane", user_id=TEST_USER_ID)
 
         assert event.aggregate_id == 2
         assert event.event_type == "ContactCreated"
@@ -66,7 +69,9 @@ class TestContactUpdated:
             "email": ("old@example.com", "new@example.com"),
         }
 
-        event = ContactUpdated(contact_id=1, changed_fields=changed_fields)
+        event = ContactUpdated(
+            user_id=TEST_USER_ID, contact_id=1, changed_fields=changed_fields
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactUpdated"
@@ -81,7 +86,7 @@ class TestContactDeleted:
 
     def test_create_event(self):
         """Test creating ContactDeleted event."""
-        event = ContactDeleted(contact_id=1)
+        event = ContactDeleted(contact_id=1, user_id=TEST_USER_ID)
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactDeleted"
@@ -95,7 +100,9 @@ class TestTagAssigned:
 
     def test_create_event(self):
         """Test creating TagAssigned event."""
-        event = TagAssigned(contact_id=1, tag_id=2, tag_name="work")
+        event = TagAssigned(
+            user_id=TEST_USER_ID, contact_id=1, tag_id=2, tag_name="work"
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "TagAssigned"
@@ -111,7 +118,9 @@ class TestTagRemoved:
 
     def test_create_event(self):
         """Test creating TagRemoved event."""
-        event = TagRemoved(contact_id=1, tag_id=2, tag_name="work")
+        event = TagRemoved(
+            user_id=TEST_USER_ID, contact_id=1, tag_id=2, tag_name="work"
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "TagRemoved"
@@ -128,7 +137,11 @@ class TestContactMethodAdded:
     def test_create_event(self):
         """Test creating ContactMethodAdded event."""
         event = ContactMethodAdded(
-            contact_id=1, method_id=2, method_type="email", value="test@example.com"
+            user_id=TEST_USER_ID,
+            contact_id=1,
+            method_id=2,
+            method_type="email",
+            value="test@example.com",
         )
 
         assert event.aggregate_id == 1
@@ -147,7 +160,11 @@ class TestContactAddressAdded:
     def test_create_event(self):
         """Test creating ContactAddressAdded event."""
         event = ContactAddressAdded(
-            contact_id=1, address_id=2, street_line_1="123 Main St", country_code="AU"
+            user_id=TEST_USER_ID,
+            contact_id=1,
+            address_id=2,
+            street_line_1="123 Main St",
+            country_code="AU",
         )
 
         assert event.aggregate_id == 1
@@ -165,7 +182,9 @@ class TestContactNoteAdded:
 
     def test_create_event_short_content(self):
         """Test creating ContactNoteAdded event with short content."""
-        event = ContactNoteAdded(contact_id=1, note_id=2, content="Short note")
+        event = ContactNoteAdded(
+            user_id=TEST_USER_ID, contact_id=1, note_id=2, content="Short note"
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactNoteAdded"
@@ -178,7 +197,9 @@ class TestContactNoteAdded:
     def test_create_event_long_content_truncated(self):
         """Test creating ContactNoteAdded event with long content gets truncated."""
         long_content = "x" * 150  # 150 characters
-        event = ContactNoteAdded(contact_id=1, note_id=2, content=long_content)
+        event = ContactNoteAdded(
+            user_id=TEST_USER_ID, contact_id=1, note_id=2, content=long_content
+        )
 
         assert event.aggregate_id == 1
         assert event.event_type == "ContactNoteAdded"
@@ -196,13 +217,14 @@ class TestProvenanceEnrichment:
     """Every contact event carries source + changed_by, defaulting to system."""
 
     def test_contact_created_defaults_to_system(self) -> None:
-        event = ContactCreated(contact_id=1, first_name="John")
+        event = ContactCreated(contact_id=1, first_name="John", user_id=TEST_USER_ID)
 
         assert event.event_data["source"] == Provenance.SYSTEM.value
         assert event.event_data["changed_by"] == "system"
 
     def test_contact_created_explicit_provenance(self) -> None:
         event = ContactCreated(
+            user_id=TEST_USER_ID,
             contact_id=1,
             first_name="John",
             source=Provenance.UI,
@@ -214,6 +236,7 @@ class TestProvenanceEnrichment:
 
     def test_contact_updated_carries_provenance(self) -> None:
         event = ContactUpdated(
+            user_id=TEST_USER_ID,
             contact_id=1,
             changed_fields={"first_name": ("A", "B")},
             source=Provenance.MCP,
@@ -224,13 +247,16 @@ class TestProvenanceEnrichment:
         assert event.event_data["changed_by"] == "mcp"
 
     def test_contact_deleted_carries_provenance(self) -> None:
-        event = ContactDeleted(contact_id=1, source=Provenance.UI, changed_by="ui")
+        event = ContactDeleted(
+            user_id=TEST_USER_ID, contact_id=1, source=Provenance.UI, changed_by="ui"
+        )
 
         assert event.event_data["source"] == Provenance.UI.value
         assert event.event_data["changed_by"] == "ui"
 
     def test_tag_assigned_carries_provenance(self) -> None:
         event = TagAssigned(
+            user_id=TEST_USER_ID,
             contact_id=1,
             tag_id=2,
             tag_name="work",
@@ -243,6 +269,7 @@ class TestProvenanceEnrichment:
 
     def test_tag_removed_carries_provenance(self) -> None:
         event = TagRemoved(
+            user_id=TEST_USER_ID,
             contact_id=1,
             tag_id=2,
             tag_name="work",
@@ -255,6 +282,7 @@ class TestProvenanceEnrichment:
 
     def test_method_added_carries_provenance(self) -> None:
         event = ContactMethodAdded(
+            user_id=TEST_USER_ID,
             contact_id=1,
             method_id=2,
             method_type="email",
@@ -268,6 +296,7 @@ class TestProvenanceEnrichment:
 
     def test_address_added_carries_provenance(self) -> None:
         event = ContactAddressAdded(
+            user_id=TEST_USER_ID,
             contact_id=1,
             address_id=2,
             street_line_1="1 St",
@@ -281,6 +310,7 @@ class TestProvenanceEnrichment:
 
     def test_note_added_carries_provenance(self) -> None:
         event = ContactNoteAdded(
+            user_id=TEST_USER_ID,
             contact_id=1,
             note_id=2,
             content="Hi",
@@ -300,13 +330,18 @@ class TestAffectsHistoryFlag:
 
     def test_method_added_defaults_affects_history_true(self) -> None:
         event = ContactMethodAdded(
-            contact_id=1, method_id=2, method_type="email", value="a@b.com"
+            user_id=TEST_USER_ID,
+            contact_id=1,
+            method_id=2,
+            method_type="email",
+            value="a@b.com",
         )
 
         assert event.event_data["affects_history"] is True
 
     def test_method_added_accepts_affects_history_false(self) -> None:
         event = ContactMethodAdded(
+            user_id=TEST_USER_ID,
             contact_id=1,
             method_id=2,
             method_type="email",
@@ -319,12 +354,17 @@ class TestAffectsHistoryFlag:
     def test_address_added_carries_affects_history(self) -> None:
         assert (
             ContactAddressAdded(
-                contact_id=1, address_id=2, street_line_1="1 St", country_code="AU"
+                user_id=TEST_USER_ID,
+                contact_id=1,
+                address_id=2,
+                street_line_1="1 St",
+                country_code="AU",
             ).event_data["affects_history"]
             is True
         )
         assert (
             ContactAddressAdded(
+                user_id=TEST_USER_ID,
                 contact_id=1,
                 address_id=2,
                 street_line_1="1 St",
@@ -336,14 +376,18 @@ class TestAffectsHistoryFlag:
 
     def test_note_added_carries_affects_history(self) -> None:
         assert (
-            ContactNoteAdded(contact_id=1, note_id=2, content="Hi").event_data[
-                "affects_history"
-            ]
+            ContactNoteAdded(
+                user_id=TEST_USER_ID, contact_id=1, note_id=2, content="Hi"
+            ).event_data["affects_history"]
             is True
         )
         assert (
             ContactNoteAdded(
-                contact_id=1, note_id=2, content="Hi", affects_history=False
+                user_id=TEST_USER_ID,
+                contact_id=1,
+                note_id=2,
+                content="Hi",
+                affects_history=False,
             ).event_data["affects_history"]
             is False
         )
@@ -351,27 +395,35 @@ class TestAffectsHistoryFlag:
     def test_important_date_added_carries_affects_history(self) -> None:
         assert (
             ImportantDateAdded(
-                contact_id=1, date_id=2, date_type="birthday"
+                user_id=TEST_USER_ID, contact_id=1, date_id=2, date_type="birthday"
             ).event_data["affects_history"]
             is True
         )
         assert (
             ImportantDateAdded(
-                contact_id=1, date_id=2, date_type="birthday", affects_history=False
+                user_id=TEST_USER_ID,
+                contact_id=1,
+                date_id=2,
+                date_type="birthday",
+                affects_history=False,
             ).event_data["affects_history"]
             is False
         )
 
     def test_tag_assigned_carries_affects_history(self) -> None:
         assert (
-            TagAssigned(contact_id=1, tag_id=2, tag_name="work").event_data[
-                "affects_history"
-            ]
+            TagAssigned(
+                user_id=TEST_USER_ID, contact_id=1, tag_id=2, tag_name="work"
+            ).event_data["affects_history"]
             is True
         )
         assert (
             TagAssigned(
-                contact_id=1, tag_id=2, tag_name="work", affects_history=False
+                user_id=TEST_USER_ID,
+                contact_id=1,
+                tag_id=2,
+                tag_name="work",
+                affects_history=False,
             ).event_data["affects_history"]
             is False
         )
@@ -383,6 +435,7 @@ class TestContactUpdatedSubEntityKeys:
 
     def test_method_field_edit_uses_mangled_key(self) -> None:
         event = ContactUpdated(
+            user_id=TEST_USER_ID,
             contact_id=1,
             changed_fields={"method_2_value": ("a@b.com", "c@d.com")},
             source=Provenance.UI,

@@ -7,6 +7,7 @@ import pytest
 from app.core.contacts.models.events import ContactCreated
 from app.core.contacts.models.repositories import ContactEditEvent
 from app.core.contacts.services.contact_event_service import ContactEventService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactEventService:
@@ -33,7 +34,9 @@ class TestContactEventService:
     ):
         """Test recording a domain event."""
         # Arrange
-        domain_event = ContactCreated(contact_id=1, first_name="John", last_name="Doe")
+        domain_event = ContactCreated(
+            user_id=TEST_USER_ID, contact_id=1, first_name="John", last_name="Doe"
+        )
 
         # Act
         await service.record_domain_event(domain_event, mock_transaction)

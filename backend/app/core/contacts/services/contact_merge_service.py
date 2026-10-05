@@ -265,6 +265,7 @@ class ContactMergeService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=survivor.user_id,
             )
         )
 
@@ -283,6 +284,7 @@ class ContactMergeService:
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
+                user_id=survivor.user_id,
                 external_collisions=[c.as_dict() for c in collisions],
             )
         )
