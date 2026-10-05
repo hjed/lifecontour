@@ -15,9 +15,9 @@ dependencies = [
     "arq==0.28.0",
 
     # Google API client libraries
-    "google-api-python-client==2.200.0",
-    "google-auth-httplib2==0.4.2",
-    "google-auth-oauthlib==1.4.1",
+    "google-api-python-client==2.201.0",
+    "google-auth-httplib2==0.4.3",
+    "google-auth-oauthlib==1.5.0",
 
     # Database
     "sqlalchemy[asyncio]>=2.0.52",
