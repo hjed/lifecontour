@@ -19,6 +19,7 @@ from app.core.integrations.services.contact_suggestion_service import (
     ContactSuggestionService,
     ExistingContactTarget,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 CONTACT_ID = 7
 EMAIL = "jane@x.com"
@@ -26,6 +27,7 @@ EMAIL = "jane@x.com"
 
 def _contact(*emails: str) -> Contact:
     return Contact(
+        user_id=TEST_USER_ID,
         first_name="Jane",
         id=CONTACT_ID,
         methods=[

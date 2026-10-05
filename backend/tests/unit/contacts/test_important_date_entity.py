@@ -8,6 +8,8 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 
+from tests.integration.contact_seeding import TEST_USER_ID
+
 
 def test_important_date_valid_full_precision():
     """Test creating a valid full precision date."""
@@ -166,7 +168,7 @@ def test_custom_date_type_validation():
 
 def test_contact_get_birthday():
     """Test helper method to get birthday."""
-    contact = Contact(first_name="John")
+    contact = Contact(user_id=TEST_USER_ID, first_name="John")
     assert contact.get_birthday() is None
 
     birthday = ImportantDate(

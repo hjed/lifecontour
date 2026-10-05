@@ -81,6 +81,7 @@ class TestWorkerOutboxEventCreation:
         """Test that OutboxEvent.create_contact_sync_event creates correct event for new contact."""
         outbox_event = OutboxEvent.create_contact_sync_event(
             contact_data=serialized_contact,
+            user_id="test-user-google",
             integration_source="google",
             external_id="people/c123456789",
             sync_type="created",
@@ -104,6 +105,7 @@ class TestWorkerOutboxEventCreation:
         """Test that OutboxEvent.create_contact_sync_event creates correct event for updated contact."""
         outbox_event = OutboxEvent.create_contact_sync_event(
             contact_data=serialized_contact,
+            user_id="test-user-google",
             integration_source="google",
             external_id="people/c123456789",
             sync_type="updated",
@@ -122,6 +124,7 @@ class TestWorkerOutboxEventCreation:
         """Test that all Contact dict fields are preserved in the outbox event."""
         outbox_event = OutboxEvent.create_contact_sync_event(
             contact_data=serialized_contact,
+            user_id="test-user-google",
             integration_source="google",
             external_id="people/c123456789",
             sync_type="created",
@@ -160,6 +163,7 @@ class TestWorkerOutboxEventCreation:
         """Test that outbox events have all required fields."""
         outbox_event = OutboxEvent.create_contact_sync_event(
             contact_data=serialized_contact,
+            user_id="test-user-google",
             integration_source="google",
             external_id="people/c123456789",
             sync_type="created",

@@ -26,6 +26,7 @@ from app.core.contacts.services.summary_generation_service import (
     SummaryInput,
     SummaryInputAssembler,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 def _make_history_entry(
@@ -89,6 +90,7 @@ def _make_assembler(
     contact_repo.find_by_id = AsyncMock(
         return_value=contact
         or Contact(
+            user_id=TEST_USER_ID,
             first_name="John",
             last_name="Doe",
             id=1,
@@ -149,7 +151,7 @@ class TestSummaryInputAssembler:
     @pytest.mark.asyncio
     async def test_empty_contact_returns_minimal_input(self):
         """Test a contact with no activity returns minimal but valid input."""
-        contact = Contact(first_name="Empty", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="Empty", id=1)
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -167,7 +169,7 @@ class TestSummaryInputAssembler:
             ContactNote(content="A note about dinner", contact_id=1, id=1),
             ContactNote(content="Follow up on project", contact_id=1, id=2),
         ]
-        contact = Contact(first_name="John", id=1, notes=notes)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1, notes=notes)
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -181,7 +183,7 @@ class TestSummaryInputAssembler:
         notes = [
             ContactNote(content=f"Note {i}", contact_id=1, id=i) for i in range(20)
         ]
-        contact = Contact(first_name="John", id=1, notes=notes)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1, notes=notes)
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -200,7 +202,13 @@ class TestSummaryInputAssembler:
                 to_contact_name="Jane Smith",
             ),
         ]
-        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=1,
+            relationships=rels,
+        )
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -227,7 +235,13 @@ class TestSummaryInputAssembler:
                 to_user=True,
             ),
         ]
-        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=1,
+            relationships=rels,
+        )
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -254,7 +268,13 @@ class TestSummaryInputAssembler:
                 to_contact_name="John Doe",
             ),
         ]
-        contact = Contact(first_name="John", last_name="Doe", id=1, relationships=rels)
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=1,
+            relationships=rels,
+        )
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 
@@ -396,7 +416,9 @@ class TestSummaryInputAssembler:
                 day=15,
             ),
         ]
-        contact = Contact(first_name="John", id=1, important_dates=dates)
+        contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", id=1, important_dates=dates
+        )
         assembler = _make_assembler(contact=contact)
         result = await assembler.assemble(contact_id=1)
 

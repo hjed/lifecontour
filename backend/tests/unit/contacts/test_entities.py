@@ -13,6 +13,8 @@ from core_shared.models.contacts.entities import (
 )
 from core_shared.models.contacts.value_objects import TagName
 
+from tests.integration.contact_seeding import TEST_USER_ID
+
 
 @pytest.mark.unit
 class TestTag:
@@ -272,7 +274,7 @@ class TestContact:
 
     def test_create_contact_minimal(self):
         """Test creating contact with minimal required fields."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.first_name == "John"
         assert contact.id is None
         assert contact.last_name is None
@@ -288,6 +290,7 @@ class TestContact:
         """Test creating contact with all fields."""
         now = datetime.now()
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="John",
             last_name="Doe",
             middle_name="Michael",
@@ -309,60 +312,67 @@ class TestContact:
     def test_empty_first_name_raises_error(self):
         """Test empty first name raises ValueError."""
         with pytest.raises(ValueError, match="First name is required"):
-            Contact(first_name="")
+            Contact(user_id=TEST_USER_ID, first_name="")
 
     def test_whitespace_only_first_name_raises_error(self):
         """Test whitespace-only first name raises ValueError."""
         with pytest.raises(ValueError, match="First name is required"):
-            Contact(first_name="   ")
+            Contact(user_id=TEST_USER_ID, first_name="   ")
 
     def test_name_length_validation(self):
         """Test name field length validation."""
         # Test first_name too long
         with pytest.raises(ValueError, match="First name cannot exceed 100 characters"):
-            Contact(first_name="x" * 101)
+            Contact(user_id=TEST_USER_ID, first_name="x" * 101)
 
         # Test last_name too long
         with pytest.raises(ValueError, match="Last name cannot exceed 100 characters"):
-            Contact(first_name="John", last_name="x" * 101)
+            Contact(user_id=TEST_USER_ID, first_name="John", last_name="x" * 101)
 
         # Test middle_name too long
         with pytest.raises(
             ValueError, match="Middle name cannot exceed 100 characters"
         ):
-            Contact(first_name="John", middle_name="x" * 101)
+            Contact(user_id=TEST_USER_ID, first_name="John", middle_name="x" * 101)
 
         # Test nick_name too long
         with pytest.raises(ValueError, match="Nick name cannot exceed 100 characters"):
-            Contact(first_name="John", nick_name="x" * 101)
+            Contact(user_id=TEST_USER_ID, first_name="John", nick_name="x" * 101)
 
     def test_get_full_name(self):
         """Test get_full_name method."""
         # First name only
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.get_full_name() == "John"
 
         # First and last name
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         assert contact.get_full_name() == "John Doe"
 
         # All names
-        contact = Contact(first_name="John", middle_name="Michael", last_name="Doe")
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            middle_name="Michael",
+            last_name="Doe",
+        )
         assert contact.get_full_name() == "John Michael Doe"
 
     def test_get_display_name(self):
         """Test get_display_name method."""
         # No nick name - returns full name
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         assert contact.get_display_name() == "John Doe"
 
         # With nick name - returns nick name
-        contact = Contact(first_name="John", last_name="Doe", nick_name="Johnny")
+        contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", nick_name="Johnny"
+        )
         assert contact.get_display_name() == "Johnny"
 
     def test_get_primary_email(self):
         """Test get_primary_email method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
 
         # No methods - returns None
         assert contact.get_primary_email() is None
@@ -395,7 +405,7 @@ class TestContact:
 
     def test_get_primary_phone(self):
         """Test get_primary_phone method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
 
         # No methods - returns None
         assert contact.get_primary_phone() is None
@@ -428,7 +438,7 @@ class TestContact:
 
     def test_get_primary_address(self):
         """Test get_primary_address method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
 
         # No addresses - returns None
         assert contact.get_primary_address() is None
@@ -460,7 +470,7 @@ class TestContact:
 
     def test_add_tag(self):
         """Test add_tag method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         tag = Tag(name=TagName("work"), id=1)
 
         # Add first tag
@@ -482,7 +492,7 @@ class TestContact:
 
     def test_add_tag_limit_exceeded(self):
         """Test add_tag raises error when limit exceeded."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
 
         # Add 25 tags (maximum)
         for i in range(25):
@@ -499,7 +509,7 @@ class TestContact:
 
     def test_remove_tag(self):
         """Test remove_tag method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         tag1 = Tag(name=TagName("work"), id=1)
         tag2 = Tag(name=TagName("family"), id=2)
 
@@ -521,22 +531,22 @@ class TestContact:
 
     def test_favourite_default_false(self):
         """Test that is_favourite defaults to False."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.is_favourite is False
 
     def test_favourite_can_be_set_true(self):
         """Test that is_favourite can be set to True."""
-        contact = Contact(first_name="John", is_favourite=True)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", is_favourite=True)
         assert contact.is_favourite is True
 
     def test_favourite_can_be_set_false_explicitly(self):
         """Test that is_favourite can be explicitly set to False."""
-        contact = Contact(first_name="John", is_favourite=False)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", is_favourite=False)
         assert contact.is_favourite is False
 
     def test_toggle_favourite_method(self):
         """Test toggle_favourite method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.is_favourite is False
 
         # Toggle to True
@@ -549,7 +559,7 @@ class TestContact:
 
     def test_set_favourite_method(self):
         """Test set_favourite method."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.is_favourite is False
 
         # Set to True

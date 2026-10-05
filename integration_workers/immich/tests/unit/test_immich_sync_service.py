@@ -61,10 +61,11 @@ def _make_contact(
     last_name: str | None = None,
     middle_name: str | None = None,
 ) -> Contact:
-    """Create a Contact entity for name matching tests."""
+    """Create a Contact entity, owned by the syncing user, for name matching tests."""
     return Contact(
         id=contact_id,
         first_name=first_name,
+        user_id="user-1",
         last_name=last_name,
         middle_name=middle_name,
     )

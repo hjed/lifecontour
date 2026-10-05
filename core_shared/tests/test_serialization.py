@@ -28,6 +28,7 @@ class TestSerializeImportantDates:
     def test_serialize_with_important_dates(self) -> None:
         """Contact with important_dates serializes them."""
         contact = Contact(
+            user_id="user-1",
             first_name="Test",
             important_dates=[
                 ImportantDate(
@@ -71,7 +72,7 @@ class TestSerializeImportantDates:
 
     def test_serialize_with_none_important_dates(self) -> None:
         """Contact with None important_dates serializes as None."""
-        contact = Contact(first_name="Test", important_dates=None)
+        contact = Contact(user_id="user-1", first_name="Test", important_dates=None)
 
         result = serialize_contact(contact)
 
@@ -79,7 +80,7 @@ class TestSerializeImportantDates:
 
     def test_serialize_with_empty_important_dates(self) -> None:
         """Contact with empty important_dates list serializes as empty list."""
-        contact = Contact(first_name="Test", important_dates=[])
+        contact = Contact(user_id="user-1", first_name="Test", important_dates=[])
 
         result = serialize_contact(contact)
 
@@ -92,6 +93,7 @@ class TestDeserializeImportantDates:
     def test_deserialize_with_important_dates(self) -> None:
         """Important dates in payload are deserialized to ImportantDate entities."""
         data = {
+            "user_id": "user-1",
             "first_name": "Test",
             "important_dates": [
                 {
@@ -120,6 +122,7 @@ class TestDeserializeImportantDates:
     def test_deserialize_with_none_important_dates(self) -> None:
         """None important_dates preserves None on Contact."""
         data = {
+            "user_id": "user-1",
             "first_name": "Test",
             "important_dates": None,
         }
@@ -131,6 +134,7 @@ class TestDeserializeImportantDates:
     def test_deserialize_without_important_dates_key(self) -> None:
         """Missing important_dates key in payload defaults to None."""
         data = {
+            "user_id": "user-1",
             "first_name": "Test",
         }
 
@@ -141,6 +145,7 @@ class TestDeserializeImportantDates:
     def test_deserialize_with_empty_important_dates(self) -> None:
         """Empty important_dates list is preserved."""
         data = {
+            "user_id": "user-1",
             "first_name": "Test",
             "important_dates": [],
         }
@@ -162,6 +167,7 @@ class TestDeserializeMissingFirstName:
     def test_deserialize_without_first_name_key(self) -> None:
         """Missing first_name key defaults to 'Unknown'."""
         data = {
+            "user_id": "user-1",
             "last_name": "Doe",
             "methods": [],
         }
@@ -174,6 +180,7 @@ class TestDeserializeMissingFirstName:
     def test_deserialize_with_none_first_name(self) -> None:
         """None first_name defaults to 'Unknown'."""
         data = {
+            "user_id": "user-1",
             "first_name": None,
             "last_name": "Smith",
         }
@@ -185,6 +192,7 @@ class TestDeserializeMissingFirstName:
     def test_deserialize_with_empty_first_name(self) -> None:
         """Empty string first_name defaults to 'Unknown'."""
         data = {
+            "user_id": "user-1",
             "first_name": "   ",
         }
 
@@ -195,6 +203,7 @@ class TestDeserializeMissingFirstName:
     def test_deserialize_with_valid_first_name_still_works(self) -> None:
         """Valid first_name is preserved as-is."""
         data = {
+            "user_id": "user-1",
             "first_name": "Jane",
         }
 
@@ -209,6 +218,7 @@ class TestRoundTrip:
     def test_round_trip_with_dates(self) -> None:
         """Serialize then deserialize preserves important date data."""
         original = Contact(
+            user_id="user-1",
             first_name="Round",
             last_name="Trip",
             important_dates=[
@@ -247,7 +257,7 @@ class TestRoundTrip:
 
     def test_round_trip_with_none(self) -> None:
         """Serialize then deserialize preserves None important dates."""
-        original = Contact(first_name="NoDate", important_dates=None)
+        original = Contact(user_id="user-1", first_name="NoDate", important_dates=None)
 
         serialized = serialize_contact(original)
         restored = deserialize_contact(serialized)
@@ -261,6 +271,7 @@ class TestPhotoUrlSerialization:
     def test_serialize_with_photo_url(self) -> None:
         """Contact with photo_url serializes it."""
         contact = Contact(
+            user_id="user-1",
             first_name="Test",
             photo_url="/api/contacts/42/avatar",
         )
@@ -271,7 +282,7 @@ class TestPhotoUrlSerialization:
 
     def test_serialize_with_none_photo_url(self) -> None:
         """Contact with None photo_url serializes as None."""
-        contact = Contact(first_name="Test")
+        contact = Contact(user_id="user-1", first_name="Test")
 
         result = serialize_contact(contact)
 
@@ -280,6 +291,7 @@ class TestPhotoUrlSerialization:
     def test_deserialize_with_photo_url(self) -> None:
         """photo_url in payload is deserialized to Contact."""
         data = {
+            "user_id": "user-1",
             "first_name": "Test",
             "photo_url": "/api/contacts/42/avatar",
         }
@@ -290,7 +302,7 @@ class TestPhotoUrlSerialization:
 
     def test_deserialize_without_photo_url_key(self) -> None:
         """Missing photo_url key defaults to None."""
-        data = {"first_name": "Test"}
+        data = {"user_id": "user-1", "first_name": "Test"}
 
         contact = deserialize_contact(data)
 
@@ -299,6 +311,7 @@ class TestPhotoUrlSerialization:
     def test_round_trip_with_photo_url(self) -> None:
         """Serialize then deserialize preserves photo_url."""
         original = Contact(
+            user_id="user-1",
             first_name="Round",
             last_name="Trip",
             photo_url="/api/contacts/1/avatar",
@@ -317,6 +330,7 @@ class TestArchivedSerialization:
 
     def test_round_trip_preserves_is_archived(self) -> None:
         original = Contact(
+            user_id="user-1",
             first_name="Arch",
             methods=[
                 ContactMethod(
@@ -351,6 +365,7 @@ class TestArchivedSerialization:
     def test_deserialize_without_is_archived_defaults_to_active(self) -> None:
         restored = deserialize_contact(
             {
+                "user_id": "user-1",
                 "first_name": "Legacy",
                 "methods": [{"method_type": "email", "value": "a@example.com"}],
                 "addresses": [{"street_line_1": "1 Main St", "country_code": "AU"}],

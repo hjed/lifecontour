@@ -29,6 +29,8 @@ from core_shared.models.contacts.entities import (
 )
 from core_shared.models.contacts.value_objects import TagName
 
+from tests.integration.contact_seeding import TEST_USER_ID
+
 # Factory Functions for Customizable Contact Creation
 
 
@@ -38,6 +40,7 @@ def create_basic_contact(
     middle_name: str | None = None,
     nick_name: str | None = None,
     contact_id: int | None = None,
+    user_id: str = TEST_USER_ID,
 ) -> Contact:
     """Create a basic contact with minimal required fields.
 
@@ -47,6 +50,7 @@ def create_basic_contact(
         middle_name: Contact's middle name (optional)
         nick_name: Contact's nickname (optional)
         contact_id: Contact's ID (optional, useful for tests that need specific IDs)
+        user_id: The owner (default: the authenticated test user)
 
     Returns:
         Contact entity with basic information
@@ -54,6 +58,7 @@ def create_basic_contact(
     return Contact(
         id=contact_id,
         first_name=first_name,
+        user_id=user_id,
         last_name=last_name,
         middle_name=middle_name,
         nick_name=nick_name,
@@ -282,6 +287,7 @@ def create_full_contact(
     tags: list[str] | None = None,
     notes: list[str] | None = None,
     contact_id: int | None = None,
+    user_id: str = TEST_USER_ID,
 ) -> Contact:
     """Create a contact with all related entities (methods, tags, notes, address).
 
@@ -295,6 +301,7 @@ def create_full_contact(
         tags: List of tag names (default: ["friend", "work"])
         notes: List of note contents (default: ["Great colleague and friend"])
         contact_id: Contact's ID (optional)
+        user_id: The owner (default: the authenticated test user)
 
     Returns:
         Contact entity with all related entities attached
@@ -307,6 +314,7 @@ def create_full_contact(
     contact = Contact(
         id=contact_id,
         first_name=first_name,
+        user_id=user_id,
         last_name=last_name,
         middle_name=middle_name,
         nick_name=nick_name,

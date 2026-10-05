@@ -19,6 +19,7 @@ def _make_contact(
 ) -> Contact:
     """Helper to create a Contact with just name fields."""
     return Contact(
+        user_id="user-1",
         first_name=first_name,
         last_name=last_name,
         middle_name=middle_name,

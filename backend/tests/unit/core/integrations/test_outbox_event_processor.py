@@ -23,6 +23,9 @@ from app.core.integrations.outbox_event_processor import (
     PermanentOutboxEventProcessingError,
 )
 
+# The user whose integration published the sync events below.
+SYNC_OWNER = "sync-owner"
+
 
 class TestOutboxEventProcessor:
     """Test cases for OutboxEventProcessor."""
@@ -134,6 +137,7 @@ class TestOutboxEventProcessor:
                 "contact_data": sample_contact_event_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
@@ -156,6 +160,7 @@ class TestOutboxEventProcessor:
                 "contact_data": updated_data,
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "updated",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
@@ -197,6 +202,7 @@ class TestOutboxEventProcessor:
         """Test processing a contact.created event."""
         # Mock contact service to return created contact
         expected_contact = Contact(
+            user_id=SYNC_OWNER,
             id=123,
             first_name="John",
             last_name="Doe",
@@ -257,7 +263,9 @@ class TestOutboxEventProcessor:
         sync_metadata is the sole dedup link, so a contact left unlinked re-opens
         the duplication path; the event must roll back and retry instead.
         """
-        created_contact = Contact(id=123, first_name="John", last_name="Doe")
+        created_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe"
+        )
         mock_contact_service.create_contact.return_value = created_contact
         mock_contact_service.get_contact_by_email.return_value = None
         mock_sync_metadata_repo.upsert.side_effect = RuntimeError("db down")
@@ -277,6 +285,7 @@ class TestOutboxEventProcessor:
         """Test processing a contact.updated event."""
         # Mock existing contact lookup
         existing_contact = Contact(
+            user_id=SYNC_OWNER,
             id=123,
             first_name="John",
             last_name="Doe",
@@ -287,6 +296,7 @@ class TestOutboxEventProcessor:
 
         # Mock contact service to return updated contact
         updated_contact = Contact(
+            user_id=SYNC_OWNER,
             id=123,
             first_name="Johnny",  # Updated name
             last_name="Doe",
@@ -324,7 +334,9 @@ class TestOutboxEventProcessor:
     ) -> Contact:
         import json
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe", tags=[]
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
@@ -358,6 +370,7 @@ class TestOutboxEventProcessor:
                 },
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
@@ -444,7 +457,9 @@ class TestOutboxEventProcessor:
         """With no canonical link there is nothing to write synced_tags onto."""
         contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe", tags=[]
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
@@ -599,7 +614,9 @@ class TestOutboxEventProcessor:
         mock_link_repo: AsyncMock,
     ):
         """Test that reconciling with a contact already linked to the same source returns conflict."""
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe"
+        )
         mock_contact_service.get_contact_by_email.return_value = existing_contact
 
         # The matched contact already has a canonical link to this source.
@@ -662,7 +679,9 @@ class TestOutboxEventProcessor:
             integration_source="google",
             external_id="people/c123456789",
         )
-        created = Contact(id=777, first_name="John", last_name="Doe")
+        created = Contact(
+            user_id=SYNC_OWNER, id=777, first_name="John", last_name="Doe"
+        )
         mock_contact_service.create_contact.return_value = created
         mock_contact_service.get_contact_by_email.return_value = None
 
@@ -683,7 +702,9 @@ class TestOutboxEventProcessor:
         """Test that DuplicateEmailError during update returns conflict and records in sync_metadata."""
         from app.core.contacts.models.exceptions import DuplicateEmailError
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe", tags=[]
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
@@ -729,7 +750,9 @@ class TestOutboxEventProcessor:
         # No local contact for this external reference triggers the upsert.
         mock_contact_service.find_contact_by_external_reference.return_value = None
         mock_contact_service.get_contact_by_email.return_value = None
-        created_contact = Contact(id=456, first_name="Johnny", last_name="Doe")
+        created_contact = Contact(
+            user_id=SYNC_OWNER, id=456, first_name="Johnny", last_name="Doe"
+        )
         mock_contact_service.create_contact.return_value = created_contact
 
         result = await processor.process_event(contact_updated_event)
@@ -772,7 +795,9 @@ class TestOutboxEventProcessor:
             "methods": [{"method_type": "INVALID_TYPE", "value": "x"}],
         }
 
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe")
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe"
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
@@ -825,13 +850,14 @@ class TestOutboxEventProcessor:
                 },
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
         )
 
         expected_contact = Contact(
-            id=999, first_name="Unknown", last_name="NoFirstName"
+            user_id=SYNC_OWNER, id=999, first_name="Unknown", last_name="NoFirstName"
         )
         mock_contact_service.create_contact.return_value = expected_contact
         mock_contact_service.get_contact_by_email.return_value = None
@@ -1067,6 +1093,7 @@ class TestOutboxEventProcessor:
     ):
         """Test that contact.created events pass changed_by='google_sync' to contact service."""
         expected_contact = Contact(
+            user_id=SYNC_OWNER,
             id=123,
             first_name="John",
             last_name="Doe",
@@ -1099,7 +1126,9 @@ class TestOutboxEventProcessor:
         mock_sync_metadata_repo: AsyncMock,
     ):
         """Test that contact.updated events pass changed_by='google_sync' to contact service."""
-        existing_contact = Contact(id=123, first_name="John", last_name="Doe", tags=[])
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John", last_name="Doe", tags=[]
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )
@@ -1143,12 +1172,15 @@ class TestOutboxEventProcessor:
                 },
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "created",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
         )
 
-        expected_contact = Contact(id=456, first_name="Legacy", last_name="Contact")
+        expected_contact = Contact(
+            user_id=SYNC_OWNER, id=456, first_name="Legacy", last_name="Contact"
+        )
         mock_contact_service.create_contact.return_value = expected_contact
         mock_contact_service.get_contact_by_email.return_value = None
 
@@ -1199,12 +1231,15 @@ class TestOutboxEventProcessor:
                 },
                 "sync_timestamp": datetime.now(UTC).isoformat(),
                 "sync_type": "updated",
+                "user_id": SYNC_OWNER,
             },
             created_at=datetime.now(UTC),
             retry_count=0,
         )
 
-        existing_contact = Contact(id=456, first_name="Legacy", last_name="Contact")
+        existing_contact = Contact(
+            user_id=SYNC_OWNER, id=456, first_name="Legacy", last_name="Contact"
+        )
         mock_contact_service.find_contact_by_external_reference.return_value = (
             existing_contact
         )

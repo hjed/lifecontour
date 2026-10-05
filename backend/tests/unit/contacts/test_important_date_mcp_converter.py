@@ -7,6 +7,7 @@ from core_shared.models.contacts.important_date_types import (
 )
 
 from app.mcp.shared.converters import ContactConverter
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 def test_mcp_contact_response_with_important_dates():
@@ -41,6 +42,7 @@ def test_mcp_contact_response_with_important_dates():
     )
 
     contact = Contact(
+        user_id=TEST_USER_ID,
         id=1,
         first_name="John",
         last_name="Doe",
@@ -76,6 +78,7 @@ def test_mcp_contact_response_with_important_dates():
 def test_mcp_contact_response_without_important_dates():
     """Test contact conversion without important dates."""
     contact = Contact(
+        user_id=TEST_USER_ID,
         id=1,
         first_name="Jane",
         last_name="Smith",

@@ -23,6 +23,7 @@ from app.mcp.shared.converters import (
     SearchResponseConverter,
     SearchResultProcessor,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactConverter:
@@ -32,6 +33,7 @@ class TestContactConverter:
         """Test basic contact conversion to response format."""
         # Create a basic contact
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=123,
             first_name="John",
             last_name="Doe",
@@ -52,6 +54,7 @@ class TestContactConverter:
     def test_to_contact_response_with_additional_context(self):
         """Test contact conversion with additional context."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=456,
             first_name="Jane",
             last_name="Smith",
@@ -68,6 +71,7 @@ class TestContactConverter:
     def test_to_contact_response_with_tags(self):
         """Test contact conversion with tags."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=789,
             first_name="Bob",
             last_name="Wilson",
@@ -292,6 +296,7 @@ class TestContactConverterAISummary:
     def test_contact_with_generated_summary_populates_ai_fields(self):
         """When a contact has a GENERATED summary, interaction_summary and follow_up_suggestions are populated."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=100,
             first_name="Alice",
             last_name="Smith",
@@ -323,6 +328,7 @@ class TestContactConverterAISummary:
     def test_contact_with_pending_summary_has_empty_ai_fields(self):
         """When a contact has a PENDING summary, AI fields are None/empty."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=101,
             first_name="Bob",
             last_name="Jones",
@@ -342,6 +348,7 @@ class TestContactConverterAISummary:
     def test_contact_without_summary_entity_has_empty_ai_fields(self):
         """When a contact has no summary entity at all, AI fields default to None/empty."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=102,
             first_name="Charlie",
             last_name="Brown",
@@ -356,6 +363,7 @@ class TestContactConverterAISummary:
     def test_contact_with_user_override_uses_override_text(self):
         """When the summary has a user override, interaction_summary uses override text."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=103,
             first_name="Diana",
             last_name="Prince",
@@ -384,6 +392,7 @@ class TestContactFields:
     @staticmethod
     def _contact() -> Contact:
         return Contact(
+            user_id=TEST_USER_ID,
             id=1,
             first_name="Ada",
             methods=[

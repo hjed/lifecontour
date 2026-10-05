@@ -50,7 +50,12 @@ class TestContactRepositoryIntegration:
     async def test_save_new_contact(self, contact_repo):
         """Test saving a new contact to database."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe", middle_name="William")
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            middle_name="William",
+        )
 
         # Act
         saved_contact = await contact_repo.save(contact)
@@ -67,7 +72,7 @@ class TestContactRepositoryIntegration:
     async def test_save_update_existing_contact(self, contact_repo):
         """Test updating an existing contact in database."""
         # Arrange - Create contact
-        contact = Contact(first_name="John", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Smith")
         saved_contact = await contact_repo.save(contact)
 
         # Update contact
@@ -93,7 +98,7 @@ class TestContactRepositoryIntegration:
     async def test_find_by_id_existing(self, contact_repo):
         """Test finding contact by ID when it exists."""
         # Arrange
-        contact = Contact(first_name="Jane", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
         saved_contact = await contact_repo.save(contact)
 
         # Act
@@ -118,7 +123,7 @@ class TestContactRepositoryIntegration:
     async def test_find_by_email_existing(self, contact_repo):
         """Test finding contact by email when it exists."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_repo.save(contact)
 
         # Add email method
@@ -151,7 +156,7 @@ class TestContactRepositoryIntegration:
     async def test_add_method_success(self, contact_repo):
         """Test adding a contact method."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_repo.save(contact)
 
         method = ContactMethod(
@@ -176,7 +181,7 @@ class TestContactRepositoryIntegration:
     async def test_add_method_duplicate_email_raises_error(self, contact_repo):
         """Test adding duplicate email raises error."""
         # Arrange - Create first contact with email
-        contact1 = Contact(first_name="John", last_name="Doe")
+        contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact1 = await contact_repo.save(contact1)
 
         method1 = ContactMethod(
@@ -188,7 +193,7 @@ class TestContactRepositoryIntegration:
         await contact_repo.add_method(saved_contact1.id, method1)
 
         # Create second contact
-        contact2 = Contact(first_name="Jane", last_name="Smith")
+        contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
         saved_contact2 = await contact_repo.save(contact2)
 
         method2 = ContactMethod(
@@ -207,7 +212,7 @@ class TestContactRepositoryIntegration:
         self, contact_repo
     ):
         """Test adding a case-equivalent duplicate email raises error."""
-        contact1 = Contact(first_name="John", last_name="Doe")
+        contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact1 = await contact_repo.save(contact1)
 
         method1 = ContactMethod(
@@ -218,7 +223,7 @@ class TestContactRepositoryIntegration:
         )
         await contact_repo.add_method(saved_contact1.id, method1)
 
-        contact2 = Contact(first_name="Jane", last_name="Smith")
+        contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
         saved_contact2 = await contact_repo.save(contact2)
 
         method2 = ContactMethod(
@@ -268,7 +273,7 @@ class TestContactRepositoryIntegration:
     async def test_add_address_success(self, contact_repo):
         """Test adding a contact address."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_repo.save(contact)
 
         address = ContactAddress(
@@ -302,7 +307,9 @@ class TestContactRepositoryIntegration:
         self, contact_repo: SqlContactRepository
     ) -> None:
         """is_archived is written on insert and update, and read back."""
-        contact = await contact_repo.save(Contact(first_name="Arch"))
+        contact = await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="Arch")
+        )
         assert contact.id is not None
         method = await contact_repo.add_method(
             contact.id,
@@ -367,7 +374,9 @@ class TestContactRepositoryIntegration:
         values: str,
     ) -> None:
         """The CHECK constraint backs the entity invariant."""
-        contact = await contact_repo.save(Contact(first_name="Check"))
+        contact = await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="Check")
+        )
 
         with pytest.raises(IntegrityError, match="archived_not_primary"):
             async with clean_database.begin_nested():
@@ -384,7 +393,9 @@ class TestContactRepositoryIntegration:
         self, contact_repo: SqlContactRepository
     ) -> None:
         """An archived email still identifies its contact."""
-        contact = await contact_repo.save(Contact(first_name="Old"))
+        contact = await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="Old")
+        )
         assert contact.id is not None
         await contact_repo.add_method(
             contact.id,
@@ -405,7 +416,7 @@ class TestContactRepositoryIntegration:
     async def test_add_note_success(self, contact_repo):
         """Test adding a contact note."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_repo.save(contact)
 
         note = ContactNote(
@@ -425,7 +436,7 @@ class TestContactRepositoryIntegration:
     async def test_delete_contact(self, contact_repo):
         """Test deleting a contact."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_repo.save(contact)
 
         # Act
@@ -439,9 +450,9 @@ class TestContactRepositoryIntegration:
     async def test_search_contacts(self, contact_repo):
         """Test searching contacts by text."""
         # Arrange - Create multiple contacts
-        contact1 = Contact(first_name="John", last_name="Doe")
-        contact2 = Contact(first_name="Jane", last_name="Smith")
-        contact3 = Contact(first_name="Bob", last_name="Johnson")
+        contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
+        contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
+        contact3 = Contact(user_id=TEST_USER_ID, first_name="Bob", last_name="Johnson")
 
         await contact_repo.save(contact1)
         await contact_repo.save(contact2)
@@ -459,8 +470,8 @@ class TestContactRepositoryIntegration:
     async def test_get_all_contacts(self, contact_repo):
         """Test getting all contacts."""
         # Arrange - Create multiple contacts
-        contact1 = Contact(first_name="John", last_name="Doe")
-        contact2 = Contact(first_name="Jane", last_name="Smith")
+        contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
+        contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
 
         await contact_repo.save(contact1)
         await contact_repo.save(contact2)
@@ -478,7 +489,12 @@ class TestContactRepositoryIntegration:
     async def test_save_contact_with_favourite(self, contact_repo):
         """Test saving a contact with favourite flag."""
         # Arrange
-        contact = Contact(first_name="Favourite", last_name="User", is_favourite=True)
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="Favourite",
+            last_name="User",
+            is_favourite=True,
+        )
 
         # Act
         saved_contact = await contact_repo.save(contact)
@@ -496,9 +512,18 @@ class TestContactRepositoryIntegration:
     async def test_get_favourite_contacts(self, contact_repo):
         """Test getting favourite contacts."""
         # Arrange - Create contacts with different favourite status
-        contact1 = Contact(first_name="Fav1", last_name="User", is_favourite=True)
-        contact2 = Contact(first_name="Fav2", last_name="User", is_favourite=True)
-        contact3 = Contact(first_name="Regular", last_name="User", is_favourite=False)
+        contact1 = Contact(
+            user_id=TEST_USER_ID, first_name="Fav1", last_name="User", is_favourite=True
+        )
+        contact2 = Contact(
+            user_id=TEST_USER_ID, first_name="Fav2", last_name="User", is_favourite=True
+        )
+        contact3 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="Regular",
+            last_name="User",
+            is_favourite=False,
+        )
 
         await contact_repo.save(contact1)
         await contact_repo.save(contact2)
@@ -518,10 +543,23 @@ class TestContactRepositoryIntegration:
     async def test_get_favourite_contacts_count(self, contact_repo):
         """Test getting count of favourite contacts."""
         # Arrange - Create contacts with different favourite status
-        contact1 = Contact(first_name="FavCount1", last_name="User", is_favourite=True)
-        contact2 = Contact(first_name="FavCount2", last_name="User", is_favourite=True)
+        contact1 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="FavCount1",
+            last_name="User",
+            is_favourite=True,
+        )
+        contact2 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="FavCount2",
+            last_name="User",
+            is_favourite=True,
+        )
         contact3 = Contact(
-            first_name="RegularCount", last_name="User", is_favourite=False
+            user_id=TEST_USER_ID,
+            first_name="RegularCount",
+            last_name="User",
+            is_favourite=False,
         )
 
         await contact_repo.save(contact1)
@@ -538,9 +576,24 @@ class TestContactRepositoryIntegration:
     async def test_get_contacts_by_filters_favourite_only(self, contact_repo):
         """Test filtering contacts by favourite status."""
         # Arrange - Create contacts with different favourite status
-        contact1 = Contact(first_name="FilterFav1", last_name="User", is_favourite=True)
-        contact2 = Contact(first_name="FilterFav2", last_name="User", is_favourite=True)
-        contact3 = Contact(first_name="FilterReg", last_name="User", is_favourite=False)
+        contact1 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="FilterFav1",
+            last_name="User",
+            is_favourite=True,
+        )
+        contact2 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="FilterFav2",
+            last_name="User",
+            is_favourite=True,
+        )
+        contact3 = Contact(
+            user_id=TEST_USER_ID,
+            first_name="FilterReg",
+            last_name="User",
+            is_favourite=False,
+        )
 
         await contact_repo.save(contact1)
         await contact_repo.save(contact2)
@@ -561,13 +614,28 @@ class TestContactRepositoryIntegration:
         """Test counting contacts by favourite status."""
         # Arrange
         await contact_repo.save(
-            Contact(first_name="CountFav1", last_name="User", is_favourite=True)
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="CountFav1",
+                last_name="User",
+                is_favourite=True,
+            )
         )
         await contact_repo.save(
-            Contact(first_name="CountFav2", last_name="User", is_favourite=True)
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="CountFav2",
+                last_name="User",
+                is_favourite=True,
+            )
         )
         await contact_repo.save(
-            Contact(first_name="CountReg", last_name="User", is_favourite=False)
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="CountReg",
+                last_name="User",
+                is_favourite=False,
+            )
         )
 
         # Act
@@ -583,12 +651,14 @@ class TestContactRepositoryIntegration:
         """Test filtered contact counts stay distinct when one contact matches multiple tags."""
         # Arrange
         contact_with_both_tags = await contact_repo.save(
-            Contact(first_name="Multi", last_name="Match")
+            Contact(user_id=TEST_USER_ID, first_name="Multi", last_name="Match")
         )
         contact_with_one_tag = await contact_repo.save(
-            Contact(first_name="Single", last_name="Match")
+            Contact(user_id=TEST_USER_ID, first_name="Single", last_name="Match")
         )
-        await contact_repo.save(Contact(first_name="Other", last_name="Contact"))
+        await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="Other", last_name="Contact")
+        )
 
         work_tag = await tag_repo.save(Tag(name=TagName("work")))
         client_tag = await tag_repo.save(Tag(name=TagName("client")))
@@ -679,7 +749,9 @@ class TestImportantDateRepositoryIntegration:
         contact_repo: SqlContactRepository, date: ImportantDate
     ) -> tuple[Contact, ImportantDate]:
         """Persist a contact carrying one important date, returning both."""
-        contact = await contact_repo.save(Contact(first_name="Date", last_name="Owner"))
+        contact = await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="Date", last_name="Owner")
+        )
         assert contact.id is not None
         date.contact_id = contact.id
         saved_date = await contact_repo.add_important_date(contact.id, date)
@@ -883,7 +955,9 @@ class TestImportantDateRepositoryIntegration:
     ) -> None:
         """Updating a date that does not exist is reported, not silently ignored."""
         # Arrange
-        contact = await contact_repo.save(Contact(first_name="No", last_name="Date"))
+        contact = await contact_repo.save(
+            Contact(user_id=TEST_USER_ID, first_name="No", last_name="Date")
+        )
         assert contact.id is not None
         missing = ImportantDate(
             id=999999,

@@ -14,6 +14,7 @@ from app.core.integrations.immich.avatar_proxy_service import (
     AvatarNotFoundError,
     AvatarProxyService,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -302,6 +303,7 @@ class TestPhotoUrlInSchemas:
         from core_shared.models.contacts.entities import Contact
 
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Test",
             photo_url="/api/contacts/1/avatar",
         )
@@ -311,7 +313,7 @@ class TestPhotoUrlInSchemas:
         """Contact entity photo_url should default to None."""
         from core_shared.models.contacts.entities import Contact
 
-        contact = Contact(first_name="Test")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Test")
         assert contact.photo_url is None
 
     def test_mcp_contact_response_includes_photo_url(self) -> None:

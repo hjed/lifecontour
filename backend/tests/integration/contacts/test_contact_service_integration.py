@@ -25,6 +25,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
 )
 from app.core.contacts.services import ContactService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -98,7 +99,9 @@ class TestContactServiceIntegration:
         # One tag already exists; the other must be created.
         await tag_repo.save(Tag(name=TagName("Friend")))
 
-        contact = Contact(first_name="Tag", last_name="Resolver", tags=[])
+        contact = Contact(
+            user_id=TEST_USER_ID, first_name="Tag", last_name="Resolver", tags=[]
+        )
         created = await contact_service.create_contact(
             contact,
             clean_database,
@@ -118,12 +121,16 @@ class TestContactServiceIntegration:
     ):
         """A tag name reused across two contacts resolves to the same tag row."""
         c1 = await contact_service.create_contact(
-            Contact(first_name="First", last_name="Owner", tags=[]),
+            Contact(
+                user_id=TEST_USER_ID, first_name="First", last_name="Owner", tags=[]
+            ),
             clean_database,
             tag_names=["Shared"],
         )
         c2 = await contact_service.create_contact(
-            Contact(first_name="Second", last_name="Owner", tags=[]),
+            Contact(
+                user_id=TEST_USER_ID, first_name="Second", last_name="Owner", tags=[]
+            ),
             clean_database,
             tag_names=["shared"],  # case-insensitive match
         )
@@ -139,13 +146,16 @@ class TestContactServiceIntegration:
     ):
         """update_contact with tag_names replaces the contact's tags."""
         created = await contact_service.create_contact(
-            Contact(first_name="Replace", last_name="Tags", tags=[]),
+            Contact(
+                user_id=TEST_USER_ID, first_name="Replace", last_name="Tags", tags=[]
+            ),
             clean_database,
             tag_names=["Old"],
         )
 
         updated = await contact_service.update_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 id=created.id,
                 first_name="Replace",
                 last_name="Tags",
@@ -164,7 +174,7 @@ class TestContactServiceIntegration:
     ):
         """Test successful contact creation with real database."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
 
         # Act
         result = await contact_service.create_contact(contact, clean_database)
@@ -187,7 +197,7 @@ class TestContactServiceIntegration:
     ):
         """Test creating a contact with methods and notes in a single service call."""
         # Arrange
-        contact = Contact(first_name="Jane", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
 
         # Add email method
         email_method = ContactMethod(
@@ -246,7 +256,7 @@ class TestContactServiceIntegration:
     ):
         """Test contact creation with email method."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
 
         # Act - Create contact first
         saved_contact = await contact_service.create_contact(contact, clean_database)
@@ -281,7 +291,7 @@ class TestContactServiceIntegration:
     ):
         """Test contact creation raises error for duplicate email."""
         # Arrange - Create first contact with email
-        contact1 = Contact(first_name="John", last_name="Doe")
+        contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact1 = await contact_service.create_contact(contact1, clean_database)
 
         email_method1 = ContactMethod(
@@ -295,7 +305,7 @@ class TestContactServiceIntegration:
         )
 
         # Create second contact
-        contact2 = Contact(first_name="Jane", last_name="Smith")
+        contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
         saved_contact2 = await contact_service.create_contact(contact2, clean_database)
 
         # Try to add same email to second contact
@@ -324,7 +334,7 @@ class TestContactServiceIntegration:
         only the mutation, not synchronous history.
         """
         # Arrange - Create contact
-        contact = Contact(first_name="John", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Smith")
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         # Update contact
@@ -344,12 +354,13 @@ class TestContactServiceIntegration:
     ):
         """Test that update_contact handles methods and notes in a single transaction."""
         # Create initial contact
-        contact = Contact(first_name="Bob", last_name="Wilson")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Bob", last_name="Wilson")
         saved_contact = await contact_service.create_contact(contact, clean_database)
         assert saved_contact.id is not None
 
         # Update contact with new methods and notes
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved_contact.id,
             first_name="Robert",  # Changed name
             last_name="Wilson",
@@ -415,7 +426,7 @@ class TestContactServiceIntegration:
     ):
         """Test contact update raises error when no ID."""
         # Arrange
-        contact = Contact(first_name="John", id=None)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=None)
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
@@ -429,7 +440,7 @@ class TestContactServiceIntegration:
     ):
         """Test successful contact deletion."""
         # Arrange - Create contact
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         # Act
@@ -459,7 +470,7 @@ class TestContactServiceIntegration:
         verifies only the assignment.
         """
         # Arrange - Create contact and tag
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         tag = Tag(name=TagName("work"))
@@ -486,7 +497,12 @@ class TestContactServiceIntegration:
     ):
         """Test comprehensive contact workflow with all features."""
         # Create contact
-        contact = Contact(first_name="John", last_name="Doe", middle_name="William")
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            middle_name="William",
+        )
         saved_contact = await contact_service.create_contact(contact, clean_database)
         assert saved_contact.id is not None
 
@@ -596,7 +612,9 @@ class TestContactServiceIntegration:
         from sqlalchemy import text
 
         # Create contact
-        contact = Contact(first_name="Timestamp", last_name="Test")
+        contact = Contact(
+            user_id=TEST_USER_ID, first_name="Timestamp", last_name="Test"
+        )
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         # Manually backdate updated_at so NOW() will definitely be greater

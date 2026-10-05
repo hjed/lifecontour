@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
 )
@@ -41,6 +41,7 @@ def _event(event_type: str, emails: list[str]) -> OutboxEvent:
             },
             "sync_timestamp": "2026-01-01T10:00:00Z",
             "sync_type": event_type.split(".")[1],
+            "user_id": TEST_USER_ID,
             "etag": f"etag-{'-'.join(emails)}",
         },
     )

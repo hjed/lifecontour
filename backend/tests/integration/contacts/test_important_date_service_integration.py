@@ -10,6 +10,7 @@ from core_shared.models.contacts.important_date_types import (
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.contacts.contact_service_harness import (
     RecordingEventPublisher,
     build_contact_service,
@@ -41,7 +42,7 @@ async def test_create_contact_with_important_dates(
     contact_service: ContactService, async_connection: AsyncConnection
 ) -> None:
     """Test creating a contact with important dates attached."""
-    contact = Contact(first_name="John", last_name="Doe")
+    contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
     contact.important_dates = [
         ImportantDate(
             contact_id=0,
@@ -68,7 +69,7 @@ async def test_update_contact_with_important_dates(
 ) -> None:
     """Test updating a contact's important dates."""
     # Create
-    contact = Contact(first_name="Jane", last_name="Doe")
+    contact = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe")
     saved_contact = await contact_service.create_contact(contact, async_connection)
     assert saved_contact.id is not None
 
@@ -104,7 +105,7 @@ async def test_add_and_delete_important_date(
     contact_service: ContactService, async_connection: AsyncConnection
 ) -> None:
     """Test adding and deleting individual important dates."""
-    contact = Contact(first_name="Jack", last_name="Smith")
+    contact = Contact(user_id=TEST_USER_ID, first_name="Jack", last_name="Smith")
     saved_contact = await contact_service.create_contact(contact, async_connection)
     assert saved_contact.id is not None
 
@@ -147,7 +148,7 @@ async def _contact_with_date(
 ) -> tuple[Contact, ImportantDate]:
     """Persist a contact carrying one important date, returning both."""
     contact = await contact_service.create_contact(
-        Contact(first_name="Edit", last_name="Target"), connection
+        Contact(user_id=TEST_USER_ID, first_name="Edit", last_name="Target"), connection
     )
     assert contact.id is not None
     date.contact_id = contact.id
@@ -346,7 +347,8 @@ async def test_update_important_date_rejects_a_date_from_another_contact(
         ),
     )
     stranger = await contact_service.create_contact(
-        Contact(first_name="Some", last_name="Stranger"), async_connection
+        Contact(user_id=TEST_USER_ID, first_name="Some", last_name="Stranger"),
+        async_connection,
     )
     assert stranger.id is not None
     assert owned_date.id is not None
@@ -372,7 +374,8 @@ async def test_update_important_date_rejects_unknown_date_id(
     """Editing a date that does not exist is refused."""
     # Arrange
     contact = await contact_service.create_contact(
-        Contact(first_name="No", last_name="Dates"), async_connection
+        Contact(user_id=TEST_USER_ID, first_name="No", last_name="Dates"),
+        async_connection,
     )
     assert contact.id is not None
 

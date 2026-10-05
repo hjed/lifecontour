@@ -29,6 +29,7 @@ from app.api.contacts.schemas import (
     ContactNoteAttributes,
     ContactNoteResource,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactConverter:
@@ -101,6 +102,7 @@ class TestContactConverter:
     def test_to_resource_minimal_contact(self):
         """Test converting minimal Contact to API resource."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=1,
             first_name="John",
         )
@@ -138,6 +140,7 @@ class TestContactConverter:
         tag = Tag(id=1, name=TagName("work"))
 
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=1,
             first_name="John",
             last_name="Doe",
@@ -173,6 +176,7 @@ class TestContactConverter:
     def test_to_resource_with_relationships(self):
         """Test converting contact with relationships to API resource."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             id=1,
             first_name="John",
             last_name="Doe",

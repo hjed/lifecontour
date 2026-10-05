@@ -13,6 +13,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactSummaryRepository,
 )
 from app.infrastructure.events.summary_refresh_sweeper import SummaryRefreshSweeper
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -27,7 +28,7 @@ class TestSummaryRefreshSweeperIntegration:
     @pytest.fixture
     async def test_contact_id(self, clean_database: AsyncConnection) -> int:
         """Create a test contact and return its id."""
-        contact = Contact(first_name="Sweeper", last_name="Test")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Sweeper", last_name="Test")
         saved: Contact = await SqlContactRepository(clean_database).save(contact)
         assert saved.id is not None
         return saved.id

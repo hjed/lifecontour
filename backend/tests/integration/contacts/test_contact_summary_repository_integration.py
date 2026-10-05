@@ -15,6 +15,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactRepository,
     SqlContactSummaryRepository,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -34,7 +35,7 @@ class TestContactSummaryRepositoryIntegration:
     @pytest.fixture
     async def test_contact(self, contact_repo: SqlContactRepository) -> Contact:
         """Create and return a test contact."""
-        contact = Contact(first_name="Summary", last_name="Test")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Summary", last_name="Test")
         saved: Contact = await contact_repo.save(contact)
         return saved
 

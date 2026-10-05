@@ -59,6 +59,7 @@ from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class RecordingEventPublisher(ContactEventPublisher):
@@ -120,7 +121,9 @@ def _id(contact: Contact) -> int:
 
 
 async def _make_contact(repo: SqlContactRepository, first_name: str, **scalars) -> int:
-    return _id(await repo.save(Contact(first_name=first_name, **scalars)))
+    return _id(
+        await repo.save(Contact(first_name=first_name, user_id=TEST_USER_ID, **scalars))
+    )
 
 
 async def _add_email(

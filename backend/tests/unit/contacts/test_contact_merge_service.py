@@ -19,9 +19,11 @@ from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 SURVIVOR_ID = 1
 SOURCE_ID = 2
+SURVIVOR_OWNER = "survivor-owner"
 
 
 @pytest.fixture
@@ -36,12 +38,12 @@ def mock_transaction() -> AsyncMock:
 
 @pytest.fixture
 def survivor() -> Contact:
-    return Contact(id=SURVIVOR_ID, first_name="Survivor")
+    return Contact(id=SURVIVOR_ID, first_name="Survivor", user_id=SURVIVOR_OWNER)
 
 
 @pytest.fixture
 def source() -> Contact:
-    return Contact(id=SOURCE_ID, first_name="Source")
+    return Contact(user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Source")
 
 
 @pytest.fixture
@@ -137,7 +139,9 @@ class TestContactMergePreconditions:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
-            None if cid == 999 else Contact(id=cid, first_name="Source")
+            None
+            if cid == 999
+            else Contact(user_id=TEST_USER_ID, id=cid, first_name="Source")
         )
         with pytest.raises(ContactNotFoundError):
             await merge_service.merge_contacts(
@@ -149,7 +153,9 @@ class TestContactMergePreconditions:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
-            Contact(id=cid, first_name="Survivor") if cid == SURVIVOR_ID else None
+            Contact(user_id=TEST_USER_ID, id=cid, first_name="Survivor")
+            if cid == SURVIVOR_ID
+            else None
         )
         with pytest.raises(ContactNotFoundError):
             await merge_service.merge_contacts(
@@ -360,9 +366,16 @@ class TestContactMergeScalarPolicy:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
-            Contact(id=SURVIVOR_ID, first_name="Survivor", company="Acme")
+            Contact(
+                user_id=TEST_USER_ID,
+                id=SURVIVOR_ID,
+                first_name="Survivor",
+                company="Acme",
+            )
             if cid == SURVIVOR_ID
-            else Contact(id=SOURCE_ID, first_name="Source", company=None)
+            else Contact(
+                user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Source", company=None
+            )
         )
 
         await merge_service.merge_contacts(
@@ -378,9 +391,19 @@ class TestContactMergeScalarPolicy:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
-            Contact(id=SURVIVOR_ID, first_name="Survivor", job_title=None)
+            Contact(
+                user_id=TEST_USER_ID,
+                id=SURVIVOR_ID,
+                first_name="Survivor",
+                job_title=None,
+            )
             if cid == SURVIVOR_ID
-            else Contact(id=SOURCE_ID, first_name="Source", job_title="Engineer")
+            else Contact(
+                user_id=TEST_USER_ID,
+                id=SOURCE_ID,
+                first_name="Source",
+                job_title="Engineer",
+            )
         )
 
         await merge_service.merge_contacts(
@@ -395,9 +418,19 @@ class TestContactMergeScalarPolicy:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
-            Contact(id=SURVIVOR_ID, first_name="Survivor", last_name="Keep")
+            Contact(
+                user_id=TEST_USER_ID,
+                id=SURVIVOR_ID,
+                first_name="Survivor",
+                last_name="Keep",
+            )
             if cid == SURVIVOR_ID
-            else Contact(id=SOURCE_ID, first_name="Source", last_name="Drop")
+            else Contact(
+                user_id=TEST_USER_ID,
+                id=SOURCE_ID,
+                first_name="Source",
+                last_name="Drop",
+            )
         )
 
         await merge_service.merge_contacts(
@@ -619,6 +652,7 @@ class TestContactMergeOverrides:
         """Both contacts hold differing non-empty values for every scalar field."""
         mock_contact_repo.find_by_id.side_effect = lambda cid: (
             Contact(
+                user_id=TEST_USER_ID,
                 id=SURVIVOR_ID,
                 first_name="SurvFirst",
                 last_name="SurvLast",
@@ -631,6 +665,7 @@ class TestContactMergeOverrides:
             )
             if cid == SURVIVOR_ID
             else Contact(
+                user_id=TEST_USER_ID,
                 id=SOURCE_ID,
                 first_name="SrcFirst",
                 last_name="SrcLast",
@@ -757,24 +792,40 @@ class TestHasScalarConflicts:
     async def test_both_non_empty_and_differing_is_a_conflict(
         self, merge_service
     ) -> None:
-        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
-        source = Contact(id=SOURCE_ID, first_name="Alice", company="Globex")
+        survivor = Contact(
+            user_id=TEST_USER_ID, id=SURVIVOR_ID, first_name="Alice", company="Acme"
+        )
+        source = Contact(
+            user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Alice", company="Globex"
+        )
         assert merge_service.has_scalar_conflicts(survivor, source) is True
 
     @pytest.mark.asyncio
     async def test_one_side_empty_is_not_a_conflict(self, merge_service) -> None:
-        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
-        source = Contact(id=SOURCE_ID, first_name="Alice", company=None)
+        survivor = Contact(
+            user_id=TEST_USER_ID, id=SURVIVOR_ID, first_name="Alice", company="Acme"
+        )
+        source = Contact(
+            user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Alice", company=None
+        )
         assert merge_service.has_scalar_conflicts(survivor, source) is False
 
     @pytest.mark.asyncio
     async def test_equal_values_are_not_a_conflict(self, merge_service) -> None:
-        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company="Acme")
-        source = Contact(id=SOURCE_ID, first_name="Alice", company="Acme")
+        survivor = Contact(
+            user_id=TEST_USER_ID, id=SURVIVOR_ID, first_name="Alice", company="Acme"
+        )
+        source = Contact(
+            user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Alice", company="Acme"
+        )
         assert merge_service.has_scalar_conflicts(survivor, source) is False
 
     @pytest.mark.asyncio
     async def test_both_empty_is_not_a_conflict(self, merge_service) -> None:
-        survivor = Contact(id=SURVIVOR_ID, first_name="Alice", company=None)
-        source = Contact(id=SOURCE_ID, first_name="Alice", company=None)
+        survivor = Contact(
+            user_id=TEST_USER_ID, id=SURVIVOR_ID, first_name="Alice", company=None
+        )
+        source = Contact(
+            user_id=TEST_USER_ID, id=SOURCE_ID, first_name="Alice", company=None
+        )
         assert merge_service.has_scalar_conflicts(survivor, source) is False

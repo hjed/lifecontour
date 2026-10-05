@@ -16,6 +16,7 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.services.contact_relationship_service import (
     ContactRelationshipService,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactRelationshipService:
@@ -59,6 +60,7 @@ class TestContactRelationshipService:
     def sample_contact_1(self):
         """Create sample contact 1."""
         return Contact(
+            user_id=TEST_USER_ID,
             id=1,
             first_name="John",
             last_name="Doe",
@@ -68,6 +70,7 @@ class TestContactRelationshipService:
     def sample_contact_2(self):
         """Create sample contact 2."""
         return Contact(
+            user_id=TEST_USER_ID,
             id=2,
             first_name="Jane",
             last_name="Smith",

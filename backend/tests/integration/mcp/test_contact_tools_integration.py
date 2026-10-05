@@ -30,6 +30,7 @@ from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
 from tests.integration import contact_seeding
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     post_mcp_tool,
@@ -267,6 +268,7 @@ class TestContactToolsIntegration:
 
         # Create a test contact
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="John",
             last_name="Doe",
         )
@@ -306,6 +308,7 @@ class TestContactToolsIntegration:
 
         # Create a test contact with attached methods and notes
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Jane",
             last_name="Smith",
         )
@@ -457,6 +460,7 @@ class TestContactToolsIntegration:
         )
 
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Alice",
             last_name="Johnson",
         )
@@ -534,6 +538,7 @@ class TestContactToolsIntegration:
         )
 
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="David",
             last_name="Wilson",
         )
@@ -608,6 +613,7 @@ class TestContactToolsIntegration:
         """Test update_contact tool with real database integration."""
         # First create a contact to update
         original_contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Original",
             last_name="Name",
         )
@@ -638,6 +644,7 @@ class TestContactToolsIntegration:
 
         # Now test updating the contact (simulating MCP tool behavior)
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved_contact.id,
             first_name="Updated",  # Changed
             last_name="Name",  # Same
@@ -921,7 +928,8 @@ class TestContactToolsIntegration:
         from sqlalchemy import text
 
         contact = await contact_service.create_contact(
-            Contact(first_name="Jane", last_name="Doe"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
+            clean_database,
         )
         tag = await tag_repo.save(Tag(name=TagName("friend")))
         await clean_database.execute(
@@ -984,7 +992,8 @@ class TestContactToolsIntegration:
         from sqlalchemy import text
 
         contact = await contact_service.create_contact(
-            Contact(first_name="Jane", last_name="Doe"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
+            clean_database,
         )
         source = await tag_repo.save(Tag(name=TagName("colleague")))
         target = await tag_repo.save(Tag(name=TagName("work")))
@@ -1050,10 +1059,12 @@ class TestContactToolsIntegration:
         from core_shared.models.contacts.entities import Contact
 
         c1 = await contact_service.create_contact(
-            Contact(first_name="Jane", last_name="Doe"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
+            clean_database,
         )
         c2 = await contact_service.create_contact(
-            Contact(first_name="John", last_name="Smith"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="John", last_name="Smith"),
+            clean_database,
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
@@ -1155,11 +1166,21 @@ class TestContactToolsIntegration:
         from core_shared.models.contacts.entities import Contact
 
         survivor = await contact_service.create_contact(
-            Contact(first_name="Jane", last_name="Survivor", middle_name=None),
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="Jane",
+                last_name="Survivor",
+                middle_name=None,
+            ),
             clean_database,
         )
         source = await contact_service.create_contact(
-            Contact(first_name="Janet", last_name="Source", middle_name="Mariposa"),
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="Janet",
+                last_name="Source",
+                middle_name="Mariposa",
+            ),
             clean_database,
         )
 
@@ -1208,6 +1229,7 @@ class TestContactToolsIntegration:
 
         survivor = await contact_service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Jane",
                 last_name="Survivor",
                 company="SurvivorCo",
@@ -1217,6 +1239,7 @@ class TestContactToolsIntegration:
         )
         source = await contact_service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Janet",
                 last_name="Source",
                 company="SourceCo",
@@ -1301,7 +1324,12 @@ class TestMCPTagParity:
         tag_b = await tag_repo.save(Tag(name=TagName("bravo")))
         tag_c = await tag_repo.save(Tag(name=TagName("charlie")))
 
-        contact = Contact(first_name="Replace", last_name="Test", tags=[tag_a, tag_b])
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="Replace",
+            last_name="Test",
+            tags=[tag_a, tag_b],
+        )
         saved = await contact_service.create_contact(contact, clean_database)
         assert saved.id is not None
 
@@ -1315,6 +1343,7 @@ class TestMCPTagParity:
 
         # Act: update with replacement tags (bravo → charlie via replacement)
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved.id,
             first_name="Replace",
             last_name="Test",
@@ -1346,7 +1375,10 @@ class TestMCPTagParity:
         existing_tag = await tag_repo.save(Tag(name=TagName("existing")))
 
         contact = Contact(
-            first_name="AutoCreate", last_name="Tags", tags=[existing_tag]
+            user_id=TEST_USER_ID,
+            first_name="AutoCreate",
+            last_name="Tags",
+            tags=[existing_tag],
         )
         saved = await contact_service.create_contact(contact, clean_database)
         assert saved.id is not None
@@ -1364,6 +1396,7 @@ class TestMCPTagParity:
                 resolved_tags.append(saved_tag)
 
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved.id,
             first_name="AutoCreate",
             last_name="Tags",
@@ -1395,7 +1428,12 @@ class TestMCPTagParity:
         tag_x = await tag_repo.save(Tag(name=TagName("x-ray")))
         tag_y = await tag_repo.save(Tag(name=TagName("yankee")))
 
-        contact = Contact(first_name="Clear", last_name="Tags", tags=[tag_x, tag_y])
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="Clear",
+            last_name="Tags",
+            tags=[tag_x, tag_y],
+        )
         saved = await contact_service.create_contact(contact, clean_database)
         assert saved.id is not None
 
@@ -1407,6 +1445,7 @@ class TestMCPTagParity:
 
         # Act: update with empty tags list
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved.id,
             first_name="Clear",
             last_name="Tags",
@@ -1439,6 +1478,7 @@ class TestMCPTagParity:
 
         # Create contact with tag-a (simulating REST assignment)
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Parity",
             last_name="Check",
             tags=[rest_tag_a],
@@ -1449,6 +1489,7 @@ class TestMCPTagParity:
         # MCP-style update: replace tags with [rest-b]
         # This mirrors what update_contact MCP tool does
         updated_contact = Contact(
+            user_id=TEST_USER_ID,
             id=saved.id,
             first_name="Parity",
             last_name="Check",
@@ -1598,7 +1639,8 @@ class TestContactConverterAISummaryIntegration:
         from sqlalchemy import text
 
         c1 = await contact_service.create_contact(
-            Contact(first_name="Jane", last_name="Doe"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
+            clean_database,
         )
         assert c1.id is not None
         # Seed the canonical link in sync_metadata (the read path's source).
@@ -1637,7 +1679,8 @@ class TestContactConverterAISummaryIntegration:
         from sqlalchemy import text
 
         c1 = await contact_service.create_contact(
-            Contact(first_name="Imo", last_name="Immich"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Imo", last_name="Immich"),
+            clean_database,
         )
         assert c1.id is not None
 
@@ -1718,7 +1761,8 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         from tests.integration.tasks.task_seeding import create_task
 
         contact = await contact_service.create_contact(
-            Contact(first_name="Agent", last_name="Visible"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Agent", last_name="Visible"),
+            clean_database,
         )
         assert contact.id is not None
         creating_id, due_id = task_anchors
@@ -1771,10 +1815,12 @@ class TestContactHistoryOverMCPCountsTaskRecords:
         from tests.integration.tasks.task_seeding import create_task
 
         subject = await contact_service.create_contact(
-            Contact(first_name="Not", last_name="Involved"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Not", last_name="Involved"),
+            clean_database,
         )
         other = await contact_service.create_contact(
-            Contact(first_name="Someone", last_name="Else"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Someone", last_name="Else"),
+            clean_database,
         )
         assert subject.id is not None
         assert other.id is not None

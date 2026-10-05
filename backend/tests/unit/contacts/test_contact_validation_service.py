@@ -15,6 +15,7 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactValidationService:
@@ -51,7 +52,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test email uniqueness validation when existing contact has same ID."""
-        existing_contact = Contact(first_name="John", id=1)
+        existing_contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_email.return_value = existing_contact
 
         await service.validate_email_uniqueness(
@@ -65,7 +66,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test email uniqueness validation raises error when existing contact has different ID."""
-        existing_contact = Contact(first_name="John", id=2)
+        existing_contact = Contact(user_id=TEST_USER_ID, first_name="John", id=2)
         mock_contact_repo.find_by_email.return_value = existing_contact
 
         with pytest.raises(DuplicateEmailError):
@@ -78,7 +79,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test email uniqueness validation raises error when no exclude ID provided."""
-        existing_contact = Contact(first_name="John", id=2)
+        existing_contact = Contact(user_id=TEST_USER_ID, first_name="John", id=2)
         mock_contact_repo.find_by_email.return_value = existing_contact
 
         with pytest.raises(DuplicateEmailError):
@@ -91,7 +92,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test email uniqueness validation raises error when existing contact has no ID."""
-        existing_contact = Contact(first_name="John", id=None)
+        existing_contact = Contact(user_id=TEST_USER_ID, first_name="John", id=None)
         mock_contact_repo.find_by_email.return_value = existing_contact
 
         with pytest.raises(ContactValidationError) as exc_info:
@@ -107,7 +108,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test primary method validation when contact exists."""
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
         await service.validate_primary_method(1, "email", mock_transaction)
@@ -129,7 +130,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test primary address validation when contact exists."""
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
         await service.validate_primary_address(1, mock_transaction)
@@ -151,7 +152,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test contact exists validation when contact found."""
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
         await service.validate_contact_exists(1, mock_transaction)
@@ -173,7 +174,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test tag limit validation when under limit."""
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         # Add 24 tags (under limit of 25)
         if contact.tags is None:
             contact.tags = []
@@ -191,7 +192,7 @@ class TestContactValidationService:
         self, service, mock_contact_repo, mock_transaction
     ):
         """Test tag limit validation raises error when at limit."""
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         # Add 25 tags (at limit)
         if contact.tags is None:
             contact.tags = []

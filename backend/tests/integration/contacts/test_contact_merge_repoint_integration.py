@@ -27,6 +27,7 @@ from app.core.contacts.adapters.sql import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest_asyncio.fixture
@@ -57,7 +58,9 @@ def _id(contact: Contact) -> int:
 
 
 async def _make_contact(contact_repo: SqlContactRepository, first_name: str) -> Contact:
-    saved = await contact_repo.save(Contact(first_name=first_name))
+    saved = await contact_repo.save(
+        Contact(user_id=TEST_USER_ID, first_name=first_name)
+    )
     assert saved.id is not None
     return saved
 
