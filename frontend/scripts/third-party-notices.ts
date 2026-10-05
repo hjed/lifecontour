@@ -34,22 +34,24 @@ const LICENCE_SOURCE = /\.(c?js|mjs|ts|json)$/i;
 const NOTICE_FILE = /^notice(\.(md|txt))?$/i;
 const SEPARATOR = '='.repeat(78);
 
-function findFile(dir: string, pattern: RegExp): string | null {
-  const name = readdirSync(dir).find(
-    entry => pattern.test(entry) && !LICENCE_SOURCE.test(entry)
-  );
-  return name ? path.join(dir, name) : null;
+/** Every file in `dir` matching `pattern`, in code-unit name order. */
+function findFiles(dir: string, pattern: RegExp): string[] {
+  return readdirSync(dir)
+    .filter(entry => pattern.test(entry) && !LICENCE_SOURCE.test(entry))
+    .sort()
+    .map(entry => path.join(dir, entry));
 }
 
-export function findLicenceFile(dir: string): string | null {
-  return findFile(dir, LICENCE_FILE);
+/** All of a package's licence files: a dual-licensed one ships several. */
+export function findLicenceFiles(dir: string): string[] {
+  return findFiles(dir, LICENCE_FILE);
 }
 
-/** The package's licence text followed by its NOTICE, or null if it ships neither. */
+/** The package's licence texts followed by its NOTICEs, or null if it ships none. */
 export function readPackageNotices(dir: string): string | null {
-  const texts = [findLicenceFile(dir), findFile(dir, NOTICE_FILE)]
-    .filter(file => file !== null)
-    .map(file => readFileSync(file, 'utf8').trim());
+  const texts = [...findLicenceFiles(dir), ...findFiles(dir, NOTICE_FILE)].map(
+    file => readFileSync(file, 'utf8').trim()
+  );
   return texts.length ? texts.join('\n\n') : null;
 }
 

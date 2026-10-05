@@ -79,8 +79,12 @@ depends on are therefore asserted in
     package's own licence file. Minified bundles drop licence headers, so this is where those
     notices survive.
   - It runs from the `predev` and `prebuild` scripts, which cover `pnpm dev`, CI's
-    `pnpm build` and the Docker image build. Each entry reproduces the package's licence file
-    and, where one ships, its `NOTICE`.
+    `pnpm build` and the Docker image build. Each entry reproduces every licence file the
+    package ships (a dual-licensed one has several) and any `NOTICE` files.
+  - Only `dependencies` are listed, so **anything the app bundles must be a dependency**, not
+    a devDependency. That includes CSS that `globals.css` pulls in with `@import` or `@plugin`.
+    `src/__tests__/scripts/bundled-dependencies.test.ts` fails if production source imports an
+    undeclared package.
   - `prebuild` fails the build if it cannot generate the file. `predev` passes `--best-effort`
     and only warns, so a dev server whose pnpm store it cannot read still starts.
 

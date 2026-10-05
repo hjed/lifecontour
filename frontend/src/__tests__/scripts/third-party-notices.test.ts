@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
-  findLicenceFile,
+  findLicenceFiles,
   readPackageNotices,
   renderThirdPartyNotices,
   type PnpmLicences,
@@ -82,7 +82,7 @@ describe('renderThirdPartyNotices', () => {
   });
 });
 
-describe('findLicenceFile', () => {
+describe('findLicenceFiles', () => {
   let dir: string;
 
   beforeEach(() => {
@@ -103,13 +103,22 @@ describe('findLicenceFile', () => {
   ])('finds %s', fileName => {
     writeFileSync(path.join(dir, 'package.json'), '{}');
     writeFileSync(path.join(dir, fileName), 'text');
-    expect(findLicenceFile(dir)).toBe(path.join(dir, fileName));
+    expect(findLicenceFiles(dir)).toEqual([path.join(dir, fileName)]);
   });
 
-  it('returns null when the package ships no licence file', () => {
+  it('finds every licence file a dual-licensed package ships, in name order', () => {
+    writeFileSync(path.join(dir, 'LICENSE.Apache'), 'Apache');
+    writeFileSync(path.join(dir, 'LICENSE'), 'MIT');
+    expect(findLicenceFiles(dir)).toEqual([
+      path.join(dir, 'LICENSE'),
+      path.join(dir, 'LICENSE.Apache'),
+    ]);
+  });
+
+  it('finds nothing when the package ships no licence file', () => {
     writeFileSync(path.join(dir, 'README.md'), 'readme');
     writeFileSync(path.join(dir, 'license-checker.js'), 'code');
-    expect(findLicenceFile(dir)).toBeNull();
+    expect(findLicenceFiles(dir)).toEqual([]);
   });
 });
 
@@ -129,6 +138,16 @@ describe('readPackageNotices', () => {
     writeFileSync(path.join(dir, 'NOTICE.txt'), 'Kobalte NOTICE');
     expect(readPackageNotices(dir)).toBe(
       'Apache License 2.0\n\nKobalte NOTICE'
+    );
+  });
+
+  it('reproduces every licence file, then every NOTICE file', () => {
+    writeFileSync(path.join(dir, 'LICENSE'), 'MIT text');
+    writeFileSync(path.join(dir, 'LICENSE.Apache'), 'Apache text');
+    writeFileSync(path.join(dir, 'NOTICE'), 'Notice one');
+    writeFileSync(path.join(dir, 'NOTICE.md'), 'Notice two');
+    expect(readPackageNotices(dir)).toBe(
+      'MIT text\n\nApache text\n\nNotice one\n\nNotice two'
     );
   });
 
