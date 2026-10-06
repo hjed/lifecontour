@@ -31,7 +31,9 @@ CREATE INDEX idx_contacts_user_id ON contacts(user_id);
 `user_id` only when it inserts a contact, so no update re-owns one. Migration `0122` added the
 column and assigned every existing contact to the site's one user, derived by
 `app/migrations/owner_derivation.py` from every table that already records a `user_id` (the
-content tables `0106` repaired plus the credential, settings and integration-state tables):
+content tables `0106` repaired, the credential, settings and integration-state tables, and the
+records that can outlive them — daily summaries, task history, series aliases; a test pins the
+list to the schema):
 
 - exactly one real owner → that owner;
 - only synthetic owners (`dev-user`, `debug-client`: local dev, CI, e2e) → that owner, preferring

@@ -26,7 +26,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.migration_helpers import RunAlembic, columns, index_exists
+from tests.integration.migration_helpers import (
+    RunAlembic,
+    columns,
+    index_exists,
+    tables_with_column,
+)
 
 
 def _load_migration() -> ModuleType:
@@ -108,15 +113,22 @@ async def _contact_owners(url: str) -> dict[str, str | None]:
 class TestAddUserIdToContacts:
     """0122 gives every contact the site's one owner, or refuses to guess."""
 
-    async def test_every_evidence_table_declares_a_user_id_column(
+    async def test_every_table_recording_a_user_is_evidence(
         self, throwaway_database: URL, run_alembic: RunAlembic
     ) -> None:
-        """A renamed or user_id-less table would break the derivation query."""
+        """The evidence is exactly the tables that hold a ``user_id`` at 0121.
+
+        A table left out can hold the only record of the real owner (a daily
+        summary outliving its journals, task history outliving its task), so the
+        migration would refuse or fall back to a synthetic owner; a table that
+        no longer has the column would break the derivation query.
+        """
         url = throwaway_database.render_as_string(hide_password=False)
         run_alembic(url, "upgrade", _PREVIOUS_REVISION)
 
-        for table in migration.EVIDENCE_TABLES:
-            assert "user_id" in await columns(url, table), table
+        assert await tables_with_column(url, "user_id") == set(
+            migration.EVIDENCE_TABLES
+        )
 
     async def test_contacts_go_to_the_single_real_owner(
         self, throwaway_database: URL, run_alembic: RunAlembic

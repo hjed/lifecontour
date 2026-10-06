@@ -36,8 +36,9 @@ depends_on: str | Sequence[str] | None = None
 
 _LABEL = "0122"
 
-# Every table that records a user at this revision. Kept literal so the
-# revision keeps meaning the same thing however the schema moves on.
+# Every table that records a user at this revision — a test pins this to the
+# schema at 0121. Kept literal so the revision keeps meaning the same thing
+# however the schema moves on.
 EVIDENCE_TABLES = (
     # Content tables (0106's REPAIRED_TABLES).
     "journals",
@@ -61,6 +62,11 @@ EVIDENCE_TABLES = (
     "calendar_sync_tokens",
     "pending_entity_mappings",
     "contact_suggestion_ignores",
+    # Records that can outlive the rows above: a daily summary its journals,
+    # task history (``field_history``) its task, an alias its merged series.
+    "journal_daily_summaries",
+    "field_history",
+    "journal_series_recurrence_aliases",
 )
 
 

@@ -85,3 +85,29 @@ async def index_exists(engine_url: str, index: str) -> bool:
             return found is not None
     finally:
         await engine.dispose()
+
+
+async def tables_with_column(engine_url: str, column: str) -> set[str]:
+    """Return the base tables in the database at ``engine_url`` that have ``column``."""
+    engine = create_async_engine(engine_url)
+    try:
+        async with engine.connect() as conn:
+            rows = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT c.table_name
+                        FROM information_schema.columns c
+                        JOIN information_schema.tables t
+                          USING (table_schema, table_name)
+                        WHERE c.table_schema = 'public'
+                          AND c.column_name = :column
+                          AND t.table_type = 'BASE TABLE'
+                        """
+                    ),
+                    {"column": column},
+                )
+            ).fetchall()
+            return {str(row.table_name) for row in rows}
+    finally:
+        await engine.dispose()

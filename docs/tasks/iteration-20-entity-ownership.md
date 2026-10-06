@@ -426,7 +426,11 @@ the API, which now stamps it).
   is `0106`'s `REPAIRED_TABLES` plus `user_google_auth`, `user_google_integration`,
   `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`,
   `user_settings`, `sync_jobs`, `calendar_sync_tokens`, `pending_entity_mappings`,
-  `contact_suggestion_ignores`.
+  `contact_suggestion_ignores`, and the records that can outlive the rows above:
+  `journal_daily_summaries`, `field_history` (task history) and
+  `journal_series_recurrence_aliases`. The migration test asserts the list *equals* the set of
+  tables holding a `user_id` at the base revision, so a table cannot be left out (augment review
+  on #1668 found three missing).
 - **Both synthetic owners, no real one → `dev-user`.** The spec covers one synthetic owner;
   `debug-client` can no longer be produced, so a database holding both is a legacy local one
   whose developer is the `DISABLE_AUTH` user. Refusing would make every such developer pass `-x`.
