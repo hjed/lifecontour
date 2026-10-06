@@ -1,4 +1,4 @@
-# Integration Architecture - Personal Management System
+# Integration Architecture - Lifecontour
 
 This document defines the architecture for external service integrations including Google Contacts, Immich, Strava, Firefly III, and communication platforms.
 

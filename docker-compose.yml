@@ -1,6 +1,6 @@
 version: '3.8'
 
-# Unified Docker Compose for Personal Management System
+# Unified Docker Compose for Lifecontour
 # Supports multiple profiles: dev (default), test, test-backend, prod
 # Usage:
 #   docker compose --env-file .env.dev up                          # dev profile (default)

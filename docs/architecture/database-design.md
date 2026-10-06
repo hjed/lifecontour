@@ -1,6 +1,6 @@
-# Database Design - Personal CRM & Journal System
+# Database Design - Lifecontour
 
-This document outlines the database approach and initial schema for the Personal CRM & Journal System. The design will evolve through agile iterations as features are implemented.
+This document outlines the database approach and initial schema for Lifecontour. The design will evolve through agile iterations as features are implemented.
 
 ## PostgreSQL Database Approach
 

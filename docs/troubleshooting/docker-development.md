@@ -1,6 +1,6 @@
 # Docker Development Environment
 
-This guide explains how to set up and use the complete Docker-based development environment for the Personal Management System.
+This guide explains how to set up and use the complete Docker-based development environment for Lifecontour.
 
 ## 🚀 Quick Start
 

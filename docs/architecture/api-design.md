@@ -1,4 +1,4 @@
-# API Design - Personal CRM & Journal System
+# API Design - Lifecontour
 
 This document provides comprehensive API design patterns for both REST and MCP interfaces.
 

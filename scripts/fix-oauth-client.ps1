@@ -63,7 +63,7 @@ $clientConfig = @{
     scope = "openid profile email"
     skip_consent = $true
     skip_logout_consent = $true
-    client_name = "Personal Management System (Development)"
+    client_name = "Lifecontour (Development)"
     client_uri = "http://localhost:3000"
     token_endpoint_auth_method = "client_secret_post"
 } | ConvertTo-Json -Depth 10

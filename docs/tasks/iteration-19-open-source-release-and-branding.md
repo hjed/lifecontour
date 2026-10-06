@@ -722,7 +722,30 @@ docs), it says **Lifecontour**, read from one constant per stack.
     `integration_workers/` returns only the deferred infrastructure identifiers (log/OTel service
     names, DB and stream names).
 
-**Phase 3 — Python package metadata and docs.** PR ~300 lines.
+**Phase 3 — Python package metadata and docs.** PR ~300 lines. ✅ DONE
+
+- **Progress:**
+  - **Packages:** the backend distribution is `lifecontour-backend`. All six `pyproject.toml` files
+    now have Lifecontour descriptions and the author `Harry J E Day`, with no email. The worker and
+    `core_shared` names are unchanged. The `creating-a-new-worker` skill's template matches.
+  - **Lockfiles:** `backend/uv.lock` changes only by the renamed project block, which uv re-sorts
+    alphabetically. The other five locks are unchanged; path dependencies record no description.
+    `uv lock --check` passes for all six.
+  - **Image:** the backend image builds, installs `lifecontour-backend` from `pyproject`, and
+    answers `/api/health`.
+  - **README:** the `<picture>` lockup header (light and dark), the tagline, a static AGPL licence
+    badge, an "About" section and the footer.
+  - **Docs:** `AGENTS.md` gains Lifecontour project context, which points at the two name
+    constants. The `docs/tasks.md`, `docs/architecture.md` and `frontend/README.md` headings are
+    renamed, and so are the living `docs/architecture/*.md`, MCP, pre-commit and troubleshooting
+    docs' headings and intros. `NEXT_PUBLIC_APP_NAME` is removed from `frontend/.env.example`.
+  - **Dev OAuth UI:** `docker/oauth-ui/views/index.ejs` no longer exists; the auto-accepting
+    `oauth-login-consent` service replaced it and shows no product text. The dev-visible name is
+    now the Hydra client name (`init-oauth.sh`, `fix-oauth-client.{sh,ps1}`): `Lifecontour (<env>)`.
+    The dev-script banners and the compose and SQL header comments are renamed with it.
+  - **Left as is:** the deferred `personal-management-backend` OTel and log service names, and
+    the two absence tests. Also the test-local `_USER_AGENT` in `test_osm_tile_source.py`, which is
+    injected test data. Historical specs are not rewritten.
 
 - **Packages:**
   - `backend/pyproject.toml`: name `lifecontour-backend`, and the description and author

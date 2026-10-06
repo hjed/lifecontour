@@ -1,7 +1,30 @@
-# Personal CRM & Journal System
-Contact and Life Management in the Age of AI.
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/lockup-dark.svg">
+    <img src="branding/lockup.svg" alt="Lifecontour" height="64">
+  </picture>
+</h1>
 
-A personal relationship management and journaling system with AI integration through the MCP (Model Context Protocol). Built with Python FastAPI backend, Next.js frontend, and PostgreSQL database.
+<p align="center"><em>Your journal, people and adventures — self-hosted.</em></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg" alt="License: AGPL-3.0-or-later"></a>
+</p>
+
+## About
+
+Lifecontour is a self-hosted personal CRM and journal. It keeps the people in your life, your
+journal, your tasks and your outdoor adventures in one place you run yourself:
+
+- **People:** contacts, relationships, important dates and the journals they appear in.
+- **Journal:** notes, events, moods and series, with tags, search and a daily summary.
+- **Adventures:** an outdoor logbook with GPX routes, fitness activities and gear.
+- **Integrations:** Google Contacts and Calendar, Strava, Immich photos and Snipe-IT gear, each
+  synced by an isolated worker.
+- **AI assistants:** an MCP (Model Context Protocol) server, so an assistant can read and update
+  your data on your behalf.
+
+It is built with a Python FastAPI backend, a Next.js frontend and PostgreSQL.
 
 ## 🚀 Quick Start
 
@@ -289,5 +312,5 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md), and for community sta
 
 ---
 
-**Personal Management System** - Centralize your personal data with AI integration
+**Lifecontour** — your journal, people and adventures, self-hosted.
 

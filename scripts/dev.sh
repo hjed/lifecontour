@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Development script for Personal Management System
+# Development script for Lifecontour
 # Provides easy commands for common development tasks
 
 set -e
@@ -49,7 +49,7 @@ command_exists() {
 
 # Setup function
 setup() {
-    log_info "Setting up Personal Management System development environment..."
+    log_info "Setting up Lifecontour development environment..."
 
     # Check prerequisites
     if ! command_exists "uv"; then
@@ -398,7 +398,7 @@ precommit() {
 
 # Show help
 help() {
-    echo "Personal Management System Development Script"
+    echo "Lifecontour Development Script"
     echo ""
     echo "Usage: $0 [command] [options]"
     echo ""

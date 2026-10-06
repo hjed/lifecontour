@@ -1,6 +1,11 @@
-# AI Development Guidelines - Personal CRM & Journal System
+# AI Development Guidelines - Lifecontour
 
 ## Project Context
+
+Lifecontour is a self-hosted personal CRM and journal: your journal, people and adventures —
+self-hosted. The product name lives in one constant per stack (`APP_NAME` in
+`frontend/src/lib/constants.ts`, `PRODUCT_NAME` in `core_shared/core_shared/product.py`); read it
+from there rather than writing the name as a literal.
 
 
 Refer to the [architecture document](docs/architecture.md) for a high-level overview of the system architecture and navigation.

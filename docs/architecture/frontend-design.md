@@ -1,4 +1,4 @@
-# Frontend Design - Personal CRM & Journal System
+# Frontend Design - Lifecontour
 
 This document provides comprehensive frontend design patterns and component guidelines using shadcn/ui.
 

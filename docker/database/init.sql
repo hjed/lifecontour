@@ -1,4 +1,4 @@
--- Database initialization script for Personal Management System
+-- Database initialization script for Lifecontour
 -- Sets up extensions for all databases (dev, test, prod)
 
 -- Set timezone to UTC for consistency

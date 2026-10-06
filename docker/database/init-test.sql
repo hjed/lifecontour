@@ -1,4 +1,4 @@
--- Database initialization script for Personal Management System Tests
+-- Database initialization script for Lifecontour tests
 -- Sets up extensions for the test database
 
 -- Set timezone to UTC for consistency

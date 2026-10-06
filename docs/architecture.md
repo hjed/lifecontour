@@ -1,8 +1,8 @@
-# Personal CRM & Journal System - Architecture Overview
+# Lifecontour - Architecture Overview
 
 ## System Overview
 
-The Personal CRM & Journal System is a Python FastAPI backend with Next.js frontend designed to centralize personal relationship management and journaling with intelligent AI integration through the MCP (Model Context Protocol).
+Lifecontour is a self-hosted personal CRM and journal: a Python FastAPI backend with Next.js frontend designed to centralize personal relationship management and journaling with intelligent AI integration through the MCP (Model Context Protocol).
 
 ### Core Objectives
 - **Unified Personal Data**: Centralize contacts, calendar events, journal entries, and photos

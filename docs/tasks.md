@@ -1,7 +1,7 @@
-# Personal CRM & Journal System - Task Overview
+# Lifecontour - Task Overview
 
 ## Project Overview
-A comprehensive personal management system with Python FastAPI backend, Next.js frontend, and AI integration via MCP protocol. Integrates personal data from multiple sources (Google Calendar/Contacts, Immich photos, Strava activities, financial data) with both web interface and AI assistant capabilities.
+Lifecontour is a self-hosted personal CRM and journal with a Python FastAPI backend, Next.js frontend, and AI integration via MCP protocol. Integrates personal data from multiple sources (Google Calendar/Contacts, Immich photos, Strava activities, financial data) with both web interface and AI assistant capabilities.
 
 ## Technology Stack
 - **Backend:** Python 3.11+ with FastAPI, PostgreSQL, Dishka dependency injection

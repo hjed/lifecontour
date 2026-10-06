@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for the Personal Management System.
+Pytest configuration and fixtures for Lifecontour.
 
 Provides common test fixtures, database setup, and test utilities
 for unit, integration, and end-to-end tests.

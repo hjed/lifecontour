@@ -1,4 +1,4 @@
-# Personal Management System Development Script (PowerShell)
+# Lifecontour Development Script (PowerShell)
 # Provides easy commands for common development tasks on Windows
 
 param(
@@ -165,7 +165,7 @@ function Invoke-DockerStop {
 
 # Show help
 function Show-Help {
-    Write-Host "Personal Management System Development Script (PowerShell)" -ForegroundColor $Colors.White
+    Write-Host "Lifecontour Development Script (PowerShell)" -ForegroundColor $Colors.White
     Write-Host ""
     Write-Host "Usage: .\scripts\dev.ps1 [command] [options]" -ForegroundColor $Colors.White
     Write-Host ""

@@ -1,6 +1,6 @@
 # MCP Tools Documentation
 
-This document describes the MCP (Model Context Protocol) tools available in the Personal Management System for AI integration.
+This document describes the MCP (Model Context Protocol) tools available in Lifecontour for AI integration.
 
 ## Overview
 
