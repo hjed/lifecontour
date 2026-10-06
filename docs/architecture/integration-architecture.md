@@ -271,8 +271,10 @@ non-empty) and is the one the backend reads:
 
 - **No owner, no contact.** `OutboxEventProcessor` fails a contact sync event that
   names no owner with `PermanentOutboxEventProcessingError` ("contact sync event
-  names no owner") rather than guess one or retry; so does any other payload that
-  fails validation.
+  names no owner") rather than guess one; so does any other payload that fails
+  validation. The stream layer does not yet treat that error specially: like any
+  failure it stays pending and is dead-lettered after `max_delivery_count`
+  deliveries.
 - **A new contact is the event owner's.** The processor builds the inbound
   contact with the top-level `user_id`, whatever `contact_data` carries;
   `deserialize_contact` itself refuses a payload without an owner.

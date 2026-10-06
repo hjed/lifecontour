@@ -105,9 +105,9 @@ class ContactReconciliationConflictError(OutboxEventProcessingError):
 def _parse_contact_sync_payload(event_data: dict[str, Any]) -> ContactSyncEventData:
     """Validate a ``contact.created`` / ``contact.updated`` payload.
 
-    A malformed payload can never succeed, so it is a permanent failure rather
-    than a retry. That includes one naming no owner: whose contact it is cannot
-    be guessed (spec: entity ownership, "Sync events name the owner").
+    A malformed payload can never succeed, so it raises the permanent error. That
+    includes one naming no owner: whose contact it is cannot be guessed (spec:
+    entity ownership, "Sync events name the owner").
     """
     try:
         return ContactSyncEventData.model_validate(event_data)

@@ -447,8 +447,9 @@ that mechanical test change lands first, while the field is still optional:
   agrees with the row, whatever owner a caller sent (augment review on #1676).
 - **The inbound consumer: the top-level `user_id` is authoritative, a stored contact keeps its
   owner.** A payload failing validation (an owner-less one included) is now a
-  `PermanentOutboxEventProcessingError`; before, pydantic's `ValidationError` fell through to the
-  transient branch and retried forever. A new contact takes the event's top-level owner, whatever
+  `PermanentOutboxEventProcessingError`, logged as an invalid payload; before, pydantic's
+  `ValidationError` was wrapped as a transient `OutboxEventProcessingError`. Either way the stream
+  layer retries it up to `max_delivery_count` and then dead-letters it (see follow-ups). A new contact takes the event's top-level owner, whatever
   `contact_data` says (`contact_data` is not rewritten, so version hashes are unchanged). An update
   through the link store, or a create reconciled by email, keeps the **stored** owner and logs a
   mismatch rather than refusing: refusing cross-owner links is Phases 14–15's per-user link store.
@@ -460,6 +461,12 @@ that mechanical test change lands first, while the field is still optional:
   mapping (which creates no contact) — the construction-site list above names it wrongly.
 
 **Follow-ups (found in Phase 3):**
+- **Permanent inbound failures are still retried.** `InboundEventConsumer` lets
+  `PermanentOutboxEventProcessingError` propagate, and `StreamConsumer` (core_shared) treats every
+  exception alike: the message stays pending, is redelivered, and is dead-lettered only after
+  `max_delivery_count` (5). An owner-less sync event therefore costs four pointless retries before
+  it reaches the dead-letter table. Pre-existing for every permanent payload error; dead-lettering
+  it on first delivery is a `StreamConsumer` change for all consumers (augment review on #1674).
 - Worker integration suites run `upgrade head` without resetting the schema, so a stale *local*
   test database holding contacts and no owner evidence makes `0123` refuse; recreate the
   container or pass `-x contacts_owner`. CI starts from fresh containers.
