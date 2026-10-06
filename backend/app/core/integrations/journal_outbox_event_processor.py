@@ -1309,8 +1309,10 @@ class JournalOutboxEventProcessor:
         a split recurrence (Google's "this and following" edits) back to the
         one it split from, so every split shares a series. Payloads sent
         before it did carry only ``recurring_event_id``, which is then the
-        key. A split keeps its own id as well, because a split the user
-        merged into another series must keep following that merge.
+        key; migration 0122 aliased every folded split's id to its survivor,
+        so those still land in the right series. A split keeps its own id as
+        well, because a split the user merged into another series must keep
+        following that merge.
 
         **Only the journal's display calendar establishes a series.** A
         recurring event held by two calendars is one journal per instance,

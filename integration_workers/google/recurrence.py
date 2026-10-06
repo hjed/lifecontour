@@ -17,6 +17,7 @@ must cancel its own instances and no other split's.
 
 import re
 
+# Kept identical to the regex migration 0122 used to fold existing series.
 _SPLIT_SUFFIXES = re.compile(r"(?:_R\d{8}(?:T\d{6}Z?)?)+$")
 
 
