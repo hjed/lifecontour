@@ -19,7 +19,6 @@ from core_shared.models.journals import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.abseil_pitch_repository import (
     SqlAbseilPitchRepository,
 )
@@ -29,81 +28,18 @@ from app.core.journal.adapters.sql.abseiling_data_repository import (
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
-from app.core.journal.adapters.sql.bushwalking_data_repository import (
-    SqlBushwalkingDataRepository,
-)
-from app.core.journal.adapters.sql.calendar_info_repository import (
-    SqlCalendarInfoRepository,
-)
-from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
-from app.core.journal.adapters.sql.canoeing_data_repository import (
-    SqlCanoeingDataRepository,
-)
-from app.core.journal.adapters.sql.canyoning_data_repository import (
-    SqlCanyoningDataRepository,
-)
-from app.core.journal.adapters.sql.caving_data_repository import (
-    SqlCavingDataRepository,
-)
-from app.core.journal.adapters.sql.climbing_data_repository import (
-    SqlClimbingDataRepository,
-)
-from app.core.journal.adapters.sql.cross_country_skiing_data_repository import (
-    SqlCrossCountrySkiingDataRepository,
-)
-from app.core.journal.adapters.sql.diving_data_repository import (
-    SqlDivingDataRepository,
-)
-from app.core.journal.adapters.sql.downhill_skiing_data_repository import (
-    SqlDownhillSkiingDataRepository,
-)
-from app.core.journal.adapters.sql.fitness_data_repository import (
-    SqlFitnessDataRepository,
-)
-from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
-    SqlGearMaintenanceDataRepository,
-)
-from app.core.journal.adapters.sql.gear_usage_data_repository import (
-    SqlGearUsageDataRepository,
-)
-from app.core.journal.adapters.sql.jogging_data_repository import (
-    SqlJoggingDataRepository,
-)
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
-from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
 )
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
-from app.core.journal.adapters.sql.kayaking_data_repository import (
-    SqlKayakingDataRepository,
-)
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
-from app.core.journal.adapters.sql.outdoor_activity_data_repository import (
-    SqlOutdoorActivityDataRepository,
-)
-from app.core.journal.adapters.sql.outdoor_planning_data_repository import (
-    SqlOutdoorPlanningDataRepository,
-)
-from app.core.journal.adapters.sql.outdoor_training_data_repository import (
-    SqlOutdoorTrainingDataRepository,
-)
-from app.core.journal.adapters.sql.plan_data_repository import SqlPlanDataRepository
-from app.core.journal.adapters.sql.snorkelling_data_repository import (
-    SqlSnorkellingDataRepository,
-)
-from app.core.journal.adapters.sql.travel_data_repository import (
-    SqlTravelDataRepository,
-)
 from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.models.journal_tag import JournalTag
-from app.core.journal.services.journal_enrichment_service import (
-    JournalEnrichmentService,
-    JournalTypeDataRepositories,
-)
 from tests.integration.contact_seeding import seed_contact
+from tests.integration.journal_enrichment import enrichment_service_for
 from tests.integration.linked_calendar_seeding import (
     USER_ID,
     create_calendar,
@@ -112,43 +48,6 @@ from tests.integration.linked_calendar_seeding import (
 )
 
 OTHER_USER_ID = "someone-else-456"
-
-
-def _service(conn: AsyncConnection) -> JournalEnrichmentService:
-    return JournalEnrichmentService(
-        type_data_repos=JournalTypeDataRepositories(
-            calendar_info_repo=SqlCalendarInfoRepository(conn),
-            mood_data_repo=SqlMoodDataRepository(conn),
-            plan_data_repo=SqlPlanDataRepository(conn),
-            travel_data_repo=SqlTravelDataRepository(conn),
-            photo_album_data_repo=AlbumSyncReadRepository(conn),
-            fitness_data_repo=SqlFitnessDataRepository(conn),
-            outdoor_activity_data_repo=SqlOutdoorActivityDataRepository(conn),
-            bushwalking_data_repo=SqlBushwalkingDataRepository(conn),
-            jogging_data_repo=SqlJoggingDataRepository(conn),
-            abseiling_data_repo=SqlAbseilingDataRepository(conn),
-            caving_data_repo=SqlCavingDataRepository(conn),
-            canyoning_data_repo=SqlCanyoningDataRepository(conn),
-            climbing_data_repo=SqlClimbingDataRepository(conn),
-            kayaking_data_repo=SqlKayakingDataRepository(conn),
-            cross_country_skiing_data_repo=SqlCrossCountrySkiingDataRepository(conn),
-            canoeing_data_repo=SqlCanoeingDataRepository(conn),
-            snorkelling_data_repo=SqlSnorkellingDataRepository(conn),
-            diving_data_repo=SqlDivingDataRepository(conn),
-            downhill_skiing_data_repo=SqlDownhillSkiingDataRepository(conn),
-            outdoor_planning_data_repo=SqlOutdoorPlanningDataRepository(conn),
-            outdoor_training_data_repo=SqlOutdoorTrainingDataRepository(conn),
-            gear_maintenance_data_repo=SqlGearMaintenanceDataRepository(conn),
-            gear_usage_data_repo=SqlGearUsageDataRepository(conn),
-            abseil_pitch_repo=SqlAbseilPitchRepository(conn),
-        ),
-        journal_repo=SqlJournalRepository(conn),
-        contact_relationship_repo=SqlJournalContactRelationshipRepository(conn),
-        contact_repo=SqlContactRepository(conn),
-        tag_repo=SqlJournalTagRepository(conn),
-        series_repo=SqlJournalSeriesRepository(conn),
-        calendar_repo=SqlCalendarRepository(conn),
-    )
 
 
 async def _create_journal(
@@ -190,7 +89,9 @@ class TestEnrichTypes:
     ) -> None:
         journal_id = await _create_journal(async_connection)
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert enrichment.types == [JournalType.NOTE.value]
         assert enrichment.type_rows == {}
@@ -206,7 +107,9 @@ class TestEnrichTypes:
             MoodData(journal_id=journal_id, mood_value=7)
         )
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert enrichment.types == [
             JournalType.MOOD_RATING.value,
@@ -227,7 +130,9 @@ class TestEnrichTypes:
         await pitch_repo.save(AbseilPitch(journal_id=journal_id, pitch_number=2))
         await pitch_repo.save(AbseilPitch(journal_id=journal_id, pitch_number=1))
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert [p.pitch_number for p in enrichment.abseil_pitches] == [1, 2]
 
@@ -236,7 +141,9 @@ class TestEnrichTypes:
     ) -> None:
         journal_id = await _create_journal(async_connection)
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert enrichment.abseil_pitches == []
 
@@ -264,7 +171,9 @@ class TestEnrichContacts:
                 )
             )
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         by_id = {c.contact_id: c for c in enrichment.contacts}
         assert by_id[full].name == "Jane Citizen"
@@ -290,7 +199,9 @@ class TestEnrichTagsSeriesCalendars:
         assert tag.id is not None
         await tag_repo.assign_tag(journal_id, tag.id)
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert [t.name for t in enrichment.tags] == ["enrichment-test-tag"]
 
@@ -303,8 +214,10 @@ class TestEnrichTagsSeriesCalendars:
         assert series.id is not None
         await series_repo.add_member(series.id, journal_id)
 
-        own = await _service(async_connection).enrich(journal_id, USER_ID)
-        other = await _service(async_connection).enrich(journal_id, OTHER_USER_ID)
+        own = await enrichment_service_for(async_connection).enrich(journal_id, USER_ID)
+        other = await enrichment_service_for(async_connection).enrich(
+            journal_id, OTHER_USER_ID
+        )
 
         assert [s.name for s in own.series] == ["Weekly"]
         assert other.series == []
@@ -324,7 +237,9 @@ class TestEnrichTagsSeriesCalendars:
             external_event_id="personal-copy",
         )
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert JournalType.EVENT.value in enrichment.types
         assert [str(c.id) for c in enrichment.calendars] == [work, personal]
@@ -346,7 +261,9 @@ class TestEnrichTagsSeriesCalendars:
             external_event_id="stray-link",
         )
 
-        enrichment = await _service(async_connection).enrich(journal_id, USER_ID)
+        enrichment = await enrichment_service_for(async_connection).enrich(
+            journal_id, USER_ID
+        )
 
         assert enrichment.types == [JournalType.NOTE.value]
         assert enrichment.calendars == []
@@ -367,7 +284,9 @@ class TestTypesFor:
         )
         await _mark_photo_album(async_connection, typed_id)
 
-        types = await _service(async_connection).types_for([note_id, typed_id])
+        types = await enrichment_service_for(async_connection).types_for(
+            [note_id, typed_id]
+        )
 
         assert types == {
             note_id: [JournalType.NOTE.value],
@@ -386,7 +305,7 @@ class TestTypesFor:
         await SqlMoodDataRepository(async_connection).save(
             MoodData(journal_id=journal_id, mood_value=3)
         )
-        service = _service(async_connection)
+        service = enrichment_service_for(async_connection)
 
         enrichment = await service.enrich(journal_id, USER_ID)
         types = await service.types_for([journal_id])
@@ -396,4 +315,4 @@ class TestTypesFor:
     async def test_types_for_no_ids_runs_no_query(
         self, async_connection: AsyncConnection
     ) -> None:
-        assert await _service(async_connection).types_for([]) == {}
+        assert await enrichment_service_for(async_connection).types_for([]) == {}
