@@ -35,6 +35,9 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
@@ -209,6 +212,14 @@ async def get_journal_external_link_service() -> JournalExternalLinkService:
     return cast(
         JournalExternalLinkService,
         await _resolve_dependency(JournalExternalLinkService),
+    )
+
+
+async def get_journal_enrichment_service() -> JournalEnrichmentService:
+    """Resolve the journal enrichment service for the current MCP request."""
+    return cast(
+        JournalEnrichmentService,
+        await _resolve_dependency(JournalEnrichmentService),
     )
 
 

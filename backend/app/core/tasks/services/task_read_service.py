@@ -47,6 +47,9 @@ from app.core.journal.services.journal_date_resolver import (
     local_window,
     today_in,
 )
+from app.core.journal.services.journal_enrichment_service import (
+    contact_display_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -100,20 +103,6 @@ def _lapses_its_tasks(
         )
         is not None
     )
-
-
-def _display_name(
-    first_name: str | None, last_name: str | None, contact_id: int
-) -> str:
-    """A contact's name for a task row, tolerating missing parts.
-
-    The same null-safe shape ``_enrich_journal_data`` uses on the same three
-    columns, so a contact reads identically on a task and on a journal. The two
-    are deliberately separate copies for now: the other lives inside a journals
-    controller function, and lifting it out would rewrite a shipped endpoint.
-    """
-    parts = [part for part in (first_name, last_name) if part]
-    return " ".join(parts) if parts else f"Contact {contact_id}"
 
 
 class TaskReadService:
@@ -710,7 +699,7 @@ class TaskReadService:
             first_name, last_name, photo_url = found
             refs[contact_id] = TaskContactRef(
                 id=contact_id,
-                display_name=_display_name(first_name, last_name, contact_id),
+                display_name=contact_display_name(first_name, last_name, contact_id),
                 photo_url=photo_url,
             )
         return refs

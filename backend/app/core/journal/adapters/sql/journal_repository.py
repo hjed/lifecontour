@@ -1,5 +1,6 @@
 """SQL implementation of JournalRepository."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from typing import Any
@@ -503,6 +504,22 @@ class SqlJournalRepository(JournalRepository):
             return []
 
         return ["NOTE", *type_names_from_projection_row(row)]
+
+    async def get_typed_rows_batch(
+        self, journal_ids: Sequence[int]
+    ) -> dict[int, set[JournalType]]:
+        """The typed rows each journal holds, from one ``GET_TYPES_BATCH_SQL``."""
+        if not journal_ids:
+            return {}
+        result = await self.conn.execute(
+            text(GET_TYPES_BATCH_SQL), {"journal_ids": list(journal_ids)}
+        )
+        return {
+            int(row.journal_id): {
+                JournalType[name] for name in type_names_from_projection_row(row)
+            }
+            for row in result.fetchall()
+        }
 
     async def get_concrete_types(self, journal_id: int) -> list[str]:
         """Types as the read paths report them: NOTE only when nothing else is.
