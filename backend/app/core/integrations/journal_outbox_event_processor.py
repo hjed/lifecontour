@@ -115,6 +115,16 @@ def _provenance_for_source(integration_source: str | None) -> Provenance:
     return _PROVENANCE_BY_INTEGRATION_SOURCE.get(integration_source, Provenance.SYSTEM)
 
 
+def _series_recurring_event_id(payload: JournalSyncEventData) -> str | None:
+    """The recurring id an instance's journal series is keyed on.
+
+    The integration folds a split recurrence back to the one it split from,
+    so every split shares a series. Payloads sent before it did carry only
+    the instance's own recurring id, which is all there is to key on.
+    """
+    return payload.series_recurring_event_id or payload.recurring_event_id
+
+
 # Mapping from JournalType value to the database table name for types that
 # need a default data row.  FITNESS is handled separately via
 # SqlFitnessDataRepository, and EVENT/NOTE have no standalone data table.
@@ -462,7 +472,7 @@ class JournalOutboxEventProcessor:
             journal_id=created_journal.id,
             user_id=created_journal.user_id,
             calendar_id=UUID(calendar_id),
-            recurring_event_id=payload.recurring_event_id,
+            recurring_event_id=_series_recurring_event_id(payload),
             series_name=created_journal.title,
         )
 
@@ -602,7 +612,7 @@ class JournalOutboxEventProcessor:
                     journal_id=existing_journal_id,
                     user_id=existing_journal.user_id,
                     calendar_id=UUID(calendar_id),
-                    recurring_event_id=payload.recurring_event_id,
+                    recurring_event_id=_series_recurring_event_id(payload),
                     series_name=existing_journal.title,
                 )
                 logger.info(
@@ -745,7 +755,7 @@ class JournalOutboxEventProcessor:
             journal_id=existing_journal_id,
             user_id=existing_journal.user_id,
             calendar_id=UUID(calendar_id),
-            recurring_event_id=payload.recurring_event_id,
+            recurring_event_id=_series_recurring_event_id(payload),
             series_name=saved_journal.title,
         )
 
@@ -1300,7 +1310,8 @@ class JournalOutboxEventProcessor:
         Get-or-creates the series keyed by (calendar_id, recurring_event_id) —
         named after the event on first creation, never renamed by sync — and
         adds the journal as a member (idempotent). No-op for non-recurring
-        events.
+        events. ``recurring_event_id`` is the series key from
+        :func:`_series_recurring_event_id`, not necessarily the link's own id.
 
         **Only the journal's display calendar establishes a series.** A
         recurring event held by two calendars is one journal per instance,

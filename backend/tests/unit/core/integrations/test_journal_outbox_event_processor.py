@@ -93,6 +93,7 @@ def _make_journal_event_data(
     existing_journal_id: int | None = None,
     contact_relationships: list[dict[str, str]] | None = None,
     recurring_event_id: str | None = None,
+    series_recurring_event_id: str | None = None,
     external_identity: str | None = None,
     timezone: str | None = None,
 ) -> dict[str, Any]:
@@ -122,6 +123,7 @@ def _make_journal_event_data(
         "existing_journal_id": existing_journal_id,
         "contact_relationships": contact_relationships or [],
         "recurring_event_id": recurring_event_id,
+        "series_recurring_event_id": series_recurring_event_id,
         "external_identity": external_identity,
     }
 
@@ -2814,6 +2816,74 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
 
     @pytest.mark.asyncio
+    async def test_created_split_instance_keys_its_series_on_the_series_id(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A split recurrence joins the series of the recurrence it split from."""
+        event = _make_outbox_event(
+            event_type="journal_event.created",
+            sync_action="created",
+            recurring_event_id="master-1_R20260801T090000",
+            series_recurring_event_id="master-1",
+        )
+        mock_journal_service.create_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _find_external_event_link (idempotency check)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _create_external_event_link
+            _mock_is_display_calendar(),  # _is_display_calendar
+        ]
+
+        await processor.process_event(event)
+
+        _mock(
+            processor.series_repo
+        ).get_or_create_by_recurrence.assert_awaited_once_with(
+            user_id="1",
+            calendar_id=UUID(CALENDAR_ID),
+            recurring_event_id="master-1",
+            name="Team Meeting",
+        )
+        link_call = _execute_call_with_param(mock_connection, "recurring_event_id")
+        assert link_call[0][1]["recurring_event_id"] == "master-1_R20260801T090000"
+
+    @pytest.mark.asyncio
+    async def test_updated_split_instance_keys_its_series_on_the_series_id(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """Updates key the series the same way creates do."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-new"',
+            recurring_event_id="master-1_R20260801T090000",
+            series_recurring_event_id="master-1",
+        )
+        mock_journal_service.update_journal.return_value = _make_journal()
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(_make_link_row()),  # _find_external_event_link
+            _mock_empty_result(),  # _find_calendar_info (private_description)
+            _mock_empty_result(),  # _save_calendar_info
+            _mock_empty_result(),  # _update_external_event_link_etag
+            _mock_is_display_calendar(),  # _is_display_calendar
+        ]
+
+        await processor.process_event(event)
+
+        call = _mock(processor.series_repo).get_or_create_by_recurrence.await_args
+        assert call.kwargs["recurring_event_id"] == "master-1"
+
+    @pytest.mark.asyncio
     async def test_created_event_without_recurring_id_skips_series(
         self,
         processor: JournalOutboxEventProcessor,
@@ -3032,6 +3102,40 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
         assert backfill_call[0][1]["recurring_event_id"] == "master-1"
         _mock(processor.series_repo).get_or_create_by_recurrence.assert_awaited_once()
         _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_backfill_keys_its_series_on_the_series_id(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The backfill stores the split's own id but joins the root's series."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+            etag='"etag-old"',  # matches the stored link version
+            recurring_event_id="master-1_R20260801T090000",
+            series_recurring_event_id="master-1",
+        )
+        mock_connection.execute.side_effect = [
+            MagicMock(),  # _ensure_calendar_exists
+            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
+            _mock_fetchone(
+                _make_link_row(recurring_event_id=None)
+            ),  # _find_external_event_link (same etag, unbackfilled)
+            _mock_empty_result(),  # _update_external_event_link_etag (backfill)
+            _mock_is_display_calendar(),  # _is_display_calendar
+        ]
+
+        await processor.process_event(event)
+
+        backfill_call = _execute_call_with_param(mock_connection, "recurring_event_id")
+        assert backfill_call[0][1]["recurring_event_id"] == (
+            "master-1_R20260801T090000"
+        )
+        call = _mock(processor.series_repo).get_or_create_by_recurrence.await_args
+        assert call.kwargs["recurring_event_id"] == "master-1"
 
     @pytest.mark.asyncio
     async def test_unchanged_etag_update_with_stored_recurring_id_pure_skip(

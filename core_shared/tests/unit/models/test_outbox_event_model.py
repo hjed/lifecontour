@@ -165,3 +165,32 @@ class TestCreateJournalSyncEventRecurring:
         )
 
         assert event.event_data["recurring_event_id"] is None
+
+    def test_series_recurring_event_id_in_payload(self) -> None:
+        """The series key travels beside the raw recurring id, not instead of it."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-1_R20260801T000000_20260802T000000Z",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="created",
+            recurring_event_id="evt-1_R20260801T000000",
+            series_recurring_event_id="evt-1",
+        )
+
+        assert event.event_data["recurring_event_id"] == "evt-1_R20260801T000000"
+        assert event.event_data["series_recurring_event_id"] == "evt-1"
+
+    def test_series_recurring_event_id_defaults_to_none(self) -> None:
+        """Payloads from before the field existed still validate."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-2",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="created",
+        )
+
+        assert event.event_data["series_recurring_event_id"] is None

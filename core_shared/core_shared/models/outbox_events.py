@@ -115,6 +115,17 @@ class JournalSyncEventData(BaseModel):
             "recurring series (drives journal series auto-linking)"
         ),
     )
+    series_recurring_event_id: str | None = Field(
+        default=None,
+        description=(
+            "Recurring id the instance's journal series is keyed on. Equal to "
+            "``recurring_event_id`` unless the source split the recurrence "
+            '(e.g. Google\'s "this and following" edits), in which case it is '
+            "the id of the original recurrence, so every split shares one "
+            "series. Null for old payloads: consumers fall back to "
+            "``recurring_event_id``."
+        ),
+    )
     external_identity: str | None = Field(
         default=None,
         max_length=512,

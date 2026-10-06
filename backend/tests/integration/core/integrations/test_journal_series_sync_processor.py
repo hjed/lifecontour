@@ -102,6 +102,93 @@ class TestSeriesAutoLinkingOnCreate:
 
 
 @pytest.mark.integration
+class TestSplitRecurrence:
+    """A "this and following" edit splits one recurrence into two masters."""
+
+    SPLIT_ID = f"{MASTER_ID}_R20260815T090000"
+
+    async def test_instances_of_every_split_share_one_series(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+
+        before = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20260808T090000Z",
+                recurring_event_id=MASTER_ID,
+                series_recurring_event_id=MASTER_ID,
+            )
+        )
+        after = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{self.SPLIT_ID}_20260815T090000Z",
+                recurring_event_id=self.SPLIT_ID,
+                series_recurring_event_id=MASTER_ID,
+            )
+        )
+
+        series_repo = SqlJournalSeriesRepository(async_connection)
+        [series] = await series_repo.find_all(USER_ID)
+        assert series.recurring_event_id == MASTER_ID
+        assert [
+            s.id
+            for s in await series_repo.get_series_for_journal(
+                after["journal_id"], USER_ID
+            )
+        ] == [series.id]
+        assert [
+            s.id
+            for s in await series_repo.get_series_for_journal(
+                before["journal_id"], USER_ID
+            )
+        ] == [series.id]
+        # The link keeps the split's own id: cancellation is scoped by it.
+        assert await link_recurring_id(async_connection, after["journal_id"]) == (
+            self.SPLIT_ID
+        )
+
+    async def test_cancelling_a_split_leaves_the_other_split_alone(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        before = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_20260808T090000Z",
+                recurring_event_id=MASTER_ID,
+                series_recurring_event_id=MASTER_ID,
+            )
+        )
+        after = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{self.SPLIT_ID}_20260815T090000Z",
+                recurring_event_id=self.SPLIT_ID,
+                series_recurring_event_id=MASTER_ID,
+            )
+        )
+
+        result = await processor.process_event(
+            series_cancelled_event(calendar_id, master_id=self.SPLIT_ID)
+        )
+
+        assert result["deleted"] == 1
+        assert not await journal_exists(async_connection, after["journal_id"])
+        assert await journal_exists(async_connection, before["journal_id"])
+        assert await event_state(async_connection, before["journal_id"]) != (
+            "cancelled"
+        )
+
+
+@pytest.mark.integration
 class TestSeriesAutoLinkingAfterSeriesMerge:
     async def test_new_instance_of_a_merged_recurrence_joins_the_survivor(
         self, async_connection: AsyncConnection

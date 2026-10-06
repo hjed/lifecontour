@@ -185,6 +185,7 @@ class OutboxEvent(Base):
         contact_relationships: list[dict[str, Any]] | None = None,
         recurring_event_id: str | None = None,
         external_identity: str | None = None,
+        series_recurring_event_id: str | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for journal calendar event synchronization.
@@ -208,6 +209,9 @@ class OutboxEvent(Base):
             external_identity: Opaque token, meaningful only to the source
                 integration, that is equal for every copy of the same
                 real-world event however many calendars hold it
+            series_recurring_event_id: Recurring id the journal series is
+                keyed on; the original recurrence's id when the source split
+                it, so every split lands in one series
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -228,6 +232,7 @@ class OutboxEvent(Base):
             contact_relationships=contact_relationships or [],
             recurring_event_id=recurring_event_id,
             external_identity=external_identity,
+            series_recurring_event_id=series_recurring_event_id,
         )
         return cls(
             event_type=f"journal_event.{sync_action}",
