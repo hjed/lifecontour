@@ -136,3 +136,59 @@ class TestJournalList:
         assert [s["name"] for s in rows[str(journal_id)]["attributes"]["series"]] == [
             "Running club"
         ]
+
+
+class TestJournalWrites:
+    async def test_patch_answers_with_series_and_typed_children(
+        self, integration_api_client: Any, async_connection: AsyncConnection
+    ) -> None:
+        parent_id = await _create_journal(async_connection, "Trip")
+        child_id = await _create_journal(
+            async_connection, "Day one", parent_id=parent_id
+        )
+        await _add_to_series(async_connection, parent_id, "Trips")
+
+        response = await integration_api_client.patch(
+            f"/api/journals/{parent_id}",
+            json={
+                "data": {
+                    "type": "journals",
+                    "id": str(parent_id),
+                    "attributes": {"content": "Updated"},
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert [s["name"] for s in attributes["series"]] == ["Trips"]
+        assert [(c["id"], c["types"]) for c in attributes["children"]] == [
+            (str(child_id), ["note"])
+        ]
+
+    async def test_adding_a_contact_answers_with_its_name(
+        self, integration_api_client: Any, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _create_journal(async_connection, "Lunch")
+        contact_id = await seed_contact(
+            async_connection, first_name="Sam", last_name="Lee"
+        )
+
+        response = await integration_api_client.post(
+            f"/api/journals/{journal_id}/relationships/contacts",
+            json={
+                "data": {
+                    "type": "journal-contact-relationships",
+                    "attributes": {
+                        "contact_id": str(contact_id),
+                        "relationship_type": "MENTION",
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        contacts = response.json()["data"]["attributes"]["contacts"]
+        assert [(c["id"], c["name"]) for c in contacts] == [
+            (str(contact_id), "Sam Lee")
+        ]

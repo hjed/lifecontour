@@ -30,7 +30,6 @@ from core_shared.models.journals import (
     GearUsageData,
     JoggingData,
     Journal,
-    JournalContactRelationship,
     JournalType,
     KayakingData,
     MoodData,
@@ -121,36 +120,30 @@ class JournalConverter:
 
     @staticmethod
     def _convert_contacts(
-        contacts: Sequence[JournalContactRelationship | EnrichedContact] | None,
+        contacts: Sequence[EnrichedContact] | None,
     ) -> list[JournalContactRelationshipSchema]:
-        """Convert contact relationships to schemas.
-
-        An :class:`EnrichedContact` carries the contact's name; a bare
-        relationship leaves it for the controller to fill in.
-        """
-        if not contacts:
-            return []
-
-        schemas = []
-        for contact in contacts:
-            if isinstance(contact, EnrichedContact):
-                enriched: EnrichedContact | None = contact
-                contact_rel = contact.relationship
-            else:
-                enriched, contact_rel = None, contact
-            schemas.append(
-                JournalContactRelationshipSchema(
-                    id=str(contact_rel.contact_id),
-                    name=enriched.name if enriched else None,
-                    relationship_type=contact_rel.relationship_type.value,
-                    status=contact_rel.status.value if contact_rel.status else None,
-                    role=contact_rel.role.value if contact_rel.role else None,
-                    first_name=enriched.first_name if enriched else None,
-                    last_name=enriched.last_name if enriched else None,
-                    photo_url=enriched.photo_url if enriched else None,
-                )
+        """Convert a journal's contacts, with their names, to schemas."""
+        return [
+            JournalContactRelationshipSchema(
+                id=str(contact.contact_id),
+                name=contact.name,
+                relationship_type=contact.relationship.relationship_type.value,
+                status=(
+                    contact.relationship.status.value
+                    if contact.relationship.status
+                    else None
+                ),
+                role=(
+                    contact.relationship.role.value
+                    if contact.relationship.role
+                    else None
+                ),
+                first_name=contact.first_name,
+                last_name=contact.last_name,
+                photo_url=contact.photo_url,
             )
-        return schemas
+            for contact in contacts or []
+        ]
 
     @staticmethod
     def _convert_tags(tags: list[JournalTag] | None) -> list[JournalTagSchema]:
@@ -235,7 +228,7 @@ class JournalConverter:
     @staticmethod
     def _create_relationships(
         tags: list[JournalTag] | None,
-        contacts: Sequence[JournalContactRelationship | EnrichedContact] | None,
+        contacts: Sequence[EnrichedContact] | None,
         calendar: Calendar | None,
         routes: list[Route] | None = None,
     ) -> JournalRelationships | None:
@@ -321,7 +314,7 @@ class JournalConverter:
         base_url: str = "",
         types: list[str] | None = None,
         type_data: dict[str, Any] | None = None,
-        contacts: Sequence[JournalContactRelationship | EnrichedContact] | None = None,
+        contacts: Sequence[EnrichedContact] | None = None,
         tags: list[JournalTag] | None = None,
         calendars: list[Calendar] | None = None,
         parent: Journal | None = None,
