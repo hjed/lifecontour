@@ -287,7 +287,9 @@ non-empty) and is the one the backend reads:
 The other direction carries the owner too. Every contact domain event that workers push
 (`CONTACT_PUSH_EVENT_TYPES`: the lifecycle events, `ContactMerged`, tag membership, methods,
 addresses, notes and important dates) names the contact's owner in `event_data.user_id`, so a
-worker can push the change to that user's accounts only (Phase 13). The publishing service takes
+worker can push the change to that user's accounts only. The Immich worker's per-contact push
+already does (it prefers `event_data["user_id"]` to every connected account); the Google worker
+and both workers' `ContactMerged` handlers move to it in Phase 13. The publishing service takes
 it from the contact it has already loaded; a merge names the survivor's owner. A registry test
 (`test_contact_event_type_registry.py`) fails if a pushed event is declared without it.
 

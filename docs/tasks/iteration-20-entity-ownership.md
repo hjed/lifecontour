@@ -422,7 +422,12 @@ that mechanical test change lands first, while the field is still optional:
   inbound consumer's owner handling; `0124` (`SET NOT NULL`).
 - **3c ✅ DONE** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event (a required keyword on
   each constructor, so mypy names every publisher). **Must merge before Phase 13.**
-  Safe after `NOT NULL`: nothing before Phase 13 reads the owner from an event.
+  It changes one worker immediately: the Immich worker's per-contact push already prefers
+  `event_data["user_id"]` (`immich/worker.py:659`) over every connected account, so from 3c it
+  pushes a contact change to its owner's Immich account only — on a one-user site the same
+  account as before, and an owner without Immich is skipped rather than written to someone
+  else's. The Google worker ignores the key until Phase 13, as does Immich's separate
+  `ContactMerged` handler.
 
 **Decisions (recorded during implementation):**
 - **Migration numbers:** `0123` (column) and `0124` (`NOT NULL`) — `main` took `0121` and `0122`

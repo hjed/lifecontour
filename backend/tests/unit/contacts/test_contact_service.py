@@ -952,6 +952,25 @@ class TestContactService:
         }
 
     @pytest.mark.asyncio
+    async def test_update_events_name_the_stored_owner(
+        self, contact_service, mock_contact_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        """A caller sending another owner cannot route the update to that user."""
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.save.side_effect = lambda contact: contact
+
+        await contact_service.update_contact(
+            Contact(user_id="someone-else", first_name="Johnny", id=1),
+            mock_transaction,
+        )
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactUpdated": "owner-9"
+        }
+
+    @pytest.mark.asyncio
     async def test_child_row_events_name_the_parent_contacts_owner(
         self,
         contact_service,
