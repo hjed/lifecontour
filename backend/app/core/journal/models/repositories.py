@@ -10,7 +10,7 @@ from uuid import UUID
 
 if TYPE_CHECKING:
     from core_shared.models.history import Provenance
-    from core_shared.models.journals import EventDateRange
+    from core_shared.models.journals import EventDateRange, JournalType
     from core_shared.models.journals.attendee_status import AttendeeStatus
     from core_shared.models.journals.contact_event_role import ContactEventRole
     from core_shared.models.journals.review_item import ReviewItem
@@ -169,6 +169,17 @@ class JournalRepository(ABC):
 
         Returns:
             A list of type strings for the journal, including 'NOTE' as the base type.
+        """
+        pass
+
+    @abstractmethod
+    async def get_typed_rows_batch(
+        self, journal_ids: Sequence[int]
+    ) -> dict[int, set[JournalType]]:
+        """The typed rows each journal holds, in one query.
+
+        NOTE is never included: it is the absence of a typed row. A journal id
+        with no typed row maps to an empty set; an unknown id is omitted.
         """
         pass
 

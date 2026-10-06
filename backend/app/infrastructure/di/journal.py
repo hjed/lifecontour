@@ -10,6 +10,7 @@ from core_shared.models.journals import (
 from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
@@ -189,6 +190,10 @@ from app.core.journal.services.incomplete_outdoor_activity_service import (
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+    JournalTypeDataRepositories,
+)
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
@@ -760,6 +765,84 @@ class JournalProvider(Provider):
         """Provide a JournalExternalLinkService instance."""
         return JournalExternalLinkService(
             journal_repo=journal_repo, immich_token_service=immich_token_service
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_type_data_repositories(
+        self,
+        calendar_info_repo: CalendarInfoRepository,
+        mood_data_repo: MoodDataRepository,
+        plan_data_repo: PlanDataRepository,
+        travel_data_repo: TravelDataRepository,
+        photo_album_data_repo: AlbumSyncReadRepository,
+        fitness_data_repo: FitnessDataRepository,
+        outdoor_activity_data_repo: OutdoorActivityDataRepository,
+        bushwalking_data_repo: BushwalkingDataRepository,
+        jogging_data_repo: JoggingDataRepository,
+        abseiling_data_repo: AbseilingDataRepository,
+        caving_data_repo: CavingDataRepository,
+        canyoning_data_repo: CanyoningDataRepository,
+        climbing_data_repo: ClimbingDataRepository,
+        kayaking_data_repo: KayakingDataRepository,
+        cross_country_skiing_data_repo: CrossCountrySkiingDataRepository,
+        canoeing_data_repo: CanoeingDataRepository,
+        snorkelling_data_repo: SnorkellingDataRepository,
+        diving_data_repo: DivingDataRepository,
+        downhill_skiing_data_repo: DownhillSkiingDataRepository,
+        outdoor_planning_data_repo: OutdoorPlanningDataRepository,
+        outdoor_training_data_repo: OutdoorTrainingDataRepository,
+        gear_maintenance_data_repo: GearMaintenanceDataRepository,
+        gear_usage_data_repo: GearUsageDataRepository,
+        abseil_pitch_repo: AbseilPitchRepository,
+    ) -> JournalTypeDataRepositories:
+        """Provide the per-type repositories the enrichment read walks."""
+        return JournalTypeDataRepositories(
+            calendar_info_repo=calendar_info_repo,
+            mood_data_repo=mood_data_repo,
+            plan_data_repo=plan_data_repo,
+            travel_data_repo=travel_data_repo,
+            photo_album_data_repo=photo_album_data_repo,
+            fitness_data_repo=fitness_data_repo,
+            outdoor_activity_data_repo=outdoor_activity_data_repo,
+            bushwalking_data_repo=bushwalking_data_repo,
+            jogging_data_repo=jogging_data_repo,
+            abseiling_data_repo=abseiling_data_repo,
+            caving_data_repo=caving_data_repo,
+            canyoning_data_repo=canyoning_data_repo,
+            climbing_data_repo=climbing_data_repo,
+            kayaking_data_repo=kayaking_data_repo,
+            cross_country_skiing_data_repo=cross_country_skiing_data_repo,
+            canoeing_data_repo=canoeing_data_repo,
+            snorkelling_data_repo=snorkelling_data_repo,
+            diving_data_repo=diving_data_repo,
+            downhill_skiing_data_repo=downhill_skiing_data_repo,
+            outdoor_planning_data_repo=outdoor_planning_data_repo,
+            outdoor_training_data_repo=outdoor_training_data_repo,
+            gear_maintenance_data_repo=gear_maintenance_data_repo,
+            gear_usage_data_repo=gear_usage_data_repo,
+            abseil_pitch_repo=abseil_pitch_repo,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def journal_enrichment_service(
+        self,
+        type_data_repos: JournalTypeDataRepositories,
+        journal_repo: JournalRepository,
+        contact_relationship_repo: JournalContactRelationshipRepository,
+        contact_repo: ContactRepository,
+        tag_repo: JournalTagRepository,
+        series_repo: JournalSeriesRepository,
+        calendar_repo: CalendarRepository,
+    ) -> JournalEnrichmentService:
+        """Provide the one read of a journal's enrichment for REST and MCP."""
+        return JournalEnrichmentService(
+            type_data_repos=type_data_repos,
+            journal_repo=journal_repo,
+            contact_relationship_repo=contact_relationship_repo,
+            contact_repo=contact_repo,
+            tag_repo=tag_repo,
+            series_repo=series_repo,
+            calendar_repo=calendar_repo,
         )
 
     @provide(scope=Scope.REQUEST)

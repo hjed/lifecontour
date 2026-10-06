@@ -255,6 +255,50 @@ class TestJournalExternalLinks:
         assert link["attributes"]["external_id"] == "google-event-abc"
         assert "calendar.google.com" in link["attributes"]["url"]
 
+    async def test_omits_event_links_that_cannot_open_in_google_calendar(
+        self, integration_api_client, async_connection
+    ):
+        """A blank event id, or a calendar with no Google id, is not a link.
+
+        Neither can be opened in Google Calendar, so REST omits both rather
+        than return a ``google_calendar`` link with a null url — the same rule
+        the MCP journal tools apply.
+        """
+        journal_id = await self._create_journal(integration_api_client)
+        google_calendar_id = await self._google_synced_calendar(
+            integration_api_client, async_connection, "Synced"
+        )
+        response = await integration_api_client.post(
+            "/api/calendars",
+            json={"data": {"type": "calendars", "attributes": {"name": "Local"}}},
+        )
+        local_calendar_id = response.json()["data"]["id"]
+        for calendar_id, external_event_id in (
+            (google_calendar_id, "  "),
+            (local_calendar_id, "local-event-1"),
+        ):
+            await async_connection.execute(
+                text(
+                    "INSERT INTO journal_external_event_links "
+                    "(journal_id, calendar_id, external_event_id, "
+                    "sync_capability, sync_status) "
+                    "VALUES (:journal_id, :calendar_id, :external_event_id, "
+                    "'bidirectional', 'synced')"
+                ),
+                {
+                    "journal_id": journal_id,
+                    "calendar_id": calendar_id,
+                    "external_event_id": external_event_id,
+                },
+            )
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/external-links"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
     async def test_returns_both_strava_and_calendar_links(
         self, integration_api_client, async_connection
     ):

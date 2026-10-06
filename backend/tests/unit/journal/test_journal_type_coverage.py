@@ -22,6 +22,9 @@ from app.core.journal.adapters.sql.logbook_export_repository import (
 from app.core.journal.services import journal_type_data_helpers as helpers
 from app.core.journal.services import journal_type_data_reader as type_reader
 from app.core.journal.services import journal_type_metadata as type_metadata
+from app.core.journal.services.journal_enrichment_service import (
+    JournalTypeDataRepositories,
+)
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.reindex_service import ReindexService
@@ -145,3 +148,15 @@ def test_logbook_export_uses_the_generated_batch_types_query() -> None:
     source = inspect.getsource(SqlLogbookExportRepository)
     assert "GET_TYPES_BATCH_SQL" in source
     assert "CASE WHEN" not in source
+
+
+def test_enrichment_repositories_expose_every_reader_repo() -> None:
+    """The core enrichment read finds each type's repository by ``repo_attr``."""
+    repo_fields = {
+        f.name for f in JournalTypeDataRepositories.__dataclass_fields__.values()
+    }
+    for journal_type, reader in type_reader.TYPE_DATA_READERS.items():
+        assert reader.repo_attr in repo_fields, (
+            f"{journal_type.value}: reader repo '{reader.repo_attr}' is not on "
+            "JournalTypeDataRepositories"
+        )
