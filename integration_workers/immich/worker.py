@@ -26,9 +26,6 @@ from core_shared import (
     redis_settings_from_url,
 )
 from core_shared.fanout import (
-    is_final_attempt as _is_final_attempt,
-)
-from core_shared.fanout import (
     persist_fanout_children as _persist_fanout_children,
 )
 from core_shared.fanout import (
@@ -268,9 +265,9 @@ async def _run_immich_batch(
     Resolves credentials, runs ``process(api_client, conn, server_url)`` inside a
     committed unit of work, and — when ``parent_job_id`` is set — marks this
     child's row ``completed`` and increments the parent's ``completed_children``
-    (only if the row update matched). On a final-attempt failure it records the
-    child ``failed`` and increments ``failed_children``; a non-final failure
-    re-raises untouched so ARQ retries without double-counting.
+    (only if the row update matched). On any failure it records the child
+    ``failed`` and increments ``failed_children`` before re-raising: ARQ retries
+    only a ``Retry``, so a plain exception ends the job on this attempt.
     """
     session_factory = ctx["session_factory"]
     child_job_id = ctx.get("job_id", "unknown")
@@ -312,7 +309,7 @@ async def _run_immich_batch(
         logger.exception(
             "immich batch failed", task=label, user_id=user_id, error=str(e)
         )
-        if parent_job_id and _is_final_attempt(ctx):
+        if parent_job_id:
             await _record_child_failure(
                 session_factory, child_job_id, parent_job_id, str(e)
             )

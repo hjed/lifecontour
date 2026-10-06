@@ -2,9 +2,11 @@
 
 ``sync_strava_activity_batch`` owns a persisted ``sync_jobs`` child row. On
 success it marks its own row ``completed`` and atomically increments the
-parent's ``completed_children``; on a **final**-attempt failure it marks its row
-``failed`` and increments ``failed_children``. A non-final failure (and a
-rate-limit ``Retry``) just propagates without bumping a counter so ARQ retries.
+parent's ``completed_children``. ARQ retries only a ``Retry``, so any other
+failure — including missing auth or a sync service that cannot be built — marks
+the row ``failed`` and increments ``failed_children`` on that same attempt. A
+rate limit raises ``Retry`` without touching the counters until the worker's
+final attempt (``STRAVA_MAX_TRIES``), where it records the failure instead.
 When called without a ``parent_job_id`` (legacy/direct) the counters are skipped.
 """
 
@@ -47,7 +49,7 @@ def _import_worker() -> Any:
         return importlib.import_module("worker")
 
 
-def _make_ctx(*, job_id: str, job_try: int = 1, max_tries: int = 5) -> dict[str, Any]:
+def _make_ctx(*, job_id: str, job_try: int = 1) -> dict[str, Any]:
     mock_session = AsyncMock()
     mock_session.connection = AsyncMock(return_value=AsyncMock())
     mock_session.commit = AsyncMock()
@@ -62,7 +64,6 @@ def _make_ctx(*, job_id: str, job_try: int = 1, max_tries: int = 5) -> dict[str,
         "settings": MagicMock(),
         "job_id": job_id,
         "job_try": job_try,
-        "max_tries": max_tries,
     }
 
 
@@ -74,8 +75,18 @@ def _make_repo() -> MagicMock:
     return repo
 
 
+_AUTH_DATA = {"encrypted_access_token": "a", "encrypted_refresh_token": "r"}
+
+
 @asynccontextmanager
-async def _patched(*, repo: MagicMock, error: Exception | None) -> AsyncIterator[None]:
+async def _patched(
+    *,
+    repo: MagicMock,
+    error: Exception | None,
+    auth_data: dict[str, str] | None = _AUTH_DATA,
+    resolve_error: Exception | None = None,
+    create_error: Exception | None = None,
+) -> AsyncIterator[MagicMock]:
     sync_service = MagicMock()
     sync_service.sync_activity_batch = (
         AsyncMock(side_effect=error)
@@ -88,17 +99,25 @@ async def _patched(*, repo: MagicMock, error: Exception | None) -> AsyncIterator
     with (
         patch(
             "worker._resolve_user_by_id",
-            AsyncMock(
-                return_value={
-                    "encrypted_access_token": "a",
-                    "encrypted_refresh_token": "r",
-                }
-            ),
+            AsyncMock(side_effect=resolve_error, return_value=auth_data),
         ),
-        patch("worker._create_sync_service", return_value=sync_service),
+        patch(
+            "worker._create_sync_service",
+            side_effect=create_error,
+            return_value=sync_service,
+        ),
         patch("worker.SyncJobRepository", return_value=repo),
     ):
-        yield
+        yield sync_service
+
+
+def _assert_child_failed(repo: MagicMock, *, job_id: str, error_message: str) -> None:
+    update_kwargs = repo.update_status.await_args.kwargs
+    assert update_kwargs["job_id"] == job_id
+    assert update_kwargs["status"] == "failed"
+    assert update_kwargs["error_message"] == error_message
+    repo.increment_failed_children.assert_awaited_once_with("strava-parent")
+    repo.increment_completed_children.assert_not_called()
 
 
 class TestStravaBatchCounters:
@@ -121,41 +140,29 @@ class TestStravaBatchCounters:
         repo.increment_failed_children.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_final_failure_marks_failed_and_increments(self) -> None:
+    async def test_first_attempt_failure_marks_failed_and_increments(self) -> None:
         worker = _import_worker()
-        ctx = _make_ctx(job_id="strava-child-fail", job_try=5, max_tries=5)
+        ctx = _make_ctx(job_id="strava-child-fail", job_try=1)
         repo = _make_repo()
         async with _patched(repo=repo, error=RuntimeError("boom")):
-            with pytest.raises(RuntimeError):
+            with pytest.raises(RuntimeError, match="boom"):
                 await worker.sync_strava_activity_batch(
                     ctx, "user-1", [1], "strava-parent"
                 )
 
-        repo.increment_failed_children.assert_awaited_once_with("strava-parent")
-        repo.increment_completed_children.assert_not_called()
+        _assert_child_failed(repo, job_id="strava-child-fail", error_message="boom")
 
     @pytest.mark.asyncio
-    async def test_non_final_failure_does_not_increment(self) -> None:
-        worker = _import_worker()
-        ctx = _make_ctx(job_id="strava-child-retry", job_try=1, max_tries=5)
-        repo = _make_repo()
-        async with _patched(repo=repo, error=RuntimeError("transient")):
-            with pytest.raises(RuntimeError):
-                await worker.sync_strava_activity_batch(
-                    ctx, "user-1", [1], "strava-parent"
-                )
-
-        repo.increment_failed_children.assert_not_called()
-        repo.increment_completed_children.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_raises_retry_without_counter(self) -> None:
+    async def test_rate_limit_before_final_attempt_retries_without_counter(
+        self,
+    ) -> None:
+        """Try 5 is past the shared default of 5 but well short of Strava's 20."""
         from arq import Retry
 
         from strava_rate_limiter import StravaRateLimitError
 
         worker = _import_worker()
-        ctx = _make_ctx(job_id="strava-child-rl", job_try=5, max_tries=5)
+        ctx = _make_ctx(job_id="strava-child-rl", job_try=5)
         repo = _make_repo()
         async with _patched(
             repo=repo, error=StravaRateLimitError("rate limited", retry_after=60)
@@ -165,8 +172,68 @@ class TestStravaBatchCounters:
                     ctx, "user-1", [1], "strava-parent"
                 )
 
+        repo.update_status.assert_not_called()
         repo.increment_failed_children.assert_not_called()
         repo.increment_completed_children.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_on_final_attempt_marks_failed(self) -> None:
+        """A ``Retry`` on the last try would be dropped by ARQ, stranding the row."""
+        from strava_rate_limiter import StravaRateLimitError
+
+        worker = _import_worker()
+        ctx = _make_ctx(job_id="strava-child-rl-final", job_try=worker.STRAVA_MAX_TRIES)
+        repo = _make_repo()
+        async with _patched(
+            repo=repo, error=StravaRateLimitError("rate limited", retry_after=60)
+        ):
+            with pytest.raises(StravaRateLimitError):
+                await worker.sync_strava_activity_batch(
+                    ctx, "user-1", [1], "strava-parent"
+                )
+
+        _assert_child_failed(
+            repo, job_id="strava-child-rl-final", error_message="rate limited"
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_auth_marks_failed(self) -> None:
+        worker = _import_worker()
+        ctx = _make_ctx(job_id="strava-child-noauth")
+        repo = _make_repo()
+        async with _patched(repo=repo, error=None, auth_data=None):
+            out = await worker.sync_strava_activity_batch(
+                ctx, "user-1", [1], "strava-parent"
+            )
+
+        assert out == {"status": "error", "reason": "no_auth"}
+        _assert_child_failed(
+            repo,
+            job_id="strava-child-noauth",
+            error_message="No Strava auth found for user",
+        )
+
+    @pytest.mark.parametrize("stage", ["resolve", "create"])
+    @pytest.mark.asyncio
+    async def test_sync_service_setup_failure_marks_failed(self, stage: str) -> None:
+        worker = _import_worker()
+        ctx = _make_ctx(job_id="strava-child-setup")
+        repo = _make_repo()
+        error = RuntimeError("setup broke")
+        async with _patched(
+            repo=repo,
+            error=None,
+            resolve_error=error if stage == "resolve" else None,
+            create_error=error if stage == "create" else None,
+        ):
+            with pytest.raises(RuntimeError, match="setup broke"):
+                await worker.sync_strava_activity_batch(
+                    ctx, "user-1", [1], "strava-parent"
+                )
+
+        _assert_child_failed(
+            repo, job_id="strava-child-setup", error_message="setup broke"
+        )
 
     @pytest.mark.asyncio
     async def test_legacy_call_without_parent_skips_counters(self) -> None:
@@ -193,23 +260,3 @@ class TestStravaBatchCounters:
 
         assert out["status"] == "completed"
         repo.increment_completed_children.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("ctx", "expected"),
-    [
-        ({"job_try": 5, "max_tries": 5}, True),
-        ({"job_try": 1, "max_tries": 5}, False),
-        ({}, False),
-        ({"job_try": None, "max_tries": None}, False),
-        ({"job_try": "5", "max_tries": "5"}, True),
-        ({"job_try": "oops"}, False),
-    ],
-)
-def test_is_final_attempt_coerces_defensively(
-    ctx: dict[str, Any], expected: bool
-) -> None:
-    """``_is_final_attempt`` never raises on missing/None/string ctx values."""
-    worker = _import_worker()
-
-    assert worker._is_final_attempt(ctx) is expected

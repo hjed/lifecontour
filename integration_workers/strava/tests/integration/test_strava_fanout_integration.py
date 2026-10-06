@@ -135,7 +135,6 @@ def _ctx(
         "settings": MagicMock(),
         "job_id": job_id,
         "job_try": 1,
-        "max_tries": 5,
         **extra,
     }
 
@@ -196,6 +195,22 @@ async def _reconcile(repo: SyncJobRepository) -> dict[str, int]:
     return await reconcile_parents(
         repo, now=datetime.now(UTC), stale_after_seconds=1800.0
     )
+
+
+async def _assert_failed_child_fails_parent(
+    repo: SyncJobRepository, *, parent_id: str, child_id: str, error_message: str
+) -> None:
+    """The child row carries the real error and reconciliation fails the parent."""
+    failed_child = await repo.get_by_job_id(child_id)
+    assert failed_child is not None
+    assert failed_child.status == SyncJobStatus.FAILED.value
+    assert failed_child.error_message == error_message
+
+    assert (await _reconcile(repo))["failed"] == 1
+    parent = await repo.get_by_job_id(parent_id)
+    assert parent is not None
+    assert parent.status == SyncJobStatus.FAILED.value
+    assert parent.error_message == "1 failed of 2 child job(s)"
 
 
 @pytest.mark.integration
@@ -268,7 +283,8 @@ class TestStravaFanout:
             redis_pool=redis_pool,
             parent_id=parent_id,
         )
-        # The other child fails on its final attempt.
+        # The other child raises on its first attempt: ARQ will not retry a
+        # plain exception, so the child must record its failure right away.
         with pytest.raises(RuntimeError):
             await _run_child(
                 bad.job_id,
@@ -276,14 +292,51 @@ class TestStravaFanout:
                 redis_pool=redis_pool,
                 parent_id=parent_id,
                 error=RuntimeError("boom"),
-                job_try=5,
+                job_try=1,
             )
 
-        assert (await _reconcile(repo))["failed"] == 1
-        parent = await repo.get_by_job_id(parent_id)
-        assert parent is not None
-        assert parent.status == SyncJobStatus.FAILED.value
-        assert parent.error_message
+        await _assert_failed_child_fails_parent(
+            repo, parent_id=parent_id, child_id=bad.job_id, error_message="boom"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_child_on_final_attempt_fails_parent(
+        self, repo: SyncJobRepository, session_factory: Any, redis_pool: Any
+    ) -> None:
+        import worker
+        from strava_rate_limiter import StravaRateLimitError
+
+        parent_id = "strava-int-rl-final"
+        await _dispatch(
+            batches=[[1], [2]],
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+
+        ok, limited = await repo.list_children(parent_id)
+        await _run_child(
+            ok.job_id,
+            session_factory=session_factory,
+            redis_pool=redis_pool,
+            parent_id=parent_id,
+        )
+        with pytest.raises(StravaRateLimitError):
+            await _run_child(
+                limited.job_id,
+                session_factory=session_factory,
+                redis_pool=redis_pool,
+                parent_id=parent_id,
+                error=StravaRateLimitError("rate limited", retry_after=60),
+                job_try=worker.STRAVA_MAX_TRIES,
+            )
+
+        await _assert_failed_child_fails_parent(
+            repo,
+            parent_id=parent_id,
+            child_id=limited.job_id,
+            error_message="rate limited",
+        )
 
     @pytest.mark.asyncio
     async def test_large_fanout_completes_with_correct_totals(

@@ -149,6 +149,10 @@ The worker-agnostic fan-out steps (`persist_fanout_children`,
 `record_child_terminal`, `is_final_attempt`) are shared in
 `core_shared/core_shared/fanout.py`.
 
+A batch that raises records its child row `FAILED` (with the error) on that same
+attempt: arq retries a job only on `Retry` or cancellation, so a plain exception
+ends it at once and a child left `QUEUED` would wait out the staleness window.
+
 `job_timeout`, `keep_result`, and the retry backoff match the
 `SharedARQWorkerSettings` baseline — which equals arq's own constructor defaults,
 so they apply unchanged. Note: arq's `get_kwargs` reads only the leaf class's

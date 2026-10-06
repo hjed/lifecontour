@@ -133,6 +133,14 @@ worker-agnostic fan-out steps (`persist_fanout_children`, `record_child_terminal
 `is_final_attempt`) are shared in `core_shared/core_shared/fanout.py`; only the
 Strava-specific parent-row ownership and per-batch session wrappers live here.
 
+A batch that raises records its child row `FAILED` (with the error) on that same
+attempt — including missing auth or a sync service that cannot be built — since
+arq retries a job only on `Retry` or cancellation. Only a rate limit raises
+`Retry`, and only until the final attempt (`STRAVA_MAX_TRIES`, which the batch
+passes to `is_final_attempt` because arq does not put `max_tries` in the job
+context); on that attempt it records the failure instead, because arq drops a
+`Retry` raised then without running the job again.
+
 ## Stream Consumer
 
 `StravaWorkerStreamConsumer` (in [`stream_consumer_tasks.py`](stream_consumer_tasks.py))
