@@ -62,6 +62,22 @@ def test_is_final_attempt(ctx: dict[str, Any], expected: bool) -> None:
     assert is_final_attempt(ctx) is expected
 
 
+@pytest.mark.parametrize(
+    ("ctx", "max_tries", "expected"),
+    [
+        # arq never puts max_tries in the job ctx, so the worker passes its own.
+        ({"job_try": 5}, 20, False),
+        ({"job_try": 20}, 20, True),
+        # The worker's explicit value wins over a ctx value.
+        ({"job_try": 5, "max_tries": 5}, 20, False),
+    ],
+)
+def test_is_final_attempt_uses_explicit_max_tries(
+    ctx: dict[str, Any], max_tries: int, expected: bool
+) -> None:
+    assert is_final_attempt(ctx, max_tries=max_tries) is expected
+
+
 class TestRecordChildTerminal:
     @pytest.mark.asyncio
     async def test_completed_increments_completed(self) -> None:

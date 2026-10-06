@@ -51,8 +51,13 @@ configure_logging(
 
 logger = get_logger(__name__)
 
+# Strava's rate limits require many retries to reach the daily-limit reset
+# (~20 hours of hourly deferrals). ARQ does not put ``max_tries`` in the job
+# context, so the batch passes this to ``is_final_attempt`` itself.
+STRAVA_MAX_TRIES = 20
+
 # Default deferral when Strava provides no retry_after hint (daily limit).
-# 1 hour ensures 20 max_tries covers ~20 hours, enough to reach midnight UTC.
+# 1 hour ensures STRAVA_MAX_TRIES covers ~20 hours, enough to reach midnight UTC.
 _DEFAULT_RATE_LIMIT_DEFER = 60 * 60  # 1 hour
 
 
@@ -283,10 +288,15 @@ async def _record_child_completion(
 async def _record_child_failure(
     session_factory: Any,
     child_job_id: str,
-    parent_job_id: str,
+    parent_job_id: str | None,
     error_message: str,
 ) -> None:
-    """Mark a child row ``failed`` and bump the parent's ``failed_children``."""
+    """Mark a child row ``failed`` and bump the parent's ``failed_children``.
+
+    A no-op without a ``parent_job_id`` (legacy/direct invocation has no row).
+    """
+    if not parent_job_id:
+        return
     async with session_factory() as session:
         conn = await session.connection()
         repo = SyncJobRepository(conn)
@@ -607,15 +617,17 @@ async def sync_strava_activity_batch(
 
     Fetches full activity details + streams from Strava and creates outbox
     events. Each activity is processed independently so one failure doesn't
-    block others. ARQ's ``max_tries`` handles automatic retries on job-level
-    failures (e.g. timeout).
+    block others.
 
     On success the batch marks **its own** child ``sync_jobs`` row ``completed``
-    and atomically increments the parent's ``completed_children``; on a
-    **final**-attempt failure it marks the row ``failed`` and increments
-    ``failed_children``. A non-final failure (and a rate-limit ``Retry``) just
-    propagates so ARQ retries without touching the counters. ``parent_job_id``
-    is optional so legacy/direct invocations still work (counters are skipped).
+    and atomically increments the parent's ``completed_children``. ARQ retries
+    only a ``Retry``, so any other failure — missing auth, a sync service that
+    cannot be built, or the sync raising — marks the row ``failed`` and
+    increments ``failed_children`` on this attempt. A rate limit raises ``Retry``
+    without touching the counters until the final attempt, where it records the
+    failure instead (ARQ would drop a ``Retry`` raised then without running the
+    job again). ``parent_job_id`` is optional so legacy/direct invocations still
+    work (counters are skipped).
 
     Args:
         ctx: ARQ worker context.
@@ -637,17 +649,29 @@ async def sync_strava_activity_batch(
         parent_job_id=parent_job_id,
     )
 
-    auth_data = await _resolve_user_by_id(session_factory, user_id)
-    if auth_data is None:
-        logger.error(
-            "No Strava auth found for user",
-            user_id=user_id,
+    try:
+        auth_data = await _resolve_user_by_id(session_factory, user_id)
+        sync_service = (
+            _create_sync_service(user_id, auth_data, worker_settings, session_factory)
+            if auth_data is not None
+            else None
+        )
+    except Exception as e:
+        logger.exception(
+            "Strava activity batch setup failed", user_id=user_id, error=str(e)
+        )
+        await _record_child_failure(
+            session_factory, child_job_id, parent_job_id, str(e)
+        )
+        raise
+
+    if sync_service is None:
+        no_auth = "No Strava auth found for user"
+        logger.error(no_auth, user_id=user_id)
+        await _record_child_failure(
+            session_factory, child_job_id, parent_job_id, no_auth
         )
         return {"status": "error", "reason": "no_auth"}
-
-    sync_service = _create_sync_service(
-        user_id, auth_data, worker_settings, session_factory
-    )
 
     try:
         result = await sync_service.sync_activity_batch(
@@ -668,20 +692,29 @@ async def sync_strava_activity_batch(
             **result,
         }
     except StravaRateLimitError as exc:
-        # Transient: ARQ retries without recording a terminal child row.
-        defer = _rate_limit_defer(exc)
-        logger.warning(
-            "Rate limit reached in batch sync, retrying",
-            retry_after=exc.retry_after,
-            defer_seconds=defer,
+        if not _is_final_attempt(ctx, max_tries=STRAVA_MAX_TRIES):
+            # Transient: ARQ retries without recording a terminal child row.
+            defer = _rate_limit_defer(exc)
+            logger.warning(
+                "Rate limit reached in batch sync, retrying",
+                retry_after=exc.retry_after,
+                defer_seconds=defer,
+            )
+            raise Retry(defer=defer) from exc
+        logger.exception(
+            "Strava activity batch still rate limited on its final attempt",
+            user_id=user_id,
+            error=str(exc),
         )
-        raise Retry(defer=defer) from exc
+        await _record_child_failure(
+            session_factory, child_job_id, parent_job_id, str(exc)
+        )
+        raise
     except Exception as e:
         logger.exception("Strava activity batch failed", user_id=user_id, error=str(e))
-        if parent_job_id and _is_final_attempt(ctx):
-            await _record_child_failure(
-                session_factory, child_job_id, parent_job_id, str(e)
-            )
+        await _record_child_failure(
+            session_factory, child_job_id, parent_job_id, str(e)
+        )
         raise
     finally:
         await sync_service._api_client.close()
@@ -853,11 +886,11 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     queue_name = STRAVA_ARQ_QUEUE_NAME
 
     # Documented overrides:
-    # - max_tries=20: Strava's rate limits require many retries to reach the
-    #   daily-limit reset (~20 hours of hourly deferrals).
+    # - max_tries=STRAVA_MAX_TRIES: Strava's rate limits require many retries to
+    #   reach the daily-limit reset (~20 hours of hourly deferrals).
     # - max_jobs=5: cap concurrency below arq's default of 10 to stay within
     #   Strava's API rate budget.
-    max_tries = 20
+    max_tries = STRAVA_MAX_TRIES
     max_jobs = 5
 
     # Cron schedule: the periodic-sync cron (shared helper; empty when periodic

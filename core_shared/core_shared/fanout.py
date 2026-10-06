@@ -29,18 +29,24 @@ def coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def is_final_attempt(ctx: dict[str, Any]) -> bool:
+def is_final_attempt(ctx: dict[str, Any], *, max_tries: int | None = None) -> bool:
     """Whether ARQ will give up on this job after the current attempt.
 
-    Children only record a terminal ``failed`` row (and bump the parent's
-    ``failed_children``) on the final attempt, so a transient failure that ARQ
-    will retry does not prematurely fail the fan-out. ``job_try``/``max_tries``
-    are coerced defensively so a missing/``None``/string value can never raise
-    here and silently skip the failure recording; the shared ARQ default is the
-    fallback when ARQ does not place ``max_tries`` in the context.
+    ARQ re-queues a job only on ``Retry`` (or cancellation); any other exception
+    finishes it on the spot. So a child records a terminal ``failed`` row on any
+    such exception, and consults this only before raising a deliberate ``Retry``
+    (e.g. a rate limit): a ``Retry`` on the final attempt would be dropped by ARQ
+    without running the job again, leaving the child row ``queued``.
+
+    ARQ does not place ``max_tries`` in the job context, so a worker whose
+    ``max_tries`` differs from the shared default must pass its own; otherwise
+    the context value, then ``DEFAULT_MAX_TRIES``, is used. ``job_try`` and a
+    context ``max_tries`` are coerced defensively so a missing/``None``/string
+    value can never raise here.
     """
     job_try = coerce_int(ctx.get("job_try"), 1)
-    max_tries = coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
+    if max_tries is None:
+        max_tries = coerce_int(ctx.get("max_tries"), DEFAULT_MAX_TRIES)
     return job_try >= max_tries
 
 

@@ -3,10 +3,10 @@
 After ITER14-003 Phase 3 each batch job (``sync_immich_album_batch`` /
 ``sync_immich_people_batch``) owns a persisted ``sync_jobs`` child row. On success
 it marks its own row ``completed`` and atomically increments the parent's
-``completed_children``; on a **final**-attempt failure it marks its row ``failed``
-and increments ``failed_children``. A non-final failure just re-raises so ARQ
-retries, without prematurely bumping a counter. Both batch jobs share one code
-path (``_run_immich_batch``) so they are parametrized here.
+``completed_children``; on any failure it marks its row ``failed`` and
+increments ``failed_children`` on that same attempt, since ARQ retries only a
+``Retry`` and finishes the job on any other exception. Both batch jobs share one
+code path (``_run_immich_batch``) so they are parametrized here.
 """
 
 from __future__ import annotations
@@ -135,33 +135,22 @@ class TestBatchCounters:
         repo.increment_failed_children.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_final_failure_marks_failed_and_increments(
+    async def test_first_attempt_failure_marks_failed_and_increments(
         self, name: str, method: str, payload: Any, result: Any
     ) -> None:
-        ctx = _make_ctx(job_id=f"{name}-child-fail", job_try=5, max_tries=5)
+        ctx = _make_ctx(job_id=f"{name}-child-fail", job_try=1, max_tries=5)
         repo = _make_repo()
         async with _patched(
             repo=repo, method=method, result=None, error=RuntimeError("boom")
         ):
-            with pytest.raises(RuntimeError):
+            with pytest.raises(RuntimeError, match="boom"):
                 await _batch(name)(ctx, "user-1", payload, f"{name}-parent")
 
+        update_kwargs = repo.update_status.await_args.kwargs
+        assert update_kwargs["job_id"] == f"{name}-child-fail"
+        assert update_kwargs["status"] == "failed"
+        assert update_kwargs["error_message"] == "boom"
         repo.increment_failed_children.assert_awaited_once_with(f"{name}-parent")
-        repo.increment_completed_children.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_non_final_failure_does_not_increment(
-        self, name: str, method: str, payload: Any, result: Any
-    ) -> None:
-        ctx = _make_ctx(job_id=f"{name}-child-retry", job_try=1, max_tries=5)
-        repo = _make_repo()
-        async with _patched(
-            repo=repo, method=method, result=None, error=RuntimeError("transient")
-        ):
-            with pytest.raises(RuntimeError):
-                await _batch(name)(ctx, "user-1", payload, f"{name}-parent")
-
-        repo.increment_failed_children.assert_not_called()
         repo.increment_completed_children.assert_not_called()
 
     @pytest.mark.asyncio
@@ -176,26 +165,6 @@ class TestBatchCounters:
         assert out["status"] == "success"
         repo.increment_completed_children.assert_not_called()
         repo.increment_failed_children.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("ctx", "expected"),
-    [
-        ({"job_try": 5, "max_tries": 5}, True),
-        ({"job_try": 1, "max_tries": 5}, False),
-        ({}, False),  # both missing -> defaults (1 >= 5 is False)
-        ({"job_try": None, "max_tries": None}, False),  # None -> defaults
-        ({"job_try": "5", "max_tries": "5"}, True),  # numeric strings coerced
-        ({"job_try": "oops"}, False),  # unparseable -> default job_try=1
-    ],
-)
-def test_is_final_attempt_coerces_defensively(
-    ctx: dict[str, Any], expected: bool
-) -> None:
-    """``_is_final_attempt`` never raises on missing/None/string ctx values."""
-    from worker import _is_final_attempt
-
-    assert _is_final_attempt(ctx) is expected
 
 
 @pytest.mark.asyncio

@@ -308,7 +308,8 @@ class TestImmichFanout:
             redis_pool=redis_pool,
             parent_id=parent_id,
         )
-        # The other child fails on its final attempt.
+        # The other child raises on its first attempt: ARQ will not retry a
+        # plain exception, so the child must record its failure right away.
         with pytest.raises(RuntimeError):
             await _run_child(
                 "albums",
@@ -317,14 +318,19 @@ class TestImmichFanout:
                 redis_pool=redis_pool,
                 parent_id=parent_id,
                 error=RuntimeError("boom"),
-                job_try=5,
+                job_try=1,
             )
+
+        failed_child = await repo.get_by_job_id(bad.job_id)
+        assert failed_child is not None
+        assert failed_child.status == SyncJobStatus.FAILED.value
+        assert failed_child.error_message == "boom"
 
         assert (await _reconcile(repo))["failed"] == 1
         parent = await repo.get_by_job_id(parent_id)
         assert parent is not None
         assert parent.status == SyncJobStatus.FAILED.value
-        assert parent.error_message
+        assert parent.error_message == "1 failed of 2 child job(s)"
 
     @pytest.mark.asyncio
     async def test_large_fanout_completes_with_correct_totals(
