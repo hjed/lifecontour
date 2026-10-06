@@ -72,7 +72,7 @@ Totals equal the resolved production dependency set of each project, deduplicate
 | `integration_workers/snipeit` | 51 | 49 | 2 | 0 |
 | `integration_workers/strava` | 51 | 49 | 2 | 0 |
 | Python, unique across projects | 147 | 143 | 4 | 0 |
-| `frontend` (production) | 363 | 346 | 14 | 3 |
+| `frontend` (production) | 371 | 354 | 14 | 3 |
 
 Notes on the counts:
 
@@ -82,8 +82,13 @@ Notes on the counts:
   - `pywin32` (Windows): PSF-2.0.
   - `pywin32-ctypes` (Windows): BSD-3-Clause.
   - `httpx2-jsfetch` (emscripten): BSD-3-Clause.
-- **Frontend:** the 363 are the distinct `name@version` pairs in the `pnpm list` tree.
-  - 330 are installed on linux-x64-gnu, and `pnpm licenses list --prod` reports those.
+- **Frontend:** the 371 are the distinct `name@version` pairs in the `pnpm list` tree.
+  - 338 are installed on linux-x64-gnu, and `pnpm licenses list --prod` reports those.
+  - Eight MIT packages joined the production set when the bundled `@radix-ui/react-radio-group`,
+    `@radix-ui/react-scroll-area`, `tailwindcss`, `@tailwindcss/typography` and `tw-animate-css`
+    moved from devDependencies to dependencies (with `postcss-selector-parser`, `cssesc` and
+    `util-deprecate`). `src/__tests__/scripts/bundled-dependencies.test.ts` keeps every package
+    production source imports in `dependencies`, so the generated third-party notices cover it.
   - The other 33 are optional per-platform binaries for other platforms (`@img/sharp-*`,
     `@img/sharp-libvips-*`, `@next/swc-*`, `fsevents`, `@emnapi/runtime`). Their licences were
     read with `npm view <pkg>@<version> license`.
@@ -117,7 +122,7 @@ Notes on the counts:
 
 ### Frontend devDependencies (shipped in the image)
 
-- There are 589 packages that are devDependencies only (`pnpm licenses list --json` minus the
+- There are 581 packages that are devDependencies only (`pnpm licenses list --json` minus the
   production set).
 - They are build and test tools (TypeScript, Jest, Playwright, ESLint, Tailwind's
   `lightningcss`, …). They sit alongside the program in the image as **mere aggregation**; they

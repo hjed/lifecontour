@@ -5,7 +5,12 @@
  */
 
 import { test, expect } from '../fixtures';
-import { APP_NAME, SOURCE_CODE_URL, UI_TEXT } from '../../../src/lib/constants';
+import {
+  APP_NAME,
+  SOURCE_CODE_URL,
+  THIRD_PARTY_NOTICES_PATH,
+  UI_TEXT,
+} from '../../../src/lib/constants';
 
 test.describe('Login Page - Unauthenticated Users', () => {
   test.describe('Page Rendering', () => {
@@ -36,7 +41,7 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await expect(loginCard).toBeVisible();
     });
 
-    test('offers the source code while signed out', async ({
+    test('offers the source code and third-party notices while signed out', async ({
       unauthenticatedPage,
     }) => {
       await unauthenticatedPage.goto('/auth/login');
@@ -51,6 +56,23 @@ test.describe('Login Page - Unauthenticated Users', () => {
       await expect(sourceLink).toHaveAttribute('href', SOURCE_CODE_URL);
       await expect(sourceLink).toHaveAttribute('target', '_blank');
       await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+      const noticesLink = projectLinks.getByRole('link', {
+        name: UI_TEXT.THIRD_PARTY_NOTICES,
+      });
+      await expect(noticesLink).toHaveAttribute(
+        'href',
+        THIRD_PARTY_NOTICES_PATH
+      );
+      await expect(noticesLink).toHaveAttribute('target', '_blank');
+      await expect(noticesLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+      // The link resolves to the generated notices, served without a session
+      const notices = await unauthenticatedPage.request.get(
+        THIRD_PARTY_NOTICES_PATH
+      );
+      expect(notices.status()).toBe(200);
+      expect(await notices.text()).toContain('react-leaflet@');
     });
 
     test('should display OAuth provider buttons', async ({

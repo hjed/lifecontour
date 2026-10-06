@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { UserMenu } from '../UserMenu';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { OAuthProvider, type AuthContextValue } from '@/types/auth';
-import { SOURCE_CODE_URL } from '@/lib/constants';
+import { SOURCE_CODE_URL, THIRD_PARTY_NOTICES_PATH } from '@/lib/constants';
 
 jest.mock('@/lib/auth/AuthProvider', () => ({
   useAuth: jest.fn(),
@@ -61,5 +61,21 @@ describe('UserMenu', () => {
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link).toHaveAccessibleName('Source code (opens in a new tab)');
+  });
+
+  it('links to the third-party notices in a new tab', async () => {
+    mockAuth(true);
+    render(<UserMenu />);
+    await openMenu();
+
+    const link = await screen.findByRole('menuitem', {
+      name: /third-party notices/i,
+    });
+    expect(link).toHaveAttribute('href', THIRD_PARTY_NOTICES_PATH);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAccessibleName(
+      'Third-party notices (opens in a new tab)'
+    );
   });
 });

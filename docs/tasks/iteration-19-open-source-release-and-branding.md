@@ -817,7 +817,8 @@ repository's protections, and flip visibility.
 
 **Phase Breakdown:**
 
-**Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines. 🟡 IN PROGRESS
+**Phase 1 — Repository rename, images, deploy, source link.** PR ~150 lines. ✅ DONE in the
+repository; the owner's manual rename and deploy steps are a checklist on the 1a PR.
 
 - **Progress:** split into two stacked PRs to stay within 500 lines.
   - **1a:**
@@ -830,7 +831,14 @@ repository's protections, and flip visibility.
     - `docs/ci-cd-setup.md` documents that the images follow `github.repository` and that
       SonarCloud runs as Automatic Analysis.
   - **1b (stacked):** the third-party notices.
-  - The manual repository-rename and deploy steps are a checklist in the 1a PR.
+    - `frontend/scripts/third-party-notices.ts` writes `public/third-party-notices.txt`. That file
+      is gitignored. The script reads `pnpm licenses list --prod --json` and copies each package's
+      licence file, plus its `NOTICE` where it has one.
+    - It runs from `prebuild`, which fails the build if it cannot run, and from `predev` with
+      `--best-effort`. The Docker image build was checked to generate the file.
+    - A "Third-party notices" link sits beside "Source code" on both surfaces.
+    - Tests: Jest unit tests cover the renderer and the licence and notice file detection. E2E
+      fetches the file signed out and asserts it lists `react-leaflet`.
 
 - **Before merge (manual):**
   - Rename the repository to `hjed/lifecontour`.

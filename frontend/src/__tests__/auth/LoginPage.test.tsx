@@ -14,7 +14,12 @@ import {
   TEST_CONSTANTS,
 } from '@/test-utils';
 import LoginPage from '@/app/auth/login/page';
-import { APP_NAME, SOURCE_CODE_URL, UI_TEXT } from '@/lib/constants';
+import {
+  APP_NAME,
+  SOURCE_CODE_URL,
+  THIRD_PARTY_NOTICES_PATH,
+  UI_TEXT,
+} from '@/lib/constants';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -94,7 +99,7 @@ describe('LoginPage', () => {
     expect(loginCard).toBeInTheDocument();
   });
 
-  it('offers the source code to signed-out visitors', () => {
+  it('offers the source code and third-party notices to signed-out visitors', () => {
     renderWithProviders(<LoginPage />);
 
     const projectLinks = within(
@@ -107,6 +112,13 @@ describe('LoginPage', () => {
     expect(sourceLink).toHaveAttribute('href', SOURCE_CODE_URL);
     expect(sourceLink).toHaveAttribute('target', '_blank');
     expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+    const noticesLink = projectLinks.getByRole('link', {
+      name: 'Third-party notices (opens in a new tab)',
+    });
+    expect(noticesLink).toHaveAttribute('href', THIRD_PARTY_NOTICES_PATH);
+    expect(noticesLink).toHaveAttribute('target', '_blank');
+    expect(noticesLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   // Helper function to test OAuth provider login

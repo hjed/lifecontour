@@ -15,3 +15,6 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 /index.d.ts
+
+# Generated before dev/build by scripts/third-party-notices.ts
+/public/third-party-notices.txt

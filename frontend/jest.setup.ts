@@ -173,6 +173,9 @@ jest.mock('@/lib/constants', () => ({
   SOURCE_CODE_URL:
     jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
       .SOURCE_CODE_URL,
+  THIRD_PARTY_NOTICES_PATH:
+    jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
+      .THIRD_PARTY_NOTICES_PATH,
   PROJECT_LINKS:
     jest.requireActual<typeof import('@/lib/constants')>('@/lib/constants')
       .PROJECT_LINKS,
