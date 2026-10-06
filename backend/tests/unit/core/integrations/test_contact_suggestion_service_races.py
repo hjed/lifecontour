@@ -19,15 +19,16 @@ from app.core.integrations.services.contact_suggestion_service import (
     ContactSuggestionService,
     ExistingContactTarget,
 )
-from tests.integration.contact_seeding import TEST_USER_ID
 
 CONTACT_ID = 7
 EMAIL = "jane@x.com"
+# The accepting user, who owns the contact the email is accepted into.
+USER_ID = "user-1"
 
 
 def _contact(*emails: str) -> Contact:
     return Contact(
-        user_id=TEST_USER_ID,
+        user_id=USER_ID,
         first_name="Jane",
         id=CONTACT_ID,
         methods=[
@@ -50,7 +51,7 @@ def _service(contact_service: Any) -> ContactSuggestionService:
 
 async def _accept(service: ContactSuggestionService) -> Contact:
     accepted = await service.accept(
-        "user-1",
+        USER_ID,
         EMAIL,
         ExistingContactTarget(contact_id=CONTACT_ID),
         transaction=AsyncMock(),
