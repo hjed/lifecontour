@@ -730,6 +730,26 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(updated_contact)
 
     @pytest.mark.asyncio
+    async def test_update_contact_keeps_the_stored_owner(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        """An update never re-owns a contact, whatever owner the caller sends.
+
+        The repository already refuses to write a new owner; the service makes
+        the aggregate it saves, returns and publishes agree with the stored row.
+        """
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.save.side_effect = lambda contact: contact
+        incoming = Contact(user_id="someone-else", first_name="Johnny", id=1)
+
+        result = await contact_service.update_contact(incoming, mock_transaction)
+
+        assert mock_contact_repo.save.call_args.args[0].user_id == "owner-9"
+        assert result.user_id == "owner-9"
+
+    @pytest.mark.asyncio
     async def test_update_contact_locks_the_contact_before_reading_it(
         self,
         contact_service: ContactService,

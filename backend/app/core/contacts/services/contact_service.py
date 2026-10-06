@@ -489,6 +489,10 @@ class ContactService:
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(contact.id)
+            # A contact's owner never changes. The repository never writes a
+            # new one; adopting the stored owner here keeps the aggregate this
+            # update saves, returns and publishes in agreement with the row.
+            contact.user_id = current_contact.user_id
             if subresource_merge is not None:
                 subresource_merge.apply_to(contact, current_contact)
             changed_fields = self._calculate_changed_fields(current_contact, contact)

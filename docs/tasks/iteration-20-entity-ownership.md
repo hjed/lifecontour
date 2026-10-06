@@ -442,7 +442,9 @@ that mechanical test change lands first, while the field is still optional:
   `debug-client` can no longer be produced, so a database holding both is a legacy local one
   whose developer is the `DISABLE_AUTH` user. Refusing would make every such developer pass `-x`.
 - **The owner is written on INSERT only.** `save` never updates `user_id`, so neither an update
-  converter nor a sync event can re-own a contact.
+  converter nor a sync event can re-own a contact. `ContactService.update_contact` also adopts the
+  stored owner onto the incoming contact, so the aggregate it saves, returns and publishes always
+  agrees with the row, whatever owner a caller sent (augment review on #1676).
 - **The inbound consumer: the top-level `user_id` is authoritative, a stored contact keeps its
   owner.** A payload failing validation (an owner-less one included) is now a
   `PermanentOutboxEventProcessingError`; before, pydantic's `ValidationError` fell through to the
