@@ -115,16 +115,6 @@ def _provenance_for_source(integration_source: str | None) -> Provenance:
     return _PROVENANCE_BY_INTEGRATION_SOURCE.get(integration_source, Provenance.SYSTEM)
 
 
-def _series_recurring_event_id(payload: JournalSyncEventData) -> str | None:
-    """The recurring id an instance's journal series is keyed on.
-
-    The integration folds a split recurrence back to the one it split from,
-    so every split shares a series. Payloads sent before it did carry only
-    the instance's own recurring id, which is all there is to key on.
-    """
-    return payload.series_recurring_event_id or payload.recurring_event_id
-
-
 # Mapping from JournalType value to the database table name for types that
 # need a default data row.  FITNESS is handled separately via
 # SqlFitnessDataRepository, and EVENT/NOTE have no standalone data table.
@@ -472,7 +462,8 @@ class JournalOutboxEventProcessor:
             journal_id=created_journal.id,
             user_id=created_journal.user_id,
             calendar_id=UUID(calendar_id),
-            recurring_event_id=_series_recurring_event_id(payload),
+            recurring_event_id=payload.recurring_event_id,
+            series_recurring_event_id=payload.series_recurring_event_id,
             series_name=created_journal.title,
         )
 
@@ -612,7 +603,8 @@ class JournalOutboxEventProcessor:
                     journal_id=existing_journal_id,
                     user_id=existing_journal.user_id,
                     calendar_id=UUID(calendar_id),
-                    recurring_event_id=_series_recurring_event_id(payload),
+                    recurring_event_id=payload.recurring_event_id,
+                    series_recurring_event_id=payload.series_recurring_event_id,
                     series_name=existing_journal.title,
                 )
                 logger.info(
@@ -755,7 +747,8 @@ class JournalOutboxEventProcessor:
             journal_id=existing_journal_id,
             user_id=existing_journal.user_id,
             calendar_id=UUID(calendar_id),
-            recurring_event_id=_series_recurring_event_id(payload),
+            recurring_event_id=payload.recurring_event_id,
+            series_recurring_event_id=payload.series_recurring_event_id,
             series_name=saved_journal.title,
         )
 
@@ -1303,15 +1296,21 @@ class JournalOutboxEventProcessor:
         user_id: str,
         calendar_id: UUID,
         recurring_event_id: str | None,
+        series_recurring_event_id: str | None,
         series_name: str,
     ) -> None:
         """Link a synced recurring instance into its journal series.
 
-        Get-or-creates the series keyed by (calendar_id, recurring_event_id) —
-        named after the event on first creation, never renamed by sync — and
-        adds the journal as a member (idempotent). No-op for non-recurring
-        events. ``recurring_event_id`` is the series key from
-        :func:`_series_recurring_event_id`, not necessarily the link's own id.
+        Get-or-creates the series keyed by (calendar_id, series key) — named
+        after the event on first creation, never renamed by sync — and adds
+        the journal as a member (idempotent). No-op for non-recurring events.
+
+        The series key is ``series_recurring_event_id``: the integration folds
+        a split recurrence (Google's "this and following" edits) back to the
+        one it split from, so every split shares a series. Payloads sent
+        before it did carry only ``recurring_event_id``, which is then the
+        key. A split keeps its own id as well, because a split the user
+        merged into another series must keep following that merge.
 
         **Only the journal's display calendar establishes a series.** A
         recurring event held by two calendars is one journal per instance,
@@ -1322,7 +1321,8 @@ class JournalOutboxEventProcessor:
         calendar assignment itself: the calendar the journal is displayed in
         owns it, and the others contribute a link and nothing more.
         """
-        if not recurring_event_id:
+        series_key = series_recurring_event_id or recurring_event_id
+        if not series_key:
             return
         if not await self._is_display_calendar(journal_id, calendar_id):
             logger.info(
@@ -1334,8 +1334,11 @@ class JournalOutboxEventProcessor:
         series = await self.series_repo.get_or_create_by_recurrence(
             user_id=user_id,
             calendar_id=calendar_id,
-            recurring_event_id=recurring_event_id,
+            recurring_event_id=series_key,
             name=series_name,
+            split_recurring_event_id=(
+                recurring_event_id if recurring_event_id != series_key else None
+            ),
         )
         if series.id is not None:
             await self.series_repo.add_member(series.id, journal_id)

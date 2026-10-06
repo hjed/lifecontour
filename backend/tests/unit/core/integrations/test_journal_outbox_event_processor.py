@@ -2812,6 +2812,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             calendar_id=UUID(CALENDAR_ID),
             recurring_event_id="master-1",
             name="Team Meeting",
+            split_recurring_event_id=None,
         )
         _mock(processor.series_repo).add_member.assert_awaited_once_with(SERIES_ID, 42)
 
@@ -2847,6 +2848,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
             calendar_id=UUID(CALENDAR_ID),
             recurring_event_id="master-1",
             name="Team Meeting",
+            split_recurring_event_id="master-1_R20260801T090000",
         )
         link_call = _execute_call_with_param(mock_connection, "recurring_event_id")
         assert link_call[0][1]["recurring_event_id"] == "master-1_R20260801T090000"
@@ -2882,6 +2884,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
 
         call = _mock(processor.series_repo).get_or_create_by_recurrence.await_args
         assert call.kwargs["recurring_event_id"] == "master-1"
+        assert call.kwargs["split_recurring_event_id"] == ("master-1_R20260801T090000")
 
     @pytest.mark.asyncio
     async def test_created_event_without_recurring_id_skips_series(
@@ -3136,6 +3139,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
         )
         call = _mock(processor.series_repo).get_or_create_by_recurrence.await_args
         assert call.kwargs["recurring_event_id"] == "master-1"
+        assert call.kwargs["split_recurring_event_id"] == ("master-1_R20260801T090000")
 
     @pytest.mark.asyncio
     async def test_unchanged_etag_update_with_stored_recurring_id_pure_skip(

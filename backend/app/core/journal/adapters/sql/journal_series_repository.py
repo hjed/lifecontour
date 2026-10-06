@@ -136,6 +136,7 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         calendar_id: UUID,
         recurring_event_id: str,
         name: str,
+        split_recurring_event_id: str | None = None,
     ) -> JournalSeries:
         """Get or atomically create the series for a recurring calendar event.
 
@@ -144,14 +145,26 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         (calendar_id, recurring_event_id): INSERT ... ON CONFLICT DO NOTHING
         followed by a SELECT is race-safe and never renames an existing series.
 
+        A split recurrence's own id is checked for an alias first: a split the
+        user merged into another series keeps following that merge.
+
         The per-key advisory lock orders this against ``alias_recurrences``:
         without it a sync could read "no alias", the merge could commit and
         free the unique key, and the INSERT would re-create the merged series.
+        Both keys are locked in the order ``alias_recurrences`` uses, so the
+        two cannot deadlock.
         """
-        await self._lock_recurrence(calendar_id, recurring_event_id)
-        aliased = await self._find_by_alias(user_id, calendar_id, recurring_event_id)
-        if aliased is not None:
-            return aliased
+        lookup_keys = [
+            key for key in (split_recurring_event_id, recurring_event_id) if key
+        ]
+        for lock_calendar_id, key in sorted(
+            {(calendar_id, key) for key in lookup_keys}, key=str
+        ):
+            await self._lock_recurrence(lock_calendar_id, key)
+        for key in lookup_keys:
+            aliased = await self._find_by_alias(user_id, calendar_id, key)
+            if aliased is not None:
+                return aliased
 
         insert_query = text(
             """
