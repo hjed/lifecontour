@@ -1,6 +1,6 @@
-# Personal Management System - Frontend
+# Lifecontour - Frontend
 
-Next.js TypeScript frontend for the Personal CRM & Journal System with shadcn/ui components, Tailwind CSS, and Australian English localization.
+Next.js TypeScript frontend for Lifecontour with shadcn/ui components, Tailwind CSS, and Australian English localization.
 
 ## Quick Start
 

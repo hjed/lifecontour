@@ -1,6 +1,6 @@
-# Testing Strategy - Personal CRM & Journal System
+# Testing Strategy - Lifecontour
 
-This document provides comprehensive testing patterns and strategies for the Personal CRM & Journal System with its Isolated Worker Architecture.
+This document provides comprehensive testing patterns and strategies for Lifecontour with its Isolated Worker Architecture.
 
 ## Testing Strategy for Isolated Worker Architecture
 

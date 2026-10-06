@@ -1,6 +1,6 @@
 # Troubleshooting Documentation
 
-This directory contains troubleshooting guides and solutions for common issues encountered during development and deployment of the Personal Management System.
+This directory contains troubleshooting guides and solutions for common issues encountered during development and deployment of Lifecontour.
 
 ## 📋 Available Guides
 

@@ -1,6 +1,6 @@
-# Future Roadmap - Personal CRM & Journal System
+# Future Roadmap - Lifecontour
 
-This document outlines future features, extensibility plans, and long-term architectural considerations for the Personal CRM & Journal System.
+This document outlines future features, extensibility plans, and long-term architectural considerations for Lifecontour.
 
 ## Extensibility Framework
 

@@ -1,1 +1,1 @@
-# Test package for Personal Management System Backend
+# Test package for the Lifecontour backend

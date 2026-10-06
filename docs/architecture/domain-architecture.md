@@ -1,4 +1,4 @@
-# Domain Architecture - Personal CRM & Journal System
+# Domain Architecture - Lifecontour
 
 This document provides detailed information about the domain-driven architecture, component design, project structure, and implementation patterns.
 

@@ -1,4 +1,4 @@
-# Technology Stack - Personal CRM & Journal System
+# Technology Stack - Lifecontour
 
 This document outlines the technology choices optimized for AI assistant understanding and development ease.
 

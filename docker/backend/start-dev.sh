@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Development startup script for Personal Management System Backend
+# Development startup script for the Lifecontour backend
 # Includes database migrations, OpenTelemetry setup, and hot reload
 
 set -e
 
-echo "🚀 Starting Personal Management System Backend (Development Mode)"
+echo "🚀 Starting Lifecontour Backend (Development Mode)"
 
 # Extract database connection info from DATABASE_URL
 # Format: postgresql://user:password@host:port/database

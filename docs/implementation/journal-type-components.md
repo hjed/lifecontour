@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of journal type-specific components for the Personal Management System. These components provide visual representation and inline editing capabilities for different journal types.
+This document describes the implementation of journal type-specific components for Lifecontour. These components provide visual representation and inline editing capabilities for different journal types.
 
 ## Components Implemented
 

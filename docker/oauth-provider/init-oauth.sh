@@ -164,7 +164,7 @@ CLIENT_CONFIG=$(cat <<EOF
     "audience": [],
     "skip_consent": true,
     "skip_logout_consent": true,
-    "client_name": "Personal Management System (${ENVIRONMENT})",
+    "client_name": "Lifecontour (${ENVIRONMENT})",
     "client_uri": "${FRONTEND_URL}",
     "logo_uri": "",
     "policy_uri": "",
@@ -215,7 +215,7 @@ if [ -n "$CLIENT_INFO" ] && echo "$CLIENT_INFO" | grep -q "\"client_id\":\"${CLI
     echo ""
     print_step "OAuth Client Configuration (${ENVIRONMENT}):"
     echo "  Client ID: ${CLIENT_ID}"
-    echo "  Client Name: Personal Management System (${ENVIRONMENT})"
+    echo "  Client Name: Lifecontour (${ENVIRONMENT})"
     echo "  Redirect URI (web app): ${WEB_CALLBACK_URL}"
     echo "  Redirect URI (MCP): ${MCP_CALLBACK_URL}"
     echo "  Grant Types: authorization_code, refresh_token"

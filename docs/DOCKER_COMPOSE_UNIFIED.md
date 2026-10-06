@@ -1,6 +1,6 @@
 # Unified Docker Compose Setup
 
-This document describes the unified Docker Compose configuration for the Personal Management System, which consolidates all environment setups (development, testing, production) into a single `docker-compose.yml` file using Docker Compose profiles.
+This document describes the unified Docker Compose configuration for Lifecontour, which consolidates all environment setups (development, testing, production) into a single `docker-compose.yml` file using Docker Compose profiles.
 
 ## Overview
 

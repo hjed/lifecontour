@@ -1,6 +1,6 @@
 # Pre-commit Hooks Setup
 
-This document describes the pre-commit hooks configuration for the Personal Management System project.
+This document describes the pre-commit hooks configuration for the Lifecontour project.
 
 ## Overview
 

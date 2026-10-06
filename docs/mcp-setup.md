@@ -1,6 +1,6 @@
 # MCP Server Setup and Configuration
 
-This document describes how to set up and configure the MCP (Model Context Protocol) server for the Personal Management System.
+This document describes how to set up and configure the MCP (Model Context Protocol) server for Lifecontour.
 
 ## Overview
 

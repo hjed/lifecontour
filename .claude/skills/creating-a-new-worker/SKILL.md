@@ -117,7 +117,10 @@ Create `integration_workers/<name>/pyproject.toml`, depending on `core_shared` a
 [project]
 name = "<name>-worker"
 version = "0.1.0"
-description = "<Name> Integration Worker for Personal Management System"
+description = "<Name> integration worker for Lifecontour"
+authors = [
+    {name = "Harry J E Day"}
+]
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.14"
 dependencies = [

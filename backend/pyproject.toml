@@ -1,9 +1,9 @@
 [project]
-name = "personal-management-backend"
+name = "lifecontour-backend"
 version = "0.1.0"
-description = "Personal CRM & Journal System - FastAPI Backend"
+description = "Lifecontour — FastAPI backend"
 authors = [
-    {name = "Personal Management System", email = "dev@example.com"}
+    {name = "Harry J E Day"}
 ]
 readme = "README.md"
 license = "AGPL-3.0-or-later"

@@ -1,4 +1,4 @@
-# Security & Performance - Personal CRM & Journal System
+# Security & Performance - Lifecontour
 
 This document covers security considerations, performance optimization strategies, and operational best practices for the Python FastAPI backend with Next.js frontend.
 

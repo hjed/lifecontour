@@ -1,4 +1,4 @@
-# Deployment Guide - Personal CRM & Journal System
+# Deployment Guide - Lifecontour
 
 This document covers deployment architecture, infrastructure setup, containerization, and operational considerations for the Python FastAPI backend with Next.js frontend.
 
