@@ -30,7 +30,8 @@ depends_on: str | Sequence[str] | None = None
 
 _LABEL = "0123"
 
-# 0122's evidence, plus the owned contacts themselves.
+# 0122's evidence, plus the owned contacts themselves — every table holding a
+# user_id at 0122, as a test pins.
 EVIDENCE_TABLES = (
     "contacts",
     "journals",
@@ -53,6 +54,9 @@ EVIDENCE_TABLES = (
     "calendar_sync_tokens",
     "pending_entity_mappings",
     "contact_suggestion_ignores",
+    "journal_daily_summaries",
+    "field_history",
+    "journal_series_recurrence_aliases",
 )
 
 
