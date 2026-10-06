@@ -4213,6 +4213,7 @@ async def sync_calendar_events(
     from event_identity import build_event_identity
     from event_transformer import GoogleEventTransformer
     from inbound_sync import InboundSyncAction, InboundSyncClassifier
+    from recurrence import root_recurring_event_id
 
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
@@ -4569,6 +4570,9 @@ async def sync_calendar_events(
                                 existing_journal_id=existing_journal_id,
                                 contact_relationships=[],
                                 recurring_event_id=google_event.recurring_event_id,
+                                series_recurring_event_id=root_recurring_event_id(
+                                    google_event.recurring_event_id
+                                ),
                             )
                             session.add(outbox_event)
                             metrics["events_cancelled"] = (
@@ -4652,6 +4656,9 @@ async def sync_calendar_events(
                             contact_relationships=contact_relationships,
                             recurring_event_id=google_event.recurring_event_id,
                             external_identity=external_identity,
+                            series_recurring_event_id=root_recurring_event_id(
+                                google_event.recurring_event_id
+                            ),
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1

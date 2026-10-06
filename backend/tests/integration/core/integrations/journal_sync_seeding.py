@@ -85,6 +85,7 @@ def sync_event(
     etag: str = '"etag-1"',
     existing_journal_id: int | None = None,
     recurring_event_id: str | None = None,
+    series_recurring_event_id: str | None = None,
     external_identity: str | None = None,
     timezone: str | None = None,
     contact_relationships: list[dict[str, Any]] | None = None,
@@ -120,6 +121,7 @@ def sync_event(
         "existing_journal_id": existing_journal_id,
         "contact_relationships": contact_relationships or [],
         "recurring_event_id": recurring_event_id,
+        "series_recurring_event_id": series_recurring_event_id,
         "external_identity": external_identity,
     }
     return OutboxEvent(

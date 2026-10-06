@@ -799,6 +799,94 @@ class TestSyncRecurringSeries:
         assert outbox_event.event_data["recurring_event_id"] == "master-1"
 
     @pytest.mark.asyncio
+    async def test_split_instance_carries_its_root_as_the_series_key(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A "this and following" split keeps its own id but shares the root's series."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                _make_google_event(
+                    event_id="master-1_R20260320T100000_20260321T100000Z",
+                    recurring_event_id="master-1_R20260320T100000",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.created"
+        assert (
+            outbox_event.event_data["recurring_event_id"] == "master-1_R20260320T100000"
+        )
+        assert outbox_event.event_data["series_recurring_event_id"] == "master-1"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_split_instance_carries_its_root_as_the_series_key(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Cancellations carry the same series key as every other sync payload."""
+        from datetime import UTC, datetime, timedelta
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+
+        existing_link = MagicMock()
+        existing_link.external_version = '"etag-old"'
+        existing_link.sync_capability = "bidirectional"
+        existing_link.journal_id = 42
+        existing_link.recurring_event_id = "master-1_R20260320T100000"
+        link_result = MagicMock()
+        link_result.fetchone.return_value = existing_link
+
+        journal_end_result = MagicMock()
+        journal_end_result.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            link_result,  # existing link lookup
+            journal_end_result,  # journal end date lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            [
+                {
+                    "id": "master-1_R20260320T100000_20260321T100000Z",
+                    "status": "cancelled",
+                    "etag": '"etag-cancelled"',
+                    "recurringEventId": "master-1_R20260320T100000",
+                }
+            ],
+        )
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.cancelled"
+        assert (
+            outbox_event.event_data["recurring_event_id"] == "master-1_R20260320T100000"
+        )
+        assert outbox_event.event_data["series_recurring_event_id"] == "master-1"
+
+    @pytest.mark.asyncio
     async def test_master_cancellation_emits_series_cancelled_event(
         self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:

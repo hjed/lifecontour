@@ -439,6 +439,49 @@ class TestRecurrenceAliases:
             "Destination"
         ]
 
+    async def test_a_merged_split_wins_over_the_recurrence_it_split_from(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        """The user merged one split elsewhere; its instances follow that merge."""
+        calendar = await _create_calendar(calendar_repository)
+        root = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master",
+            name="Root",
+        )
+        split = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master_R20260801T090000",
+            name="Split",
+        )
+        destination = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Destination")
+        )
+        await series_repository.alias_recurrences(split, _sid(destination))
+        await series_repository.delete(_sid(split), USER_ID)
+
+        merged_split = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master",
+            name="Must not be used",
+            split_recurring_event_id="master_R20260801T090000",
+        )
+        unmerged_split = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="master",
+            name="Must not be used",
+            split_recurring_event_id="master_R20261001T090000",
+        )
+
+        assert merged_split.id == destination.id
+        assert unmerged_split.id == root.id
+
     async def test_existing_aliases_follow_a_chained_merge(
         self,
         series_repository: SqlJournalSeriesRepository,

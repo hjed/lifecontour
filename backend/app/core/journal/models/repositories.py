@@ -1374,6 +1374,7 @@ class JournalSeriesRepository(ABC):
         calendar_id: UUID,
         recurring_event_id: str,
         name: str,
+        split_recurring_event_id: str | None = None,
     ) -> JournalSeries:
         """Get or atomically create the series for a recurring calendar event.
 
@@ -1381,6 +1382,11 @@ class JournalSeriesRepository(ABC):
         the series doesn't exist yet — an existing series is never renamed.
         A recurrence whose series was merged into another resolves, through
         its alias, to the series that absorbed it.
+
+        ``split_recurring_event_id`` is the instance's own recurring id when
+        the source folded it into ``recurring_event_id`` (a split recurrence).
+        An alias on it wins: the user merged that split somewhere and its
+        instances follow. It never creates a series of its own.
         """
         pass
 
