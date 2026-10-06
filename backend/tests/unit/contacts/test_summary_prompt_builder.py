@@ -1,5 +1,7 @@
 """Unit tests for SummaryPromptBuilder — prompt construction for AI summaries."""
 
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -9,6 +11,7 @@ from app.core.contacts.services.summary_generation_service import (
     SummaryInput,
 )
 from app.core.contacts.services.summary_prompt_builder import SummaryPromptBuilder
+from app.core.settings import timezone_utils
 
 
 def _make_input(**overrides: Any) -> SummaryInput:
@@ -43,6 +46,15 @@ def _make_input(**overrides: Any) -> SummaryInput:
     }
     defaults.update(overrides)
     return SummaryInput(**defaults)
+
+
+def _frozen_now_in_tz(instant: datetime) -> Callable[[str | None], datetime]:
+    """Return a ``now_in_tz`` stand-in whose clock is fixed at ``instant``."""
+
+    def _now_in_tz(timezone: str | None, now: datetime | None = None) -> datetime:
+        return timezone_utils.now_in_tz(timezone, now=instant)
+
+    return _now_in_tz
 
 
 @pytest.mark.unit
@@ -252,15 +264,44 @@ class TestSummaryPromptBuilder:
         assert "Current System Time" in prompt
         assert "UTC" in prompt
 
-    def test_prompt_current_time_uses_user_timezone(self):
+    @pytest.mark.parametrize(
+        ("instant", "local_time", "abbreviation", "offset"),
+        [
+            pytest.param(
+                datetime(2026, 7, 1, tzinfo=UTC),
+                "2026-07-01 10:00:00",
+                "AEST",
+                "+10:00",
+                id="standard-time",
+            ),
+            pytest.param(
+                datetime(2026, 1, 1, tzinfo=UTC),
+                "2026-01-01 11:00:00",
+                "AEDT",
+                "+11:00",
+                id="daylight-time",
+            ),
+        ],
+    )
+    def test_prompt_current_time_uses_user_timezone(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        instant: datetime,
+        local_time: str,
+        abbreviation: str,
+        offset: str,
+    ) -> None:
         """Current system time is rendered in the user's timezone with a label."""
+        monkeypatch.setattr(
+            "app.core.contacts.services.summary_prompt_builder.now_in_tz",
+            _frozen_now_in_tz(instant),
+        )
         builder = SummaryPromptBuilder()
         prompt = builder.build(_make_input(), timezone="Australia/Sydney")
 
         assert "Current System Time" in prompt
         # Explicit timezone label and offset, not a bare UTC timestamp
-        assert "AEST" in prompt
-        assert "+10:00" in prompt
+        assert f"{local_time} {abbreviation} (UTC{offset})" in prompt
 
 
 @pytest.mark.unit
