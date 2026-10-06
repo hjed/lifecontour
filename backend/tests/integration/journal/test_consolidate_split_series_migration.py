@@ -15,6 +15,9 @@ The cases:
   the root key and stays reachable through its old one;
 - a root already merged into another series pulls its splits into that series,
   and an alias a split held from an earlier merge follows them;
+- a root merged into a split of *another* recurrence follows that split when
+  its own group folds it away, members and all;
+- a recurrence left only as a merged split's alias sends its root there too;
 - a manual series and an unsplit recurring series are left alone.
 
 Runs against an isolated throwaway database so the shared session DB is
@@ -48,6 +51,8 @@ ROOT_SERIES = UUID("00000000-0000-4000-8000-0000000000a0")
 FIRST_SERIES = UUID("00000000-0000-4000-8000-0000000000a1")
 SECOND_SERIES = UUID("00000000-0000-4000-8000-0000000000a2")
 MANUAL_SERIES = UUID("00000000-0000-4000-8000-0000000000b0")
+OTHER_ROOT_SERIES = UUID("00000000-0000-4000-8000-0000000000d0")
+OTHER_SPLIT_SERIES = UUID("00000000-0000-4000-8000-0000000000d1")
 UNSPLIT_SERIES = UUID("00000000-0000-4000-8000-0000000000c0")
 
 Statement = tuple[str, dict[str, object]]
@@ -325,4 +330,63 @@ class TestConsolidateSplitSeriesMigration:
             ROOT: MANUAL_SERIES,
             FIRST_SPLIT: MANUAL_SERIES,
             SECOND_SPLIT: MANUAL_SERIES,
+        }
+
+    async def test_a_survivor_folded_by_another_group_keeps_what_it_gained(
+        self,
+        throwaway_database: URL,
+        run_alembic: Callable[[str, str, str], None],
+    ) -> None:
+        # The user merged ROOT into a split of "zother". Folding ROOT's splits
+        # moves them into that split, which zother's own fold then absorbs.
+        other_root = "zother"
+        other_split = f"{other_root}_R20240101T090000"
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", _PREVIOUS_REVISION)
+        await _execute(
+            url,
+            _calendar()
+            + _journals(1, 2, 3)
+            + _series_row(OTHER_ROOT_SERIES, other_root, name="Other")
+            + _series_row(OTHER_SPLIT_SERIES, other_split, name="Other split")
+            + _series_row(FIRST_SERIES, FIRST_SPLIT)
+            + _member(OTHER_ROOT_SERIES, 1)
+            + _member(OTHER_SPLIT_SERIES, 2)
+            + _member(FIRST_SERIES, 3)
+            + _alias(ROOT, OTHER_SPLIT_SERIES),
+        )
+
+        run_alembic(url, "upgrade", _REVISION)
+
+        assert await _series(url) == {OTHER_ROOT_SERIES: other_root}
+        assert await _members(url) == {OTHER_ROOT_SERIES: {1, 2, 3}}
+        assert await _aliases(url) == {
+            ROOT: OTHER_ROOT_SERIES,
+            FIRST_SPLIT: OTHER_ROOT_SERIES,
+            other_split: OTHER_ROOT_SERIES,
+        }
+
+    async def test_a_recurrence_left_only_as_a_merged_split_sends_its_root_there(
+        self,
+        throwaway_database: URL,
+        run_alembic: Callable[[str, str, str], None],
+    ) -> None:
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", _PREVIOUS_REVISION)
+        await _execute(
+            url,
+            _calendar()
+            + _journals(1)
+            + _series_row(MANUAL_SERIES, None, name="Stand-ups")
+            + _member(MANUAL_SERIES, 1)
+            # The root never synced; its one split was merged by hand.
+            + _alias(FIRST_SPLIT, MANUAL_SERIES),
+        )
+
+        run_alembic(url, "upgrade", _REVISION)
+
+        assert await _series(url) == {MANUAL_SERIES: None}
+        assert await _aliases(url) == {
+            FIRST_SPLIT: MANUAL_SERIES,
+            ROOT: MANUAL_SERIES,
         }

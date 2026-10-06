@@ -7,7 +7,9 @@ Create Date: 2026-10-06 12:00:00.000000
 """
 
 from collections.abc import Sequence
+from uuid import UUID
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -40,139 +42,178 @@ def upgrade() -> None:
     key — so a sync payload still naming a split by its own id resolves to the
     survivor rather than re-creating the split. Members move across, and the
     absorbed series are deleted.
+
+    Groups are folded one at a time against the current state, not in one
+    set-based pass: a survivor picked through an alias can itself be a split
+    another group absorbs, and only a later fold sees what an earlier one
+    moved into it.
     """
-    op.execute(
-        f"""
-        CREATE TEMPORARY TABLE split_series_0122 AS
-        SELECT id AS series_id, user_id, calendar_id, recurring_event_id,
-               created_at,
-               regexp_replace(recurring_event_id, '{_SPLIT_SUFFIXES}', '') AS root
-        FROM journal_series
-        WHERE calendar_id IS NOT NULL AND recurring_event_id IS NOT NULL
-        """
-    )
-    # Only groups holding at least one split need anything done.
-    op.execute(
-        """
-        DELETE FROM split_series_0122 s
-        WHERE NOT EXISTS (
-            SELECT 1 FROM split_series_0122 g
-            WHERE g.user_id = s.user_id
-              AND g.calendar_id = s.calendar_id
-              AND g.root = s.root
-              AND g.recurring_event_id <> g.root
-        )
-        """
-    )
-    op.execute(
-        """
-        CREATE TEMPORARY TABLE split_survivors_0122 AS
-        SELECT g.user_id, g.calendar_id, g.root,
-               COALESCE(
-                   (SELECT a.series_id
-                    FROM journal_series_recurrence_aliases a
-                    JOIN journal_series s ON s.id = a.series_id
-                    WHERE a.calendar_id = g.calendar_id
-                      AND a.recurring_event_id = g.root
-                      AND s.user_id = g.user_id),
-                   (SELECT s.series_id
-                    FROM split_series_0122 s
-                    WHERE s.user_id = g.user_id
-                      AND s.calendar_id = g.calendar_id
-                      AND s.recurring_event_id = g.root),
-                   (SELECT s.series_id
-                    FROM split_series_0122 s
-                    WHERE s.user_id = g.user_id
-                      AND s.calendar_id = g.calendar_id
-                      AND s.root = g.root
-                    ORDER BY s.created_at, s.series_id
-                    LIMIT 1)
-               ) AS survivor_id
-        FROM (SELECT DISTINCT user_id, calendar_id, root FROM split_series_0122) g
-        """
-    )
-    op.execute(
-        """
-        CREATE TEMPORARY TABLE absorbed_series_0122 AS
-        SELECT s.series_id, s.user_id, s.calendar_id, s.recurring_event_id,
-               v.survivor_id
-        FROM split_series_0122 s
-        JOIN split_survivors_0122 v
-          ON v.user_id = s.user_id
-         AND v.calendar_id = s.calendar_id
-         AND v.root = s.root
-        WHERE s.series_id <> v.survivor_id
-        """
-    )
+    bind = op.get_bind()
+    groups = bind.execute(
+        sa.text(
+            """
+            SELECT DISTINCT user_id, calendar_id,
+                   regexp_replace(recurring_event_id, :pattern, '') AS root
+            FROM journal_series
+            WHERE calendar_id IS NOT NULL
+              AND recurring_event_id ~ :pattern
+            ORDER BY user_id, calendar_id, root
+            """
+        ),
+        {"pattern": _SPLIT_SUFFIXES},
+    ).fetchall()
+    for group in groups:
+        _fold_group(bind, group.user_id, group.calendar_id, group.root)
+    _alias_roots_of_merged_splits(bind)
+
+
+def _fold_group(
+    bind: sa.Connection, user_id: str, calendar_id: UUID, root: str
+) -> None:
+    """Fold one recurrence's series into its survivor."""
+    params: dict[str, object] = {
+        "user_id": user_id,
+        "calendar_id": calendar_id,
+        "root": root,
+        "pattern": _SPLIT_SUFFIXES,
+    }
+    in_group = """
+        user_id = :user_id
+        AND calendar_id = :calendar_id
+        AND regexp_replace(recurring_event_id, :pattern, '') = :root
+    """
+    survivor_id = bind.execute(
+        sa.text(
+            f"""
+            SELECT COALESCE(
+                (SELECT a.series_id
+                 FROM journal_series_recurrence_aliases a
+                 JOIN journal_series s ON s.id = a.series_id
+                 WHERE a.calendar_id = :calendar_id
+                   AND a.recurring_event_id = :root
+                   AND s.user_id = :user_id),
+                (SELECT id FROM journal_series
+                 WHERE user_id = :user_id
+                   AND calendar_id = :calendar_id
+                   AND recurring_event_id = :root),
+                (SELECT id FROM journal_series
+                 WHERE {in_group}
+                 ORDER BY created_at, id
+                 LIMIT 1)
+            )
+            """
+        ),
+        params,
+    ).scalar_one()
+    params["survivor_id"] = survivor_id
+    absorbed = f"SELECT id FROM journal_series WHERE {in_group} AND id <> :survivor_id"
 
     # Aliases follow their series; then each absorbed key becomes one.
-    op.execute(
-        """
-        UPDATE journal_series_recurrence_aliases a
-        SET series_id = x.survivor_id
-        FROM absorbed_series_0122 x
-        WHERE a.series_id = x.series_id
-        """
+    bind.execute(
+        sa.text(
+            f"""
+            UPDATE journal_series_recurrence_aliases
+            SET series_id = :survivor_id
+            WHERE series_id IN ({absorbed})
+            """
+        ),
+        params,
     )
-    op.execute(
-        """
-        INSERT INTO journal_series_recurrence_aliases
-            (calendar_id, recurring_event_id, series_id, user_id)
-        SELECT calendar_id, recurring_event_id, survivor_id, user_id
-        FROM absorbed_series_0122
-        ON CONFLICT (calendar_id, recurring_event_id)
-            DO UPDATE SET series_id = EXCLUDED.series_id
-        """
+    bind.execute(
+        sa.text(
+            f"""
+            INSERT INTO journal_series_recurrence_aliases
+                (calendar_id, recurring_event_id, series_id, user_id)
+            SELECT calendar_id, recurring_event_id, :survivor_id, user_id
+            FROM journal_series
+            WHERE id IN ({absorbed})
+            ON CONFLICT (calendar_id, recurring_event_id)
+                DO UPDATE SET series_id = EXCLUDED.series_id
+            """
+        ),
+        params,
     )
-    op.execute(
-        """
-        INSERT INTO journal_series_members (series_id, journal_id)
-        SELECT x.survivor_id, m.journal_id
-        FROM journal_series_members m
-        JOIN absorbed_series_0122 x ON x.series_id = m.series_id
-        ON CONFLICT (series_id, journal_id) DO NOTHING
-        """
+    bind.execute(
+        sa.text(
+            f"""
+            INSERT INTO journal_series_members (series_id, journal_id)
+            SELECT :survivor_id, journal_id
+            FROM journal_series_members
+            WHERE series_id IN ({absorbed})
+            ON CONFLICT (series_id, journal_id) DO NOTHING
+            """
+        ),
+        params,
     )
-    # Members and any alias still pointing here cascade.
-    op.execute(
-        """
-        DELETE FROM journal_series
-        WHERE id IN (SELECT series_id FROM absorbed_series_0122)
-        """
-    )
-
-    # A survivor that is itself a split takes the root key, and keeps its old
-    # key reachable as an alias. Its group's root-keyed series, if there was
-    # one, was absorbed and deleted above, so the unique key is free.
-    op.execute(
-        f"""
-        INSERT INTO journal_series_recurrence_aliases
-            (calendar_id, recurring_event_id, series_id, user_id)
-        SELECT s.calendar_id, s.recurring_event_id, s.id, s.user_id
-        FROM journal_series s
-        JOIN split_survivors_0122 v ON v.survivor_id = s.id
-        WHERE s.calendar_id = v.calendar_id
-          AND s.recurring_event_id <> v.root
-          AND regexp_replace(s.recurring_event_id, '{_SPLIT_SUFFIXES}', '') = v.root
-        ON CONFLICT (calendar_id, recurring_event_id)
-            DO UPDATE SET series_id = EXCLUDED.series_id
-        """
-    )
-    op.execute(
-        f"""
-        UPDATE journal_series s
-        SET recurring_event_id = v.root, updated_at = now()
-        FROM split_survivors_0122 v
-        WHERE v.survivor_id = s.id
-          AND s.calendar_id = v.calendar_id
-          AND s.recurring_event_id <> v.root
-          AND regexp_replace(s.recurring_event_id, '{_SPLIT_SUFFIXES}', '') = v.root
-        """
+    # Members cascade with the series.
+    bind.execute(
+        sa.text(f"DELETE FROM journal_series WHERE id IN ({absorbed})"), params
     )
 
-    op.execute("DROP TABLE absorbed_series_0122")
-    op.execute("DROP TABLE split_survivors_0122")
-    op.execute("DROP TABLE split_series_0122")
+    # A survivor that is itself one of this group's splits takes the root key
+    # and keeps its old one reachable as an alias. The group's root-keyed
+    # series, if there was one, was absorbed above, so the unique key is free.
+    renamed = f"""
+        id = :survivor_id AND {in_group} AND recurring_event_id <> :root
+    """
+    bind.execute(
+        sa.text(
+            f"""
+            INSERT INTO journal_series_recurrence_aliases
+                (calendar_id, recurring_event_id, series_id, user_id)
+            SELECT calendar_id, recurring_event_id, id, user_id
+            FROM journal_series
+            WHERE {renamed}
+            ON CONFLICT (calendar_id, recurring_event_id)
+                DO UPDATE SET series_id = EXCLUDED.series_id
+            """
+        ),
+        params,
+    )
+    bind.execute(
+        sa.text(
+            f"""
+            UPDATE journal_series
+            SET recurring_event_id = :root, updated_at = now()
+            WHERE {renamed}
+            """
+        ),
+        params,
+    )
+
+
+def _alias_roots_of_merged_splits(bind: sa.Connection) -> None:
+    """Send a recurrence that survives only as merged-split aliases there.
+
+    When no series holds the root key and nothing aliases it, the user merged
+    every split that ever synced; the root follows the earliest such merge
+    rather than being re-created by the next sync.
+    """
+    bind.execute(
+        sa.text(
+            """
+            INSERT INTO journal_series_recurrence_aliases
+                (calendar_id, recurring_event_id, series_id, user_id)
+            SELECT DISTINCT ON (a.calendar_id, a.root)
+                   a.calendar_id, a.root, a.series_id, a.user_id
+            FROM (
+                SELECT calendar_id, series_id, user_id, created_at,
+                       recurring_event_id,
+                       regexp_replace(recurring_event_id, :pattern, '') AS root
+                FROM journal_series_recurrence_aliases
+                WHERE recurring_event_id ~ :pattern
+            ) a
+            WHERE NOT EXISTS (
+                SELECT 1 FROM journal_series s
+                WHERE s.calendar_id = a.calendar_id
+                  AND s.recurring_event_id = a.root
+            )
+            ORDER BY a.calendar_id, a.root, a.created_at, a.recurring_event_id
+            ON CONFLICT (calendar_id, recurring_event_id) DO NOTHING
+            """
+        ),
+        {"pattern": _SPLIT_SUFFIXES},
+    )
 
 
 def downgrade() -> None:
