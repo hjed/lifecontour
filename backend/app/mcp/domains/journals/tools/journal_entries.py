@@ -29,12 +29,11 @@ from app.core.integrations.external_link_helpers import (
 from app.core.journal.adapters.sql.activity_template_repository import (
     SqlActivityTemplateRepository,
 )
-from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
-)
-from app.core.journal.services.journal_type_data_reader import (
-    read_journal_types_and_data,
 )
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.template_application import (
@@ -44,15 +43,12 @@ from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
 from app.mcp.domains.journals.schemas import (
-    ContactRelationshipSummary,
     JournalCreateRequest,
     JournalUpdateRequest,
     validate_type_data,
 )
 from app.mcp.domains.journals.tools._shared import (
-    JournalToolRepositories,
     create_journal_tool_repositories,
-    fetch_contact_relationships_with_names,
     fetch_parent_journal,
 )
 from app.mcp.shared.annotations import (
@@ -63,6 +59,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     get_journal_external_link_service,
     get_journal_write_service,
     mcp_depends,
@@ -196,23 +193,6 @@ def _to_service_relationships(
     return nested
 
 
-async def _fetch_enrichment_data(
-    journal_id: int, repos: JournalToolRepositories
-) -> tuple[
-    list[str], dict[str, Any], list[ContactRelationshipSummary], list[JournalTag]
-]:
-    """Fetch all enrichment data for a journal (types, type_data, contacts, tags)."""
-    types, type_data = await read_journal_types_and_data(journal_id, repos)
-
-    contacts = await fetch_contact_relationships_with_names(
-        journal_id, repos.contact_relationship_repo, repos.contact_repo
-    )
-
-    tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-
-    return types, type_data, contacts, tags
-
-
 async def _load_own_template(
     template_id: str,
     user_id: str,
@@ -248,6 +228,9 @@ async def create_journal_entry(
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
     link_service: JournalExternalLinkService = mcp_depends(
         get_journal_external_link_service
+    ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
     ),
 ) -> str:
     """
@@ -400,19 +383,13 @@ async def create_journal_entry(
         raise ValueError(msg)
     journal_id = created_journal.id
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
-
     parent = await fetch_parent_journal(created_journal, repos.journal_repo, user_id)
     external_links = await link_service.links_for_journal(journal_id, user_id)
 
     # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=created_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
+    response = JournalConverter.to_enriched_response(
+        created_journal,
+        await enrichment_service.enrich(journal_id, user_id),
         parent=parent,
         additional_context=_note_implied_context(request.types),
         external_links=external_links,
@@ -432,6 +409,9 @@ async def update_journal_entry(
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
     link_service: JournalExternalLinkService = mcp_depends(
         get_journal_external_link_service
+    ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
     ),
 ) -> str:
     """
@@ -558,20 +538,14 @@ async def update_journal_entry(
     )
     updated_journal = update_result.journal
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags = await _fetch_enrichment_data(journal_id, repos)
-
     parent = await fetch_parent_journal(updated_journal, repos.journal_repo, user_id)
     links_after = await link_service.links_for_journal(journal_id, user_id)
     links_preserved = _external_links_preserved(links_before, links_after)
 
     # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=updated_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
+    response = JournalConverter.to_enriched_response(
+        updated_journal,
+        await enrichment_service.enrich(journal_id, user_id),
         parent=parent,
         additional_context=_note_implied_context(request.types),
         external_links=links_after,

@@ -23,6 +23,9 @@ from app.core.journal.models.activity_stats import (
 from app.core.journal.models.repositories import (
     ActivityStatsRepository,
 )
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.mcp.domains.journals.schemas import (
     ActivityPersonalRecord,
     ActivityStatsResponse,
@@ -49,6 +52,7 @@ from app.mcp.shared.dependencies import (
     get_activity_stats_repository,
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
@@ -98,14 +102,15 @@ async def search_activities(
         int,
         Field(default=20, description="Maximum number of results to return"),
     ] = 20,
-    db_connection: AsyncConnection = mcp_depends(get_async_connection),
     activity_stats_repo: ActivityStatsRepository = mcp_depends(
         get_activity_stats_repository
+    ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
     ),
 ) -> str:
     """Search activity journals with effective activity-type filtering."""
     user_id = await get_current_user_id()
-    repos = create_journal_tool_repositories(db_connection)
     filters = _activity_filters(
         user_id,
         activity_type=activity_type,
@@ -123,7 +128,7 @@ async def search_activities(
 
     results = await build_search_results(
         [activity_row.journal for activity_row in activity_rows],
-        repos,
+        enrichment_service,
         activity_rows_by_id={
             activity_row.journal.id: activity_row
             for activity_row in activity_rows

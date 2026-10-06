@@ -1,15 +1,15 @@
-"""Read a journal's types and type_data from the per-type data repositories.
+"""Where each journal type's row lives, and how MCP renders it as type_data.
 
 Type membership is the presence of a type-data row. ``TYPE_DATA_READERS`` maps
-every type except NOTE to the repository attribute holding its row and the
-function rendering that row as a plain dict; a type missing here is written
-but never read back, so ``tests/unit/journal/test_journal_type_coverage.py``
-enforces completeness.
+every type except NOTE to the repository attribute holding its row (which
+``JournalEnrichmentService`` reads) and the function rendering that row as the
+plain dict MCP reports. A type missing here is written but never read back, so
+``tests/unit/journal/test_journal_type_coverage.py`` enforces completeness.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple
 
 from core_shared.models.journals import JournalType
@@ -327,26 +327,34 @@ TYPE_DATA_READERS: dict[JournalType, TypeDataReader] = {
 }
 
 
-async def read_journal_types_and_data(
-    journal_id: int, repos: Any
-) -> tuple[list[str], dict[str, Any]]:
-    """Fetch a journal's types and type-specific data via ``TYPE_DATA_READERS``.
+def _build_abseil_pitch(pitch: Any) -> dict[str, Any]:
+    """One pitch, in the shape ``ABSEILING_TRIP.pitches`` is written in."""
+    return {
+        "pitch_number": pitch.pitch_number,
+        "height": pitch.height,
+        "anchor_location": pitch.anchor_location,
+        "anchor_type": pitch.anchor_type,
+        "did_rescue": pitch.did_rescue,
+        "did_setup": pitch.did_setup,
+        "notes": pitch.notes,
+        "pitch_type": pitch.pitch_type,
+    }
 
-    Returns:
-        Tuple of (types list, type_data dict keyed by type value)
+
+def render_type_data(
+    type_rows: Mapping[JournalType, Any], abseil_pitches: Sequence[Any]
+) -> dict[str, dict[str, Any]]:
+    """Render a journal's type rows as MCP type_data, keyed by type value.
+
+    ``type_rows`` and ``abseil_pitches`` are as
+    ``JournalEnrichmentService.enrich`` reads them. An abseiling trip's pitches
+    are rendered into its type_data, as they are written.
     """
-    types: list[str] = []
-    type_data: dict[str, Any] = {}
-
-    for journal_type, reader in TYPE_DATA_READERS.items():
-        repo = getattr(repos, reader.repo_attr)
-        data = await repo.find_by_journal_id(journal_id)
-        if data:
-            types.append(journal_type.value)
-            type_data[journal_type.value] = reader.build(data)
-
-    # No typed row at all means the journal is a plain NOTE.
-    if not types:
-        types.append(JournalType.NOTE.value)
-
-    return types, type_data
+    type_data = {
+        journal_type.value: TYPE_DATA_READERS[journal_type].build(row)
+        for journal_type, row in type_rows.items()
+    }
+    abseiling = type_data.get(JournalType.ABSEILING_TRIP.value)
+    if abseiling is not None:
+        abseiling["pitches"] = [_build_abseil_pitch(p) for p in abseil_pitches]
+    return type_data

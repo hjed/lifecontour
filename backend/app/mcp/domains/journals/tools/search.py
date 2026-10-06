@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.integrations.link_sources import (
     resolve_journal_source,
 )
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.core.journal.services.journal_search_service import (
     SEARCH_SUGGESTIONS,
     SEARCH_UNAVAILABLE_HINT,
@@ -38,7 +41,6 @@ from app.mcp.domains.journals.tools._shared import (
     JournalToolRepositories,
     build_search_results,
     create_journal_tool_repositories,
-    fetch_types_for_journal,
     journal_to_search_result,
     parse_optional_datetime_filter,
     parse_type_filters,
@@ -50,6 +52,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     get_journal_search_service,
     get_journal_tag_service,
     mcp_depends,
@@ -184,6 +187,9 @@ async def search_journals(
         get_journal_search_service
     ),
     tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
+    ),
 ) -> str:
     """
     Search journals with filtering options.
@@ -244,8 +250,8 @@ async def search_journals(
     }
 
     async def read_types(journal_id: int) -> list[str]:
-        journal_types, _ = await fetch_types_for_journal(journal_id, repos)
-        return journal_types
+        types_by_id = await enrichment_service.types_for([journal_id])
+        return types_by_id.get(journal_id, [])
 
     try:
         outcome = await journal_search_service.search(
@@ -308,7 +314,7 @@ async def search_journals(
     else:
         journal_types = outcome.journal_types
         results = (
-            await build_search_results(outcome.journals, repos)
+            await build_search_results(outcome.journals, enrichment_service)
             if journal_types is None
             else [
                 journal_to_search_result(journal, types=journal_types[journal.id])
@@ -405,6 +411,9 @@ async def browse_journals_by_date_window(
     journal_search_service: JournalSearchService = mcp_depends(
         get_journal_search_service
     ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
+    ),
 ) -> str:
     """
     Browse journals within a date window anchored on a given date.
@@ -469,7 +478,7 @@ async def browse_journals_by_date_window(
     results = (
         [_search_hit_to_result(hit) for hit in window.hits]
         if window.searched
-        else await build_search_results(window.journals, repos)
+        else await build_search_results(window.journals, enrichment_service)
     )
     total_count = window.total_count
     start_iso = window.start_iso
