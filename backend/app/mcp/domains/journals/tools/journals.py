@@ -20,18 +20,17 @@ from app.core.integrations.link_sources import (
     journal_source_names,
     resolve_journal_source,
 )
-from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
 from app.core.journal.services.journal_service import JournalService
-from app.core.journal.services.journal_type_data_reader import (
-    read_journal_types_and_data,
-)
 from app.core.journal.services.journal_type_metadata import describe_journal_types
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -39,8 +38,6 @@ from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
 from app.mcp.domains.journals.tools._shared import (
-    create_journal_tool_repositories,
-    fetch_contact_relationships_with_names,
     fetch_parent_journal,
 )
 from app.mcp.shared.annotations import (
@@ -51,6 +48,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     get_journal_external_link_service,
     get_outbox_event_publisher,
     mcp_depends,
@@ -80,15 +78,13 @@ async def _build_journal_response(
     user_id: str,
     db_connection: AsyncConnection,
     link_service: JournalExternalLinkService,
+    enrichment_service: JournalEnrichmentService,
     *,
     include_children: bool = False,
 ) -> str:
     """Full owner-scoped journal payload shared by the get_journal* tools."""
-    # Create repositories
-    repos = create_journal_tool_repositories(db_connection)
-    journal_repo = repos.journal_repo
+    journal_repo = SqlJournalRepository(db_connection)
 
-    # Get journal
     journal = await journal_repo.find_by_id(journal_id)
     if not journal or str(journal.user_id) != str(user_id):
         raise JournalNotFoundError(journal_id)
@@ -96,58 +92,14 @@ async def _build_journal_response(
     # Resolve the parent this journal hangs off, so a child created with a
     # parent_id reads back as one.
     parent = await fetch_parent_journal(journal, journal_repo, user_id)
+    children = await journal_repo.get_children(journal_id) if include_children else None
 
-    # Get children if requested
-    children = None
-    if include_children:
-        children = await journal_repo.get_children(journal_id)
-
-    # Fetch types and type-specific data
-    types, type_data = await read_journal_types_and_data(journal_id, repos)
-
-    # Fetch contact relationships and contact details
-    contacts = await fetch_contact_relationships_with_names(
-        journal_id, repos.contact_relationship_repo, repos.contact_repo
-    )
-
-    # Fetch tags
-    journal_tags = await repos.tag_repo.get_tags_for_journal(journal_id)
-
-    # Fetch series memberships
-    from app.core.journal.adapters.sql.journal_series_repository import (
-        SqlJournalSeriesRepository,
-    )
-
-    journal_series = await SqlJournalSeriesRepository(
-        db_connection
-    ).get_series_for_journal(journal_id, user_id)
-    series = [
-        {"id": str(s.id), "name": s.name} for s in journal_series if s.id is not None
-    ]
-
-    # Fetch external links (Strava and Google Calendar)
-    external_links = await link_service.links_for_journal(journal_id, user_id)
-
-    # Fetch every calendar this event lives in. One event held by two
-    # calendars — where one invited the other — is a single journal linked
-    # to each, so reporting only the one it is displayed in would hide the
-    # rest.
-    linked_calendars = await SqlCalendarRepository(
-        db_connection
-    ).find_linked_to_journal(journal_id)
-
-    # Convert to AI-friendly response
-    response = JournalConverter.to_response(
-        journal=journal,
-        types=types,
-        type_data=type_data,
-        linked_calendars=linked_calendars,
-        contacts=contacts,
-        tags=journal_tags,
+    response = JournalConverter.to_enriched_response(
+        journal,
+        await enrichment_service.enrich(journal_id, user_id),
         parent=parent,
         children=children,
-        external_links=external_links,
-        series=series,
+        external_links=await link_service.links_for_journal(journal_id, user_id),
     )
 
     return MCPResponseBuilder.success_response(response)
@@ -169,6 +121,9 @@ async def get_journal(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     link_service: JournalExternalLinkService = mcp_depends(
         get_journal_external_link_service
+    ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
     ),
 ) -> str:
     """
@@ -200,6 +155,7 @@ async def get_journal(
         user_id,
         db_connection,
         link_service,
+        enrichment_service,
         include_children=include_children,
     )
 
@@ -232,6 +188,9 @@ async def get_journal_by_external_id(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     link_service: JournalExternalLinkService = mcp_depends(
         get_journal_external_link_service
+    ),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
     ),
 ) -> str:
     """
@@ -266,6 +225,7 @@ async def get_journal_by_external_id(
         user_id,
         db_connection,
         link_service,
+        enrichment_service,
         include_children=include_children,
     )
 

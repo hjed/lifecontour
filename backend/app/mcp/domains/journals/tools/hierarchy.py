@@ -8,15 +8,16 @@ from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.services.hierarchy_service import HierarchyNode, HierarchyService
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.mcp.domains.journals.schemas import (
     EventDateRangeSchema,
     JournalHierarchyNode,
     JournalHierarchyResponse,
 )
 from app.mcp.domains.journals.tools._shared import (
-    JournalToolRepositories,
     create_journal_tool_repositories,
-    fetch_types_for_journal,
     parse_optional_datetime_filter,
     parse_type_filters,
 )
@@ -27,20 +28,22 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
 async def _build_hierarchy_node(
-    node: HierarchyNode, repos: JournalToolRepositories
+    node: HierarchyNode, types_by_id: dict[int, list[str]]
 ) -> JournalHierarchyNode:
     """Build an AI-friendly hierarchy node from a HierarchyNode."""
     assert node.journal.id is not None, "Hierarchy node journal must have an ID"
-    types, _ = await fetch_types_for_journal(node.journal.id, repos)
-    children = []
-    for child_node in node.children:
-        children.append(await _build_hierarchy_node(child_node, repos))
+    types = types_by_id.get(node.journal.id, [])
+    children = [
+        await _build_hierarchy_node(child_node, types_by_id)
+        for child_node in node.children
+    ]
 
     return JournalHierarchyNode(
         id=node.journal.id or 0,
@@ -94,6 +97,9 @@ async def get_journal_hierarchy(
         ),
     ] = 100,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
+    ),
 ) -> str:
     """
     Get a hierarchical view of journals.
@@ -135,14 +141,16 @@ async def get_journal_hierarchy(
         end_date=end_str,
     )
 
-    filtered_journals = []
+    types_by_id = await enrichment_service.types_for(
+        [j.id for j in journals if j.id is not None]
+    )
     if len(type_filters) > 1:
-        for j in journals:
-            if j.id is not None:
-                j_types, _ = await fetch_types_for_journal(j.id, repos)
-                if any(t in type_filters for t in j_types):
-                    filtered_journals.append(j)
-        journals = filtered_journals
+        journals = [
+            j
+            for j in journals
+            if j.id is not None
+            and any(t in type_filters for t in types_by_id.get(j.id, []))
+        ]
 
     returned_ids_list = [j.id for j in journals if j.id is not None]
     children_count_by_parent_id = await repos.journal_repo.count_children_for_parents(
@@ -159,7 +167,7 @@ async def get_journal_hierarchy(
 
     root_nodes = []
     for h_node in hierarchy_nodes:
-        root_nodes.append(await _build_hierarchy_node(h_node, repos))
+        root_nodes.append(await _build_hierarchy_node(h_node, types_by_id))
 
     processing_time_ms = int((time.time() - start_time) * 1000)
     summary = (

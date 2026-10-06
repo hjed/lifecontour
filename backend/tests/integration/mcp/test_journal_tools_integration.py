@@ -35,16 +35,14 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
-from app.core.journal.services.journal_type_data_reader import (
-    read_journal_types_and_data as _fetch_journal_types_and_data,
-)
+from app.core.journal.services.journal_type_data_reader import render_type_data
 from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import register_journal_tools
-from app.mcp.domains.journals.tools._shared import create_journal_tool_repositories
 from tests.integration.contact_seeding import seed_contact
+from tests.integration.journal_enrichment import enrichment_service_for
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
@@ -1161,7 +1159,7 @@ class TestJournalToolsIntegration:
 
 class TestFetchJournalTypesAndDataNewActivityTypes:
     """
-    Integration tests verifying _fetch_journal_types_and_data detects
+    Integration tests verifying the MCP type_data read detects
     FITNESS, OUTDOOR_ACTIVITY, BUSHWALKING, JOGGING, ABSEILING_TRIP,
     CANYONING, CLIMBING, KAYAKING, and CROSS_COUNTRY_SKIING types.
     """
@@ -1192,9 +1190,10 @@ class TestFetchJournalTypesAndDataNewActivityTypes:
     async def _call_fetch(
         self, journal_id: int, conn: AsyncConnection
     ) -> tuple[list[str], dict[str, Any]]:
-        """Helper: call _fetch_journal_types_and_data with all repos."""
-        return await _fetch_journal_types_and_data(
-            journal_id, create_journal_tool_repositories(conn)
+        """Helper: read the journal as the MCP tools do and render its type_data."""
+        enrichment = await enrichment_service_for(conn).enrich(journal_id, "test_user")
+        return enrichment.types, render_type_data(
+            enrichment.type_rows, enrichment.abseil_pitches
         )
 
     @pytest.mark.asyncio

@@ -12,7 +12,6 @@ from uuid import UUID
 import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
-    Calendar,
     IncompleteOutdoorActivity,
     Journal,
     JournalContactRelationship,
@@ -43,7 +42,6 @@ from app.api.history import HistoryConverter, HistoryListResponse
 from app.api.journals.converters import (
     JournalConverter,
     JournalRequestConverter,
-    TypeDataConverter,
 )
 from app.api.journals.schemas import (
     CheckedOutGearItemSchema,
@@ -87,51 +85,23 @@ from app.api.journals.schemas import (
     TemplateDoneSchema,
     UpcomingOutdoorActivitySchema,
 )
-from app.core.contacts.models.repositories import ContactRepository
 from app.core.history.services import JournalHistoryService
 from app.core.integrations.immich.album_cover_proxy_service import (
     AlbumCoverProxyService,
 )
-from app.core.journal.adapters.sql.album_sync_read_repository import (
-    AlbumSyncReadRepository,
-)
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.models.repositories import (
-    AbseilingDataRepository,
-    AbseilPitchRepository,
-    BushwalkingDataRepository,
-    CalendarInfoRepository,
-    CalendarRepository,
-    CanoeingDataRepository,
-    CanyoningDataRepository,
-    CavingDataRepository,
-    ClimbingDataRepository,
-    CrossCountrySkiingDataRepository,
-    DivingDataRepository,
-    DownhillSkiingDataRepository,
-    FitnessDataRepository,
-    GearMaintenanceDataRepository,
-    GearUsageDataRepository,
-    JoggingDataRepository,
-    JournalContactRelationshipRepository,
-    JournalSeriesRepository,
     JournalTagRepository,
-    KayakingDataRepository,
-    MoodDataRepository,
-    OutdoorActivityDataRepository,
-    OutdoorPlanningDataRepository,
-    OutdoorTrainingDataRepository,
-    PlanDataRepository,
     ReviewItemRepository,
-    RouteRepository,
-    SnorkellingDataRepository,
-    TravelDataRepository,
 )
 from app.core.journal.services.hierarchy_service import HierarchyService
 from app.core.journal.services.incomplete_outdoor_activity_service import (
     IncompleteOutdoorActivityService,
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
+)
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
@@ -265,321 +235,58 @@ async def get_journal_album_cover(
         ) from None
 
 
-async def _populate_contact_names(
-    resource: JournalResource,
-    contact_repo: ContactRepository,
-    contact_cache: dict[int, dict[str, str | None]],
-) -> None:
-    """Populate the names and avatar info of contacts in a JournalResource."""
-    if not resource.attributes.contacts:
-        return
-
-    # Gather IDs that need fetching
-    contact_ids_to_fetch = [
-        int(cs.id)
-        for cs in resource.attributes.contacts
-        if int(cs.id) not in contact_cache and (not cs.name or not cs.photo_url)
-    ]
-
-    # Bulk fetch names and photo_url in a single query
-    if contact_ids_to_fetch:
-        name_rows = await contact_repo.find_names_by_ids(contact_ids_to_fetch)
-        for cid, (first_name, last_name, photo_url) in name_rows.items():
-            # Null-safe formatter: filter out None or empty name parts
-            name_parts = [part for part in (first_name, last_name) if part]
-            name = " ".join(name_parts)
-            contact_cache[cid] = {
-                "name": name or f"Contact {cid}",
-                "first_name": first_name,
-                "last_name": last_name,
-                "photo_url": photo_url,
-            }
-
-        # Mark any IDs not found in the database
-        for cid in contact_ids_to_fetch:
-            if cid not in contact_cache:
-                contact_cache[cid] = {
-                    "name": f"Unknown Contact {cid}",
-                    "first_name": None,
-                    "last_name": None,
-                    "photo_url": None,
-                }
-
-    # Set names and photo_url from cache
-    for contact_schema in resource.attributes.contacts:
-        contact_id = int(contact_schema.id)
-        if contact_id in contact_cache:
-            cache_info = contact_cache[contact_id]
-            contact_schema.name = cache_info["name"]
-            contact_schema.first_name = cache_info["first_name"]
-            contact_schema.last_name = cache_info["last_name"]
-            contact_schema.photo_url = cache_info.get("photo_url")
-
-
-async def _build_journal_response(
-    journal_resource: JournalResource,
-    contact_repo: ContactRepository,
-) -> JournalResponse:
-    """Build a JournalResponse with populated contact names.
-
-    Shared helper used by all endpoints returning a single JournalResponse
-    to ensure consistent contact name population.
-    """
-    await _populate_contact_names(journal_resource, contact_repo, {})
-    return JournalResponse(data=journal_resource)
-
-
-async def _enrich_journal_data(
+async def _journal_resource_with_hierarchy(
     journal: Journal,
-    calendar_info_repo: CalendarInfoRepository,
-    calendar_repo: CalendarRepository,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    fitness_data_repo: FitnessDataRepository,
-    contact_relationship_repo: JournalContactRelationshipRepository,
-    tag_repo: JournalTagRepository,
-    route_repo: RouteRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-    gear_usage_data_repo: GearUsageDataRepository,
-    include_routes: bool = False,
-) -> tuple[
-    list[str],
-    dict[str, Any],
-    list[Any],
-    list[Any],
-    list[Calendar],
-    list[Any] | None,
-]:
+    user_id: str,
+    base_url: str,
+    journal_service: JournalService,
+    enrichment_service: JournalEnrichmentService,
+) -> JournalResource:
+    """A journal's full resource: its enrichment, parent, children and depth.
+
+    What the detail read and the whole-journal writes (PUT, PATCH) answer with.
     """
-    Fetch all enrichment data for a journal.
+    assert journal.id is not None, "A stored journal has an id"
+    enrichment = await enrichment_service.enrich(journal.id, user_id)
+    parent, children, children_count = await _fetch_parent_and_children(
+        journal, user_id, journal_service
+    )
+    children_types = await enrichment_service.types_for(
+        [child.id for child in children or [] if child.id is not None]
+    )
+    depth_map = await HierarchyService.compute_depth_map(
+        [journal.id], journal_service.journal_repo
+    )
+    return JournalConverter.to_enriched_resource(
+        journal,
+        base_url,
+        enrichment,
+        parent=parent,
+        children=children,
+        children_count=children_count,
+        depth=depth_map.get(journal.id, 1),
+        children_types=children_types,
+    )
 
-    Retrieves types, type_data, contacts, tags, and calendar information.
 
-    ``calendars`` is every calendar the event lives in, display calendar
-    first — one event held by two calendars is a single journal linked to
-    each — and is empty for a journal that is not an event.
+async def _enriched_journal_response(
+    journal_id: int,
+    user_id: str,
+    base_url: str,
+    journal_service: JournalService,
+    enrichment_service: JournalEnrichmentService,
+) -> JournalResponse:
+    """The journal a write endpoint answers with, re-read after the write.
 
-    Returns:
-        Tuple of (types, type_data, contacts, tags, calendars, routes)
+    Rendered from its enrichment, like every other journal response.
     """
-    # Journal must have an ID when being enriched (it was retrieved from the database)
-    assert journal.id is not None, "Journal must have an ID to fetch enrichment data"
-    journal_id: int = journal.id
-
-    types = []
-    type_data = {}
-
-    # Fetch type-specific data
-    calendar_info = await calendar_info_repo.find_by_journal_id(journal_id)
-    # One event can be held by several calendars — where one calendar invites
-    # another the sync records a single journal linked to each — while it is
-    # still displayed in exactly one, which leads the list.
-    calendars: list[Calendar] = []
-    if calendar_info:
-        types.append(JournalType.EVENT.value)
-        calendars = await calendar_repo.find_linked_to_journal(journal_id)
-        type_data[JournalType.EVENT.value] = TypeDataConverter.calendar_info_to_schema(
-            calendar_info
-        )
-
-    mood_data = await mood_data_repo.find_by_journal_id(journal_id)
-    if mood_data:
-        types.append(JournalType.MOOD_RATING.value)
-        type_data[JournalType.MOOD_RATING.value] = (
-            TypeDataConverter.mood_data_to_schema(mood_data)
-        )
-
-    plan_data = await plan_data_repo.find_by_journal_id(journal_id)
-    if plan_data:
-        types.append(JournalType.PLAN.value)
-        type_data[JournalType.PLAN.value] = TypeDataConverter.plan_data_to_schema(
-            plan_data
-        )
-
-    travel_data = await travel_data_repo.find_by_journal_id(journal_id)
-    if travel_data:
-        types.append(JournalType.TRAVEL.value)
-        type_data[JournalType.TRAVEL.value] = TypeDataConverter.travel_data_to_schema(
-            travel_data
-        )
-
-    photo_album_data = await photo_album_data_repo.find_by_journal_id(journal_id)
-    if photo_album_data:
-        types.append(JournalType.PHOTO_ALBUM.value)
-        type_data[JournalType.PHOTO_ALBUM.value] = (
-            TypeDataConverter.photo_album_data_to_schema(photo_album_data)
-        )
-
-    fitness_data = await fitness_data_repo.find_by_journal_id(journal_id)
-    if fitness_data:
-        types.append(JournalType.FITNESS.value)
-        type_data[JournalType.FITNESS.value] = TypeDataConverter.fitness_data_to_schema(
-            fitness_data
-        )
-
-    outdoor_activity_data = await outdoor_activity_data_repo.find_by_journal_id(
-        journal_id
+    journal = await journal_service.get_journal(journal_id)
+    if not journal:
+        raise JournalNotFoundError(journal_id)
+    enrichment = await enrichment_service.enrich(journal_id, user_id)
+    return JournalResponse(
+        data=JournalConverter.to_enriched_resource(journal, base_url, enrichment)
     )
-    if outdoor_activity_data:
-        types.append(JournalType.OUTDOOR_ACTIVITY.value)
-        type_data[JournalType.OUTDOOR_ACTIVITY.value] = (
-            TypeDataConverter.outdoor_activity_data_to_schema(outdoor_activity_data)
-        )
-
-    bushwalking_data = await bushwalking_data_repo.find_by_journal_id(journal_id)
-    if bushwalking_data:
-        types.append(JournalType.BUSHWALKING.value)
-        type_data[JournalType.BUSHWALKING.value] = (
-            TypeDataConverter.bushwalking_data_to_schema(bushwalking_data)
-        )
-
-    jogging_data = await jogging_data_repo.find_by_journal_id(journal_id)
-    if jogging_data:
-        types.append(JournalType.JOGGING.value)
-        type_data[JournalType.JOGGING.value] = TypeDataConverter.jogging_data_to_schema(
-            jogging_data
-        )
-
-    abseiling_data = await abseiling_data_repo.find_by_journal_id(journal_id)
-    if abseiling_data:
-        types.append(JournalType.ABSEILING_TRIP.value)
-        pitches = await abseil_pitch_repo.find_by_journal_id(journal_id)
-        converted = TypeDataConverter.abseiling_data_to_schema(
-            abseiling_data, pitches=pitches
-        )
-        type_data[JournalType.ABSEILING_TRIP.value] = converted
-
-    canyoning_data = await canyoning_data_repo.find_by_journal_id(journal_id)
-    if canyoning_data:
-        types.append(JournalType.CANYONING.value)
-        type_data[JournalType.CANYONING.value] = (
-            TypeDataConverter.canyoning_data_to_schema(canyoning_data)
-        )
-
-    climbing_data = await climbing_data_repo.find_by_journal_id(journal_id)
-    if climbing_data:
-        types.append(JournalType.CLIMBING.value)
-        type_data[JournalType.CLIMBING.value] = (
-            TypeDataConverter.climbing_data_to_schema(climbing_data)
-        )
-
-    kayaking_data = await kayaking_data_repo.find_by_journal_id(journal_id)
-    if kayaking_data:
-        types.append(JournalType.KAYAKING.value)
-        type_data[JournalType.KAYAKING.value] = (
-            TypeDataConverter.kayaking_data_to_schema(kayaking_data)
-        )
-
-    skiing_data = await skiing_data_repo.find_by_journal_id(journal_id)
-    if skiing_data:
-        types.append(JournalType.CROSS_COUNTRY_SKIING.value)
-        type_data[JournalType.CROSS_COUNTRY_SKIING.value] = (
-            TypeDataConverter.cross_country_skiing_data_to_schema(skiing_data)
-        )
-
-    caving_data = await caving_data_repo.find_by_journal_id(journal_id)
-    if caving_data:
-        types.append(JournalType.CAVING.value)
-        type_data[JournalType.CAVING.value] = TypeDataConverter.caving_data_to_schema(
-            caving_data
-        )
-
-    canoeing_data = await canoeing_data_repo.find_by_journal_id(journal_id)
-    if canoeing_data:
-        types.append(JournalType.CANOEING.value)
-        type_data[JournalType.CANOEING.value] = (
-            TypeDataConverter.canoeing_data_to_schema(canoeing_data)
-        )
-
-    snorkelling_data = await snorkelling_data_repo.find_by_journal_id(journal_id)
-    if snorkelling_data:
-        types.append(JournalType.SNORKELLING.value)
-        type_data[JournalType.SNORKELLING.value] = (
-            TypeDataConverter.snorkelling_data_to_schema(snorkelling_data)
-        )
-
-    diving_data = await diving_data_repo.find_by_journal_id(journal_id)
-    if diving_data:
-        types.append(JournalType.DIVING.value)
-        type_data[JournalType.DIVING.value] = TypeDataConverter.diving_data_to_schema(
-            diving_data
-        )
-
-    downhill_skiing_data = await downhill_skiing_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if downhill_skiing_data:
-        types.append(JournalType.DOWNHILL_SKIING.value)
-        type_data[JournalType.DOWNHILL_SKIING.value] = (
-            TypeDataConverter.downhill_skiing_data_to_schema(downhill_skiing_data)
-        )
-
-    outdoor_planning_data = await outdoor_planning_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if outdoor_planning_data:
-        types.append(JournalType.OUTDOOR_PLANNING.value)
-        type_data[JournalType.OUTDOOR_PLANNING.value] = (
-            TypeDataConverter.outdoor_planning_data_to_schema(outdoor_planning_data)
-        )
-
-    outdoor_training_data = await outdoor_training_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if outdoor_training_data:
-        types.append(JournalType.OUTDOOR_TRAINING.value)
-        type_data[JournalType.OUTDOOR_TRAINING.value] = (
-            TypeDataConverter.outdoor_training_data_to_schema(outdoor_training_data)
-        )
-
-    gear_maintenance_data = await gear_maintenance_data_repo.find_by_journal_id(
-        journal_id
-    )
-    if gear_maintenance_data:
-        types.append(JournalType.GEAR_MAINTENANCE.value)
-        type_data[JournalType.GEAR_MAINTENANCE.value] = (
-            TypeDataConverter.gear_maintenance_data_to_schema(gear_maintenance_data)
-        )
-
-    gear_usage_data = await gear_usage_data_repo.find_by_journal_id(journal_id)
-    if gear_usage_data:
-        types.append(JournalType.GEAR_USAGE.value)
-        type_data[JournalType.GEAR_USAGE.value] = (
-            TypeDataConverter.gear_usage_data_to_schema(gear_usage_data)
-        )
-
-    # If no types found, it's a NOTE
-    if not types:
-        types.append(JournalType.NOTE.value)
-
-    # Fetch contacts
-    contacts = await contact_relationship_repo.get_by_journal(journal_id)
-
-    # Fetch tags
-    tags = await tag_repo.get_tags_for_journal(journal_id)
-
-    # Fetch routes
-    routes = await route_repo.find_by_journal_id(journal_id) if include_routes else None
-
-    return types, type_data, contacts, tags, calendars, routes
 
 
 def _journal_tag_resource(tag: JournalTag, base_url: str) -> JournalTagResource:
@@ -912,135 +619,12 @@ async def _fetch_parent_and_children(
     return parent, children, children_count
 
 
-async def _fetch_children_types(
-    children: list[Journal],
-    calendar_info_repo: CalendarInfoRepository,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    fitness_data_repo: FitnessDataRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-    gear_usage_data_repo: GearUsageDataRepository,
-) -> dict[int, list[str]]:
-    """Fetch only the type names for each child journal (lightweight).
-
-    Unlike ``_enrich_journal_data`` this skips contacts, tags, calendar
-    details, type_data, and routes — we only need the type *names* for the
-    child summary shown in the UI.
-
-    Returns:
-        Mapping of journal ID to list of type name strings.
-    """
-    result: dict[int, list[str]] = {}
-
-    for child in children:
-        if child.id is None:
-            continue
-        journal_id = child.id
-        types: list[str] = []
-
-        if await calendar_info_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.EVENT.value)
-        if await mood_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.MOOD_RATING.value)
-        if await plan_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.PLAN.value)
-        if await travel_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.TRAVEL.value)
-        if await photo_album_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.PHOTO_ALBUM.value)
-        if await fitness_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.FITNESS.value)
-        if await outdoor_activity_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.OUTDOOR_ACTIVITY.value)
-        if await bushwalking_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.BUSHWALKING.value)
-        if await jogging_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.JOGGING.value)
-        if await abseiling_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.ABSEILING_TRIP.value)
-        if await canyoning_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.CANYONING.value)
-        if await climbing_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.CLIMBING.value)
-        if await kayaking_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.KAYAKING.value)
-        if await skiing_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.CROSS_COUNTRY_SKIING.value)
-        if await caving_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.CAVING.value)
-        if await canoeing_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.CANOEING.value)
-        if await snorkelling_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.SNORKELLING.value)
-        if await diving_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.DIVING.value)
-        if await downhill_skiing_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.DOWNHILL_SKIING.value)
-        if await outdoor_planning_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.OUTDOOR_PLANNING.value)
-        if await outdoor_training_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.OUTDOOR_TRAINING.value)
-        if await gear_maintenance_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.GEAR_MAINTENANCE.value)
-        if await gear_usage_data_repo.find_by_journal_id(journal_id):
-            types.append(JournalType.GEAR_USAGE.value)
-
-        result[journal_id] = types
-
-    return result
-
-
 async def _build_journal_list_resources(
     journals: list[Journal],
     user_id: str,
     base_url: str,
     journal_service: JournalService,
-    contact_repo: ContactRepository,
-    calendar_info_repo: CalendarInfoRepository,
-    calendar_repo: CalendarRepository,
-    mood_data_repo: MoodDataRepository,
-    plan_data_repo: PlanDataRepository,
-    travel_data_repo: TravelDataRepository,
-    photo_album_data_repo: AlbumSyncReadRepository,
-    fitness_data_repo: FitnessDataRepository,
-    outdoor_activity_data_repo: OutdoorActivityDataRepository,
-    bushwalking_data_repo: BushwalkingDataRepository,
-    jogging_data_repo: JoggingDataRepository,
-    abseiling_data_repo: AbseilingDataRepository,
-    abseil_pitch_repo: AbseilPitchRepository,
-    canyoning_data_repo: CanyoningDataRepository,
-    caving_data_repo: CavingDataRepository,
-    canoeing_data_repo: CanoeingDataRepository,
-    climbing_data_repo: ClimbingDataRepository,
-    kayaking_data_repo: KayakingDataRepository,
-    skiing_data_repo: CrossCountrySkiingDataRepository,
-    snorkelling_data_repo: SnorkellingDataRepository,
-    diving_data_repo: DivingDataRepository,
-    downhill_skiing_data_repo: DownhillSkiingDataRepository,
-    outdoor_planning_data_repo: OutdoorPlanningDataRepository,
-    outdoor_training_data_repo: OutdoorTrainingDataRepository,
-    gear_maintenance_data_repo: GearMaintenanceDataRepository,
-    gear_usage_data_repo: GearUsageDataRepository,
-    contact_relationship_repo: JournalContactRelationshipRepository,
-    tag_repo: JournalTagRepository,
-    route_repo: RouteRepository,
+    enrichment_service: JournalEnrichmentService,
     pending_review_journal_ids: set[int] | None = None,
     tasks_due_counts: dict[int, int] | None = None,
 ) -> list[JournalResource]:
@@ -1082,67 +666,20 @@ async def _build_journal_list_resources(
         returned_ids_list, journal_service.journal_repo
     )
 
-    # Enrich journals
     journal_resources = []
     for journal in all_journals:
-        (
-            types,
-            type_data,
-            contacts,
-            tags,
-            calendars,
-            routes,
-        ) = await _enrich_journal_data(
-            journal,
-            calendar_info_repo,
-            calendar_repo,
-            mood_data_repo,
-            plan_data_repo,
-            travel_data_repo,
-            photo_album_data_repo,
-            fitness_data_repo,
-            contact_relationship_repo,
-            tag_repo,
-            route_repo,
-            outdoor_activity_data_repo,
-            bushwalking_data_repo,
-            jogging_data_repo,
-            abseiling_data_repo,
-            abseil_pitch_repo,
-            canyoning_data_repo,
-            caving_data_repo,
-            canoeing_data_repo,
-            climbing_data_repo,
-            kayaking_data_repo,
-            skiing_data_repo,
-            snorkelling_data_repo,
-            diving_data_repo,
-            downhill_skiing_data_repo,
-            outdoor_planning_data_repo,
-            outdoor_training_data_repo,
-            gear_maintenance_data_repo,
-            gear_usage_data_repo,
-            include_routes=False,
-        )
+        assert journal.id is not None, "De-duplicated journals all have ids"
         parent = parent_by_id.get(journal.parent_id) if journal.parent_id else None
-        children_count = (
-            children_count_by_parent_id.get(journal.id, 0) if journal.id else 0
+        journal_resources.append(
+            JournalConverter.to_enriched_resource(
+                journal,
+                base_url,
+                await enrichment_service.enrich(journal.id, user_id),
+                parent=parent,
+                children_count=children_count_by_parent_id.get(journal.id, 0),
+                depth=depth_map.get(journal.id, 1),
+            )
         )
-        depth = depth_map.get(journal.id, 1) if journal.id else None
-        resource = JournalConverter.to_resource(
-            journal,
-            base_url,
-            types=types,
-            type_data=type_data,
-            contacts=contacts,
-            tags=tags,
-            calendars=calendars,
-            routes=routes,
-            parent=parent,
-            children_count=children_count,
-            depth=depth,
-        )
-        journal_resources.append(resource)
 
     # Set the list-level indicators, both of them read once for the whole page
     # and zipped on here rather than fetched per row.
@@ -1165,11 +702,6 @@ async def _build_journal_list_resources(
                 journal_id_int, 0
             )
 
-    # Populate contact names
-    contact_cache: dict[int, dict[str, str | None]] = {}
-    for resource in journal_resources:
-        await _populate_contact_names(resource, contact_repo, contact_cache)
-
     return journal_resources
 
 
@@ -1178,35 +710,7 @@ async def _build_journal_list_resources(
 async def list_journals(
     request: Request,
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     review_item_repo: FromDishka[ReviewItemRepository],
     task_read_service: FromDishka[TaskReadService],
     user: FromDishka[SessionUser],  # Require authentication
@@ -1304,35 +808,7 @@ async def list_journals(
         user_id=user.id,
         base_url=base_url,
         journal_service=journal_service,
-        contact_repo=contact_repo,
-        calendar_info_repo=calendar_info_repo,
-        calendar_repo=calendar_repo,
-        mood_data_repo=mood_data_repo,
-        plan_data_repo=plan_data_repo,
-        travel_data_repo=travel_data_repo,
-        photo_album_data_repo=photo_album_data_repo,
-        fitness_data_repo=fitness_data_repo,
-        outdoor_activity_data_repo=outdoor_activity_data_repo,
-        bushwalking_data_repo=bushwalking_data_repo,
-        jogging_data_repo=jogging_data_repo,
-        abseiling_data_repo=abseiling_data_repo,
-        abseil_pitch_repo=abseil_pitch_repo,
-        canyoning_data_repo=canyoning_data_repo,
-        caving_data_repo=caving_data_repo,
-        canoeing_data_repo=canoeing_data_repo,
-        climbing_data_repo=climbing_data_repo,
-        kayaking_data_repo=kayaking_data_repo,
-        skiing_data_repo=skiing_data_repo,
-        snorkelling_data_repo=snorkelling_data_repo,
-        diving_data_repo=diving_data_repo,
-        downhill_skiing_data_repo=downhill_skiing_data_repo,
-        outdoor_planning_data_repo=outdoor_planning_data_repo,
-        outdoor_training_data_repo=outdoor_training_data_repo,
-        gear_maintenance_data_repo=gear_maintenance_data_repo,
-        gear_usage_data_repo=gear_usage_data_repo,
-        contact_relationship_repo=contact_relationship_repo,
-        tag_repo=tag_repo,
-        route_repo=route_repo,
+        enrichment_service=enrichment_service,
         pending_review_journal_ids=pending_review_journal_ids,
         tasks_due_counts=tasks_due_counts,
     )
@@ -1983,36 +1459,7 @@ async def get_journal(
     request: Request,
     response: Response,
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    series_repo: FromDishka[JournalSeriesRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     review_item_repo: FromDishka[ReviewItemRepository],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2026,98 +1473,9 @@ async def get_journal(
     journal = await _require_owned_journal(journal_service, user.id, journal_id)
     set_etag(response, "journals", journal_id, journal.updated_at)
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
+    journal_resource = await _journal_resource_with_hierarchy(
+        journal, user.id, base_url, journal_service, enrichment_service
     )
-
-    parent, children, children_count = await _fetch_parent_and_children(
-        journal, user.id, journal_service
-    )
-
-    children_types = await _fetch_children_types(
-        children,
-        calendar_info_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-    )
-
-    # Compute depth for the journal
-    depth_map = await HierarchyService.compute_depth_map(
-        [journal.id] if journal.id else [], journal_service.journal_repo
-    )
-    depth = depth_map.get(journal.id, 1) if journal.id else None
-
-    journal_resource = JournalConverter.to_resource(
-        journal,
-        base_url,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        calendars=calendars,
-        parent=parent,
-        children=children,
-        children_count=children_count,
-        depth=depth,
-        children_types=children_types,
-    )
-
-    # Embed series memberships in the detail response
-    journal_series = await series_repo.get_series_for_journal(journal_id, user.id)
-    journal_resource.attributes.series = [
-        {"id": str(series.id), "name": series.name}
-        for series in journal_series
-        if series.id is not None
-    ]
 
     # Embed pending review items in the detail response
     pending_review_items = await review_item_repo.find_pending_by_journal_id(
@@ -2148,7 +1506,7 @@ async def get_journal(
         ]
         journal_resource.attributes.has_pending_reviews = True
 
-    return await _build_journal_response(journal_resource, contact_repo)
+    return JournalResponse(data=journal_resource)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -2157,36 +1515,8 @@ async def create_journal(
     request: Request,
     journal_request: JournalCreateRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2223,39 +1553,7 @@ async def create_journal(
     if created_journal.id is None:
         raise ValueError(JOURNAL_ID_NOT_SET_MSG)
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        created_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
-    )
+    enrichment = await enrichment_service.enrich(created_journal.id, user.id)
 
     parent = (
         await journal_service.get_journal(created_journal.parent_id)
@@ -2268,19 +1566,15 @@ async def create_journal(
     )
     depth = depth_map.get(created_journal.id, 1)
 
-    journal_resource = JournalConverter.to_resource(
-        journal=created_journal,
-        base_url=base_url,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        calendars=calendars,
+    journal_resource = JournalConverter.to_enriched_resource(
+        created_journal,
+        base_url,
+        enrichment,
         parent=parent,
         depth=depth,
     )
 
-    return await _build_journal_response(journal_resource, contact_repo)
+    return JournalResponse(data=journal_resource)
 
 
 @router.put(
@@ -2305,36 +1599,8 @@ async def update_journal(
     response: Response,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2363,94 +1629,11 @@ async def update_journal(
     )
     set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        saved_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    journal_resource = await _journal_resource_with_hierarchy(
+        saved_journal, user.id, base_url, journal_service, enrichment_service
     )
 
-    parent, children, children_count = await _fetch_parent_and_children(
-        saved_journal, user.id, journal_service
-    )
-
-    children_types = await _fetch_children_types(
-        children,
-        calendar_info_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-    )
-
-    # Compute depth for the journal
-    depth_map = await HierarchyService.compute_depth_map(
-        [saved_journal.id] if saved_journal.id else [],
-        journal_service.journal_repo,
-    )
-    depth = depth_map.get(saved_journal.id, 1) if saved_journal.id else None
-
-    journal_resource = JournalConverter.to_resource(
-        journal=saved_journal,
-        base_url=base_url,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        calendars=calendars,
-        parent=parent,
-        children=children,
-        children_count=children_count,
-        depth=depth,
-        children_types=children_types,
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
+    return JournalResponse(data=journal_resource)
 
 
 @router.patch(
@@ -2475,36 +1658,8 @@ async def partial_update_journal(
     response: Response,
     journal_request: JournalUpdateRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2580,94 +1735,11 @@ async def partial_update_journal(
     )
     set_etag(response, "journals", journal_id, saved_journal.updated_at)
 
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        saved_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    journal_resource = await _journal_resource_with_hierarchy(
+        saved_journal, user.id, base_url, journal_service, enrichment_service
     )
 
-    parent, children, children_count = await _fetch_parent_and_children(
-        saved_journal, user.id, journal_service
-    )
-
-    children_types = await _fetch_children_types(
-        children,
-        calendar_info_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-    )
-
-    # Compute depth for the journal
-    depth_map = await HierarchyService.compute_depth_map(
-        [saved_journal.id] if saved_journal.id else [],
-        journal_service.journal_repo,
-    )
-    depth = depth_map.get(saved_journal.id, 1) if saved_journal.id else None
-
-    journal_resource = JournalConverter.to_resource(
-        journal=saved_journal,
-        base_url=base_url,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        calendars=calendars,
-        parent=parent,
-        children=children,
-        children_count=children_count,
-        depth=depth,
-        children_types=children_types,
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
+    return JournalResponse(data=journal_resource)
 
 
 @router.delete(
@@ -2728,35 +1800,7 @@ async def merge_journal(
     merge_request: MergeJournalRequest,
     journal_merge_service: FromDishka[JournalMergeService],
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2805,38 +1849,7 @@ async def merge_journal(
     if not target_journal:
         raise JournalNotFoundError(journal_id)
 
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        target_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=False,
-    )
+    enrichment = await enrichment_service.enrich(journal_id, user.id)
 
     # A merge keeps the survivor's own parent and adopts the source's children,
     # so the response has to describe that hierarchy — reporting neither reads
@@ -2856,19 +1869,15 @@ async def merge_journal(
     depth = depth_map.get(journal_id, 1)
 
     base_url = get_request_base_url(request)
-    resource = JournalConverter.to_resource(
-        journal=target_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=tags,
-        calendars=calendars,
+    resource = JournalConverter.to_enriched_resource(
+        target_journal,
+        base_url,
+        enrichment,
         parent=parent,
         children_count=children_count,
         depth=depth,
-        base_url=base_url,
     )
-    return await _build_journal_response(resource, contact_repo)
+    return JournalResponse(data=resource)
 
 
 # Type Management Endpoints
@@ -2879,36 +1888,8 @@ async def add_type_to_journal(
     request: Request,
     type_request: JournalTypeAddRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -2969,50 +1950,9 @@ async def add_type_to_journal(
         source=Provenance.UI,
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/types/{journal_type}")
@@ -3022,36 +1962,8 @@ async def remove_type_from_journal(
     journal_type: str,
     request: Request,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -3093,50 +2005,9 @@ async def remove_type_from_journal(
         journal_id, jtype, connection, changed_by="ui", source=Provenance.UI
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.put("/{journal_id}/types/{journal_type}/data")
@@ -3147,36 +2018,8 @@ async def update_type_data(
     request: Request,
     type_data_request: JournalTypeDataUpdateRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -3214,50 +2057,9 @@ async def update_type_data(
         source=Provenance.UI,
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 # Relationship Management Endpoints
@@ -3268,35 +2070,7 @@ async def add_contact_to_journal(
     request: Request,
     contact_request: JournalContactAddRequest,
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     connection: FromDishka[AsyncConnection],
     journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
@@ -3366,50 +2140,9 @@ async def add_contact_to_journal(
             f"Contact not found or relationship already exists: {contact_id}",
         ) from e
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.patch("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
@@ -3421,35 +2154,7 @@ async def update_journal_contact_relationship(
     request: Request,
     update_request: JournalContactRelationshipUpdateRequest,
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     connection: FromDishka[AsyncConnection],
     journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
@@ -3531,50 +2236,9 @@ async def update_journal_contact_relationship(
             f"with type {relationship_type}",
         )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
@@ -3585,35 +2249,7 @@ async def remove_contact_from_journal(
     relationship_type: str,
     request: Request,
     journal_service: FromDishka[JournalService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     connection: FromDishka[AsyncConnection],
     journal_contact_service: FromDishka[JournalContactService],
     user: FromDishka[SessionUser],  # Require authentication
@@ -3653,50 +2289,9 @@ async def remove_contact_from_journal(
         journal_id, contact_id_int, relationship_type_enum, transaction=connection
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.post("/{journal_id}/relationships/tags")
@@ -3706,36 +2301,9 @@ async def add_tag_to_journal(
     request: Request,
     tag_request: JournalTagAddRequest,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_tag_service: FromDishka[JournalTagService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
     tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -3769,50 +2337,9 @@ async def add_tag_to_journal(
         journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, routes = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)
 
 
 @router.delete("/{journal_id}/relationships/tags/{tag_id}")
@@ -3822,36 +2349,8 @@ async def remove_tag_from_journal(
     tag_id: str,
     request: Request,
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     journal_tag_service: FromDishka[JournalTagService],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> JournalResponse:
@@ -3880,47 +2379,6 @@ async def remove_tag_from_journal(
         journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
     )
 
-    # Get updated journal
-    updated_journal = await journal_service.get_journal(journal_id)
-    if not updated_journal:
-        raise JournalNotFoundError(journal_id)
-
-    # Fetch all enrichment data
-    types, type_data, contacts, tags, calendars, _ = await _enrich_journal_data(
-        updated_journal,
-        calendar_info_repo,
-        calendar_repo,
-        mood_data_repo,
-        plan_data_repo,
-        travel_data_repo,
-        photo_album_data_repo,
-        fitness_data_repo,
-        contact_relationship_repo,
-        tag_repo,
-        route_repo,
-        outdoor_activity_data_repo,
-        bushwalking_data_repo,
-        jogging_data_repo,
-        abseiling_data_repo,
-        abseil_pitch_repo,
-        canyoning_data_repo,
-        caving_data_repo,
-        canoeing_data_repo,
-        climbing_data_repo,
-        kayaking_data_repo,
-        skiing_data_repo,
-        snorkelling_data_repo,
-        diving_data_repo,
-        downhill_skiing_data_repo,
-        outdoor_planning_data_repo,
-        outdoor_training_data_repo,
-        gear_maintenance_data_repo,
-        gear_usage_data_repo,
-        include_routes=True,
+    return await _enriched_journal_response(
+        journal_id, user.id, base_url, journal_service, enrichment_service
     )
-
-    journal_resource = JournalConverter.to_resource(
-        updated_journal, base_url, types, type_data, contacts, tags, calendars
-    )
-
-    return await _build_journal_response(journal_resource, contact_repo)

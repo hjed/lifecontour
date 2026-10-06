@@ -11,10 +11,10 @@ from fastmcp.tools import tool
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.journal.services.journal_type_data_reader import (
-    read_journal_types_and_data,
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
 )
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
@@ -31,7 +31,6 @@ from app.mcp.domains.journals.schemas import (
 )
 from app.mcp.domains.journals.tools._shared import (
     create_journal_tool_repositories,
-    fetch_contact_relationships_with_names,
     fetch_parent_journal,
 )
 from app.mcp.shared.annotations import (
@@ -42,6 +41,7 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_journal_enrichment_service,
     get_outbox_event_publisher,
     mcp_depends,
 )
@@ -75,6 +75,9 @@ async def merge_journals(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
+    ),
 ) -> str:
     """
     Merge a source journal into a target journal.
@@ -139,27 +142,13 @@ async def merge_journals(
         changed_by="mcp",
     )
 
-    # Fetch enriched target
-    types, type_data = await read_journal_types_and_data(target_journal_id, repos)
-
-    contacts = await fetch_contact_relationships_with_names(
-        target_journal_id,
-        repos.contact_relationship_repo,
-        repos.contact_repo,
-    )
-
-    journal_tags = await repos.tag_repo.get_tags_for_journal(target_journal_id)
-
     # The merge leaves the survivor's parent_id alone, so the response has to
     # report it — otherwise the target reads back as orphaned.
     parent = await fetch_parent_journal(merged_journal, repos.journal_repo, user_id)
 
-    response = JournalConverter.to_response(
-        journal=merged_journal,
-        types=types,
-        type_data=type_data,
-        contacts=contacts,
-        tags=journal_tags,
+    response = JournalConverter.to_enriched_response(
+        merged_journal,
+        await enrichment_service.enrich(target_journal_id, user_id),
         parent=parent,
     )
 
@@ -181,6 +170,9 @@ async def get_merge_candidates(
         ),
     ] = 10,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    enrichment_service: JournalEnrichmentService = mcp_depends(
+        get_journal_enrichment_service
+    ),
 ) -> str:
     """
     Find journals that could be merged with a given journal.
@@ -217,6 +209,9 @@ async def get_merge_candidates(
         limit=max(1, min(limit, 50)),
     )
 
+    candidate_types = await enrichment_service.types_for(
+        [candidate.id for candidate in overlapping if candidate.id is not None]
+    )
     candidates: list[MergeCandidateResult] = []
     for candidate in overlapping:
         assert candidate.id is not None, "A stored journal has an id"
@@ -226,8 +221,7 @@ async def get_merge_candidates(
         candidate_start = candidate.event_date_range.start
         candidate_end = candidate.event_date_range.end
 
-        # Fetch types and tags for each candidate
-        c_types, _ = await read_journal_types_and_data(candidate_id, repos)
+        c_types = candidate_types[candidate_id]
         c_tags = await repos.tag_repo.get_tags_for_journal(candidate_id)
         tag_names = [t.name for t in c_tags]
 

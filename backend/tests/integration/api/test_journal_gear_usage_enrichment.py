@@ -1,7 +1,7 @@
 """Integration tests for GEAR_USAGE enrichment on the journals API.
 
 These guard the read/write wiring that makes a GEAR_USAGE journal type visible
-through the REST API: ``_enrich_journal_data`` must surface the type and its
+through the REST API: ``JournalEnrichmentService`` must surface the type and its
 data, and ``add_type_to_journal`` must create the row from supplied data (and
 reject an add with no initial data, since ``gear_item_id`` is required).
 """

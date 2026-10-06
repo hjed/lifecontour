@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import pytest
 from core_shared.models.journals import JournalType
 
+from app.api.journals import converters as api_converters
 from app.core.journal.adapters.sql import journal_repository
 from app.core.journal.adapters.sql.logbook_export_repository import (
     SqlLogbookExportRepository,
@@ -160,3 +161,10 @@ def test_enrichment_repositories_expose_every_reader_repo() -> None:
             f"{journal_type.value}: reader repo '{reader.repo_attr}' is not on "
             "JournalTypeDataRepositories"
         )
+
+
+def test_rest_type_data_renderers_cover_every_reader() -> None:
+    """REST renders every type the enrichment read returns a row for."""
+    assert set(api_converters.REST_TYPE_DATA_RENDERERS) == set(
+        type_reader.TYPE_DATA_READERS
+    )

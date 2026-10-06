@@ -63,9 +63,6 @@ from app.api.journals.schemas import JournalListResponse
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
-from app.core.contacts.models.repositories import (
-    ContactRepository,
-)
 from app.core.contacts.services import (
     ContactService,
     ContactSummaryService,
@@ -75,37 +72,11 @@ from app.core.contacts.services.contact_history_service import ContactHistorySer
 from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.integrations.external_link_helpers import build_contact_external_links
 from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
-from app.core.journal.adapters.sql.album_sync_read_repository import (
-    AlbumSyncReadRepository,
-)
 from app.core.journal.models.repositories import (
-    AbseilingDataRepository,
-    AbseilPitchRepository,
-    BushwalkingDataRepository,
-    CalendarInfoRepository,
-    CalendarRepository,
-    CanoeingDataRepository,
-    CanyoningDataRepository,
-    CavingDataRepository,
-    ClimbingDataRepository,
-    CrossCountrySkiingDataRepository,
-    DivingDataRepository,
-    DownhillSkiingDataRepository,
-    FitnessDataRepository,
-    GearMaintenanceDataRepository,
-    GearUsageDataRepository,
-    JoggingDataRepository,
     JournalContactRelationshipRepository,
-    JournalTagRepository,
-    KayakingDataRepository,
-    MoodDataRepository,
-    OutdoorActivityDataRepository,
-    OutdoorPlanningDataRepository,
-    OutdoorTrainingDataRepository,
-    PlanDataRepository,
-    RouteRepository,
-    SnorkellingDataRepository,
-    TravelDataRepository,
+)
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
 )
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
@@ -1128,35 +1099,8 @@ async def get_contact_journals(
     request: Request,
     contact_service: FromDishka[ContactService],
     journal_service: FromDishka[JournalService],
+    enrichment_service: FromDishka[JournalEnrichmentService],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    calendar_info_repo: FromDishka[CalendarInfoRepository],
-    calendar_repo: FromDishka[CalendarRepository],
-    mood_data_repo: FromDishka[MoodDataRepository],
-    plan_data_repo: FromDishka[PlanDataRepository],
-    travel_data_repo: FromDishka[TravelDataRepository],
-    photo_album_data_repo: FromDishka[AlbumSyncReadRepository],
-    fitness_data_repo: FromDishka[FitnessDataRepository],
-    outdoor_activity_data_repo: FromDishka[OutdoorActivityDataRepository],
-    bushwalking_data_repo: FromDishka[BushwalkingDataRepository],
-    jogging_data_repo: FromDishka[JoggingDataRepository],
-    abseiling_data_repo: FromDishka[AbseilingDataRepository],
-    abseil_pitch_repo: FromDishka[AbseilPitchRepository],
-    canyoning_data_repo: FromDishka[CanyoningDataRepository],
-    caving_data_repo: FromDishka[CavingDataRepository],
-    climbing_data_repo: FromDishka[ClimbingDataRepository],
-    kayaking_data_repo: FromDishka[KayakingDataRepository],
-    skiing_data_repo: FromDishka[CrossCountrySkiingDataRepository],
-    canoeing_data_repo: FromDishka[CanoeingDataRepository],
-    snorkelling_data_repo: FromDishka[SnorkellingDataRepository],
-    diving_data_repo: FromDishka[DivingDataRepository],
-    downhill_skiing_data_repo: FromDishka[DownhillSkiingDataRepository],
-    outdoor_planning_data_repo: FromDishka[OutdoorPlanningDataRepository],
-    outdoor_training_data_repo: FromDishka[OutdoorTrainingDataRepository],
-    gear_maintenance_data_repo: FromDishka[GearMaintenanceDataRepository],
-    gear_usage_data_repo: FromDishka[GearUsageDataRepository],
-    tag_repo: FromDishka[JournalTagRepository],
-    route_repo: FromDishka[RouteRepository],
-    contact_repo: FromDishka[ContactRepository],
     _user: FromDishka[SessionUser],  # Require authentication
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
     limit: Annotated[
@@ -1239,35 +1183,7 @@ async def get_contact_journals(
         user_id=_user.id,
         base_url=base_url,
         journal_service=journal_service,
-        contact_repo=contact_repo,
-        calendar_info_repo=calendar_info_repo,
-        calendar_repo=calendar_repo,
-        mood_data_repo=mood_data_repo,
-        plan_data_repo=plan_data_repo,
-        travel_data_repo=travel_data_repo,
-        photo_album_data_repo=photo_album_data_repo,
-        fitness_data_repo=fitness_data_repo,
-        outdoor_activity_data_repo=outdoor_activity_data_repo,
-        bushwalking_data_repo=bushwalking_data_repo,
-        jogging_data_repo=jogging_data_repo,
-        abseiling_data_repo=abseiling_data_repo,
-        abseil_pitch_repo=abseil_pitch_repo,
-        canyoning_data_repo=canyoning_data_repo,
-        caving_data_repo=caving_data_repo,
-        climbing_data_repo=climbing_data_repo,
-        kayaking_data_repo=kayaking_data_repo,
-        skiing_data_repo=skiing_data_repo,
-        canoeing_data_repo=canoeing_data_repo,
-        snorkelling_data_repo=snorkelling_data_repo,
-        diving_data_repo=diving_data_repo,
-        downhill_skiing_data_repo=downhill_skiing_data_repo,
-        outdoor_planning_data_repo=outdoor_planning_data_repo,
-        outdoor_training_data_repo=outdoor_training_data_repo,
-        gear_maintenance_data_repo=gear_maintenance_data_repo,
-        gear_usage_data_repo=gear_usage_data_repo,
-        contact_relationship_repo=contact_relationship_repo,
-        tag_repo=tag_repo,
-        route_repo=route_repo,
+        enrichment_service=enrichment_service,
     )
 
     # Create pagination metadata

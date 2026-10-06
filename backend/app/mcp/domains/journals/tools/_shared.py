@@ -7,7 +7,6 @@ and argument parsing more than one tool module needs.
 import dataclasses
 from datetime import UTC, date, datetime
 from datetime import time as dt_time
-from typing import Any
 
 from core_shared.models.journals import (
     Journal,
@@ -94,11 +93,10 @@ from app.core.journal.adapters.sql.travel_data_repository import SqlTravelDataRe
 from app.core.journal.models.activity_stats import (
     ActivityJournalRow,
 )
-from app.core.journal.services.journal_type_data_reader import (
-    read_journal_types_and_data,
+from app.core.journal.services.journal_enrichment_service import (
+    JournalEnrichmentService,
 )
 from app.mcp.domains.journals.schemas import (
-    ContactRelationshipSummary,
     EventDateRangeSchema,
     JournalSearchResult,
 )
@@ -267,13 +265,6 @@ def parse_optional_datetime_filter(
     )
 
 
-async def fetch_types_for_journal(
-    journal_id: int, repos: JournalToolRepositories
-) -> tuple[list[str], dict[str, Any]]:
-    """Fetch the concrete types and type-specific data for a journal."""
-    return await read_journal_types_and_data(journal_id, repos)
-
-
 async def fetch_parent_journal(
     journal: Journal, journal_repo: SqlJournalRepository, user_id: str
 ) -> Journal | None:
@@ -294,16 +285,19 @@ async def fetch_parent_journal(
 
 async def build_search_results(
     journals: list[Journal],
-    repos: JournalToolRepositories,
+    enrichment_service: JournalEnrichmentService,
     *,
     activity_rows_by_id: dict[int, ActivityJournalRow] | None = None,
 ) -> list[JournalSearchResult]:
     """Build AI-friendly journal search results with concrete types included."""
+    types_by_id = await enrichment_service.types_for(
+        [journal.id for journal in journals if journal.id is not None]
+    )
     results: list[JournalSearchResult] = []
     for journal in journals:
         if journal.id is None:
             continue
-        types, _ = await fetch_types_for_journal(journal.id, repos)
+        types = types_by_id.get(journal.id, [])
         activity_row = (
             activity_rows_by_id.get(journal.id)
             if activity_rows_by_id is not None
@@ -318,42 +312,3 @@ async def build_search_results(
             )
         results.append(journal_to_search_result(journal, types=types, summary=summary))
     return results
-
-
-async def fetch_contact_relationships_with_names(
-    journal_id: int,
-    contact_relationship_repo: SqlJournalContactRelationshipRepository,
-    contact_repo: SqlContactRepository,
-) -> list[ContactRelationshipSummary]:
-    """
-    Fetch contact relationships with contact names for a journal.
-
-    Args:
-        journal_id: The journal ID to fetch relationships for
-        contact_relationship_repo: Contact relationship repository
-        contact_repo: Contact repository
-
-    Returns:
-        List of ContactRelationshipSummary objects
-    """
-    contact_relationships = await contact_relationship_repo.get_by_journal(journal_id)
-
-    contacts: list[ContactRelationshipSummary] = []
-    for rel in contact_relationships:
-        contact = await contact_repo.find_by_id(rel.contact_id)
-        if contact:
-            contact_name = f"{contact.first_name} {contact.last_name}".strip()
-            if not contact_name:
-                contact_name = f"Contact {rel.contact_id}"
-
-            contacts.append(
-                ContactRelationshipSummary(
-                    id=rel.contact_id,
-                    name=contact_name,
-                    relationship_type=rel.relationship_type.value,
-                    status=rel.status.value if rel.status else None,
-                    role=rel.role.value if rel.role else None,
-                )
-            )
-
-    return contacts

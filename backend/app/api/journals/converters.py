@@ -7,6 +7,7 @@ ensuring proper separation between domain and API layers.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from core_shared.models.journals import (
@@ -29,7 +30,7 @@ from core_shared.models.journals import (
     GearUsageData,
     JoggingData,
     Journal,
-    JournalContactRelationship,
+    JournalType,
     KayakingData,
     MoodData,
     OutdoorActivityData,
@@ -84,6 +85,10 @@ from app.api.journals.schemas import (
     TravelTransportationSchema,
 )
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_enrichment_service import (
+    EnrichedContact,
+    JournalEnrichment,
+)
 
 if TYPE_CHECKING:
     from app.api.journals.schemas import (
@@ -115,23 +120,29 @@ class JournalConverter:
 
     @staticmethod
     def _convert_contacts(
-        contacts: list[JournalContactRelationship] | None,
+        contacts: Sequence[EnrichedContact] | None,
     ) -> list[JournalContactRelationshipSchema]:
-        """Convert contact relationships to schemas."""
-        if not contacts:
-            return []
-
+        """Convert a journal's contacts, with their names, to schemas."""
         return [
             JournalContactRelationshipSchema(
-                id=str(contact_rel.contact_id),
-                name=None,  # Will be populated by controller
-                relationship_type=contact_rel.relationship_type.value,
-                status=contact_rel.status.value if contact_rel.status else None,
-                role=contact_rel.role.value if contact_rel.role else None,
-                first_name=None,
-                last_name=None,
+                id=str(contact.contact_id),
+                name=contact.name,
+                relationship_type=contact.relationship.relationship_type.value,
+                status=(
+                    contact.relationship.status.value
+                    if contact.relationship.status
+                    else None
+                ),
+                role=(
+                    contact.relationship.role.value
+                    if contact.relationship.role
+                    else None
+                ),
+                first_name=contact.first_name,
+                last_name=contact.last_name,
+                photo_url=contact.photo_url,
             )
-            for contact_rel in contacts
+            for contact in contacts or []
         ]
 
     @staticmethod
@@ -217,7 +228,7 @@ class JournalConverter:
     @staticmethod
     def _create_relationships(
         tags: list[JournalTag] | None,
-        contacts: list[JournalContactRelationship] | None,
+        contacts: Sequence[EnrichedContact] | None,
         calendar: Calendar | None,
         routes: list[Route] | None = None,
     ) -> JournalRelationships | None:
@@ -257,12 +268,53 @@ class JournalConverter:
         )
 
     @staticmethod
+    def to_enriched_resource(
+        journal: Journal,
+        base_url: str,
+        enrichment: JournalEnrichment,
+        *,
+        parent: Journal | None = None,
+        children: list[Journal] | None = None,
+        children_count: int | None = None,
+        depth: int | None = None,
+        routes: list[Route] | None = None,
+        children_types: dict[int, list[str]] | None = None,
+    ) -> JournalResource:
+        """A journal's resource from its :class:`JournalEnrichment`.
+
+        The REST counterpart of the MCP converter's ``to_enriched_response``:
+        both render the one enrichment read, so they report the same types,
+        type data, contacts, tags, series and calendars.
+        """
+        resource = JournalConverter.to_resource(
+            journal,
+            base_url,
+            types=enrichment.types,
+            type_data=render_rest_type_data(enrichment),
+            contacts=enrichment.contacts,
+            tags=enrichment.tags,
+            calendars=enrichment.calendars,
+            parent=parent,
+            children=children,
+            children_count=children_count,
+            depth=depth,
+            routes=routes,
+            children_types=children_types,
+        )
+        resource.attributes.series = [
+            {"id": str(series.id), "name": series.name}
+            for series in enrichment.series
+            if series.id is not None
+        ]
+        return resource
+
+    @staticmethod
     def to_resource(
         journal: Journal,
         base_url: str = "",
         types: list[str] | None = None,
         type_data: dict[str, Any] | None = None,
-        contacts: list[JournalContactRelationship] | None = None,
+        contacts: Sequence[EnrichedContact] | None = None,
         tags: list[JournalTag] | None = None,
         calendars: list[Calendar] | None = None,
         parent: Journal | None = None,
@@ -634,6 +686,54 @@ class TypeDataConverter:
                 for item in data.items
             ],
         ).model_dump(exclude_none=True)
+
+
+# Every type with a row, rendered as its REST type_data. ABSEILING_TRIP's
+# pitches are added by ``render_rest_type_data``. Kept complete by
+# tests/unit/journal/test_journal_type_coverage.py.
+REST_TYPE_DATA_RENDERERS: dict[JournalType, Callable[[Any], dict[str, Any]]] = {
+    JournalType.EVENT: TypeDataConverter.calendar_info_to_schema,
+    JournalType.MOOD_RATING: TypeDataConverter.mood_data_to_schema,
+    JournalType.PLAN: TypeDataConverter.plan_data_to_schema,
+    JournalType.TRAVEL: TypeDataConverter.travel_data_to_schema,
+    JournalType.PHOTO_ALBUM: TypeDataConverter.photo_album_data_to_schema,
+    JournalType.FITNESS: TypeDataConverter.fitness_data_to_schema,
+    JournalType.OUTDOOR_ACTIVITY: TypeDataConverter.outdoor_activity_data_to_schema,
+    JournalType.BUSHWALKING: TypeDataConverter.bushwalking_data_to_schema,
+    JournalType.JOGGING: TypeDataConverter.jogging_data_to_schema,
+    JournalType.ABSEILING_TRIP: TypeDataConverter.abseiling_data_to_schema,
+    JournalType.CAVING: TypeDataConverter.caving_data_to_schema,
+    JournalType.CANYONING: TypeDataConverter.canyoning_data_to_schema,
+    JournalType.CLIMBING: TypeDataConverter.climbing_data_to_schema,
+    JournalType.KAYAKING: TypeDataConverter.kayaking_data_to_schema,
+    JournalType.CROSS_COUNTRY_SKIING: (
+        TypeDataConverter.cross_country_skiing_data_to_schema
+    ),
+    JournalType.CANOEING: TypeDataConverter.canoeing_data_to_schema,
+    JournalType.SNORKELLING: TypeDataConverter.snorkelling_data_to_schema,
+    JournalType.DIVING: TypeDataConverter.diving_data_to_schema,
+    JournalType.DOWNHILL_SKIING: TypeDataConverter.downhill_skiing_data_to_schema,
+    JournalType.OUTDOOR_PLANNING: TypeDataConverter.outdoor_planning_data_to_schema,
+    JournalType.OUTDOOR_TRAINING: TypeDataConverter.outdoor_training_data_to_schema,
+    JournalType.GEAR_MAINTENANCE: TypeDataConverter.gear_maintenance_data_to_schema,
+    JournalType.GEAR_USAGE: TypeDataConverter.gear_usage_data_to_schema,
+}
+
+
+def render_rest_type_data(enrichment: JournalEnrichment) -> dict[str, Any]:
+    """A journal's type rows as REST type_data, keyed by type value."""
+    type_data = {
+        journal_type.value: REST_TYPE_DATA_RENDERERS[journal_type](row)
+        for journal_type, row in enrichment.type_rows.items()
+    }
+    abseiling = enrichment.type_rows.get(JournalType.ABSEILING_TRIP)
+    if abseiling is not None:
+        type_data[JournalType.ABSEILING_TRIP.value] = (
+            TypeDataConverter.abseiling_data_to_schema(
+                abseiling, pitches=enrichment.abseil_pitches
+            )
+        )
+    return type_data
 
 
 class JournalRequestConverter:

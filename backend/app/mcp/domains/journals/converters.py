@@ -15,6 +15,8 @@ from core_shared.models.route import Route
 
 from app.core.integrations.external_link_helpers import ExternalLinkInfo
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_enrichment_service import JournalEnrichment
+from app.core.journal.services.journal_type_data_reader import render_type_data
 from app.mcp.domains.journals.schemas import (
     ActivityTemplateListMCPResponse,
     ActivityTemplateMCPResponse,
@@ -36,6 +38,63 @@ from app.mcp.domains.journals.schemas import (
 
 class JournalConverter:
     """Converter for journal entities to AI-friendly MCP formats."""
+
+    @staticmethod
+    def to_enriched_response(
+        journal: Journal,
+        enrichment: JournalEnrichment,
+        *,
+        parent: Journal | None = None,
+        children: list[Journal] | None = None,
+        additional_context: str = "",
+        external_links: list[ExternalLinkInfo] | None = None,
+        types_removed: list[str] | None = None,
+        type_data_discarded: dict[str, list[str]] | None = None,
+        external_links_preserved: bool | None = None,
+    ) -> JournalResponse:
+        """A journal's response from its :class:`JournalEnrichment`.
+
+        Every tool answering with a journal goes through here, so they all
+        report the same types, type_data, contacts, tags, series and
+        calendars. The remaining arguments are as for :meth:`to_response`.
+        """
+        return JournalConverter.to_response(
+            journal=journal,
+            types=enrichment.types,
+            type_data=render_type_data(enrichment.type_rows, enrichment.abseil_pitches),
+            contacts=[
+                ContactRelationshipSummary(
+                    id=contact.contact_id,
+                    name=contact.name,
+                    relationship_type=contact.relationship.relationship_type.value,
+                    status=(
+                        contact.relationship.status.value
+                        if contact.relationship.status
+                        else None
+                    ),
+                    role=(
+                        contact.relationship.role.value
+                        if contact.relationship.role
+                        else None
+                    ),
+                )
+                for contact in enrichment.contacts
+            ],
+            tags=enrichment.tags,
+            linked_calendars=enrichment.calendars,
+            series=[
+                {"id": str(series.id), "name": series.name}
+                for series in enrichment.series
+                if series.id is not None
+            ],
+            parent=parent,
+            children=children,
+            additional_context=additional_context,
+            external_links=external_links,
+            types_removed=types_removed,
+            type_data_discarded=type_data_discarded,
+            external_links_preserved=external_links_preserved,
+        )
 
     @staticmethod
     def to_response(

@@ -16,6 +16,7 @@ from app.api.journals.schemas import (
     JournalContactRelationshipAddAttributes,
     JournalContactRelationshipSchema,
 )
+from app.core.journal.services.journal_enrichment_service import EnrichedContact
 from app.mcp.domains.journals.schemas import (
     ContactRelationshipSchema as MCPContactRelationshipSchema,
 )
@@ -120,7 +121,7 @@ class TestJournalContactRelationshipAddAttributes:
 
 class TestJournalConverterContacts:
     def test_convert_contacts_with_status_role(self):
-        """Test that converter correctly maps status and role from domain entities."""
+        """The converter maps a contact's name, status and role."""
         rel1 = JournalContactRelationship(
             journal_id=1,
             contact_id=101,
@@ -128,20 +129,24 @@ class TestJournalConverterContacts:
             status=AttendeeStatus.ATTENDING,
             role=ContactEventRole.ORGANISER,
         )
+        contact = EnrichedContact(
+            relationship=rel1,
+            name="Alice",
+            first_name="Alice",
+            last_name=None,
+            photo_url=None,
+        )
 
-        converted = JournalConverter._convert_contacts([rel1])
+        converted = JournalConverter._convert_contacts([contact])
         assert len(converted) == 1
         result_schema = converted[0]
-
-        # Name is populated differently so setting it directly here for completeness
-        result_schema.name = "Alice"
 
         assert result_schema.id == "101"
         assert result_schema.name == "Alice"
         assert result_schema.relationship_type == "PARTICIPANT"
         assert result_schema.status == "ATTENDING"
         assert result_schema.role == "ORGANISER"
-        assert result_schema.first_name is None
+        assert result_schema.first_name == "Alice"
         assert result_schema.last_name is None
 
 
