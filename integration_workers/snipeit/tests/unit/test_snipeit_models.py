@@ -1,5 +1,7 @@
 """Tests for Snipe-IT Pydantic response models."""
 
+from datetime import datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,6 +15,7 @@ from snipeit_models import (
     SnipeItMaintenanceListResponse,
     SnipeItMaintenanceWriteResponse,
     SnipeItNestedObject,
+    parse_wall_clock,
 )
 
 
@@ -456,3 +459,28 @@ class TestSnipeItMaintenanceListResponse:
         data = {"total": 0}
         response = SnipeItMaintenanceListResponse.model_validate(data)
         assert response.rows == []
+
+
+class TestWallClock:
+    """Snipe-IT's naive ``Y-m-d H:i:s`` timestamps."""
+
+    def test_parses_a_wall_clock_string(self) -> None:
+        assert parse_wall_clock("2026-10-07 09:30:05") == datetime(
+            2026, 10, 7, 9, 30, 5
+        )
+
+    @pytest.mark.parametrize(
+        "value", [None, "", "2026-10-07", "2026-10-07 (Invalid datetime value.)", 5]
+    )
+    def test_anything_else_is_none(self, value: object) -> None:
+        assert parse_wall_clock(value) is None
+
+    def test_date_object_reads_its_datetime(self) -> None:
+        stamp = SnipeItDateObject.model_validate(
+            {"datetime": "2026-10-07 09:30:05", "formatted": "7/10/2026 9:30AM"}
+        )
+
+        assert stamp.wall_clock() == datetime(2026, 10, 7, 9, 30, 5)
+
+    def test_date_object_without_a_datetime_has_no_wall_clock(self) -> None:
+        assert SnipeItDateObject.model_validate("2026-10-07").wall_clock() is None
