@@ -33,6 +33,15 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 - `build-test`: Tests Docker builds for both components
 - `secret-scan`: Runs gitleaks over the commits the event introduces; fails on any new
   finding. See [Secret scanning](#secret-scanning-secret-scan)
+- `frontend-image`: Builds the production frontend image (the Dockerfile's `runner`
+  stage) and runs `docker/frontend/verify-image.sh` against it. The script checks that the
+  image has no `.next/cache`, dev dependencies or pnpm store, that it refuses to start
+  without `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, and that it serves pages, static assets
+  and the third-party notices. The e2e suite serves the frontend from source, so this is
+  the only CI check of the published image. It runs when the `frontend_image` path filter
+  matches (`docker/frontend/**`, `next.config.mjs`, the package and lock files,
+  `frontend/public/**`, the notices script), and on every release run. See
+  [Deployment Guide → Frontend Image](architecture/deployment-guide.md#frontend-image)
 
 **Features:**
 - Parallel execution for faster feedback
@@ -158,6 +167,9 @@ that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.
   ([spec](./product-specifications/open-source-release-and-branding-product-specification.md#decision-images-follow-the-repository-name)).
 - After a rename, update the production deployment's image references at the next release.
   Packages published under the old name stay pullable, which keeps rollback possible.
+- The frontend image needs `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` set in the deployment, or
+  it will not start. See
+  [Deployment Guide → Frontend Image](architecture/deployment-guide.md#frontend-image).
 
 ## Configuration Files
 

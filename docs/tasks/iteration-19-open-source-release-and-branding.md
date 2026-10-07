@@ -903,7 +903,20 @@ repository; the owner's manual rename and deploy steps are a checklist on the 1a
 - **Docs:** `docs/ci-cd-setup.md` gets the new image paths and a note that they follow
   `github.repository`.
 
-**Phase 1b — Frontend image hardening.** PR ~150 lines.
+**Phase 1b — Frontend image hardening.** PR ~330 lines (half of it docs). ✅ DONE in the repository; the owner's manual steps after merge are a checklist on the PR.
+
+- **Progress:**
+  - `docker/frontend/Dockerfile` is multi-stage: `deps` → `development` (compose, `pnpm dev`) and `builder` → `runner`. `runner` is the default stage and the one `release.yml` publishes. It ships only `.next/standalone`, `.next/static` and the built `public`, and runs `node server.js` as the non-root user. The image went from 2.17 GB to 231 MB.
+  - `start.sh` refuses to start without `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.
+  - `docker-compose.yml` builds `target: development`, so its `prod` profile runs the dev server. The README notes this; production runs the released image.
+  - Rewrites are unchanged. The old and new `routes-manifest.json` match, and neither image honours a runtime `BACKEND_URL`.
+  - Tests:
+    - `docker/frontend/verify-image.sh` was written first and failed 8 checks on the old image.
+    - The new `frontend-image` CI job (`needs: changes`, its own path filter, and every release run) runs the script.
+    - Locally, the login, app-shell and oauth-flow e2e specs passed against the built container (47/47, firefox and Mobile Chrome), and the full e2e suite passed.
+  - Docs: the deployment guide's "Frontend Image" section, `frontend/.env.example`, `docs/ci-cd-setup.md`, the licence audit (devDependencies are no longer shipped) and the audit's key section.
+- **After merge (manual, owner):** set `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` in the production environment **before** deploying, tag a release, then verify production health, login and an MCP call.
+- **Note on e2e coverage:** neither CI e2e nor the `E2E Docker Image Build` job builds the frontend image. The compose `frontend` service is profile `dev`/`prod` only, and Playwright runs `next build && next start` from source. The image is covered instead by `docker/frontend/verify-image.sh`, which a gated `frontend-image` CI job runs, plus a local run of the login, app-shell and oauth-flow e2e specs against the built container.
 
 Tracked in [#1661](https://github.com/hjed/personal-management-system/issues/1661). The ITER19-001 Phase 3 audit found Next.js build-generated keys in every frontend image (see [the audit](../security/open-source-release-audit.md#nextjs-build-generated-keys)): the preview-mode signing and encryption keys, and the Server Actions `encryptionKey`. The app uses neither feature, and Next.js cannot be told not to generate them. This phase makes sure nothing relies on the baked-in copies before the packages go public.
 
