@@ -63,8 +63,8 @@ class StravaAthleteMappingService:
         Create a mapping and retroactively add the contact to existing journals
         that contain the unmatched athlete.
         """
-        # Ensure contact exists
-        contact = await self.contact_repo.find_by_id(contact_id)
+        # The contact must be the user's own; another's is not found.
+        contact = await self.contact_repo.find_by_id(contact_id, user_id=user_id)
         if not contact:
             raise ContactNotFoundError(contact_id)
 

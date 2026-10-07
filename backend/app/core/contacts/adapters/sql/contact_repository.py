@@ -51,24 +51,36 @@ class SqlContactRepository(ContactRepository):
             return value.strip()
         return value
 
-    async def contact_exists(self, contact_id: int) -> bool:
-        """Return whether a contact with the given ID exists."""
+    async def contact_exists(self, contact_id: int, *, user_id: str) -> bool:
+        """Return whether ``user_id`` owns a contact with the given ID."""
         result = await self.conn.execute(
-            text("SELECT 1 FROM contacts WHERE id = :contact_id"),
-            {"contact_id": contact_id},
+            text(
+                "SELECT 1 FROM contacts WHERE id = :contact_id AND user_id = :user_id"
+            ),
+            {"contact_id": contact_id, "user_id": user_id},
         )
         return result.first() is not None
 
-    async def find_by_id(self, contact_id: int) -> Contact | None:
-        """Find a contact by ID with all related data."""
+    async def find_owner_id(self, contact_id: int) -> str | None:
+        """Return the contact's owner, or None if there is no such contact."""
+        result = await self.conn.execute(
+            text("SELECT user_id FROM contacts WHERE id = :contact_id"),
+            {"contact_id": contact_id},
+        )
+        return result.scalar_one_or_none()
+
+    async def find_by_id(self, contact_id: int, *, user_id: str) -> Contact | None:
+        """Find ``user_id``'s contact by ID with all related data."""
         # Get contact basic info
         contact_query = text(
             """
             SELECT id, user_id, first_name, last_name, middle_name, nick_name, company, job_title, photo_url, is_favourite, created_at, updated_at
-            FROM contacts WHERE id = :contact_id
+            FROM contacts WHERE id = :contact_id AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(contact_query, {"contact_id": contact_id})
+        result = await self.conn.execute(
+            contact_query, {"contact_id": contact_id, "user_id": user_id}
+        )
         contact_row = result.fetchone()
 
         if not contact_row:
@@ -322,7 +334,7 @@ class SqlContactRepository(ContactRepository):
         return contact
 
     async def find_names_by_ids(
-        self, contact_ids: list[int]
+        self, contact_ids: list[int], *, user_id: str
     ) -> dict[int, tuple[str | None, str | None, str | None]]:
         """Fetch (first_name, last_name, photo_url) for multiple contacts in a single query."""
         if not contact_ids:
@@ -332,17 +344,19 @@ class SqlContactRepository(ContactRepository):
             """
             SELECT id, first_name, last_name, photo_url
             FROM contacts
-            WHERE id = ANY(:ids)
+            WHERE id = ANY(:ids) AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"ids": contact_ids})
+        result = await self.conn.execute(
+            query, {"ids": contact_ids, "user_id": user_id}
+        )
         return {
             row.id: (row.first_name, row.last_name, row.photo_url)
             for row in result.fetchall()
         }
 
-    async def find_by_email(self, email: str) -> Contact | None:
-        """Find a contact by email address."""
+    async def find_by_email(self, email: str, *, user_id: str) -> Contact | None:
+        """Find ``user_id``'s contact by email address."""
         normalized_email = email.strip().lower()
         if not normalized_email:
             return None
@@ -353,6 +367,7 @@ class SqlContactRepository(ContactRepository):
             JOIN contact_methods cm ON c.id = cm.contact_id
             WHERE cm.method_type = :method_type
               AND LOWER(BTRIM(cm.value)) = :normalized_email
+              AND c.user_id = :user_id
         """
         )
         result = await self.conn.execute(
@@ -360,16 +375,17 @@ class SqlContactRepository(ContactRepository):
             {
                 "method_type": MethodType.EMAIL.value,
                 "normalized_email": normalized_email,
+                "user_id": user_id,
             },
         )
         row = result.fetchone()
 
         if row:
-            return await self.find_by_id(row.id)
+            return await self.find_by_id(row.id, user_id=user_id)
         return None
 
     async def find_by_external_reference(
-        self, external_system: str, external_entity_id: str
+        self, external_system: str, external_entity_id: str, *, user_id: str
     ) -> Contact | None:
         """Find a contact by external link, read from the canonical store.
 
@@ -384,6 +400,7 @@ class SqlContactRepository(ContactRepository):
             WHERE sm.internal_entity_type = 'contact'
             AND sm.integration_source = :external_system
             AND sm.external_id = :external_entity_id
+            AND c.user_id = :user_id
         """
         )
         result = await self.conn.execute(
@@ -391,12 +408,13 @@ class SqlContactRepository(ContactRepository):
             {
                 "external_system": external_system,
                 "external_entity_id": external_entity_id,
+                "user_id": user_id,
             },
         )
         row = result.fetchone()
 
         if row:
-            return await self.find_by_id(row.id)
+            return await self.find_by_id(row.id, user_id=user_id)
         return None
 
     async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
@@ -425,8 +443,10 @@ class SqlContactRepository(ContactRepository):
             for row in result.fetchall()
         ]
 
-    async def search(self, query: str, limit: int = 50) -> list[Contact]:
-        """Search contacts by name, email, or notes."""
+    async def search(
+        self, query: str, limit: int = 50, *, user_id: str
+    ) -> list[Contact]:
+        """Search ``user_id``'s contacts by name, email, or notes."""
         search_query = text(
             """
             SELECT DISTINCT c.id,
@@ -444,43 +464,51 @@ class SqlContactRepository(ContactRepository):
                 COALESCE(cm.value, '') || ' ' ||
                 COALESCE(cn.content, '')
             ) @@ plainto_tsquery('english', :query)
+              AND c.user_id = :user_id
             ORDER BY rank DESC
             LIMIT :limit
         """
         )
-        result = await self.conn.execute(search_query, {"query": query, "limit": limit})
+        result = await self.conn.execute(
+            search_query, {"query": query, "limit": limit, "user_id": user_id}
+        )
         contact_ids = [row.id for row in result.fetchall()]
 
         contacts = []
         for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
+            contact = await self.find_by_id(contact_id, user_id=user_id)
             if contact:
                 contacts.append(contact)
         return contacts
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[Contact]:
-        """Get all contacts with pagination."""
+    async def get_all(
+        self, limit: int = 100, offset: int = 0, *, user_id: str
+    ) -> list[Contact]:
+        """Get all of ``user_id``'s contacts with pagination."""
         query = text(
             """
             SELECT id FROM contacts
+            WHERE user_id = :user_id
             ORDER BY first_name, last_name
             LIMIT :limit OFFSET :offset
         """
         )
-        result = await self.conn.execute(query, {"limit": limit, "offset": offset})
+        result = await self.conn.execute(
+            query, {"limit": limit, "offset": offset, "user_id": user_id}
+        )
         contact_ids = [row.id for row in result.fetchall()]
 
         contacts = []
         for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
+            contact = await self.find_by_id(contact_id, user_id=user_id)
             if contact:
                 contacts.append(contact)
         return contacts
 
-    async def get_count(self) -> int:
-        """Get total count of contacts."""
-        query = text("SELECT COUNT(*) FROM contacts")
-        result = await self.conn.execute(query)
+    async def get_count(self, *, user_id: str) -> int:
+        """Get the total count of ``user_id``'s contacts."""
+        query = text("SELECT COUNT(*) FROM contacts WHERE user_id = :user_id")
+        result = await self.conn.execute(query, {"user_id": user_id})
         row = result.fetchone()
         return row[0] if row else 0
 
@@ -602,26 +630,33 @@ class SqlContactRepository(ContactRepository):
 
         return row.updated_at if row else None
 
-    async def delete(self, contact_id: int) -> None:
-        """Delete a contact and all related data."""
-        query = text("DELETE FROM contacts WHERE id = :contact_id")
-        result = await self.conn.execute(query, {"contact_id": contact_id})
+    async def delete(self, contact_id: int, *, user_id: str) -> None:
+        """Delete ``user_id``'s contact and all related data."""
+        query = text(
+            "DELETE FROM contacts WHERE id = :contact_id AND user_id = :user_id"
+        )
+        result = await self.conn.execute(
+            query, {"contact_id": contact_id, "user_id": user_id}
+        )
 
         if result.rowcount == 0:
             raise ContactNotFoundError(contact_id)
 
-    async def bulk_delete_all(self, transaction: AsyncConnection) -> None:
+    async def bulk_delete_all(
+        self, transaction: AsyncConnection, *, user_id: str
+    ) -> None:
         """
-        Bulk delete all contacts and related data for test cleanup.
+        Bulk delete all of ``user_id``'s contacts and related data for test cleanup.
 
-        This method efficiently deletes all contacts in a single operation
+        This method efficiently deletes the contacts in a single operation
         without individual validation or event publishing overhead.
 
-        WARNING: This will delete ALL contacts. Only use in test environments.
+        WARNING: This deletes every contact the user owns. Only use in test
+        environments.
         """
-        # Delete all contacts - foreign key constraints will handle related data
-        query = text("DELETE FROM contacts")
-        await transaction.execute(query)
+        # Foreign key constraints delete the related data.
+        query = text("DELETE FROM contacts WHERE user_id = :user_id")
+        await transaction.execute(query, {"user_id": user_id})
 
     async def repoint_methods(
         self, source_id: int, survivor_id: int, transaction: AsyncConnection
@@ -1011,26 +1046,6 @@ class SqlContactRepository(ContactRepository):
             ),
             params,
         )
-
-    async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
-        """Get all contacts with a specific tag."""
-        query = text(
-            """
-            SELECT DISTINCT c.id, c.first_name, c.last_name FROM contacts c
-            JOIN contact_tags ct ON c.id = ct.contact_id
-            WHERE ct.tag_id = :tag_id
-            ORDER BY c.first_name, c.last_name
-        """
-        )
-        result = await self.conn.execute(query, {"tag_id": tag_id})
-        contact_ids = [row.id for row in result.fetchall()]
-
-        contacts = []
-        for contact_id in contact_ids:
-            contact = await self.find_by_id(contact_id)
-            if contact:
-                contacts.append(contact)
-        return contacts
 
     async def add_method(self, contact_id: int, method: ContactMethod) -> ContactMethod:
         """Add a contact method."""
@@ -1509,68 +1524,19 @@ class SqlContactRepository(ContactRepository):
         )
         await self.conn.execute(query, {"contact_id": contact_id})
 
-    async def get_favourite_contacts(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[Contact]:
-        """Get all favourite contacts with pagination."""
-        # Single query to get all contact data
-        query = text(
-            """
-            SELECT id, user_id, first_name, last_name, middle_name, nick_name, company,
-                   job_title, is_favourite, created_at, updated_at
-            FROM contacts
-            WHERE is_favourite = true
-            ORDER BY first_name, last_name
-            LIMIT :limit OFFSET :offset
-            """
-        )
-        result = await self.conn.execute(query, {"limit": limit, "offset": offset})
-        contacts = []
-
-        for row in result:
-            contact = Contact(
-                id=row.id,
-                first_name=row.first_name,
-                user_id=row.user_id,
-                last_name=row.last_name,
-                middle_name=row.middle_name,
-                nick_name=row.nick_name,
-                company=row.company,
-                job_title=row.job_title,
-                is_favourite=row.is_favourite,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            contacts.append(contact)
-
-        # Batch load related entities for all contacts
-        if contacts:
-            await self._batch_load_contact_relations(contacts)
-
-        return contacts
-
-    async def get_favourite_contacts_count(self) -> int:
-        """Get total count of favourite contacts."""
-        query = text(
-            """
-            SELECT COUNT(*) as count
-            FROM contacts
-            WHERE is_favourite = true
-            """
-        )
-        result = await self.conn.execute(query)
-        row = result.fetchone()
-        return row[0] if row else 0
-
     def _build_contact_filter_query_parts(
         self,
+        user_id: str,
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
-    ) -> tuple[list[str], list[str], dict[str, bool | int]]:
-        """Build shared SQL JOIN/WHERE fragments and params for contact filtering."""
+    ) -> tuple[list[str], list[str], dict[str, bool | int | str]]:
+        """Build shared SQL JOIN/WHERE fragments and params for contact filtering.
+
+        The owner predicate is always the first WHERE clause.
+        """
         query_parts: list[str] = []
-        where_parts: list[str] = []
-        params: dict[str, bool | int] = {}
+        where_parts: list[str] = ["c.user_id = :user_id"]
+        params: dict[str, bool | int | str] = {"user_id": user_id}
 
         if tag_ids:
             query_parts.append(
@@ -1599,8 +1565,10 @@ class SqlContactRepository(ContactRepository):
         self,
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
+        *,
+        user_id: str,
     ) -> int:
-        """Get the distinct count of contacts filtered by favourite status and/or tags."""
+        """Count ``user_id``'s contacts filtered by favourite status and/or tags."""
         query_parts = [
             """
             SELECT COUNT(DISTINCT c.id) as count
@@ -1609,14 +1577,14 @@ class SqlContactRepository(ContactRepository):
         ]
         filter_query_parts, where_parts, params = (
             self._build_contact_filter_query_parts(
+                user_id,
                 is_favourite=is_favourite,
                 tag_ids=tag_ids,
             )
         )
         query_parts.extend(filter_query_parts)
 
-        if where_parts:
-            query_parts.append("WHERE " + " AND ".join(where_parts))
+        query_parts.append("WHERE " + " AND ".join(where_parts))
 
         query = text("".join(query_parts))
         result = await self.conn.execute(query, params)
@@ -1629,8 +1597,10 @@ class SqlContactRepository(ContactRepository):
         tag_ids: list[int] | None = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        user_id: str,
     ) -> list[Contact]:
-        """Get contacts filtered by favourite status and/or tags."""
+        """Get ``user_id``'s contacts filtered by favourite status and/or tags."""
         query_parts = [
             """
             SELECT DISTINCT c.id, c.user_id, c.first_name, c.last_name, c.middle_name,
@@ -1641,19 +1611,19 @@ class SqlContactRepository(ContactRepository):
         ]
         filter_query_parts, where_parts, filter_params = (
             self._build_contact_filter_query_parts(
+                user_id,
                 is_favourite=is_favourite,
                 tag_ids=tag_ids,
             )
         )
         query_parts.extend(filter_query_parts)
-        params: dict[str, bool | int] = {
+        params: dict[str, bool | int | str] = {
             **filter_params,
             "limit": limit,
             "offset": offset,
         }
 
-        if where_parts:
-            query_parts.append("WHERE " + " AND ".join(where_parts))
+        query_parts.append("WHERE " + " AND ".join(where_parts))
 
         query_parts.append(
             """

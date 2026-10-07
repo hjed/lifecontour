@@ -184,7 +184,9 @@ class TestContactService:
 
         # Assert
         assert result.is_favourite is True
-        mock_contact_repo.find_by_id.assert_called_once_with(contact_id)
+        mock_contact_repo.find_by_id.assert_called_once_with(
+            contact_id, user_id=TEST_USER_ID
+        )
         mock_contact_repo.save.assert_called_once()
 
     @pytest.mark.asyncio
@@ -227,7 +229,7 @@ class TestContactService:
         # Assert
         assert result == favourite_contacts
         mock_contact_repo.get_contacts_by_filters.assert_called_once_with(
-            is_favourite=True, tag_ids=None, limit=10, offset=0
+            is_favourite=True, tag_ids=None, limit=10, offset=0, user_id=TEST_USER_ID
         )
 
     @pytest.mark.asyncio
@@ -249,7 +251,7 @@ class TestContactService:
         # Assert
         assert result == tag_contacts
         mock_contact_repo.get_contacts_by_filters.assert_called_once_with(
-            is_favourite=None, tag_ids=[1, 2], limit=10, offset=0
+            is_favourite=None, tag_ids=[1, 2], limit=10, offset=0, user_id=TEST_USER_ID
         )
 
     @pytest.mark.asyncio
@@ -271,7 +273,7 @@ class TestContactService:
 
         # Assert
         assert result == all_contacts
-        mock_contact_repo.get_all.assert_called_once_with(10, 0)
+        mock_contact_repo.get_all.assert_called_once_with(10, 0, user_id=TEST_USER_ID)
         # Ensure get_contacts_by_filters was not called
         mock_contact_repo.get_contacts_by_filters.assert_not_called()
 
@@ -288,7 +290,7 @@ class TestContactService:
 
         # Assert
         assert result == 42
-        mock_contact_repo.get_count.assert_called_once_with()
+        mock_contact_repo.get_count.assert_called_once_with(user_id=TEST_USER_ID)
         mock_contact_repo.get_contacts_count_by_filters.assert_not_called()
 
     @pytest.mark.asyncio
@@ -311,6 +313,7 @@ class TestContactService:
         mock_contact_repo.get_contacts_count_by_filters.assert_called_once_with(
             is_favourite=True,
             tag_ids=[1, 2],
+            user_id=TEST_USER_ID,
         )
         mock_contact_repo.get_count.assert_not_called()
 
@@ -418,7 +421,9 @@ class TestContactService:
         # Verify repository calls
         mock_contact_repo.save.assert_called_once_with(contact)
         assert mock_contact_repo.add_method.call_count == 2
-        mock_contact_repo.find_by_email.assert_called_once_with("john@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "john@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_create_contact_with_notes_success(
@@ -525,7 +530,9 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(contact)
         mock_contact_repo.add_method.assert_called_once()
         mock_contact_repo.add_note.assert_called_once()
-        mock_contact_repo.find_by_email.assert_called_once_with("bob@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "bob@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_create_contact_with_method_no_id_after_save_raises_error(
@@ -678,7 +685,9 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(updated_contact)
         mock_contact_repo.add_method.assert_called_once()
         mock_contact_repo.add_note.assert_called_once()
-        mock_contact_repo.find_by_email.assert_called_once_with("john.doe@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "john.doe@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_update_contact_success(
@@ -706,7 +715,7 @@ class TestContactService:
 
         # Assert
         assert result == saved_contact
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
         mock_contact_repo.save.assert_called_once_with(updated_contact)
 
     @pytest.mark.asyncio
@@ -848,7 +857,7 @@ class TestContactService:
         await contact_service.delete_contact(1, mock_transaction, user_id=TEST_USER_ID)
 
         # Assert
-        mock_contact_repo.delete.assert_called_once_with(1)
+        mock_contact_repo.delete.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_assign_tag_to_contact_success(
@@ -1060,7 +1069,7 @@ class TestContactService:
 
         # Assert
         assert result == contact
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_get_contact_by_email(self, contact_service, mock_contact_repo):
@@ -1076,7 +1085,9 @@ class TestContactService:
 
         # Assert
         assert result == contact
-        mock_contact_repo.find_by_email.assert_called_once_with("test@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "test@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_get_all_contacts(self, contact_service, mock_contact_repo):
@@ -1092,7 +1103,7 @@ class TestContactService:
 
         # Assert
         assert result == contacts
-        mock_contact_repo.get_all.assert_called_once_with(50, 0)
+        mock_contact_repo.get_all.assert_called_once_with(50, 0, user_id=TEST_USER_ID)
 
     # Descendant-aware filtering tests (ITER2.6-002 Phase 1)
 

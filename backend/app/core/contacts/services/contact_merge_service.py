@@ -151,11 +151,11 @@ class ContactMergeService:
         if survivor_id == source_id:
             raise ContactMergeConflictError("Cannot merge a contact into itself")
 
-        survivor = await self.contact_repo.find_by_id(survivor_id)
+        survivor = await self.contact_repo.find_by_id(survivor_id, user_id=user_id)
         if survivor is None:
             raise ContactNotFoundError(survivor_id)
 
-        source_contact = await self.contact_repo.find_by_id(source_id)
+        source_contact = await self.contact_repo.find_by_id(source_id, user_id=user_id)
         if source_contact is None:
             raise ContactNotFoundError(source_id)
 
@@ -250,7 +250,7 @@ class ContactMergeService:
         #    source's links may need to carry over to, or consolidate onto, the
         #    survivor — ITER13-005). The source's now-stale search row is instead
         #    removed by the search indexer's ``ContactMerged`` handler.
-        await self.contact_repo.delete(source_id)
+        await self.contact_repo.delete(source_id, user_id=user_id)
 
         # 4. Publish the merge as a ContactUpdated event; the history projection
         #    decodes the plain "merged_from" key to a contact-level audit row
@@ -297,7 +297,9 @@ class ContactMergeService:
             source=str(source),
         )
 
-        merged_survivor = await self.contact_repo.find_by_id(survivor_id)
+        merged_survivor = await self.contact_repo.find_by_id(
+            survivor_id, user_id=user_id
+        )
         if merged_survivor is None:  # pragma: no cover - survivor was just updated
             raise ContactNotFoundError(survivor_id)
         return merged_survivor

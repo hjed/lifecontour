@@ -1665,7 +1665,9 @@ class JournalOutboxEventProcessor:
         if not athlete_name:
             return None
 
-        contacts = await self.contact_repository.search(athlete_name, limit=10)
+        contacts = await self.contact_repository.search(
+            athlete_name, limit=10, user_id=user_id
+        )
         exact_matches = [
             c
             for c in contacts

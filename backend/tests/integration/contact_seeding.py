@@ -18,6 +18,9 @@ from core_shared.testing import seeding
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 TEST_USER_ID: Final = "test-user-123"
+# A second, unrelated owner: ownership is only worth asserting against real rows
+# belonging to someone else, never against a merely absent id.
+OTHER_USER_ID: Final = "other-user-456"
 
 
 async def seed_contact(
@@ -67,4 +70,4 @@ async def seed_contacts(
     )
 
 
-__all__ = ["TEST_USER_ID", "seed_contact", "seed_contacts"]
+__all__ = ["OTHER_USER_ID", "TEST_USER_ID", "seed_contact", "seed_contacts"]

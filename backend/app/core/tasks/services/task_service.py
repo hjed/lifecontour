@@ -252,7 +252,7 @@ class TaskService:
             user_id, creating_journal_id, due_journal_id
         )
         await self._require_future_dated(user_id, due_journal_id, due_journal, now)
-        contacts = await self._resolve_contacts(contact_ids)
+        contacts = await self._resolve_contacts(contact_ids, user_id=user_id)
 
         created = await self._save(task, creating_journal_id, due_journal_id)
         assert created.id is not None, "Task ID must be set after save"
@@ -462,12 +462,10 @@ class TaskService:
         Raises:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's. The two are indistinguishable by design.
-            ContactNotFoundError: When the contact does not exist. Existence is
-                the whole check — ``contacts`` carries no owner column in this
-                system, so there is no ownership to enforce (recorded as a
-                divergence in the iteration document).
+            ContactNotFoundError: When the contact does not exist or is not the
+                acting user's. The two are indistinguishable by design.
         """
-        contacts = await self._resolve_contacts([contact_id])
+        contacts = await self._resolve_contacts([contact_id], user_id=user_id)
         created = await self._link_contacts(task_id, contacts, user_id, transaction)
         linked = contact_id in created
         if linked:
@@ -1493,7 +1491,7 @@ class TaskService:
         except IntegrityError as error:
             if "contact_id" not in _driver_message(error):
                 raise
-            known = await self.contact_repo.find_names_by_ids(wanted)
+            known = await self.contact_repo.find_names_by_ids(wanted, user_id=user_id)
             missing = [cid for cid in wanted if cid not in known]
             if not missing:
                 raise
@@ -1630,20 +1628,21 @@ class TaskService:
             due_journal_id, journal_date(due_journal, tz), today_in(tz, moment)
         )
 
-    async def _resolve_contacts(self, contact_ids: Sequence[int] | None) -> list[int]:
-        """Return the contacts to link, having proved every one of them exists.
+    async def _resolve_contacts(
+        self, contact_ids: Sequence[int] | None, *, user_id: str
+    ) -> list[int]:
+        """Return the contacts to link, having proved every one is ``user_id``'s.
 
         A contact named in a create must be real: dropping an unknown id would
         silently give the user a task with fewer people on it than they asked
-        for. Existence is the whole check — ``contacts`` carries no owner column
-        in this system, so there is no ownership to enforce here (recorded as a
-        divergence in the iteration document).
+        for. The lookup is owner-scoped, so another user's contact is not found,
+        exactly as a missing one is.
         """
         if not contact_ids:
             return []
 
         wanted = _ordered_unique(contact_ids)
-        known = await self.contact_repo.find_names_by_ids(wanted)
+        known = await self.contact_repo.find_names_by_ids(wanted, user_id=user_id)
         for contact_id in wanted:
             if contact_id not in known:
                 raise ContactNotFoundError(contact_id)

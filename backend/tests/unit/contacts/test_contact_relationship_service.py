@@ -120,8 +120,8 @@ class TestContactRelationshipService:
         assert relationship.from_contact_id == 1
         assert relationship.to_contact_id == 2
         assert relationship.relationship_type == RelationshipType.FRIEND
-        mock_contact_repo.find_by_id.assert_any_call(1)
-        mock_contact_repo.find_by_id.assert_any_call(2)
+        mock_contact_repo.find_by_id.assert_any_call(1, user_id=TEST_USER_ID)
+        mock_contact_repo.find_by_id.assert_any_call(2, user_id=TEST_USER_ID)
         mock_relationship_repo.create.assert_called_once()
         # History is now derived from the published event (ITER12-003 Phase 2).
         mock_event_publisher.publish.assert_called_once()
@@ -197,7 +197,7 @@ class TestContactRelationshipService:
 
         assert "cannot have a relationship with itself" in str(exc_info.value)
         # from-contact is validated first, then self-reference is caught
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
         mock_relationship_repo.create.assert_not_called()
 
     @pytest.mark.asyncio

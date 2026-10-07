@@ -73,7 +73,9 @@ class ContactRelationshipService:
             ContactNotFoundError: If either contact doesn't exist
         """
         # Validate the from-contact exists
-        from_contact = await self.contact_repo.find_by_id(from_contact_id)
+        from_contact = await self.contact_repo.find_by_id(
+            from_contact_id, user_id=user_id
+        )
         if not from_contact:
             raise ContactNotFoundError(from_contact_id)
 
@@ -130,7 +132,9 @@ class ContactRelationshipService:
                     "Contact cannot have a relationship with itself",
                 )
 
-            to_contact = await self.contact_repo.find_by_id(to_contact_id)
+            to_contact = await self.contact_repo.find_by_id(
+                to_contact_id, user_id=user_id
+            )
             if not to_contact:
                 raise ContactNotFoundError(to_contact_id)
 
@@ -378,7 +382,7 @@ class ContactRelationshipService:
         # Batch-fetch contacts
         contact_names: dict[int, str] = {}
         for cid in contact_ids:
-            contact = await self.contact_repo.find_by_id(cid)
+            contact = await self.contact_repo.find_by_id(cid, user_id=user_id)
             if contact:
                 contact_names[cid] = contact.get_display_name()
 

@@ -587,9 +587,9 @@ class TestAContactThatVanishesMidWrite:
             deleted = False
 
             async def find_names_by_ids(
-                self, contact_ids: list[int]
+                self, contact_ids: list[int], *, user_id: str
             ) -> dict[int, tuple[str | None, str | None, str | None]]:
-                names = await super().find_names_by_ids(contact_ids)
+                names = await super().find_names_by_ids(contact_ids, user_id=user_id)
                 if not self.deleted:
                     self.deleted = True
                     await delete_contact(async_connection, sarah)
@@ -693,10 +693,10 @@ class TestTheWritesAreUnitsOfWork:
 
         class _ObservingContactRepository(SqlContactRepository):
             async def find_names_by_ids(
-                self, contact_ids: list[int]
+                self, contact_ids: list[int], *, user_id: str
             ) -> dict[int, tuple[str | None, str | None, str | None]]:
                 observed.append(async_connection.get_nested_transaction() is not None)
-                return await super().find_names_by_ids(contact_ids)
+                return await super().find_names_by_ids(contact_ids, user_id=user_id)
 
         service = TaskService(
             task_repo=SqlTaskRepository(async_connection),

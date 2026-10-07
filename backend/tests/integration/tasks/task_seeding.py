@@ -245,9 +245,11 @@ async def mark_journal_as_event(
     )
 
 
-async def create_contact(conn: AsyncConnection, *, first_name: str = "Sarah") -> int:
-    """Create a contact and return its id."""
-    return await seed_contact(conn, first_name=first_name)
+async def create_contact(
+    conn: AsyncConnection, *, first_name: str = "Sarah", user_id: str = USER_ID
+) -> int:
+    """Create a contact owned by ``user_id`` and return its id."""
+    return await seed_contact(conn, first_name=first_name, user_id=user_id)
 
 
 async def count(conn: AsyncConnection, sql: str, params: dict[str, int | str]) -> int:

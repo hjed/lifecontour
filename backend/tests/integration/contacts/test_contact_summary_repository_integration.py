@@ -211,7 +211,7 @@ class TestContactSummaryRepositoryIntegration:
             )
         )
 
-        contact = await contact_repo.find_by_id(test_contact.id)
+        contact = await contact_repo.find_by_id(test_contact.id, user_id=TEST_USER_ID)
 
         assert contact is not None
         assert contact.summary is not None
@@ -431,7 +431,7 @@ class TestContactSummaryRepositoryIntegration:
         )
         await summary_repo.upsert(summary)
 
-        contact = await contact_repo.find_by_id(test_contact.id)
+        contact = await contact_repo.find_by_id(test_contact.id, user_id=TEST_USER_ID)
 
         assert contact is not None
         assert contact.summary is not None
@@ -442,7 +442,7 @@ class TestContactSummaryRepositoryIntegration:
     @pytest.mark.asyncio
     async def test_contact_find_by_id_without_summary(self, contact_repo, test_contact):
         """Test that find_by_id works when no summary exists."""
-        contact = await contact_repo.find_by_id(test_contact.id)
+        contact = await contact_repo.find_by_id(test_contact.id, user_id=TEST_USER_ID)
 
         assert contact is not None
         assert contact.summary is None
@@ -460,7 +460,7 @@ class TestContactSummaryRepositoryIntegration:
         await summary_repo.upsert(summary)
 
         # Delete the contact
-        await contact_repo.delete(test_contact.id)
+        await contact_repo.delete(test_contact.id, user_id=TEST_USER_ID)
 
         # Summary should also be gone
         result = await summary_repo.find_by_contact_id(test_contact.id)

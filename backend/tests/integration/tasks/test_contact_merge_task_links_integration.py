@@ -521,6 +521,6 @@ class TestTheWholeMergeCarriesThePeople:
         assert await task_events(async_connection) == []
 
 
-async def _raises(_contact_id: int) -> None:
+async def _raises(_contact_id: int, *, user_id: str) -> None:
     """Stands in for the source contact's deletion, failing the merge."""
     raise RuntimeError("merge failed")

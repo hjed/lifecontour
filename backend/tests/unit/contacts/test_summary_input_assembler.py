@@ -87,6 +87,7 @@ def _make_assembler(
 ) -> SummaryInputAssembler:
     """Create a SummaryInputAssembler with mock repositories."""
     contact_repo = AsyncMock()
+    contact_repo.find_owner_id = AsyncMock(return_value=TEST_USER_ID)
     contact_repo.find_by_id = AsyncMock(
         return_value=contact
         or Contact(
@@ -434,7 +435,7 @@ class TestSummaryInputAssembler:
     async def test_contact_not_found_returns_none(self):
         """Test that None is returned when contact doesn't exist."""
         contact_repo = AsyncMock()
-        contact_repo.find_by_id = AsyncMock(return_value=None)
+        contact_repo.find_owner_id = AsyncMock(return_value=None)
         assembler = SummaryInputAssembler(
             contact_repo=contact_repo,
             history_repo=AsyncMock(),
@@ -445,6 +446,26 @@ class TestSummaryInputAssembler:
 
         result = await assembler.assemble(contact_id=999)
         assert result is None
+        contact_repo.find_by_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_contact_is_read_as_its_owner(self):
+        """Generation has no acting user, so it reads the contact as its owner."""
+        contact_repo = AsyncMock()
+        contact_repo.find_owner_id = AsyncMock(return_value="owner-9")
+        contact_repo.find_by_id = AsyncMock(return_value=None)
+        assembler = SummaryInputAssembler(
+            contact_repo=contact_repo,
+            history_repo=AsyncMock(),
+            journal_relationship_repo=AsyncMock(),
+            journal_repo=AsyncMock(),
+            summary_repo=AsyncMock(),
+        )
+
+        await assembler.assemble(contact_id=5)
+
+        contact_repo.find_owner_id.assert_awaited_once_with(5)
+        contact_repo.find_by_id.assert_awaited_once_with(5, user_id="owner-9")
 
 
 @pytest.mark.unit

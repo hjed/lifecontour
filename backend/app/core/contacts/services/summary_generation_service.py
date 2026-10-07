@@ -101,8 +101,15 @@ class SummaryInputAssembler:
         explicit offset so the model never has to assume UTC.
 
         Returns None if the contact does not exist.
+
+        Generation runs from a background consumer with no acting user, so the
+        contact is read as its own owner: the summary describes the contact to
+        that user.
         """
-        contact = await self._contact_repo.find_by_id(contact_id)
+        owner = await self._contact_repo.find_owner_id(contact_id)
+        if owner is None:
+            return None
+        contact = await self._contact_repo.find_by_id(contact_id, user_id=owner)
         if contact is None:
             return None
 

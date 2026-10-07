@@ -43,9 +43,13 @@ class TestContactValidationService:
         """Test email uniqueness validation when no existing contact."""
         mock_contact_repo.find_by_email.return_value = None
 
-        await service.validate_email_uniqueness("test@example.com", mock_transaction)
+        await service.validate_email_uniqueness(
+            "test@example.com", mock_transaction, user_id=TEST_USER_ID
+        )
 
-        mock_contact_repo.find_by_email.assert_called_once_with("test@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "test@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_validate_email_uniqueness_existing_contact_same_id(
@@ -56,10 +60,15 @@ class TestContactValidationService:
         mock_contact_repo.find_by_email.return_value = existing_contact
 
         await service.validate_email_uniqueness(
-            "test@example.com", mock_transaction, exclude_contact_id=1
+            "test@example.com",
+            mock_transaction,
+            exclude_contact_id=1,
+            user_id=TEST_USER_ID,
         )
 
-        mock_contact_repo.find_by_email.assert_called_once_with("test@example.com")
+        mock_contact_repo.find_by_email.assert_called_once_with(
+            "test@example.com", user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_validate_email_uniqueness_existing_contact_different_id_raises_error(
@@ -71,7 +80,10 @@ class TestContactValidationService:
 
         with pytest.raises(DuplicateEmailError):
             await service.validate_email_uniqueness(
-                "test@example.com", mock_transaction, exclude_contact_id=1
+                "test@example.com",
+                mock_transaction,
+                exclude_contact_id=1,
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -84,7 +96,7 @@ class TestContactValidationService:
 
         with pytest.raises(DuplicateEmailError):
             await service.validate_email_uniqueness(
-                "test@example.com", mock_transaction
+                "test@example.com", mock_transaction, user_id=TEST_USER_ID
             )
 
     @pytest.mark.asyncio
@@ -97,7 +109,7 @@ class TestContactValidationService:
 
         with pytest.raises(ContactValidationError) as exc_info:
             await service.validate_email_uniqueness(
-                "test@example.com", mock_transaction
+                "test@example.com", mock_transaction, user_id=TEST_USER_ID
             )
 
         assert exc_info.value.field == "contact_id"
@@ -111,9 +123,11 @@ class TestContactValidationService:
         contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
-        await service.validate_primary_method(1, "email", mock_transaction)
+        await service.validate_primary_method(
+            1, "email", mock_transaction, user_id=TEST_USER_ID
+        )
 
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_validate_primary_method_contact_not_found_raises_error(
@@ -123,7 +137,9 @@ class TestContactValidationService:
         mock_contact_repo.find_by_id.return_value = None
 
         with pytest.raises(ContactNotFoundError):
-            await service.validate_primary_method(1, "email", mock_transaction)
+            await service.validate_primary_method(
+                1, "email", mock_transaction, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_validate_primary_address_contact_exists(
@@ -133,9 +149,11 @@ class TestContactValidationService:
         contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
-        await service.validate_primary_address(1, mock_transaction)
+        await service.validate_primary_address(
+            1, mock_transaction, user_id=TEST_USER_ID
+        )
 
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_validate_primary_address_contact_not_found_raises_error(
@@ -145,7 +163,9 @@ class TestContactValidationService:
         mock_contact_repo.find_by_id.return_value = None
 
         with pytest.raises(ContactNotFoundError):
-            await service.validate_primary_address(1, mock_transaction)
+            await service.validate_primary_address(
+                1, mock_transaction, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_validate_contact_exists_contact_found(
@@ -155,9 +175,9 @@ class TestContactValidationService:
         contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
-        await service.validate_contact_exists(1, mock_transaction)
+        await service.validate_contact_exists(1, mock_transaction, user_id=TEST_USER_ID)
 
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_validate_contact_exists_contact_not_found_raises_error(
@@ -167,7 +187,9 @@ class TestContactValidationService:
         mock_contact_repo.find_by_id.return_value = None
 
         with pytest.raises(ContactNotFoundError):
-            await service.validate_contact_exists(1, mock_transaction)
+            await service.validate_contact_exists(
+                1, mock_transaction, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_validate_contact_tag_limit_under_limit(
@@ -183,9 +205,11 @@ class TestContactValidationService:
 
         mock_contact_repo.find_by_id.return_value = contact
 
-        await service.validate_contact_tag_limit(1, mock_transaction)
+        await service.validate_contact_tag_limit(
+            1, mock_transaction, user_id=TEST_USER_ID
+        )
 
-        mock_contact_repo.find_by_id.assert_called_once_with(1)
+        mock_contact_repo.find_by_id.assert_called_once_with(1, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_validate_contact_tag_limit_at_limit_raises_error(
@@ -202,7 +226,9 @@ class TestContactValidationService:
         mock_contact_repo.find_by_id.return_value = contact
 
         with pytest.raises(TooManyTagsError):
-            await service.validate_contact_tag_limit(1, mock_transaction)
+            await service.validate_contact_tag_limit(
+                1, mock_transaction, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_validate_contact_tag_limit_contact_not_found_raises_error(
@@ -212,4 +238,6 @@ class TestContactValidationService:
         mock_contact_repo.find_by_id.return_value = None
 
         with pytest.raises(ContactNotFoundError):
-            await service.validate_contact_tag_limit(1, mock_transaction)
+            await service.validate_contact_tag_limit(
+                1, mock_transaction, user_id=TEST_USER_ID
+            )
