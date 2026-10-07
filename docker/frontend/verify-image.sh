@@ -28,29 +28,34 @@ trap cleanup EXIT
 # Run a shell snippet inside the image without starting the server, as root
 # so that no directory is hidden from the checks.
 in_image() {
-  docker run --rm --user 0 --entrypoint sh "$IMAGE" -c "$1"
+  snippet=$1
+  docker run --rm --user 0 --entrypoint sh "$IMAGE" -c "$snippet"
 }
 
-# Check that the snippet $1 finds nothing in the image: its exit status 0
+# Check that the probe snippet finds nothing in the image: its exit status 0
 # means found, 1 means absent, and anything else (docker itself failing)
 # counts as a failure rather than a pass.
 check_absent() {
+  probe=$1
+  what=$2
   status=0
-  in_image "$1" || status=$?
+  in_image "$probe" || status=$?
   case $status in
-    0) fail "image ships $2" ;;
-    1) pass "no $2" ;;
-    *) fail "could not check for $2 (exit $status)" ;;
+    0) fail "image ships $what" ;;
+    1) pass "no $what" ;;
+    *) fail "could not check for $what (exit $status)" ;;
   esac
 }
 
-# Wait up to $2 seconds for container $1 to stop; print its exit code, or
+# Wait up to `seconds` for `container` to stop; print its exit code, or
 # "running" if it is still up.
 wait_for_exit() {
+  container=$1
+  seconds=$2
   i=0
-  while [ "$i" -lt "$2" ]; do
-    if [ "$(docker inspect -f '{{.State.Running}}' "$1")" = false ]; then
-      docker inspect -f '{{.State.ExitCode}}' "$1"
+  while [ "$i" -lt "$seconds" ]; do
+    if [ "$(docker inspect -f '{{.State.Running}}' "$container")" = false ]; then
+      docker inspect -f '{{.State.ExitCode}}' "$container"
       return
     fi
     sleep 1
@@ -59,12 +64,14 @@ wait_for_exit() {
   echo running
 }
 
-# Print the HTTP status of $1, retrying for up to $2 seconds while the
+# Print the HTTP status of `url`, retrying for up to `seconds` while the
 # server starts.
 http_status() {
+  url=$1
+  seconds=$2
   i=0
-  while [ "$i" -lt "$2" ]; do
-    status=$(curl -s -o /dev/null -w '%{http_code}' "$1" || true)
+  while [ "$i" -lt "$seconds" ]; do
+    status=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
     if [ "$status" != 000 ]; then
       echo "$status"
       return

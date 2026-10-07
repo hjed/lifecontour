@@ -13,7 +13,7 @@ FROM node:26-alpine AS base
 # Keep this version in sync with the "packageManager" field in
 # frontend/package.json.
 RUN apk add --no-cache curl && \
-    npm install -g pnpm@11.7.0
+    npm install -g --ignore-scripts pnpm@11.7.0
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S frontend -u 1001
