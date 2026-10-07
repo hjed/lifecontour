@@ -620,11 +620,12 @@ async def test_smart_orchestrator_runs_as_full_after_settings_change(
     repo: SyncJobRepository,
     user_id: str,
 ) -> None:
-    """A changed URL, user mapping or API key invalidates the cursor."""
+    """A changed URL, user mapping or API key invalidates the cursor, which
+    may come from another instance's clock: it is not carried forward."""
     kind = _KINDS[kind_name]
     parent_id = f"parent-{uuid4().hex}"
     await _configured(async_connection, user_id)
-    await _seed_completed(repo, user_id, kind_name)
+    await _seed_completed(repo, user_id, kind_name, cursor="2026-10-08 15:00:00")
     # The test shares one transaction, so now() is the earlier run's start too.
     await async_connection.execute(
         text(
@@ -647,7 +648,8 @@ async def test_smart_orchestrator_runs_as_full_after_settings_change(
     )
 
     assert [args[1] for _, args, _ in redis.jobs] == [[1, 2], [3]]
-    assert (await _status(repo, parent_id)).sync_type == "full"
+    parent = await _status(repo, parent_id)
+    assert (parent.sync_type, parent.sync_cursor) == ("full", "2026-10-07 09:05:00")
 
 
 @pytest.mark.asyncio
