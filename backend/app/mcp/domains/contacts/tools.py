@@ -187,6 +187,7 @@ async def _build_contact_response(
     contact: Contact,
     contact_service: ContactService,
     *,
+    user_id: str,
     include_history: bool,
     include_archived: bool = False,
 ) -> str:
@@ -196,11 +197,12 @@ async def _build_contact_response(
     )
     from app.mcp.domains.journals.schemas import ExternalLinkSchema
 
-    external_references = await contact_service.get_external_references(contact_id)
+    external_references = await contact_service.get_external_references(
+        contact_id, user_id=user_id
+    )
 
     # Resolve the user's Immich server URL (no API-key decryption) so Immich
     # person references can be rendered as clickable links.
-    user_id = await get_current_user_id()
     immich_token_service = await get_immich_token_service()
     immich_server_url = await immich_token_service.get_server_url(user_id)
 
@@ -224,11 +226,8 @@ async def _build_contact_response(
 
     # Add history context if requested
     if include_history:
-        # ``user_id`` is resolved above for the Immich link; it is passed here
-        # because this feed carries a linked task's rows and a task is owned
-        # while a contact is not.
         history = await contact_service.get_contact_history(
-            contact_id, limit=DEFAULT_HISTORY_LIMIT, reader_user_id=user_id
+            contact_id, limit=DEFAULT_HISTORY_LIMIT, user_id=user_id
         )
         history_summary = (
             f"Recent changes: {len(history)} field updates recorded"
@@ -331,6 +330,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = False,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Get contact details by ID for AI analysis.
@@ -357,7 +357,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             ContactNotFoundError: If the contact with the given ID does not exist
         """
         # Fetch contact data (contact_service is automatically injected)
-        contact = await contact_service.get_contact_by_id(contact_id)
+        contact = await contact_service.get_contact_by_id(contact_id, user_id=user_id)
 
         if contact is None:
             raise ContactNotFoundError(contact_id)
@@ -366,6 +366,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact_id,
             contact,
             contact_service,
+            user_id=user_id,
             include_history=include_history,
             include_archived=include_archived,
         )
@@ -398,6 +399,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = False,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Find the contact linked to an external system's record.
@@ -416,7 +418,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             raise ValueError("external_id must not be empty")
 
         contact = await contact_service.find_contact_by_external_reference(
-            normalized_source, normalized_id, connection
+            normalized_source, normalized_id, connection, user_id=user_id
         )
         if contact is None or contact.id is None:
             return MCPResponseBuilder.error_response(
@@ -430,6 +432,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact.id,
             contact,
             contact_service,
+            user_id=user_id,
             include_history=include_history,
             include_archived=include_archived,
         )
@@ -713,6 +716,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = None,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Update an existing contact for AI-managed relationship maintenance.
@@ -754,7 +758,9 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
 
         # Get existing contact
-        existing_contact = await contact_service.get_contact_by_id(request.contact_id)
+        existing_contact = await contact_service.get_contact_by_id(
+            request.contact_id, user_id=user_id
+        )
         if not existing_contact:
             raise ContactNotFoundError(request.contact_id)
 
@@ -783,9 +789,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 changed_by="mcp",
                 source=Provenance.MCP,
                 expected_etags=expected_etags,
+                user_id=user_id,
             )
             # Fetch updated contact for response
-            final_contact = await contact_service.get_contact_by_id(request.contact_id)
+            final_contact = await contact_service.get_contact_by_id(
+                request.contact_id, user_id=user_id
+            )
             if not final_contact:
                 raise ContactNotFoundError(request.contact_id)
         else:
@@ -864,6 +873,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 tag_names=request.tags,
                 expected_etags=expected_etags,
                 subresource_merge=subresource_merge,
+                user_id=user_id,
             )
 
         # Create AI-friendly response using shared converter
@@ -885,6 +895,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         page: Annotated[int, Field(description="Page number", ge=1)] = 1,
         limit: Annotated[int, Field(description="Contacts per page", ge=1, le=50)] = 20,
         contact_service: ContactService = mcp_depends(get_contact_service),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         List contacts with pagination for AI analysis.
@@ -908,8 +919,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         offset = (page - 1) * limit
 
         # Get contacts with pagination
-        contacts = await contact_service.get_contacts_paginated(limit, offset)
-        total_count = await contact_service.get_contacts_count()
+        contacts = await contact_service.get_contacts_paginated(
+            limit, offset, user_id=user_id
+        )
+        total_count = await contact_service.get_contacts_count(user_id=user_id)
 
         # Convert to AI-friendly format using shared converter
         contact_responses = []
@@ -1024,6 +1037,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ],
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Toggle the favourite status of a contact for AI-managed relationship prioritization.
@@ -1046,7 +1060,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         try:
             # Toggle the favourite status
             updated_contact = await contact_service.toggle_contact_favourite(
-                contact_id, connection
+                contact_id, connection, user_id=user_id
             )
 
             # Create AI-friendly response using shared converter
@@ -1097,6 +1111,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ],
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Archive or restore one of a contact's emails, phones or addresses.
@@ -1110,7 +1125,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Returns the contact as get_contact does with include_archived.
         """
-        contact = await contact_service.get_contact_by_id(contact_id)
+        contact = await contact_service.get_contact_by_id(contact_id, user_id=user_id)
         if contact is None:
             raise ContactNotFoundError(contact_id)
         _require_contact_field(contact, kind, field_id)
@@ -1128,15 +1143,17 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             connection,
             changed_by="mcp",
             source=Provenance.MCP,
+            user_id=user_id,
         )
 
-        updated = await contact_service.get_contact_by_id(contact_id)
+        updated = await contact_service.get_contact_by_id(contact_id, user_id=user_id)
         if updated is None:
             raise ContactNotFoundError(contact_id)
         return await _build_contact_response(
             contact_id,
             updated,
             contact_service,
+            user_id=user_id,
             include_history=False,
             include_archived=True,
         )

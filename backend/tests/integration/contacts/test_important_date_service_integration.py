@@ -82,7 +82,7 @@ async def test_update_contact_with_important_dates(
     )
     saved_contact.important_dates = [date]
     updated_contact = await contact_service.update_contact(
-        saved_contact, async_connection
+        saved_contact, async_connection, user_id=TEST_USER_ID
     )
 
     assert updated_contact.important_dates is not None
@@ -92,7 +92,7 @@ async def test_update_contact_with_important_dates(
     # Remove via update (replace with empty list)
     updated_contact.important_dates = []
     updated_contact = await contact_service.update_contact(
-        updated_contact, async_connection
+        updated_contact, async_connection, user_id=TEST_USER_ID
     )
 
     dates = updated_contact.important_dates
@@ -120,23 +120,27 @@ async def test_add_and_delete_important_date(
 
     # Add individual
     saved_date = await contact_service.add_contact_important_date(
-        saved_contact.id, date, async_connection
+        saved_contact.id, date, async_connection, user_id=TEST_USER_ID
     )
     assert saved_date.id is not None
 
     # Verify
-    fetched = await contact_service.get_contact_by_id(saved_contact.id)
+    fetched = await contact_service.get_contact_by_id(
+        saved_contact.id, user_id=TEST_USER_ID
+    )
     assert fetched is not None
     assert fetched.important_dates is not None
     assert len(fetched.important_dates) == 1
 
     # Delete individual
     await contact_service.delete_contact_important_date(
-        saved_contact.id, saved_date.id, async_connection
+        saved_contact.id, saved_date.id, async_connection, user_id=TEST_USER_ID
     )
 
     # Verify
-    fetched2 = await contact_service.get_contact_by_id(saved_contact.id)
+    fetched2 = await contact_service.get_contact_by_id(
+        saved_contact.id, user_id=TEST_USER_ID
+    )
     assert fetched2 is not None
     assert len(fetched2.important_dates or []) == 0
 
@@ -153,7 +157,7 @@ async def _contact_with_date(
     assert contact.id is not None
     date.contact_id = contact.id
     saved_date = await contact_service.add_contact_important_date(
-        contact.id, date, connection
+        contact.id, date, connection, user_id=TEST_USER_ID
     )
     return contact, saved_date
 
@@ -190,13 +194,13 @@ async def test_update_important_date_keeps_the_same_row(
         day=15,
     )
     returned = await contact_service.update_contact_important_date(
-        contact.id, saved_date.id, edited, async_connection
+        contact.id, saved_date.id, edited, async_connection, user_id=TEST_USER_ID
     )
 
     # Assert
     assert returned.id == saved_date.id, "the date must keep its id across an edit"
 
-    fetched = await contact_service.get_contact_by_id(contact.id)
+    fetched = await contact_service.get_contact_by_id(contact.id, user_id=TEST_USER_ID)
     assert fetched is not None
     dates = fetched.important_dates or []
     assert len(dates) == 1
@@ -234,7 +238,7 @@ async def test_update_important_date_publishes_changed_fields(
         year=2021,
     )
     await recording_contact_service.update_contact_important_date(
-        contact.id, saved_date.id, edited, async_connection
+        contact.id, saved_date.id, edited, async_connection, user_id=TEST_USER_ID
     )
 
     # Assert
@@ -279,7 +283,7 @@ async def test_update_important_date_reports_type_and_precision_changes(
         day=1,
     )
     await recording_contact_service.update_contact_important_date(
-        contact.id, saved_date.id, edited, async_connection
+        contact.id, saved_date.id, edited, async_connection, user_id=TEST_USER_ID
     )
 
     # Assert
@@ -323,7 +327,7 @@ async def test_update_important_date_with_no_changes_publishes_nothing(
         year=2015,
     )
     await recording_contact_service.update_contact_important_date(
-        contact.id, saved_date.id, unchanged, async_connection
+        contact.id, saved_date.id, unchanged, async_connection, user_id=TEST_USER_ID
     )
 
     # Assert
@@ -363,7 +367,7 @@ async def test_update_important_date_rejects_a_date_from_another_contact(
     )
     with pytest.raises(ContactValidationError):
         await contact_service.update_contact_important_date(
-            stranger.id, owned_date.id, edited, async_connection
+            stranger.id, owned_date.id, edited, async_connection, user_id=TEST_USER_ID
         )
 
 
@@ -389,7 +393,7 @@ async def test_update_important_date_rejects_unknown_date_id(
     )
     with pytest.raises(ContactValidationError):
         await contact_service.update_contact_important_date(
-            contact.id, 999999, edited, async_connection
+            contact.id, 999999, edited, async_connection, user_id=TEST_USER_ID
         )
 
 
@@ -435,5 +439,5 @@ async def test_update_important_date_revalidates_the_entity(
     # Assert
     with pytest.raises(ValueError):
         await contact_service.update_contact_important_date(
-            contact.id, saved_date.id, edited, async_connection
+            contact.id, saved_date.id, edited, async_connection, user_id=TEST_USER_ID
         )

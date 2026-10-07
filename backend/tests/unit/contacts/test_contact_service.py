@@ -179,7 +179,7 @@ class TestContactService:
 
         # Act
         result = await contact_service.toggle_contact_favourite(
-            contact_id, mock_transaction
+            contact_id, mock_transaction, user_id=TEST_USER_ID
         )
 
         # Assert
@@ -198,38 +198,9 @@ class TestContactService:
 
         # Act & Assert
         with pytest.raises(ContactValidationError, match="Contact not found"):
-            await contact_service.toggle_contact_favourite(contact_id, mock_transaction)
-
-    @pytest.mark.asyncio
-    async def test_get_favourite_contacts_success(
-        self, contact_service, mock_contact_repo
-    ):
-        """Test successful retrieval of favourite contacts."""
-        # Arrange
-        favourite_contacts = [
-            Contact(
-                user_id=TEST_USER_ID,
-                first_name="John",
-                last_name="Doe",
-                id=1,
-                is_favourite=True,
-            ),
-            Contact(
-                user_id=TEST_USER_ID,
-                first_name="Jane",
-                last_name="Smith",
-                id=2,
-                is_favourite=True,
-            ),
-        ]
-        mock_contact_repo.get_favourite_contacts.return_value = favourite_contacts
-
-        # Act
-        result = await contact_service.get_favourite_contacts(limit=10, offset=0)
-
-        # Assert
-        assert result == favourite_contacts
-        mock_contact_repo.get_favourite_contacts.assert_called_once_with(10, 0)
+            await contact_service.toggle_contact_favourite(
+                contact_id, mock_transaction, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_get_contacts_paginated_with_favourite_filter(
@@ -250,7 +221,7 @@ class TestContactService:
 
         # Act
         result = await contact_service.get_contacts_paginated(
-            limit=10, offset=0, is_favourite=True
+            limit=10, offset=0, is_favourite=True, user_id=TEST_USER_ID
         )
 
         # Assert
@@ -272,7 +243,7 @@ class TestContactService:
 
         # Act
         result = await contact_service.get_contacts_paginated(
-            limit=10, offset=0, tag_ids=[1, 2]
+            limit=10, offset=0, tag_ids=[1, 2], user_id=TEST_USER_ID
         )
 
         # Assert
@@ -294,7 +265,9 @@ class TestContactService:
         mock_contact_repo.get_all.return_value = all_contacts
 
         # Act
-        result = await contact_service.get_contacts_paginated(limit=10, offset=0)
+        result = await contact_service.get_contacts_paginated(
+            limit=10, offset=0, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == all_contacts
@@ -311,7 +284,7 @@ class TestContactService:
         mock_contact_repo.get_count.return_value = 42
 
         # Act
-        result = await contact_service.get_contacts_count()
+        result = await contact_service.get_contacts_count(user_id=TEST_USER_ID)
 
         # Assert
         assert result == 42
@@ -330,6 +303,7 @@ class TestContactService:
         result = await contact_service.get_contacts_count(
             is_favourite=True,
             tag_ids=[1, 2],
+            user_id=TEST_USER_ID,
         )
 
         # Assert
@@ -686,7 +660,9 @@ class TestContactService:
         mock_contact_repo.add_note.return_value = saved_note
 
         # Act
-        result = await contact_service.update_contact(updated_contact, mock_transaction)
+        result = await contact_service.update_contact(
+            updated_contact, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result.id == 1
@@ -724,7 +700,9 @@ class TestContactService:
         mock_contact_repo.save.return_value = saved_contact
 
         # Act
-        result = await contact_service.update_contact(updated_contact, mock_transaction)
+        result = await contact_service.update_contact(
+            updated_contact, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == saved_contact
@@ -746,7 +724,9 @@ class TestContactService:
         mock_contact_repo.save.side_effect = lambda contact: contact
         incoming = Contact(user_id="someone-else", first_name="Johnny", id=1)
 
-        result = await contact_service.update_contact(incoming, mock_transaction)
+        result = await contact_service.update_contact(
+            incoming, mock_transaction, user_id=TEST_USER_ID
+        )
 
         assert mock_contact_repo.save.call_args.args[0].user_id == "owner-9"
         assert result.user_id == "owner-9"
@@ -769,7 +749,9 @@ class TestContactService:
         )
 
         await contact_service.update_contact(
-            Contact(user_id=TEST_USER_ID, first_name="Ada", id=1), mock_transaction
+            Contact(user_id=TEST_USER_ID, first_name="Ada", id=1),
+            mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         calls = [name for name, *_ in mock_contact_repo.method_calls]
@@ -803,6 +785,7 @@ class TestContactService:
                 subresource_merge=SubResourceMerge(
                     primary_methods={MethodType.EMAIL: "b@example.com"}
                 ),
+                user_id=TEST_USER_ID,
             )
 
         assert mock_contact_repo.method_calls == []
@@ -829,7 +812,7 @@ class TestContactService:
             user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1, tags=None
         )
         result = await contact_service.update_contact(
-            updated_contact, mock_transaction, tag_names=[]
+            updated_contact, mock_transaction, tag_names=[], user_id=TEST_USER_ID
         )
 
         assert result == saved_contact
@@ -845,7 +828,9 @@ class TestContactService:
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(contact, mock_transaction)
+            await contact_service.update_contact(
+                contact, mock_transaction, user_id=TEST_USER_ID
+            )
 
         assert exc_info.value.field == "id"
         assert "Contact ID is required for updates" in exc_info.value.message
@@ -860,7 +845,7 @@ class TestContactService:
         mock_contact_repo.find_by_id.return_value = contact
 
         # Act
-        await contact_service.delete_contact(1, mock_transaction)
+        await contact_service.delete_contact(1, mock_transaction, user_id=TEST_USER_ID)
 
         # Assert
         mock_contact_repo.delete.assert_called_once_with(1)
@@ -878,7 +863,9 @@ class TestContactService:
         mock_tag_repo.find_by_id.return_value = tag
 
         # Act
-        await contact_service.assign_tag_to_contact(1, 2, mock_transaction)
+        await contact_service.assign_tag_to_contact(
+            1, 2, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         mock_contact_repo.assign_tag.assert_called_once_with(1, 2)
@@ -896,7 +883,9 @@ class TestContactService:
         mock_tag_repo.find_by_id.return_value = tag
 
         # Act
-        await contact_service.remove_tag_from_contact(1, 2, mock_transaction)
+        await contact_service.remove_tag_from_contact(
+            1, 2, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         mock_contact_repo.remove_tag.assert_called_once_with(1, 2)
@@ -920,7 +909,9 @@ class TestContactService:
         mock_contact_repo.add_method.return_value = saved_method
 
         # Act
-        result = await contact_service.add_contact_method(1, method, mock_transaction)
+        result = await contact_service.add_contact_method(
+            1, method, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == saved_method
@@ -964,6 +955,7 @@ class TestContactService:
         await contact_service.update_contact(
             Contact(user_id="someone-else", first_name="Johnny", id=1),
             mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert self._pushed_event_owners(mock_event_publisher) == {
@@ -995,9 +987,12 @@ class TestContactService:
                 method_type=MethodType.EMAIL, value="j@example.com", contact_id=1
             ),
             mock_transaction,
+            user_id=TEST_USER_ID,
         )
-        await contact_service.assign_tag_to_contact(1, 3, mock_transaction)
-        await contact_service.delete_contact(1, mock_transaction)
+        await contact_service.assign_tag_to_contact(
+            1, 3, mock_transaction, user_id=TEST_USER_ID
+        )
+        await contact_service.delete_contact(1, mock_transaction, user_id=TEST_USER_ID)
 
         assert self._pushed_event_owners(mock_event_publisher) == {
             "ContactMethodAdded": "owner-9",
@@ -1023,7 +1018,9 @@ class TestContactService:
         mock_contact_repo.add_address.return_value = saved_address
 
         # Act
-        result = await contact_service.add_contact_address(1, address, mock_transaction)
+        result = await contact_service.add_contact_address(
+            1, address, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == saved_address
@@ -1043,7 +1040,9 @@ class TestContactService:
         mock_contact_repo.add_note.return_value = saved_note
 
         # Act
-        result = await contact_service.add_contact_note(1, note, mock_transaction)
+        result = await contact_service.add_contact_note(
+            1, note, mock_transaction, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == saved_note
@@ -1057,7 +1056,7 @@ class TestContactService:
         mock_contact_repo.find_by_id.return_value = contact
 
         # Act
-        result = await contact_service.get_contact_by_id(1)
+        result = await contact_service.get_contact_by_id(1, user_id=TEST_USER_ID)
 
         # Assert
         assert result == contact
@@ -1071,25 +1070,13 @@ class TestContactService:
         mock_contact_repo.find_by_email.return_value = contact
 
         # Act
-        result = await contact_service.get_contact_by_email("test@example.com")
+        result = await contact_service.get_contact_by_email(
+            "test@example.com", user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == contact
         mock_contact_repo.find_by_email.assert_called_once_with("test@example.com")
-
-    @pytest.mark.asyncio
-    async def test_search_contacts(self, contact_service, mock_contact_repo):
-        """Test searching contacts."""
-        # Arrange
-        contacts = [Contact(user_id=TEST_USER_ID, first_name="John", id=1)]
-        mock_contact_repo.search.return_value = contacts
-
-        # Act
-        result = await contact_service.search_contacts("John", limit=10)
-
-        # Assert
-        assert result == contacts
-        mock_contact_repo.search.assert_called_once_with("John", 10)
 
     @pytest.mark.asyncio
     async def test_get_all_contacts(self, contact_service, mock_contact_repo):
@@ -1099,25 +1086,13 @@ class TestContactService:
         mock_contact_repo.get_all.return_value = contacts
 
         # Act
-        result = await contact_service.get_all_contacts(limit=50, offset=0)
+        result = await contact_service.get_all_contacts(
+            limit=50, offset=0, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == contacts
         mock_contact_repo.get_all.assert_called_once_with(50, 0)
-
-    @pytest.mark.asyncio
-    async def test_get_contacts_by_tag(self, contact_service, mock_contact_repo):
-        """Test getting contacts by tag."""
-        # Arrange
-        contacts = [Contact(user_id=TEST_USER_ID, first_name="John", id=1)]
-        mock_contact_repo.get_contacts_by_tag.return_value = contacts
-
-        # Act
-        result = await contact_service.get_contacts_by_tag(1)
-
-        # Assert
-        assert result == contacts
-        mock_contact_repo.get_contacts_by_tag.assert_called_once_with(1)
 
     # Descendant-aware filtering tests (ITER2.6-002 Phase 1)
 
@@ -1138,7 +1113,7 @@ class TestContactService:
 
         # Act
         await contact_service.get_contacts_paginated(
-            limit=10, offset=0, tag_ids=[parent_tag_id]
+            limit=10, offset=0, tag_ids=[parent_tag_id], user_id=TEST_USER_ID
         )
 
         # Assert: repo should be called with expanded tag_ids including parent + descendants
@@ -1161,7 +1136,9 @@ class TestContactService:
         mock_contact_repo.get_contacts_count_by_filters.return_value = 5
 
         # Act
-        result = await contact_service.get_contacts_count(tag_ids=[parent_tag_id])
+        result = await contact_service.get_contacts_count(
+            tag_ids=[parent_tag_id], user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result == 5
@@ -1181,7 +1158,7 @@ class TestContactService:
 
         # Act
         await contact_service.get_contacts_paginated(
-            limit=10, offset=0, tag_ids=[leaf_tag_id]
+            limit=10, offset=0, tag_ids=[leaf_tag_id], user_id=TEST_USER_ID
         )
 
         # Assert: repo should be called with just the original tag ID
@@ -1206,7 +1183,10 @@ class TestContactService:
 
         # Act
         await contact_service.get_contacts_paginated(
-            limit=10, offset=0, tag_ids=[parent_tag_id, leaf_tag_id]
+            limit=10,
+            offset=0,
+            tag_ids=[parent_tag_id, leaf_tag_id],
+            user_id=TEST_USER_ID,
         )
 
         # Assert: repo called with parent + child + leaf
@@ -1223,7 +1203,9 @@ class TestContactService:
         mock_contact_repo.get_all.return_value = []
 
         # Act
-        await contact_service.get_contacts_paginated(limit=10, offset=0, tag_ids=None)
+        await contact_service.get_contacts_paginated(
+            limit=10, offset=0, tag_ids=None, user_id=TEST_USER_ID
+        )
 
         # Assert: get_descendants_for_tags should never be called
         mock_tag_repo.get_descendants_for_tags.assert_not_called()

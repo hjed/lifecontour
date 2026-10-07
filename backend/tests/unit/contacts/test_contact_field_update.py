@@ -12,6 +12,7 @@ from tests.fixtures.contact_fixtures import (
     create_basic_contact,
     create_contact_with_methods,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactFieldUpdate:
@@ -110,6 +111,7 @@ class TestContactFieldUpdate:
             field_name="first_name",
             field_value="Jonathan",
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "John"
@@ -144,6 +146,7 @@ class TestContactFieldUpdate:
             field_name="is_favourite",
             field_value="true",
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "False"
@@ -166,6 +169,7 @@ class TestContactFieldUpdate:
             field_name="is_favourite",
             field_value=True,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "False"
@@ -192,6 +196,7 @@ class TestContactFieldUpdate:
             field_name="first_name",
             field_value="John",  # Same as current value
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "John"
@@ -215,6 +220,7 @@ class TestContactFieldUpdate:
             field_name="middle_name",
             field_value=None,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "William"
@@ -239,6 +245,7 @@ class TestContactFieldUpdate:
                 field_name="invalid_field",
                 field_value="test",
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -257,6 +264,7 @@ class TestContactFieldUpdate:
                 field_name="first_name",
                 field_value="test",
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -283,6 +291,7 @@ class TestContactFieldUpdate:
                 field_name=field_name,
                 field_value="test_value" if field_name != "is_favourite" else True,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
             # Verify the field was processed without error
@@ -384,6 +393,7 @@ class TestContactMethodFieldUpdate:
             field_name="value",
             field_value="newemail@example.com",
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "john.doe@example.com"
@@ -417,6 +427,7 @@ class TestContactMethodFieldUpdate:
             field_name="is_primary",
             field_value="false",
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert old_value == "True"
@@ -442,6 +453,7 @@ class TestContactMethodFieldUpdate:
                 field_name="invalid_field",
                 field_value="test",
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -461,4 +473,5 @@ class TestContactMethodFieldUpdate:
                 field_name="value",
                 field_value="test@example.com",
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )

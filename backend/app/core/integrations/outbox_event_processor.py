@@ -355,12 +355,16 @@ class OutboxEventProcessor:
         self,
         contact_data: dict[str, Any],
         integration_source: str,
+        *,
+        user_id: str,
     ) -> Contact | None:
         """Find a single safe local contact candidate for email-based reconciliation."""
         matched_contacts: dict[int, Contact] = {}
 
         for email in self._extract_candidate_emails(contact_data):
-            existing_contact = await self.contact_service.get_contact_by_email(email)
+            existing_contact = await self.contact_service.get_contact_by_email(
+                email, user_id=user_id
+            )
             if existing_contact is None or existing_contact.id is None:
                 continue
             matched_contacts[existing_contact.id] = existing_contact
@@ -766,6 +770,7 @@ class OutboxEventProcessor:
                 await self._find_existing_contact_for_email_reconciliation(
                     contact_data=contact_data,
                     integration_source=integration_source,
+                    user_id=payload.user_id,
                 )
             )
         except ContactReconciliationConflictError as e:
@@ -819,13 +824,14 @@ class OutboxEventProcessor:
                         self.connection,
                         changed_by=sync_changed_by,
                         source=provenance_source,
+                        user_id=payload.user_id,
                     )
             else:
                 contact.id = matched_contact.id
                 _keep_stored_owner(contact, matched_contact)
                 if matched_contact.id is not None:
                     stored = await self.contact_service.get_contact_by_id(
-                        matched_contact.id
+                        matched_contact.id, user_id=payload.user_id
                     )
                     if stored is not None:
                         _keep_archived_values(contact, stored)
@@ -834,6 +840,7 @@ class OutboxEventProcessor:
                     self.connection,
                     changed_by=sync_changed_by,
                     source=provenance_source,
+                    user_id=payload.user_id,
                 )
                 contact_action = "reconciled"
                 logger.info(
@@ -997,6 +1004,7 @@ class OutboxEventProcessor:
                     integration_source=integration_source,
                     external_id=external_id,
                     transaction=self.connection,
+                    user_id=payload.user_id,
                 )
             )
         except AttributeError as e:
@@ -1032,7 +1040,7 @@ class OutboxEventProcessor:
 
             # Refetch full contact to ensure we have current tags
             full_existing_contact = await self.contact_service.get_contact_by_id(
-                existing_contact.id
+                existing_contact.id, user_id=payload.user_id
             )
             existing_tags = (
                 full_existing_contact.tags or [] if full_existing_contact else []
@@ -1072,6 +1080,7 @@ class OutboxEventProcessor:
                     self.connection,
                     changed_by=sync_changed_by,
                     source=provenance_source,
+                    user_id=payload.user_id,
                 )
         except DuplicateEmailError as e:
             logger.warning(

@@ -111,7 +111,11 @@ class TestMatchedImportantDate:
 
         saved.important_dates = [_birthday(saved.id or 0, year=1991)]
         updated = await contact_service.update_contact(
-            saved, async_connection, changed_by="mcp", source=Provenance.MCP
+            saved,
+            async_connection,
+            changed_by="mcp",
+            source=Provenance.MCP,
+            user_id=TEST_USER_ID,
         )
 
         assert updated.important_dates is not None
@@ -141,7 +145,9 @@ class TestMatchedImportantDate:
         original_id = saved.important_dates[0].id
 
         saved.important_dates = [_birthday(saved.id or 0)]
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         assert updated.important_dates[0].id == original_id
@@ -165,7 +171,9 @@ class TestMatchedImportantDate:
         contact_id = saved.id or 0
         saved.important_dates = [_birthday(contact_id), _anniversary(contact_id)]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         assert len(updated.important_dates) == 2
@@ -196,7 +204,9 @@ class TestMatchedImportantDate:
         )
         saved.important_dates = [_birthday(contact_id)]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         assert [d.id for d in updated.important_dates] == [birthday_id]
@@ -220,7 +230,9 @@ class TestMatchedImportantDate:
         contact_id = saved.id or 0
         saved.important_dates = [_birthday(contact_id)]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         assert updated.important_dates[0].date_type == ImportantDateType.BIRTHDAY
@@ -253,7 +265,9 @@ class TestMatchedImportantDate:
         stale.id = 999_999
         saved.important_dates = [stale]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         (date,) = updated.important_dates
@@ -289,7 +303,9 @@ class TestMatchedImportantDate:
             edited_anniversary,
         ]
 
-        await contact_service.update_contact(saved, async_connection)
+        await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         published = recorded_events.of_type("ImportantDateUpdated")
         assert [e.event_data["date_id"] for e in published] == [
@@ -325,7 +341,11 @@ class TestMatchedMethodAddressAndNote:
         saved.methods[0].value = "after@example.com"
 
         updated = await contact_service.update_contact(
-            saved, async_connection, changed_by="ui", source=Provenance.UI
+            saved,
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
 
         assert updated.methods is not None
@@ -365,7 +385,9 @@ class TestMatchedMethodAddressAndNote:
         address_id = saved.addresses[0].id
         saved.addresses[0].street_line_1 = "2 New Street"
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.addresses is not None
         assert updated.addresses[0].id == address_id
@@ -395,7 +417,9 @@ class TestMatchedMethodAddressAndNote:
         note_id = saved.notes[0].id
         saved.notes[0].content = "Met at the cricket"
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.notes is not None
         assert updated.notes[0].id == note_id
@@ -427,7 +451,9 @@ class TestMatchedMethodAddressAndNote:
             ContactNote(content="Follows the cricket", contact_id=contact_id),
         ]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.notes is not None
         assert len(updated.notes) == 2
@@ -451,7 +477,9 @@ class TestMatchedMethodAddressAndNote:
         )
         saved.notes = [ContactNote(content="Follows the cricket", contact_id=0)]
 
-        await contact_service.update_contact(saved, async_connection)
+        await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert _changed_fields(recorded_events)["notes"] == (
             "Met at the conference",
@@ -475,7 +503,9 @@ class TestMatchedMethodAddressAndNote:
         )
         saved.notes = [ContactNote(content="Met at the conference", contact_id=0)]
 
-        await contact_service.update_contact(saved, async_connection)
+        await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert recorded_events.of_type("ContactUpdated") == []
 
@@ -508,7 +538,9 @@ class TestPrimaryAndUniquenessGuards:
         method_id = saved.methods[0].id
         saved.methods[0].value = "promoted@example.com"
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.methods is not None
         assert updated.methods[0].id == method_id
@@ -550,7 +582,9 @@ class TestPrimaryAndUniquenessGuards:
         saved.methods[0].value = "taken@example.com"
 
         with pytest.raises(Exception, match="(?i)email"):
-            await contact_service.update_contact(saved, async_connection)
+            await contact_service.update_contact(
+                saved, async_connection, user_id=TEST_USER_ID
+            )
 
 
 class TestUniqueIndexesDuringASave:
@@ -606,7 +640,9 @@ class TestUniqueIndexesDuringASave:
             ),
         ]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.methods is not None
         primaries = {m.id: m.is_primary for m in updated.methods}
@@ -637,7 +673,9 @@ class TestUniqueIndexesDuringASave:
         becomes_anniversary.id = birthday_id
         saved.important_dates = [becomes_birthday, becomes_anniversary]
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.important_dates is not None
         assert {d.id: d.date_type for d in updated.important_dates} == {
@@ -676,7 +714,9 @@ class TestUniqueIndexesDuringASave:
         home, work = saved.methods
         home.value, work.value = work.value, home.value
 
-        updated = await contact_service.update_contact(saved, async_connection)
+        updated = await contact_service.update_contact(
+            saved, async_connection, user_id=TEST_USER_ID
+        )
 
         assert updated.methods is not None
         assert {m.label: m.value for m in updated.methods} == {
@@ -748,6 +788,7 @@ class TestSubResourceMerge:
             subresource_merge=SubResourceMerge(
                 primary_methods={MethodType.EMAIL: "merge.after@example.com"}
             ),
+            user_id=TEST_USER_ID,
         )
 
         assert updated.methods is not None
@@ -786,6 +827,7 @@ class TestSubResourceMerge:
             ),
             async_connection,
             subresource_merge=SubResourceMerge(new_notes=["Follows the cricket"]),
+            user_id=TEST_USER_ID,
         )
 
         assert updated.notes is not None
