@@ -49,11 +49,13 @@ async def get_contact_relationships(
     """
     base_url = get_request_base_url(request)
 
-    relationships = await relationship_service.get_relationships_for_contact(contact_id)
+    relationships = await relationship_service.get_relationships_for_contact(
+        contact_id, user_id=user.id
+    )
 
     # Resolve contact names for display
     relationships = await relationship_service.resolve_relationship_contact_names(
-        relationships, contact_id
+        relationships, contact_id, user_id=user.id
     )
 
     relationship_resources = [
@@ -80,7 +82,9 @@ async def get_contact_relationship(
     """
     base_url = get_request_base_url(request)
 
-    relationship = await relationship_service.get_relationship_by_id(relationship_id)
+    relationship = await relationship_service.get_relationship_by_id(
+        relationship_id, user_id=user.id
+    )
     if not relationship:
         raise ContactValidationError(
             "relationship", f"Relationship with ID {relationship_id} not found"
@@ -98,7 +102,7 @@ async def get_contact_relationship(
 
     # Resolve contact name for display
     [relationship] = await relationship_service.resolve_relationship_contact_names(
-        [relationship], contact_id
+        [relationship], contact_id, user_id=user.id
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
@@ -158,6 +162,7 @@ async def create_contact_relationship(
         to_user=relationship.to_user,
         changed_by="ui",
         source=Provenance.UI,
+        user_id=user.id,
     )
 
     # Handle both single relationship and list of relationships
@@ -172,7 +177,7 @@ async def create_contact_relationship(
     [
         primary_relationship
     ] = await relationship_service.resolve_relationship_contact_names(
-        [primary_relationship], contact_id
+        [primary_relationship], contact_id, user_id=user.id
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
@@ -210,7 +215,7 @@ async def update_contact_relationship(
 
     # Get existing relationship to verify ownership
     existing_relationship = await relationship_service.get_relationship_by_id(
-        relationship_id
+        relationship_id, user_id=user.id
     )
     if not existing_relationship:
         raise ContactValidationError(
@@ -274,13 +279,14 @@ async def update_contact_relationship(
         transaction=connection,
         changed_by="ui",
         source=Provenance.UI,
+        user_id=user.id,
     )
 
     # Resolve contact name for display consistency
     [
         updated_relationship
     ] = await relationship_service.resolve_relationship_contact_names(
-        [updated_relationship], contact_id
+        [updated_relationship], contact_id, user_id=user.id
     )
 
     relationship_resource = ContactRelationshipConverter.to_resource(
@@ -306,7 +312,7 @@ async def delete_contact_relationship(
     """
     # Get existing relationship to verify ownership
     existing_relationship = await relationship_service.get_relationship_by_id(
-        relationship_id
+        relationship_id, user_id=user.id
     )
     if not existing_relationship:
         raise ContactValidationError(
@@ -328,4 +334,5 @@ async def delete_contact_relationship(
         transaction=connection,
         changed_by="ui",
         source=Provenance.UI,
+        user_id=user.id,
     )

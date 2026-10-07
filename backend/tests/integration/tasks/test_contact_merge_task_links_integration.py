@@ -49,6 +49,7 @@ from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
@@ -450,7 +451,7 @@ class TestTheWholeMergeCarriesThePeople:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await linked_contact_ids(async_connection, task_id) == [survivor]
@@ -469,7 +470,7 @@ class TestTheWholeMergeCarriesThePeople:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await linked_contact_ids(async_connection, task_id) == [survivor]
@@ -498,7 +499,7 @@ class TestTheWholeMergeCarriesThePeople:
 
         with pytest.raises(RuntimeError, match="merge failed"):
             await contact_merge.merge_contacts(
-                survivor, absorbed, transaction=async_connection
+                survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
             )
 
         assert await linked_contact_ids(async_connection, task_id) == [absorbed]
@@ -513,7 +514,7 @@ class TestTheWholeMergeCarriesThePeople:
         absorbed, survivor = people
 
         merged = await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert merged.id == survivor

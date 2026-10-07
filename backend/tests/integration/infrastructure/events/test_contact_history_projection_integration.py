@@ -941,6 +941,7 @@ class TestContactProjectionEndToEnd:
             transaction=async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         rel_id = (
             created_rel.id if not isinstance(created_rel, list) else created_rel[0].id

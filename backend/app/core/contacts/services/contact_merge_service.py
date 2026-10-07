@@ -129,6 +129,7 @@ class ContactMergeService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         overrides: dict[str, Any] | None = None,
+        user_id: str,
     ) -> Contact:
         """Absorb the source contact into the survivor, returning the unified contact.
 

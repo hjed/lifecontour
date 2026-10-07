@@ -237,7 +237,7 @@ class TestContactMergeAggregateIntegration:
         await contact_repo.assign_tag(source_id, tag_b)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -267,7 +267,7 @@ class TestContactMergeAggregateIntegration:
         source_id = await _make_contact(contact_repo, "Source")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await contact_repo.find_by_id(source_id) is None
@@ -288,7 +288,7 @@ class TestContactMergeAggregateIntegration:
         await _add_email(contact_repo, source_id, "other@example.com", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -314,7 +314,7 @@ class TestContactMergeAggregateIntegration:
         await _add_phone(contact_repo, source_id, "+61400000001")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -338,7 +338,7 @@ class TestContactMergeAggregateIntegration:
         await _add_phone(contact_repo, source_id, "+61400000001")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -362,7 +362,7 @@ class TestContactMergeAggregateIntegration:
         await _add_address(contact_repo, source_id, "1 Shared St", is_primary=False)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -391,7 +391,7 @@ class TestContactMergeAggregateIntegration:
         await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -421,7 +421,7 @@ class TestContactMergeAggregateIntegration:
         await _add_address(contact_repo, source_id, "1 Shared St", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -446,7 +446,7 @@ class TestContactMergeAggregateIntegration:
         await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -468,7 +468,7 @@ class TestContactMergeAggregateIntegration:
         await _add_phone(contact_repo, source_id, "+61400000001", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -491,7 +491,7 @@ class TestContactMergeAggregateIntegration:
         await _add_address(contact_repo, source_id, "2 Other Rd", is_primary=True)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -518,7 +518,7 @@ class TestContactMergeAggregateIntegration:
         await contact_repo.assign_tag(source_id, source_only)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -538,7 +538,7 @@ class TestContactMergeAggregateIntegration:
         await _add_birthday(contact_repo, source_id, month=2, day=2)
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -566,7 +566,7 @@ class TestContactMergeAggregateIntegration:
         )
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         survivor = await contact_repo.find_by_id(survivor_id)
@@ -590,7 +590,7 @@ class TestContactMergeAggregateIntegration:
         source_id = await _make_contact(contact_repo, "Source")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         merged_events = [
@@ -627,7 +627,7 @@ class TestContactMergeAggregateIntegration:
         )
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         aggregate = await history_repo.get_history_for_aggregate(
@@ -656,7 +656,7 @@ class TestContactMergeAggregateIntegration:
         source_id = await _make_contact(contact_repo, "Source")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         refresh_events = [

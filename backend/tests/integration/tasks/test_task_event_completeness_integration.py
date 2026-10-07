@@ -90,6 +90,7 @@ from app.infrastructure.events.history_projection_consumer import (
     TASK_HISTORY_EVENT_TYPES,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.tasks.task_seeding import (
     FIXED_PAST_INSTANT,
     USER_ID,
@@ -447,6 +448,7 @@ async def _act_merge_the_contact_away(fixtures: _Fixtures, seeded: Seeded) -> No
         transaction=fixtures.connection,
         source=Provenance.UI,
         changed_by="ui",
+        user_id=TEST_USER_ID,
     )
 
 
