@@ -498,9 +498,10 @@ async def _unlink_immich_reference_for_event(
 
     Immich exposes no person-delete, so reconciling a same-service merge clash
     means removing the source contact's canonical ``sync_metadata`` link (keyed
-    by the source's remote person id) — never a remote call. Idempotent:
-    deleting zero rows (the link was already cleaned inline by the merge) is
-    success.
+    by the source's remote person id) — never a remote call. Only the source
+    contact's own link is removed: a row for the same person id that points at
+    any other contact is not this merge's to touch. Idempotent: deleting zero
+    rows (the link was already cleaned inline by the merge) is success.
 
     Args:
         session: Database session
@@ -517,8 +518,13 @@ async def _unlink_immich_reference_for_event(
             DELETE FROM sync_metadata
             WHERE integration_source = :integration_source
               AND external_id = :external_id
+              AND internal_id = :contact_id
         """),
-        {"integration_source": "immich", "external_id": external_id},
+        {
+            "integration_source": "immich",
+            "external_id": external_id,
+            "contact_id": contact_id,
+        },
     )
 
     logger.info(
@@ -556,6 +562,10 @@ async def _process_contact_merged_event(
     sync metadata) without any remote call. The survivor's Immich person is
     reconciled separately by the ``ContactUpdated`` event the merge also emits,
     so it is intentionally not re-pushed here.
+
+    An event that names no owner never reaches this handler (see
+    ``process_contact_event``), and the unlink is keyed by the source contact,
+    which the owner held, so no other user's link is touched.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory

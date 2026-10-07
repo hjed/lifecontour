@@ -286,12 +286,28 @@ non-empty) and is the one the backend reads:
 
 The other direction carries the owner too. Every contact domain event that workers push
 (`CONTACT_PUSH_EVENT_TYPES`: the lifecycle events, `ContactMerged`, tag membership, methods,
-addresses, notes and important dates) names the contact's owner in `event_data.user_id`, so a
-worker can push the change to that user's accounts only. The Immich worker's per-contact push
-already does (it prefers `event_data["user_id"]` to every connected account); the Google worker
-and both workers' `ContactMerged` handlers move to it in Phase 13. The publishing service takes
-it from the contact it has already loaded; a merge names the survivor's owner. A registry test
-(`test_contact_event_type_registry.py`) fails if a pushed event is declared without it.
+addresses, notes and important dates) names the contact's owner in `event_data.user_id`. The
+publishing service takes it from the contact it has already loaded; a merge names the survivor's
+owner. A registry test (`test_contact_event_type_registry.py`) fails if a pushed event is
+declared without it.
+
+Outbound pushes go to that owner only:
+
+- **Event pushes.** The Google and Immich `process_contact_event` read only the owner's
+  credentials (`user_google_auth` / `user_immich_auth` `WHERE user_id = :user_id`) and push to
+  those accounts; another user's connected account is never written. An owner with no account
+  for that integration gets no push (Google skips the event; Immich reports a skipped result).
+- **No owner, no push.** An event that names no owner is acknowledged as
+  `{"status": "skipped", "reason": "no_owner"}` with a warning (the Snipe-IT rule), before any
+  database work. It is never fanned out to every connected account.
+- **Merges.** Each worker's `ContactMerged` handler is scoped the same way. Google deletes the
+  merged-away source's remote contact only in the owner's account(s) — the one destructive
+  outbound call. Immich (which has no remote delete) unlinks only the source contact's own
+  orphaned `sync_metadata` row (`internal_id` = the merged-away contact), never a row for the same
+  person id that points at any other contact.
+- **Per-user reads.** The Google push before each account's pull reads that account's user's
+  contacts only (`find_contacts_to_push(session, user_id=…)`), and the Immich name-match
+  auto-link considers only the syncing user's contacts as candidates.
 
 ### 2. Task Queue System
 
@@ -1455,7 +1471,8 @@ The system supports bidirectional synchronization:
 1. **Outbound Sync** (Local Changes → External Systems)
    - User updates contact in local database
    - Domain event triggers worker task
-   - Worker pushes changes to external API (e.g., Google Contacts)
+   - Worker pushes changes to external API (e.g., Google Contacts), in the accounts of the
+     contact's owner only (see [Shared Models](#1-shared-models-core_shared-package))
 
 2. **Inbound Sync** (External Systems → Local Database)
    - Worker pulls data from external API (periodic, manual, or webhook-triggered)

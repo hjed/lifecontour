@@ -427,7 +427,7 @@ that mechanical test change lands first, while the field is still optional:
   pushes a contact change to its owner's Immich account only — on a one-user site the same
   account as before, and an owner without Immich is skipped rather than written to someone
   else's. The Google worker ignores the key until Phase 13, as does Immich's separate
-  `ContactMerged` handler.
+  `ContactMerged` handler (both scoped in Phase 13).
 
 **Decisions (recorded during implementation):**
 - **Migration numbers:** `0123` (column) and `0124` (`NOT NULL`) — `main` took `0121` and `0122`
@@ -806,7 +806,7 @@ is keyed by the owner; no runtime single-user fallback remains.
 **Specification Reference:** Part 6.
 
 **Acceptance Criteria (task-level):**
-- [ ] Google and Immich outbound pushes reach only the owner's connected account(s); an event without an owner is skipped and logged, never fanned out.
+- [x] Google and Immich outbound pushes reach only the owner's connected account(s); an event without an owner is skipped and logged, never fanned out.
 - [ ] `sync_metadata.user_id NOT NULL` with `UNIQUE(user_id, integration_source, external_id)`; every lookup and upsert is keyed by owner.
 - [ ] `get_default_timezone()` no longer exists; the per-user `get_timezone(user_id)` does.
 
@@ -816,17 +816,17 @@ is keyed by the owner; no runtime single-user fallback remains.
 
 **PR Size:** ~350 lines (Google + Immich workers)
 
-- [ ] Google `process_contact_event` (`worker.py:3440-3671`): `user_id = event_data["user_id"]`;
+- [x] Google `process_contact_event` (`worker.py:3440-3671`): `user_id = event_data["user_id"]`;
   select `user_google_auth WHERE user_id = :user_id` only; an event without `user_id` returns
   `{"status": "skipped", "reason": "no_owner"}` with a warning (the Snipe-IT rule).
-- [ ] Google `find_contacts_to_push(session, user_id, …)` (`worker.py:142`) filters
+- [x] Google `find_contacts_to_push(session, user_id, …)` (`worker.py:142`) filters
   `c.user_id = :user_id`; the periodic push job iterates `user_google_auth` users and calls it per
   user.
-- [ ] Immich `process_contact_event`: remove the `get_all_user_ids` fallback (`worker.py:659`) and
+- [x] Immich `process_contact_event`: remove the `get_all_user_ids` fallback (`worker.py:659`) and
   the "single-user by design" comment; skip without an owner.
-- [ ] Immich `_fetch_user_contacts(user_id)` (`immich_sync_service.py:843`) filters by owner so the
+- [x] Immich `_fetch_user_contacts(user_id)` (`immich_sync_service.py:843`) filters by owner so the
   name-match auto-link (`:639`) only considers the owner's contacts; `ContactNameMatcher` unchanged.
-- [ ] **Merge events, in both workers.** `_process_contact_merged_event` (Google `worker.py:3338`,
+- [x] **Merge events, in both workers.** `_process_contact_merged_event` (Google `worker.py:3338`,
   Immich `worker.py:535`) is dispatched ahead of the generic branch and has its own account loop, so
   it is scoped separately: it reads `event_data["user_id"]` (the survivor's owner, carried on
   `ContactMerged` since Phase 3), reconciles the source's remote record only in **that** user's
@@ -835,20 +835,76 @@ is keyed by the owner; no runtime single-user fallback remains.
   must never run against another user's account.
 
 **Required Test Coverage:**
-- [ ] **Unit (Google, first):** two `user_google_auth` rows, an event owned by one → exactly one
+- [x] **Unit (Google, first):** two `user_google_auth` rows, an event owned by one → exactly one
   push; no owner → skipped, no API call (`test_worker.py`). The same two cases for a
   `ContactMerged` event: exactly one remote delete, against the owner's account only; no owner →
   no delete call.
-- [ ] **Unit (Immich):** same shape for both the generic branch and `_process_contact_merged_event`;
+- [x] **Unit (Immich):** same shape for both the generic branch and `_process_contact_merged_event`;
   auto-link candidates exclude another user's contact (`test_immich_sync_service.py`).
-- [ ] **Integration (workers):** `find_contacts_to_push` returns only the owner's contacts
+- [x] **Integration (workers):** `find_contacts_to_push` returns only the owner's contacts
   (`test_tag_push_integration.py` / the outbound push integration suite).
 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/integration-architecture.md` — Google/Immich outbound sections: per-owner
+- [x] `docs/architecture/integration-architecture.md` — Google/Immich outbound sections: per-owner
   push; "single-user" wording removed.
+
+**Delivery:** a four-layer stack, each layer deployable on its own (the measured diff was
+~1,200 lines against the ~350 estimate, mostly tests):
+- **13a** — Google `process_contact_event` and `_process_contact_merged_event` scoped to the
+  owner; no owner → skipped.
+- **13b** — Google `find_contacts_to_push(session, user_id=…)`; the push before each account's
+  pull passes that account's user; `push_local_contacts_to_google` loses its `user_id=1` default.
+- **13c** — Immich `process_contact_event` scoped to the owner (fallback, `get_all_user_ids` and
+  the "single-user by design" comment removed); `_fetch_user_contacts` filters by owner.
+- **13d** — Immich `_process_contact_merged_event` scoped to the owner; documentation.
+
+**Status:** ✅ DONE — Google and Immich push a contact change only to its owner's connected
+account(s); an event that names no owner is skipped; the periodic Google push and the Immich
+name-match read only the owner's contacts.
+
+**Decisions (recorded during implementation):**
+- **No owner → skip, never raise.** Both workers return
+  `{"status": "skipped", "reason": "no_owner"}` and log a warning, after the Google inbound-echo
+  guard and before any database work. Raising would only redeliver the event to the dead-letter
+  table. The check sits once at the top of `process_contact_event`, so the `ContactMerged` branch
+  is covered by the same line and the handler receives the owner as an argument.
+- **`_event_owner` normalises with `str()`.** `user_id` columns are `VARCHAR`; a numeric owner
+  would otherwise fail the bound comparison under asyncpg. The helper is duplicated in the two
+  workers rather than shared: workers are isolated and it is five lines.
+- **The Google periodic push needs no new loop.** `periodic_sync_all_accounts` already enqueues
+  `sync_google_contacts` per `user_google_auth` row, and each run pushes before it pulls; the
+  owner is passed explicitly down to `find_contacts_to_push` (`_push_before_pull` /
+  `_push_pending_local_contacts` take `user_id`) rather than read off the client, which the
+  tests mock.
+- **The Immich merge unlink is keyed by the source contact.** It makes no remote call; it deletes
+  the source's orphaned `sync_metadata` row, now `WHERE integration_source = 'immich' AND
+  external_id = … AND internal_id = <source_contact_id>`. The source contact was the owner's, so
+  this is owner-scoped without a per-user link store, and a row for the same person id held by any
+  other contact is never touched. A first draft gated the unlink on the owner having an Immich
+  account instead; review found that protected nothing under the global unique key and stopped an
+  owner who had disconnected Immich from having the orphan cleaned. `get_all_user_ids` is deleted
+  (no caller left).
+- **An Immich owner without credentials is reported as a skipped result**, as before for one
+  account in the loop; the old top-level `no_immich_integrations` skip no longer exists because
+  there is no list of accounts to be empty.
+
+- **Events published before Phase 3c are skipped.** A contact event still in the stream from a
+  backend that did not stamp `user_id` is skipped as `no_owner` at deploy. A create or update is
+  recovered by the next periodic Google push (`updated_at > last_synced_at`); a
+  `ContactDeleted` / `ContactMerged` is not, so that remote contact stays. Accepted: Phase 3c was
+  already deployed, so the window is the stream backlog at deploy time.
+- **Test placement.** Most of the Google event tests live in
+  `google/tests/unit/test_process_contact_event.py` (with the two-account integration cases in
+  `test_contact_subentity_event_push_integration.py` and
+  `test_process_contact_event_integration.py`), not `test_worker.py` as listed above;
+  `find_contacts_to_push` has its own `test_find_contacts_to_push_integration.py`, and the Immich
+  name-match test is `test_immich_name_match_owner_integration.py`.
+
+**Follow-ups (found in Phase 13):**
+- None. Google `process_tag_event` still loops over every `user_google_auth` row; that is Phase 8's
+  by design (it must land with the per-user tag schema).
 
 ---
 

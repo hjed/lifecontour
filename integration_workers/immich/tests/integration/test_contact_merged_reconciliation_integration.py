@@ -184,7 +184,29 @@ class TestContactMergedImmichReconciliation:
 
 @pytest.mark.asyncio
 class TestContactMergedIsScopedToTheOwner:
-    """A merge event that names no owner unlinks nothing."""
+    """The unlink touches only the merged-away contact's own link."""
+
+    async def test_same_person_linked_to_another_contact_is_left_alone(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Only the source contact's own link is unlinked, never another's."""
+        other_contact = 99
+        await _seed_sync_metadata(db_session, other_contact, _SOURCE_PERSON)
+        await db_session.flush()
+
+        result = await process_contact_event(
+            ctx=_ctx(db_session),
+            event_type="ContactMerged",
+            event_data={
+                "user_id": _OWNER,
+                "survivor_contact_id": _SURVIVOR_CONTACT,
+                "source_contact_id": _SOURCE_CONTACT,
+                "external_collisions": [_immich_collision()],
+            },
+        )
+
+        assert result["status"] == "success"
+        assert _SOURCE_PERSON in await _sync_metadata_external_ids(db_session)
 
     async def test_event_without_owner_leaves_links_alone(
         self, merge_setup: AsyncSession
