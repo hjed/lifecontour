@@ -18,8 +18,8 @@ from tests.integration.contact_seeding import TEST_USER_ID, seed_contact, seed_c
 pytestmark = pytest.mark.asyncio
 
 _SELECT_CONTACT = text("""
-    SELECT id, first_name, last_name, middle_name, nick_name, company, job_title,
-           photo_url, is_favourite, created_at, updated_at
+    SELECT id, user_id, first_name, last_name, middle_name, nick_name, company,
+           job_title, photo_url, is_favourite, created_at, updated_at
     FROM contacts
     WHERE id = :id
 """)
@@ -35,6 +35,7 @@ async def test_a_bare_call_seeds_a_minimal_contact(
     contact_id = await seed_contact(async_connection)
 
     row = await _row(async_connection, contact_id)
+    assert row.user_id == TEST_USER_ID
     assert row.first_name == "Sarah"
     assert row.last_name is None
     assert row.is_favourite is False
@@ -93,6 +94,12 @@ async def test_every_named_column_is_written(async_connection: AsyncConnection) 
     )
 
 
+async def test_an_explicit_owner_is_written(async_connection: AsyncConnection) -> None:
+    contact_id = await seed_contact(async_connection, user_id="other-user-456")
+
+    assert (await _row(async_connection, contact_id)).user_id == "other-user-456"
+
+
 async def test_an_explicit_id_is_used_and_returned(
     async_connection: AsyncConnection,
 ) -> None:
@@ -114,5 +121,6 @@ async def test_bulk_seeding_numbers_the_contacts_in_one_statement(
     contact_ids = await seed_contacts(async_connection, 3, first_name_prefix="Guest")
 
     assert len(set(contact_ids)) == 3
-    names = [(await _row(async_connection, i)).first_name for i in contact_ids]
-    assert names == ["Guest 1", "Guest 2", "Guest 3"]
+    rows = [await _row(async_connection, i) for i in contact_ids]
+    assert [row.first_name for row in rows] == ["Guest 1", "Guest 2", "Guest 3"]
+    assert {row.user_id for row in rows} == {TEST_USER_ID}

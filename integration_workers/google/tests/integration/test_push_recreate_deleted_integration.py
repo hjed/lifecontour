@@ -23,6 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from google_client import GoogleContactNotFoundError
 from worker import process_contact_event, push_contacts_to_google
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 _DELETED_REMOTE = "people/cDELETED"
 _RECREATED_REMOTE = "people/cRECREATED"
 # The backend's record of which tags were last synced; losing it makes an
@@ -68,7 +72,7 @@ def _client_for_deleted_remote() -> AsyncMock:
 async def linked_contact_id(db_session: AsyncSession) -> int:
     """A local contact whose Google link points at a deleted person."""
     contact_id: int = await seed_contact(
-        db_session, first_name="Recreate", last_name="Me"
+        db_session, first_name="Recreate", last_name="Me", user_id=CONTACT_OWNER
     )
     await db_session.execute(
         text(

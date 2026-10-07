@@ -577,6 +577,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         request: ContactCreateRequest,
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Create a new contact for AI-managed relationship building.
@@ -592,9 +593,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         """
         logger.info("MCP: Creating contact", request=request.model_dump())
 
-        # Create contact entity with methods and notes
+        # Create contact entity with methods and notes, owned by the acting user
         contact = Contact(
             first_name=request.first_name,
+            user_id=user_id,
             last_name=request.last_name,
             middle_name=request.middle_name,
             nick_name=request.nick_name,
@@ -792,6 +794,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             updated_contact = Contact(
                 id=request.contact_id,
                 first_name=request.first_name or existing_contact.first_name,
+                user_id=existing_contact.user_id,
                 last_name=request.last_name or existing_contact.last_name,
                 middle_name=request.middle_name or existing_contact.middle_name,
                 nick_name=request.nick_name or existing_contact.nick_name,

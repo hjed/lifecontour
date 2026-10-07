@@ -204,11 +204,11 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 **Specification Reference:** Parts 1, 2, 5; Part 6 "Sync events name the owner".
 
 **Acceptance Criteria (task-level):**
-- [ ] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
-- [ ] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
+- [x] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
+- [x] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
 - [ ] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
 - [ ] Contact search, global search and search suggestions return only the acting user's contacts.
-- [ ] Worker-published contact sync events and backend contact events carry `user_id`.
+- [x] Worker-published contact sync events and backend contact events carry `user_id`.
 
 ---
 
@@ -342,7 +342,7 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
 
 > **Migration number:** indicative `0121_add_user_id_to_contacts.py` (`down_revision = "0120"`).
 
-- [ ] Migration `0121`: add `user_id VARCHAR(50)` nullable → assign every row per the `0106`
+- [x] Migration `0121`: add `user_id VARCHAR(50)` nullable → assign every row per the `0106`
   derivation, **widened to every owner-bearing table as evidence**: `0106`'s `REPAIRED_TABLES` plus
   the credential and settings tables it deliberately left out of *repair* (`user_google_auth`,
   `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `user_settings`, `sync_jobs`,
@@ -356,10 +356,10 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   `idx_contacts_user_id`. Downgrade drops the index and column. Logs every decision through the
   `alembic.runtime.migration` logger. The derivation is written once as a helper module beside the
   migrations so `0122`–`0125` reuse it rather than re-deriving.
-- [ ] `contact_tables.py`: `user_id` column. `SqlContactRepository.save` writes it; the three row
+- [x] `contact_tables.py`: `user_id` column. `SqlContactRepository.save` writes it; the three row
   mappers (`contact_repository.py:78,1528,1665`) and `upcoming_important_date_repository.py:161`
   read it.
-- [ ] **Contract:** `Contact.user_id: str` (required, placed after `first_name`). mypy then names
+- [x] **Contract:** `Contact.user_id: str` (required, placed after `first_name`). mypy then names
   every construction site; each passes the owner:
   - REST: `ContactRequestConverter` (`api/contacts/converters.py:417,475`) receives the
     `SessionUser` id from the controller.
@@ -372,7 +372,7 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   - Inbound consumer (`outbox_event_processor.py:646, 883`): the owner is
     `payload.user_id` (or `contact_data.user_id`); missing →
     `PermanentOutboxEventProcessingError("contact sync event names no owner")`.
-- [ ] **Every event in `CONTACT_PUSH_EVENT_TYPES`** (`core/contacts/models/events.py` — the four
+- [x] **Every event in `CONTACT_PUSH_EVENT_TYPES`** (`core/contacts/models/events.py` — the four
   lifecycle events plus `TagAssigned`, `TagRemoved`, `ContactMethodAdded/Deleted`,
   `ContactAddressAdded/Deleted`, `ContactNoteAdded`, `ImportantDateAdded/Updated/Deleted`) gains
   `user_id` in `event_data`, supplied by the publishing service from the aggregate it has already
@@ -381,19 +381,19 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
   iterates `CONTACT_PUSH_EVENT_TYPES` and asserts each constructor's payload names `user_id`, so a
   new pushed type cannot land without one (the subscription-list-vs-handlers assertion pattern).
   Mechanical, ~2 lines per class; it is 3b work if the phase splits.
-- [ ] Test fixtures: `contact_fixtures.py` factories and `ContactFactory` default
+- [x] Test fixtures: `contact_fixtures.py` factories and `ContactFactory` default
   `user_id=TEST_USER_ID`; `seed_contact` (Phase 1) writes the column.
 
 **Required Test Coverage:**
-- [ ] **Integration (migration):** `backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py`
+- [x] **Integration (migration):** `backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py`
   on the `test_reassign_synthetic_owner_migration.py` harness — rows assigned to the single real
   owner; owner found from a credential/settings table alone (contacts-only installation);
   dev-only database assigned to `dev-user`; contacts with no owner evidence refuse; ambiguous
   ownership refuses; `-x contacts_owner` overrides both refusals; empty database upgrades and
   downgrades; existing rows otherwise untouched.
-- [ ] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
+- [x] **Integration (repository):** `save` persists and `find_by_id` returns `user_id`
   (`test_contact_repository_integration.py`).
-- [ ] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
+- [x] **Unit:** converters and MCP tools stamp the acting user; processor stamps the payload's owner
   and rejects a payload without one; each of the four events carries `user_id`
   (`tests/unit/contacts/test_contact_service.py`, `tests/unit/api/test_contact_converters.py`,
   `tests/unit/core/integrations/test_outbox_event_processor.py`).
@@ -402,10 +402,92 @@ is the reverse: a `NOT NULL` column in production while a construction site can 
 the API, which now stamps it).
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/database-design.md` — `contacts.user_id` in the Contacts Table section; the
+- [x] `docs/architecture/database-design.md` — `contacts.user_id` in the Contacts Table section; the
   migration's owner derivation.
-- [ ] `docs/architecture/integration-architecture.md` — inbound consumer rejects contact events
+- [x] `docs/architecture/integration-architecture.md` — inbound consumer rejects contact events
   without an owner.
+
+**Delivery:** a four-layer stack, each layer deployable on its own. The contract alone breaks 288
+test construction sites (mypy, 40 backend files) on top of the hand-built sync-event payloads, so
+that mechanical test change lands first, while the field is still optional:
+- **3a ✅ DONE** — `0123` (nullable column, owner assignment, `idx_contacts_user_id`), the shared
+  `app/migrations/owner_derivation.py`, `contacts_table` column and index, repository INSERT and
+  row mappers, `seed_contact(user_id=…)` (required in `core_shared`; the backend wrapper defaults
+  to `TEST_USER_ID`), `run_alembic(..., x_args=…)`.
+- **3b-prep ✅ DONE** — test-only: every test `Contact(...)`, the contact factories (`user_id`
+  defaulting to `TEST_USER_ID`) and the hand-built sync payloads name an owner. No production code.
+- **3b ✅ DONE** — required `Contact.user_id`, `ContactSyncEventData.user_id` and
+  `create_contact_sync_event(user_id=…)`; every writer stamps an owner (REST and MCP the acting
+  user, Immich-conflict "create" on both surfaces, suggestion accept, the merge survivor); the
+  inbound consumer's owner handling; `0124` (`SET NOT NULL`).
+- **3c ✅ DONE** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event (a required keyword on
+  each constructor, so mypy names every publisher). **Must merge before Phase 13.**
+  It changes one worker immediately: the Immich worker's per-contact push already prefers
+  `event_data["user_id"]` (`immich/worker.py:659`) over every connected account, so from 3c it
+  pushes a contact change to its owner's Immich account only — on a one-user site the same
+  account as before, and an owner without Immich is skipped rather than written to someone
+  else's. The Google worker ignores the key until Phase 13, as does Immich's separate
+  `ContactMerged` handler.
+
+**Decisions (recorded during implementation):**
+- **Migration numbers:** `0123` (column) and `0124` (`NOT NULL`) — `main` took `0121` and `0122`
+  (journal-series recurrence aliases, split-series consolidation) — so the indicative numbers of
+  later phases shift by three.
+- **One derivation helper, literal evidence per revision.** `derive_owner` reads the operator
+  override first, then the evidence each migration passes as its own literal tuple (revision
+  files cannot import each other, and literals keep a revision's meaning fixed). `0123`'s evidence
+  is `0106`'s `REPAIRED_TABLES` plus `user_google_auth`, `user_google_integration`,
+  `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`,
+  `user_settings`, `sync_jobs`, `calendar_sync_tokens`, `pending_entity_mappings`,
+  `contact_suggestion_ignores`, and the records that can outlive the rows above:
+  `journal_daily_summaries`, `field_history` (task history) and
+  `journal_series_recurrence_aliases`. The migration test asserts the list *equals* the set of
+  tables holding a `user_id` at the base revision, so a table cannot be left out (augment review
+  on #1668 found three missing).
+- **Both synthetic owners, no real one → `dev-user`.** The spec covers one synthetic owner;
+  `debug-client` can no longer be produced, so a database holding both is a legacy local one
+  whose developer is the `DISABLE_AUTH` user. Refusing would make every such developer pass `-x`.
+- **The owner is written on INSERT only.** `save` never updates `user_id`, so neither an update
+  converter nor a sync event can re-own a contact. `ContactService.update_contact` also adopts the
+  stored owner onto the incoming contact, so the aggregate it saves, returns and publishes always
+  agrees with the row, whatever owner a caller sent (augment review on #1676).
+- **The inbound consumer: the top-level `user_id` is authoritative, a stored contact keeps its
+  owner.** A payload failing validation (an owner-less one included) is now a
+  `PermanentOutboxEventProcessingError`, logged as an invalid payload; before, pydantic's
+  `ValidationError` was wrapped as a transient `OutboxEventProcessingError`. Either way the stream
+  layer retries it up to `max_delivery_count` and then dead-letters it (see follow-ups). A new contact takes the event's top-level owner, whatever
+  `contact_data` says (`contact_data` is not rewritten, so version hashes are unchanged). An update
+  through the link store, or a create reconciled by email, keeps the **stored** owner and logs a
+  mismatch rather than refusing: refusing cross-owner links is Phases 14–15's per-user link store.
+- **Child-row events take the owner from the contact the service already loads.**
+  `ContactValidationService.validate_contact_exists` now returns the contact it loads; field
+  updates use `current_contact`, bulk saves the aggregate being saved (on update, the *stored*
+  contact), and the private `_save_contact_*` / important-date helpers take a keyword `user_id`.
+  No extra query.
+- **`ContactMergeService._merge_scalars` names the survivor's owner explicitly.** It builds the
+  merged contact with `Contact(id=…, **resolved)`; mypy cannot see a missing required argument
+  through `**dict`, so this one site would have raised `TypeError` on every merge with no type
+  error to warn of it.
+- **`mcp/domains/integrations/tools.py:429` is the Immich conflict "create"**, not the athlete
+  mapping (which creates no contact) — the construction-site list above names it wrongly.
+
+**Follow-ups (found in Phase 3):**
+- **Permanent inbound failures are still retried.** `InboundEventConsumer` lets
+  `PermanentOutboxEventProcessingError` propagate, and `StreamConsumer` (core_shared) treats every
+  exception alike: the message stays pending, is redelivered, and is dead-lettered only after
+  `max_delivery_count` (5). An owner-less sync event therefore costs four pointless retries before
+  it reaches the dead-letter table. Pre-existing for every permanent payload error; dead-lettering
+  it on first delivery is a `StreamConsumer` change for all consumers (augment review on #1674).
+- `daily_summary_invalidation_service.py` (the `ImportantDate*` / `ContactUpdated` invalidation)
+  still documents "contacts carries no owner column" and fans out to every user with a summary.
+  The events now carry `user_id`; scoping that fan-out belongs with the dashboard reads in Phase 4.
+- `backend/tests/unit/contacts/test_summary_prompt_builder.py::test_prompt_current_time_uses_user_timezone`
+  asserts Sydney renders as `AEST` / `+10:00`, which is false during daylight saving (from
+  2026-10-04 it is `AEDT` / `+11:00`). It fails on `main`, independent of this phase; fix the test
+  to pin "now" or to accept the zone's current abbreviation.
+- Worker integration suites run `upgrade head` without resetting the schema, so a stale *local*
+  test database holding contacts and no owner evidence makes `0123` refuse; recreate the
+  container or pass `-x contacts_owner`. CI starts from fresh containers.
 
 ---
 

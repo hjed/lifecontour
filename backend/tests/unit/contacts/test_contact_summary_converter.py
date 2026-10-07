@@ -11,6 +11,7 @@ from core_shared.models.contacts.entities import (
 )
 
 from app.api.contacts.converters import ContactConverter
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.unit
@@ -95,6 +96,7 @@ class TestContactSummaryConverter:
             status=SummaryStatus.GENERATED,
         )
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="John",
             id=1,
             summary=summary,
@@ -106,6 +108,7 @@ class TestContactSummaryConverter:
     def test_to_resource_works_without_summary(self):
         """Test that to_resource works when contact has no summary."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="John",
             id=1,
         )

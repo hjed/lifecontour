@@ -165,7 +165,7 @@ class TestContactOutboxEmission:
         """A linked person with a stale version hash yields ``contact.updated``."""
         person_id = "22222222-2222-4222-8222-222222222222"
         contact_id = await seed_contact(
-            async_connection, first_name="Existing", last_name="Person"
+            async_connection, first_name="Existing", last_name="Person", user_id=USER_ID
         )
 
         # Link the person via the canonical sync_metadata store with a *different*
@@ -194,7 +194,7 @@ class TestContactOutboxEmission:
         """A single name match auto-links and emits ``contact.updated``."""
         person_id = "33333333-3333-4333-8333-333333333333"
         contact_id = await seed_contact(
-            async_connection, first_name="Linkable", last_name="Match"
+            async_connection, first_name="Linkable", last_name="Match", user_id=USER_ID
         )
 
         result = await sync_service.sync_people_batch(

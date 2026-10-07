@@ -63,6 +63,7 @@ _CANDIDATES_QUERY = text("""
         cdt.name AS custom_date_type_name,
         d.created_at,
         d.updated_at,
+        c.user_id,
         c.first_name,
         c.middle_name,
         c.last_name,
@@ -132,6 +133,7 @@ class SqlUpcomingImportantDateRepository(UpcomingImportantDateRepository):
                 contact=UpcomingDateContact(
                     id=row.contact_id,
                     display_name=_display_name(
+                        row.user_id,
                         row.first_name,
                         row.middle_name,
                         row.last_name,
@@ -145,6 +147,7 @@ class SqlUpcomingImportantDateRepository(UpcomingImportantDateRepository):
 
 
 def _display_name(
+    user_id: str,
     first_name: str,
     middle_name: str | None,
     last_name: str | None,
@@ -160,6 +163,7 @@ def _display_name(
     """
     return Contact(
         first_name=first_name,
+        user_id=user_id,
         middle_name=middle_name,
         last_name=last_name,
         nick_name=nick_name,

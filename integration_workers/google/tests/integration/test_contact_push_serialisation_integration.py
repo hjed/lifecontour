@@ -21,6 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker import _lock_contact_for_push, push_contacts_to_google
 
+# The connected Google user these tests push for, and so the owner of
+# every contact they seed.
+CONTACT_OWNER = "1"
+
 _TRY_LOCK = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))")
 
 
@@ -100,7 +104,7 @@ class TestCronRereadsTheLinkUnderTheLock:
         the linked person rather than create a duplicate.
         """
         contact_id = await seed_contact(
-            db_session, first_name="Race", last_name="Loser"
+            db_session, first_name="Race", last_name="Loser", user_id=CONTACT_OWNER
         )
 
         # What find_contacts_to_push returned before the event path ran.
@@ -163,7 +167,7 @@ class TestCronRereadsTheLinkUnderTheLock:
     ) -> None:
         """The re-read does not suppress a genuine create."""
         contact_id = await seed_contact(
-            db_session, first_name="Genuinely", last_name="New"
+            db_session, first_name="Genuinely", last_name="New", user_id=CONTACT_OWNER
         )
         await db_session.flush()
 

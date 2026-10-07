@@ -321,16 +321,16 @@ async def create_contact(
     contact_request: ContactCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
-    Create a new contact.
+    Create a new contact, owned by the signed-in user.
 
     Creates a new contact with the provided data and returns the created resource.
     """
     base_url = get_request_base_url(request)
 
-    contact = ContactRequestConverter.from_create_request(contact_request.data)
+    contact = ContactRequestConverter.from_create_request(contact_request.data, user.id)
 
     created_contact = await contact_service.create_contact(
         contact, connection, changed_by="ui", source=Provenance.UI

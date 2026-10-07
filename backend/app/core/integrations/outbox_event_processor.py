@@ -30,6 +30,7 @@ from core_shared.models.sync_metadata import SyncStatus
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
@@ -99,6 +100,53 @@ class ContactReconciliationConflictError(OutboxEventProcessingError):
         super().__init__(message)
         self.matched_contact_id = matched_contact_id
         self.integration_source = integration_source
+
+
+def _parse_contact_sync_payload(event_data: dict[str, Any]) -> ContactSyncEventData:
+    """Validate a ``contact.created`` / ``contact.updated`` payload.
+
+    A malformed payload can never succeed, so it raises the permanent error. That
+    includes one naming no owner: whose contact it is cannot be guessed (spec:
+    entity ownership, "Sync events name the owner").
+    """
+    try:
+        return ContactSyncEventData.model_validate(event_data)
+    except ValidationError as e:
+        if any(error["loc"][:1] == ("user_id",) for error in e.errors()):
+            raise PermanentOutboxEventProcessingError(
+                "contact sync event names no owner (user_id)"
+            ) from e
+        raise PermanentOutboxEventProcessingError(
+            f"invalid contact sync event payload: {e}"
+        ) from e
+
+
+def _deserialize_owned_contact(contact_data: dict[str, Any], owner: str) -> Contact:
+    """Build the inbound contact for ``owner``, the event's top-level ``user_id``.
+
+    The event's owner is authoritative over anything ``contact_data`` carries.
+    ``contact_data`` itself is left untouched, so its version hash is unchanged.
+    """
+    try:
+        return deserialize_contact({**contact_data, "user_id": owner})
+    except ContactDeserializationError as e:
+        raise PermanentOutboxEventProcessingError(str(e)) from e
+
+
+def _keep_stored_owner(incoming: Contact, stored: Contact) -> None:
+    """An inbound sync never re-owns a stored contact; it keeps ``stored``'s owner.
+
+    A mismatch means the global link store matched another user's contact. It
+    is logged, not refused: per-owner links are the link store's job.
+    """
+    if incoming.user_id != stored.user_id:
+        logger.warning(
+            "Inbound contact sync names a different owner than the stored contact",
+            contact_id=stored.id,
+            event_owner=incoming.user_id,
+            stored_owner=stored.user_id,
+        )
+    incoming.user_id = stored.user_id
 
 
 def _keep_archived_values(incoming: Contact, stored: Contact) -> None:
@@ -646,7 +694,7 @@ class OutboxEventProcessor:
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
-        payload = ContactSyncEventData.model_validate(event_data)
+        payload = _parse_contact_sync_payload(event_data)
         integration_source: str = _normalize_integration_source(
             payload.integration_source
         )
@@ -699,10 +747,7 @@ class OutboxEventProcessor:
         )
 
         # Deserialize contact data from outbox event
-        try:
-            contact = deserialize_contact(contact_data)
-        except ContactDeserializationError as e:
-            raise PermanentOutboxEventProcessingError(str(e)) from e
+        contact = _deserialize_owned_contact(contact_data, payload.user_id)
 
         # Resolve tags: deserialize_contact creates Tag objects without DB IDs.
         # We need to look up or create real tags before saving the contact.
@@ -777,6 +822,7 @@ class OutboxEventProcessor:
                     )
             else:
                 contact.id = matched_contact.id
+                _keep_stored_owner(contact, matched_contact)
                 if matched_contact.id is not None:
                     stored = await self.contact_service.get_contact_by_id(
                         matched_contact.id
@@ -890,7 +936,7 @@ class OutboxEventProcessor:
         3. Updates contact and sync metadata atomically
         """
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
-        payload = ContactSyncEventData.model_validate(event_data)
+        payload = _parse_contact_sync_payload(event_data)
         integration_source: str = _normalize_integration_source(
             payload.integration_source
         )
@@ -973,13 +1019,16 @@ class OutboxEventProcessor:
 
         # Deserialize contact data from outbox event
         try:
-            updated_contact_data = deserialize_contact(contact_data)
+            updated_contact_data = _deserialize_owned_contact(
+                contact_data, payload.user_id
+            )
 
             if existing_contact.id is None:
                 raise OutboxEventProcessingError("Existing contact has no ID")
 
-            # Preserve the existing contact ID
+            # Preserve the existing contact ID and owner
             updated_contact_data.id = existing_contact.id
+            _keep_stored_owner(updated_contact_data, existing_contact)
 
             # Refetch full contact to ensure we have current tags
             full_existing_contact = await self.contact_service.get_contact_by_id(

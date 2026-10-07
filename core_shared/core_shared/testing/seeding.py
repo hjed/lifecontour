@@ -22,15 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 # defaults would.
 _INSERT_CONTACT = text("""
     INSERT INTO contacts (
-        id, first_name, middle_name, last_name, nick_name, company, job_title,
-        photo_url, is_favourite, created_at, updated_at
+        id, user_id, first_name, middle_name, last_name, nick_name, company,
+        job_title, photo_url, is_favourite, created_at, updated_at
     )
     VALUES (
         COALESCE(
             CAST(:id AS INTEGER),
             nextval(pg_get_serial_sequence('contacts', 'id'))
         ),
-        :first_name, :middle_name, :last_name, :nick_name, :company, :job_title,
+        :user_id, :first_name, :middle_name, :last_name, :nick_name, :company, :job_title,
         :photo_url, :is_favourite,
         COALESCE(CAST(:created_at AS TIMESTAMPTZ), now()),
         COALESCE(CAST(:updated_at AS TIMESTAMPTZ), now())
@@ -42,6 +42,7 @@ _INSERT_CONTACT = text("""
 async def seed_contact(
     conn: AsyncConnection | AsyncSession,
     *,
+    user_id: str,
     first_name: str = "Sarah",
     last_name: str | None = None,
     middle_name: str | None = None,
@@ -54,7 +55,10 @@ async def seed_contact(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> int:
-    """Insert a contact row and return its id.
+    """Insert a contact row owned by ``user_id`` and return its id.
+
+    The owner is required: a worker test acts as its own user, and a default
+    here would let it seed a contact for somebody else without noticing.
 
     ``contact_id`` pins the id, for tests that address fixed ids; it does not
     advance the table's sequence, so a test mixing pinned and drawn ids must
@@ -65,6 +69,7 @@ async def seed_contact(
         _INSERT_CONTACT,
         {
             "id": contact_id,
+            "user_id": user_id,
             "first_name": first_name,
             "middle_name": middle_name,
             "last_name": last_name,
@@ -81,8 +86,8 @@ async def seed_contact(
 
 
 _INSERT_NUMBERED_CONTACTS = text("""
-    INSERT INTO contacts (first_name)
-    SELECT CAST(:prefix AS TEXT) || ' ' || n
+    INSERT INTO contacts (user_id, first_name)
+    SELECT CAST(:user_id AS VARCHAR), CAST(:prefix AS TEXT) || ' ' || n
     FROM generate_series(1, :count) AS n
     ORDER BY n
     RETURNING id
@@ -93,15 +98,17 @@ async def seed_contacts(
     conn: AsyncConnection | AsyncSession,
     count: int,
     *,
+    user_id: str,
     first_name_prefix: str = "Contact",
 ) -> list[int]:
-    """Insert ``count`` bare contacts named ``"<prefix> 1"`` … in one statement.
+    """Insert ``count`` bare contacts, owned by ``user_id``, named ``"<prefix> 1"`` … in one statement.
 
     For tests that need more contacts than one-at-a-time seeding can afford —
     tens of thousands of round trips would dominate the suite. Returns the ids
     in numbering order.
     """
     result = await conn.execute(
-        _INSERT_NUMBERED_CONTACTS, {"prefix": first_name_prefix, "count": count}
+        _INSERT_NUMBERED_CONTACTS,
+        {"user_id": user_id, "prefix": first_name_prefix, "count": count},
     )
     return [int(contact_id) for contact_id in result.scalars()]

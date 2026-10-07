@@ -136,6 +136,12 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
     if not isinstance(data, dict):
         raise ContactDeserializationError("Contact payload must be a dictionary")
 
+    # Every contact has exactly one owner; a payload that names none cannot
+    # become a contact, and guessing would give it to the wrong user.
+    user_id = data.get("user_id")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ContactDeserializationError("Contact payload names no owner (user_id)")
+
     def _get_list(field: str) -> list[Any] | None:
         if field not in data or data[field] is None:
             return None
@@ -231,7 +237,7 @@ def deserialize_contact(data: dict[str, Any]) -> Contact:
 
         return Contact(
             first_name=first_name,
-            user_id=data.get("user_id"),
+            user_id=user_id,
             last_name=data.get("last_name"),
             middle_name=data.get("middle_name"),
             nick_name=data.get("nick_name"),

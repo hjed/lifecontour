@@ -76,6 +76,7 @@ async def test_participant_detection_by_exact_name(
     # Create contact with exact name
     contact_repo = SqlContactRepository(async_connection)
     contact = Contact(
+        user_id=user_id,
         first_name="John",
         last_name="Doe",
     )
@@ -145,6 +146,7 @@ async def test_participant_detection_uses_existing_mapping(
     # Create contact
     contact_repo = SqlContactRepository(async_connection)
     contact = Contact(
+        user_id=user_id,
         first_name="Jane",
         last_name="Smith",
     )
@@ -217,8 +219,12 @@ async def test_participant_detection_skips_ambiguous_names(
 
     # Create two contacts with the same name
     contact_repo = SqlContactRepository(async_connection)
-    c1 = await contact_repo.save(Contact(first_name="Bob", last_name="Jones"))
-    c2 = await contact_repo.save(Contact(first_name="Bob", last_name="Jones"))
+    c1 = await contact_repo.save(
+        Contact(user_id=user_id, first_name="Bob", last_name="Jones")
+    )
+    c2 = await contact_repo.save(
+        Contact(user_id=user_id, first_name="Bob", last_name="Jones")
+    )
     assert c1.id is not None
     assert c2.id is not None
 

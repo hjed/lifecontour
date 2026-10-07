@@ -12,6 +12,7 @@ from app.core.contacts.adapters.sql.contact_repository import SqlContactReposito
 from app.core.contacts.adapters.sql.custom_date_type_repository import (
     SqlCustomDateTypeRepository,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def custom_date_repo(async_connection: AsyncConnection) -> SqlCustomDateTypeRepo
 @pytest.fixture
 async def sample_contact(contact_repo: SqlContactRepository) -> Contact:
     """Fixture to create a sample contact for testing."""
-    contact = Contact(first_name="Alice", last_name="Smith")
+    contact = Contact(user_id=TEST_USER_ID, first_name="Alice", last_name="Smith")
     return await contact_repo.save(contact)
 
 

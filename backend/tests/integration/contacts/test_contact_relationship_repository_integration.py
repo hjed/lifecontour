@@ -14,6 +14,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactRelationshipRepository,
     SqlContactRepository,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest_asyncio.fixture
@@ -33,8 +34,8 @@ async def relationship_repo(
 @pytest_asyncio.fixture
 async def test_contacts(contact_repo: SqlContactRepository) -> tuple[Contact, Contact]:
     """Create test contacts for relationship testing."""
-    contact1 = Contact(first_name="John", last_name="Doe")
-    contact2 = Contact(first_name="Jane", last_name="Smith")
+    contact1 = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
+    contact2 = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
 
     saved_contact1 = await contact_repo.save(contact1)
     saved_contact2 = await contact_repo.save(contact2)

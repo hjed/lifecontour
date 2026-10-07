@@ -10,6 +10,8 @@ from core_shared.models.contacts.entities import (
     SummaryStatus,
 )
 
+from tests.integration.contact_seeding import TEST_USER_ID
+
 
 @pytest.mark.unit
 class TestSummaryStatus:
@@ -245,7 +247,7 @@ class TestContactWithSummary:
 
     def test_contact_has_optional_summary_field(self):
         """Test Contact has summary field that defaults to None."""
-        contact = Contact(first_name="John")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
         assert contact.summary is None
 
     def test_contact_with_summary(self):
@@ -255,7 +257,9 @@ class TestContactWithSummary:
             summary_text="A test summary",
             status=SummaryStatus.GENERATED,
         )
-        contact = Contact(first_name="John", id=1, summary=summary)
+        contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", id=1, summary=summary
+        )
         assert contact.summary is not None
         assert contact.summary.summary_text == "A test summary"
         assert contact.summary.status == SummaryStatus.GENERATED

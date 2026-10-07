@@ -848,7 +848,7 @@ class ImmichSyncService:
         matching purposes.
         """
         query = text("""
-            SELECT id, first_name, last_name, middle_name
+            SELECT id, user_id, first_name, last_name, middle_name
             FROM contacts
         """)
         result = await self._conn.execute(query)
@@ -858,6 +858,7 @@ class ImmichSyncService:
             Contact(
                 id=row.id,
                 first_name=row.first_name,
+                user_id=row.user_id,
                 last_name=row.last_name,
                 middle_name=row.middle_name,
             )

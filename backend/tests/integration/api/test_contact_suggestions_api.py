@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from core_shared.models.history import Provenance
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
@@ -85,6 +86,10 @@ async def test_accept_as_new_contact(
         journal_ids
     )
     assert (await authenticated_client.get(BASE_URL)).json()["data"] == []
+    owner = await async_connection.execute(
+        text("SELECT user_id FROM contacts WHERE id = :id"), {"id": contact_id}
+    )
+    assert owner.scalar_one() == USER_ID
 
 
 async def test_accept_into_existing_contact(

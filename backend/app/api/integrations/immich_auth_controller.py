@@ -360,6 +360,7 @@ async def resolve_immich_conflict(
 
             new_contact = Contact(
                 first_name=first_name,
+                user_id=str(user.id),
                 last_name=last_name,
             )
             saved_contact = await contact_service.create_contact(

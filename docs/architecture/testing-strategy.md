@@ -248,12 +248,15 @@ An integration test that needs a contact row **seeds it with `seed_contact`**, n
 | Backend | `from tests.integration.contact_seeding import TEST_USER_ID, seed_contact` |
 | Workers | `from core_shared.testing.seeding import seed_contact` |
 
-- `seed_contact(conn, *, first_name="Sarah", last_name=None, ..., contact_id=None, created_at=None,
-  updated_at=None) -> int` takes an `AsyncConnection` or an `AsyncSession`, writes only what it is
-  given (an unnamed id comes from the sequence, unnamed timestamps are `now()`) and returns the id.
-  The SQL exists once, in `core_shared/core_shared/testing/seeding.py`, so a change to what a
-  contact row requires lands in one module.
-- `seed_contacts(conn, count, *, first_name_prefix="Contact") -> list[int]` inserts `count`
+- `seed_contact(conn, *, user_id, first_name="Sarah", last_name=None, ..., contact_id=None,
+  created_at=None, updated_at=None) -> int` takes an `AsyncConnection` or an `AsyncSession`, writes
+  only what it is given (an unnamed id comes from the sequence, unnamed timestamps are `now()`) and
+  returns the id. The SQL exists once, in `core_shared/core_shared/testing/seeding.py`, so a change
+  to what a contact row requires lands in one module.
+- Every contact has an owner. In `core_shared` the `user_id` is **required**: a worker test names
+  the user it acts as. The backend wrapper defaults it to `TEST_USER_ID`; pass `OTHER_USER_ID`
+  to seed another user's contact.
+- `seed_contacts(conn, count, *, user_id, first_name_prefix="Contact") -> list[int]` inserts `count`
   numbered contacts in one statement, for tests that need thousands.
 - `TEST_USER_ID` is the acting user of every authenticated backend test client: the `test_user`
   fixture reads it.
@@ -262,6 +265,16 @@ An integration test that needs a contact row **seeds it with `seed_contact`**, n
 - `backend/tests/unit/test_contact_seeding_guard.py` fails on a raw contact insert anywhere under
   `backend/tests`, `core_shared` or `integration_workers/*/tests`. The only exemptions are
   migration tests, which seed a schema pinned at an older revision the helper does not describe.
+
+### Migration Tests
+
+A data migration is tested on an isolated database: the `throwaway_database` fixture creates one,
+and `run_alembic(url, command, target, *, x_args=None)` runs `alembic [-x k=v ...] <command>
+<target>` against it, raising `RuntimeError` with alembic's output when the command fails. Annotate
+the fixture with `tests.integration.migration_helpers.RunAlembic`; the same module has the
+`columns` / `index_exists` schema helpers. Upgrade to the revision before the one under test, seed
+raw rows in that older schema, then upgrade and assert on the data
+(`test_add_user_id_to_contacts_migration.py` is a worked example, `-x` override included).
 
 ### MCP Integration Testing Guidelines
 

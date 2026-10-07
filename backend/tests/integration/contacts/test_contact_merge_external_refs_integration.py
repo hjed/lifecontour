@@ -48,6 +48,7 @@ from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class RecordingEventPublisher(ContactEventPublisher):
@@ -96,7 +97,7 @@ async def merge_service(
 
 
 async def _make_contact(repo: SqlContactRepository, first_name: str) -> int:
-    saved = await repo.save(Contact(first_name=first_name))
+    saved = await repo.save(Contact(user_id=TEST_USER_ID, first_name=first_name))
     assert saved.id is not None
     return saved.id
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql import SqlContactEditEventRepository
 from app.core.contacts.models.repositories import ContactEditEvent
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 
 @pytest.mark.integration
@@ -22,7 +22,9 @@ class TestContactEditEventRepositoryIntegration:
     async def test_store_event(self, event_repo, clean_database: AsyncConnection):
         """Test storing a domain event."""
         # Arrange
-        contact = Contact(id=1, first_name="John", last_name="Doe")
+        contact = Contact(
+            user_id=TEST_USER_ID, id=1, first_name="John", last_name="Doe"
+        )
         await seed_contact(
             clean_database,
             contact_id=contact.id,

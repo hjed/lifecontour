@@ -18,6 +18,7 @@ from app.core.contacts.adapters.sql import (
     SqlTagRepository,
 )
 from app.core.contacts.services import ContactService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 async def _simulate_concurrent_write(
@@ -76,7 +77,8 @@ class TestContactUpdatePrecondition:
         self, contact_service, clean_database: AsyncConnection
     ):
         saved = await contact_service.create_contact(
-            Contact(first_name="Ada", last_name="Lovelace"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Ada", last_name="Lovelace"),
+            clean_database,
         )
         etag = resource_etag("contacts", saved.id, saved.updated_at)
 
@@ -92,7 +94,8 @@ class TestContactUpdatePrecondition:
         self, contact_service, contact_repo, clean_database: AsyncConnection
     ):
         saved = await contact_service.create_contact(
-            Contact(first_name="Ada", last_name="Lovelace"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Ada", last_name="Lovelace"),
+            clean_database,
         )
         stale_etag = resource_etag("contacts", saved.id, saved.updated_at)
         await _simulate_concurrent_write(clean_database, saved.id)
@@ -118,7 +121,8 @@ class TestContactUpdatePrecondition:
         conflict would still have written something.
         """
         saved = await contact_service.create_contact(
-            Contact(first_name="Ada", last_name="Lovelace"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Ada", last_name="Lovelace"),
+            clean_database,
         )
         stale_etag = resource_etag("contacts", saved.id, saved.updated_at)
         await _simulate_concurrent_write(clean_database, saved.id)
@@ -141,7 +145,8 @@ class TestContactUpdatePrecondition:
     ):
         """The feature is opt-in: today's callers send nothing and are unaffected."""
         saved = await contact_service.create_contact(
-            Contact(first_name="Ada", last_name="Lovelace"), clean_database
+            Contact(user_id=TEST_USER_ID, first_name="Ada", last_name="Lovelace"),
+            clean_database,
         )
         await _simulate_concurrent_write(clean_database, saved.id)
 

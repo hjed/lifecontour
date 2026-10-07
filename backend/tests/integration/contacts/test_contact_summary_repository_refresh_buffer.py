@@ -17,6 +17,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactSummaryRepository,
 )
 from app.core.contacts.models.repositories import ClaimedRefresh
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -36,7 +37,7 @@ class TestSummaryRefreshBufferRepository:
     @pytest.fixture
     async def test_contact(self, contact_repo: SqlContactRepository) -> Contact:
         """Create and return a test contact."""
-        contact = Contact(first_name="Buffer", last_name="Test")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Buffer", last_name="Test")
         saved: Contact = await contact_repo.save(contact)
         return saved
 
@@ -273,7 +274,9 @@ class TestSummaryRefreshBufferRepository:
         contacts = []
         for index in range(3):
             contact = await contact_repo.save(
-                Contact(first_name=f"Batch{index}", last_name="Limit")
+                Contact(
+                    user_id=TEST_USER_ID, first_name=f"Batch{index}", last_name="Limit"
+                )
             )
             contacts.append(contact)
             await summary_repo.mark_refresh_requested(contact.id)

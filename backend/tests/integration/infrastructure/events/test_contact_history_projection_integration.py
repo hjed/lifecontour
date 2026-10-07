@@ -49,6 +49,7 @@ from app.infrastructure.events.history_projection_consumer import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_relay import OutboxRelay
 from tests.integration.conftest import ContactFactory
+from tests.integration.contact_seeding import TEST_USER_ID
 
 GROUP_NAME = "history-projection"
 OCCURRED_AT = "2024-03-01T08:00:00+00:00"
@@ -432,6 +433,7 @@ class TestContactProjectionEndToEnd:
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="John",
                 methods=[
                     ContactMethod(
@@ -468,7 +470,7 @@ class TestContactProjectionEndToEnd:
     ) -> None:
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="John", last_name="Doe"),
+            Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
@@ -501,6 +503,7 @@ class TestContactProjectionEndToEnd:
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Mia",
                 methods=[
                     ContactMethod(
@@ -544,6 +547,7 @@ class TestContactProjectionEndToEnd:
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Ari",
                 methods=[
                     ContactMethod(
@@ -587,7 +591,7 @@ class TestContactProjectionEndToEnd:
     ) -> None:
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="Tara"),
+            Contact(user_id=TEST_USER_ID, first_name="Tara"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
@@ -620,7 +624,7 @@ class TestContactProjectionEndToEnd:
     ) -> None:
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="Dana"),
+            Contact(user_id=TEST_USER_ID, first_name="Dana"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
@@ -663,7 +667,7 @@ class TestContactProjectionEndToEnd:
         """
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="Edith"),
+            Contact(user_id=TEST_USER_ID, first_name="Edith"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
@@ -734,7 +738,7 @@ class TestContactProjectionEndToEnd:
         row's per-item event still carries affects_history=False."""
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="Bea"),
+            Contact(user_id=TEST_USER_ID, first_name="Bea"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
@@ -747,6 +751,7 @@ class TestContactProjectionEndToEnd:
         # Bulk update: add a method and a tag through the re-save path.
         await service.update_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 id=created.id,
                 first_name="Bea",
                 methods=[
@@ -790,6 +795,7 @@ class TestContactProjectionEndToEnd:
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Cleo",
                 important_dates=[
                     ImportantDate(
@@ -816,6 +822,7 @@ class TestContactProjectionEndToEnd:
         # As MCP submits it: the whole date list, carrying no ids.
         await service.update_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 id=created.id,
                 first_name="Cleo",
                 important_dates=[
@@ -859,6 +866,7 @@ class TestContactProjectionEndToEnd:
         service = self._service(async_connection)
         created = await service.create_contact(
             Contact(
+                user_id=TEST_USER_ID,
                 first_name="Dara",
                 methods=[
                     ContactMethod(
@@ -901,10 +909,14 @@ class TestContactProjectionEndToEnd:
     ) -> None:
         service = self._service(async_connection)
         a = await service.create_contact(
-            Contact(first_name="Ann"), async_connection, source=Provenance.UI
+            Contact(user_id=TEST_USER_ID, first_name="Ann"),
+            async_connection,
+            source=Provenance.UI,
         )
         b = await service.create_contact(
-            Contact(first_name="Ben"), async_connection, source=Provenance.UI
+            Contact(user_id=TEST_USER_ID, first_name="Ben"),
+            async_connection,
+            source=Provenance.UI,
         )
         assert a.id is not None and b.id is not None
         rel_service = self._relationship_service(async_connection)
@@ -974,7 +986,7 @@ class TestContactProjectionEndToEnd:
         duplicate rows — the unique index makes the projection idempotent."""
         service = self._service(async_connection)
         created = await service.create_contact(
-            Contact(first_name="Uno"),
+            Contact(user_id=TEST_USER_ID, first_name="Uno"),
             async_connection,
             changed_by="ui",
             source=Provenance.UI,

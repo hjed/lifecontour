@@ -49,6 +49,8 @@ class ContactCreated(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_created_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -56,6 +58,8 @@ class ContactCreated(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactCreated",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "first_name": first_name,
                 "last_name": last_name,
@@ -77,6 +81,8 @@ class ContactUpdated(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_updated_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -84,6 +90,8 @@ class ContactUpdated(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactUpdated",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "changed_fields": changed_fields,
                 "source": source.value,
@@ -103,6 +111,8 @@ class ContactDeleted(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_deleted_{contact_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -110,6 +120,8 @@ class ContactDeleted(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactDeleted",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "source": source.value,
                 "changed_by": changed_by,
@@ -131,6 +143,8 @@ class TagAssigned(DomainEvent):
         changed_by: str = "system",
         affects_history: bool = True,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"tag_assigned_{contact_id}_{tag_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -138,6 +152,8 @@ class TagAssigned(DomainEvent):
             aggregate_id=contact_id,
             event_type="TagAssigned",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "tag_id": tag_id,
                 "tag_name": tag_name,
@@ -164,6 +180,8 @@ class TagRemoved(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         now = datetime.now(tz=UTC)
         super().__init__(
@@ -172,6 +190,8 @@ class TagRemoved(DomainEvent):
             aggregate_id=contact_id,
             event_type="TagRemoved",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "tag_id": tag_id,
                 "tag_name": tag_name,
@@ -246,6 +266,8 @@ class ContactMethodAdded(DomainEvent):
         changed_by: str = "system",
         affects_history: bool = True,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_method_added_{contact_id}_{method_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -253,6 +275,8 @@ class ContactMethodAdded(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactMethodAdded",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "method_id": method_id,
                 "method_type": method_type,
@@ -280,6 +304,8 @@ class ContactAddressAdded(DomainEvent):
         changed_by: str = "system",
         affects_history: bool = True,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_address_added_{contact_id}_{address_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -287,6 +313,8 @@ class ContactAddressAdded(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactAddressAdded",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "address_id": address_id,
                 "street_line_1": street_line_1,
@@ -313,6 +341,8 @@ class ContactMethodDeleted(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_method_deleted_{contact_id}_{method_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -320,6 +350,8 @@ class ContactMethodDeleted(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactMethodDeleted",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "method_id": method_id,
                 "method_type": method_type,
@@ -343,6 +375,8 @@ class ContactAddressDeleted(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_address_deleted_{contact_id}_{address_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -350,6 +384,8 @@ class ContactAddressDeleted(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactAddressDeleted",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "address_id": address_id,
                 "street_line_1": street_line_1,
@@ -373,6 +409,8 @@ class ContactNoteAdded(DomainEvent):
         changed_by: str = "system",
         affects_history: bool = True,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_note_added_{contact_id}_{note_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -380,6 +418,8 @@ class ContactNoteAdded(DomainEvent):
             aggregate_id=contact_id,
             event_type="ContactNoteAdded",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "note_id": note_id,
                 "content": (
@@ -407,6 +447,8 @@ class ImportantDateAdded(DomainEvent):
         changed_by: str = "system",
         affects_history: bool = True,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_important_date_added_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -414,6 +456,8 @@ class ImportantDateAdded(DomainEvent):
             aggregate_id=contact_id,
             event_type="ImportantDateAdded",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "date_id": date_id,
                 "date_type": date_type,
@@ -446,6 +490,8 @@ class ImportantDateUpdated(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_important_date_updated_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -453,6 +499,8 @@ class ImportantDateUpdated(DomainEvent):
             aggregate_id=contact_id,
             event_type="ImportantDateUpdated",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "date_id": date_id,
                 "date_type": date_type,
@@ -476,6 +524,8 @@ class ImportantDateDeleted(DomainEvent):
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_important_date_deleted_{contact_id}_{date_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -483,6 +533,8 @@ class ImportantDateDeleted(DomainEvent):
             aggregate_id=contact_id,
             event_type="ImportantDateDeleted",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "contact_id": contact_id,
                 "date_id": date_id,
                 "date_type": date_type,
@@ -712,6 +764,8 @@ class ContactMerged(DomainEvent):
         changed_by: str = "system",
         transaction: AsyncConnection | None = None,
         external_collisions: list[dict[str, Any]] | None = None,
+        *,
+        user_id: str,
     ):
         super().__init__(
             event_id=f"contact_merged_{survivor_contact_id}_{source_contact_id}_{datetime.now(tz=UTC).isoformat()}",
@@ -719,6 +773,8 @@ class ContactMerged(DomainEvent):
             aggregate_id=survivor_contact_id,
             event_type="ContactMerged",
             event_data={
+                # The contact's owner: workers push the change only to its accounts.
+                "user_id": user_id,
                 "survivor_contact_id": survivor_contact_id,
                 "source_contact_id": source_contact_id,
                 "source": source.value,

@@ -1095,24 +1095,37 @@ async def task_anchors(journal_repository: Any) -> tuple[int, int]:
 
 @pytest.fixture
 def run_alembic() -> Any:
-    """Return a helper that runs ``alembic <command> <target>`` against a db URL.
+    """Return a helper that runs ``alembic [-x k=v ...] <command> <target>``.
 
     Shared by migration round-trip tests so each does not re-implement the
-    subprocess invocation.
+    subprocess invocation; ``x_args`` become alembic ``-x`` arguments. Typed as
+    ``tests.integration.migration_helpers.RunAlembic``.
     """
     import sys
+    from collections.abc import Mapping
     from pathlib import Path
 
     backend_dir = Path(__file__).resolve().parents[2]
 
-    def _run(database_url: str, command: str, target: str) -> None:
+    def _run(
+        database_url: str,
+        command: str,
+        target: str,
+        *,
+        x_args: Mapping[str, str] | None = None,
+    ) -> None:
         env = {
             **os.environ,
             "ENVIRONMENT": "test",
             "DATABASE_URL": database_url,
         }
+        x_flags = [
+            flag
+            for key, value in (x_args or {}).items()
+            for flag in ("-x", f"{key}={value}")
+        ]
         result = subprocess.run(
-            [sys.executable, "-m", "alembic", command, target],
+            [sys.executable, "-m", "alembic", *x_flags, command, target],
             cwd=str(backend_dir),
             capture_output=True,
             text=True,

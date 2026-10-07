@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.contacts.contact_service_harness import (
     RecordingEventPublisher,
     build_contact_service,
@@ -71,7 +72,7 @@ async def _contact_with(
     **attached: object,
 ) -> Contact:
     """Create a contact with sub-entities attached, then forget those events."""
-    contact = Contact(first_name="Reconcile", last_name="Test")
+    contact = Contact(user_id=TEST_USER_ID, first_name="Reconcile", last_name="Test")
     for name, value in attached.items():
         setattr(contact, name, value)
     saved = await service.create_contact(
@@ -738,7 +739,10 @@ class TestSubResourceMerge:
         # only have come from the service's own read.
         updated = await contact_service.update_contact(
             Contact(
-                id=saved.id, first_name=saved.first_name, last_name=saved.last_name
+                user_id=TEST_USER_ID,
+                id=saved.id,
+                first_name=saved.first_name,
+                last_name=saved.last_name,
             ),
             async_connection,
             subresource_merge=SubResourceMerge(
@@ -775,7 +779,10 @@ class TestSubResourceMerge:
 
         updated = await contact_service.update_contact(
             Contact(
-                id=saved.id, first_name=saved.first_name, last_name=saved.last_name
+                user_id=TEST_USER_ID,
+                id=saved.id,
+                first_name=saved.first_name,
+                last_name=saved.last_name,
             ),
             async_connection,
             subresource_merge=SubResourceMerge(new_notes=["Follows the cricket"]),

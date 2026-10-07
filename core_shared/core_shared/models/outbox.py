@@ -107,7 +107,8 @@ class OutboxEvent(Base):
         external_id: str,
         sync_type: str = "created",
         etag: str | None = None,
-        user_id: str | None = None,
+        *,
+        user_id: str,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.

@@ -1,5 +1,6 @@
 """Tests for main ContactService."""
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,11 +12,13 @@ from core_shared.models.contacts.entities import (
     MethodType,
     Tag,
 )
+from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
 
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 class TestContactService:
@@ -127,7 +130,7 @@ class TestContactService:
         mock_tag_repo.find_by_name.side_effect = _find
         mock_tag_service.create_tag.return_value = created
 
-        contact = Contact(first_name="A", last_name="B", tags=[])
+        contact = Contact(user_id=TEST_USER_ID, first_name="A", last_name="B", tags=[])
         await contact_service_with_tags._resolve_tag_names(
             contact, ["Friend", "Work"], mock_transaction
         )
@@ -144,7 +147,7 @@ class TestContactService:
         self, contact_service, mock_transaction
     ):
         """A service built without a TagService can't create tags by name."""
-        contact = Contact(first_name="A", last_name="B", tags=[])
+        contact = Contact(user_id=TEST_USER_ID, first_name="A", last_name="B", tags=[])
         with pytest.raises(ContactValidationError):
             await contact_service._resolve_tag_names(contact, ["X"], mock_transaction)
 
@@ -157,10 +160,18 @@ class TestContactService:
         # Arrange
         contact_id = 1
         existing_contact = Contact(
-            first_name="John", last_name="Doe", id=contact_id, is_favourite=False
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=contact_id,
+            is_favourite=False,
         )
         updated_contact = Contact(
-            first_name="John", last_name="Doe", id=contact_id, is_favourite=True
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=contact_id,
+            is_favourite=True,
         )
 
         mock_contact_repo.find_by_id.return_value = existing_contact
@@ -196,8 +207,20 @@ class TestContactService:
         """Test successful retrieval of favourite contacts."""
         # Arrange
         favourite_contacts = [
-            Contact(first_name="John", last_name="Doe", id=1, is_favourite=True),
-            Contact(first_name="Jane", last_name="Smith", id=2, is_favourite=True),
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="John",
+                last_name="Doe",
+                id=1,
+                is_favourite=True,
+            ),
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="Jane",
+                last_name="Smith",
+                id=2,
+                is_favourite=True,
+            ),
         ]
         mock_contact_repo.get_favourite_contacts.return_value = favourite_contacts
 
@@ -215,7 +238,13 @@ class TestContactService:
         """Test get_contacts_paginated with favourite filter."""
         # Arrange
         favourite_contacts = [
-            Contact(first_name="John", last_name="Doe", id=1, is_favourite=True),
+            Contact(
+                user_id=TEST_USER_ID,
+                first_name="John",
+                last_name="Doe",
+                id=1,
+                is_favourite=True,
+            ),
         ]
         mock_contact_repo.get_contacts_by_filters.return_value = favourite_contacts
 
@@ -237,7 +266,7 @@ class TestContactService:
         """Test get_contacts_paginated with tag filter."""
         # Arrange
         tag_contacts = [
-            Contact(first_name="John", last_name="Doe", id=1),
+            Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1),
         ]
         mock_contact_repo.get_contacts_by_filters.return_value = tag_contacts
 
@@ -259,8 +288,8 @@ class TestContactService:
         """Test get_contacts_paginated without filters uses get_all_contacts."""
         # Arrange
         all_contacts = [
-            Contact(first_name="John", last_name="Doe", id=1),
-            Contact(first_name="Jane", last_name="Smith", id=2),
+            Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1),
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith", id=2),
         ]
         mock_contact_repo.get_all.return_value = all_contacts
 
@@ -317,8 +346,10 @@ class TestContactService:
     ):
         """Test successful contact creation."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
-        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
 
         mock_contact_repo.save.return_value = saved_contact
 
@@ -335,8 +366,10 @@ class TestContactService:
     ):
         """Test contact creation raises error when no ID after save."""
         # Arrange
-        contact = Contact(first_name="John")
-        saved_contact = Contact(first_name="John", id=None)  # No ID assigned
+        contact = Contact(user_id=TEST_USER_ID, first_name="John")
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", id=None
+        )  # No ID assigned
 
         mock_contact_repo.save.return_value = saved_contact
 
@@ -353,7 +386,7 @@ class TestContactService:
     ):
         """Test successful contact creation with attached methods."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
 
         # Add email method
         email_method = ContactMethod(
@@ -377,7 +410,9 @@ class TestContactService:
             contact.methods = []
         contact.methods.append(phone_method)
 
-        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
         saved_email = ContactMethod(
             method_type=MethodType.EMAIL,
             value="john@example.com",
@@ -417,7 +452,7 @@ class TestContactService:
     ):
         """Test successful contact creation with attached notes."""
         # Arrange
-        contact = Contact(first_name="Jane", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
 
         # Add note
         note = ContactNote(
@@ -428,7 +463,9 @@ class TestContactService:
             contact.notes = []
         contact.notes.append(note)
 
-        saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="Jane", last_name="Smith", id=1
+        )
         saved_note = ContactNote(
             content="Met at conference",
             contact_id=1,
@@ -457,7 +494,7 @@ class TestContactService:
     ):
         """Test successful contact creation with both methods and notes."""
         # Arrange
-        contact = Contact(first_name="Bob", last_name="Wilson")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Bob", last_name="Wilson")
 
         # Add email method
         email_method = ContactMethod(
@@ -479,7 +516,9 @@ class TestContactService:
             contact.notes = []
         contact.notes.append(note)
 
-        saved_contact = Contact(first_name="Bob", last_name="Wilson", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="Bob", last_name="Wilson", id=1
+        )
         saved_email = ContactMethod(
             method_type=MethodType.EMAIL,
             value="bob@example.com",
@@ -520,7 +559,7 @@ class TestContactService:
     ):
         """Test contact creation with method raises error when method has no ID after save."""
         # Arrange
-        contact = Contact(first_name="John", last_name="Doe")
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", last_name="Doe")
 
         # Add email method
         email_method = ContactMethod(
@@ -533,7 +572,9 @@ class TestContactService:
             contact.methods = []
         contact.methods.append(email_method)
 
-        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
         saved_email = ContactMethod(
             method_type=MethodType.EMAIL,
             value="john@example.com",
@@ -559,7 +600,7 @@ class TestContactService:
     ):
         """Test contact creation with note raises error when note has no ID after save."""
         # Arrange
-        contact = Contact(first_name="Jane", last_name="Smith")
+        contact = Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Smith")
 
         # Add note
         note = ContactNote(
@@ -570,7 +611,9 @@ class TestContactService:
             contact.notes = []
         contact.notes.append(note)
 
-        saved_contact = Contact(first_name="Jane", last_name="Smith", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="Jane", last_name="Smith", id=1
+        )
         saved_note = ContactNote(
             content="Met at conference",
             contact_id=1,
@@ -593,8 +636,12 @@ class TestContactService:
     ):
         """Test successful contact update with attached methods and notes."""
         # Arrange
-        current_contact = Contact(first_name="John", last_name="Smith", id=1)
-        updated_contact = Contact(first_name="John", last_name="Doe", id=1)
+        current_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1
+        )
+        updated_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
 
         # Add email method to updated contact
         email_method = ContactMethod(
@@ -616,7 +663,9 @@ class TestContactService:
             updated_contact.notes = []
         updated_contact.notes.append(note)
 
-        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
         saved_email = ContactMethod(
             method_type=MethodType.EMAIL,
             value="john.doe@example.com",
@@ -661,9 +710,15 @@ class TestContactService:
     ):
         """Test successful contact update."""
         # Arrange
-        current_contact = Contact(first_name="John", last_name="Smith", id=1)
-        updated_contact = Contact(first_name="John", last_name="Doe", id=1)
-        saved_contact = Contact(first_name="John", last_name="Doe", id=1)
+        current_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1
+        )
+        updated_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Doe", id=1
+        )
 
         mock_contact_repo.find_by_id.return_value = current_contact
         mock_contact_repo.save.return_value = saved_contact
@@ -677,6 +732,26 @@ class TestContactService:
         mock_contact_repo.save.assert_called_once_with(updated_contact)
 
     @pytest.mark.asyncio
+    async def test_update_contact_keeps_the_stored_owner(
+        self, contact_service, mock_contact_repo, mock_transaction
+    ) -> None:
+        """An update never re-owns a contact, whatever owner the caller sends.
+
+        The repository already refuses to write a new owner; the service makes
+        the aggregate it saves, returns and publishes agree with the stored row.
+        """
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.save.side_effect = lambda contact: contact
+        incoming = Contact(user_id="someone-else", first_name="Johnny", id=1)
+
+        result = await contact_service.update_contact(incoming, mock_transaction)
+
+        assert mock_contact_repo.save.call_args.args[0].user_id == "owner-9"
+        assert result.user_id == "owner-9"
+
+    @pytest.mark.asyncio
     async def test_update_contact_locks_the_contact_before_reading_it(
         self,
         contact_service: ContactService,
@@ -686,11 +761,15 @@ class TestContactService:
         """Even with no ETag to check: the save builds its lists from what it
         reads, so a row a concurrent writer adds must not land between the
         read and the write. Every per-item writer takes this lock first too."""
-        mock_contact_repo.find_by_id.return_value = Contact(first_name="Ada", id=1)
-        mock_contact_repo.save.return_value = Contact(first_name="Ada", id=1)
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id=TEST_USER_ID, first_name="Ada", id=1
+        )
+        mock_contact_repo.save.return_value = Contact(
+            user_id=TEST_USER_ID, first_name="Ada", id=1
+        )
 
         await contact_service.update_contact(
-            Contact(first_name="Ada", id=1), mock_transaction
+            Contact(user_id=TEST_USER_ID, first_name="Ada", id=1), mock_transaction
         )
 
         calls = [name for name, *_ in mock_contact_repo.method_calls]
@@ -707,6 +786,7 @@ class TestContactService:
         """Two answers to "what should the methods be" - refused before
         anything is locked or written."""
         contact = Contact(
+            user_id=TEST_USER_ID,
             first_name="Ada",
             id=1,
             methods=[
@@ -736,12 +816,18 @@ class TestContactService:
         contact_service is built WITHOUT a TagService, so this would raise if the
         empty-list clear path still went through _resolve_tag_names.
         """
-        current_contact = Contact(first_name="John", last_name="Smith", id=1)
-        saved_contact = Contact(first_name="John", last_name="Smith", id=1)
+        current_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1
+        )
+        saved_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1
+        )
         mock_contact_repo.find_by_id.return_value = current_contact
         mock_contact_repo.save.return_value = saved_contact
 
-        updated_contact = Contact(first_name="John", last_name="Smith", id=1, tags=None)
+        updated_contact = Contact(
+            user_id=TEST_USER_ID, first_name="John", last_name="Smith", id=1, tags=None
+        )
         result = await contact_service.update_contact(
             updated_contact, mock_transaction, tag_names=[]
         )
@@ -755,7 +841,7 @@ class TestContactService:
     ):
         """Test contact update raises error when no ID."""
         # Arrange
-        contact = Contact(first_name="John", id=None)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=None)
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
@@ -770,7 +856,7 @@ class TestContactService:
     ):
         """Test successful contact deletion."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
         # Act
@@ -785,7 +871,7 @@ class TestContactService:
     ):
         """Test successful tag assignment."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         tag = Tag(name=TagName("work"), id=2)
 
         mock_contact_repo.find_by_id.return_value = contact
@@ -803,7 +889,7 @@ class TestContactService:
     ):
         """Test successful tag removal."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         tag = Tag(name=TagName("work"), id=2)
 
         mock_contact_repo.find_by_id.return_value = contact
@@ -821,7 +907,7 @@ class TestContactService:
     ):
         """Test successful contact method addition."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         method = ContactMethod(
             method_type=MethodType.EMAIL, value="test@example.com", contact_id=1
         )
@@ -840,13 +926,92 @@ class TestContactService:
         assert result == saved_method
         mock_contact_repo.add_method.assert_called_once_with(1, method)
 
+    @staticmethod
+    def _pushed_event_owners(mock_event_publisher: AsyncMock) -> dict[str, Any]:
+        """``{event_type: event_data["user_id"]}`` for every pushed event published."""
+        events = [call.args[0] for call in mock_event_publisher.publish.call_args_list]
+        return {
+            event.event_type: event.event_data.get("user_id")
+            for event in events
+            if event.event_type in CONTACT_PUSH_EVENT_TYPES
+        }
+
+    @pytest.mark.asyncio
+    async def test_created_contact_events_name_its_owner(
+        self, contact_service, mock_contact_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        contact = Contact(user_id="owner-9", first_name="John")
+        mock_contact_repo.save.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+
+        await contact_service.create_contact(contact, mock_transaction)
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactCreated": "owner-9"
+        }
+
+    @pytest.mark.asyncio
+    async def test_update_events_name_the_stored_owner(
+        self, contact_service, mock_contact_repo, mock_event_publisher, mock_transaction
+    ) -> None:
+        """A caller sending another owner cannot route the update to that user."""
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.save.side_effect = lambda contact: contact
+
+        await contact_service.update_contact(
+            Contact(user_id="someone-else", first_name="Johnny", id=1),
+            mock_transaction,
+        )
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactUpdated": "owner-9"
+        }
+
+    @pytest.mark.asyncio
+    async def test_child_row_events_name_the_parent_contacts_owner(
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_tag_repo,
+        mock_event_publisher,
+        mock_transaction,
+    ) -> None:
+        """A child mutation publishes only its own event; it still names the owner."""
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id="owner-9", first_name="John", id=1
+        )
+        mock_contact_repo.find_by_email.return_value = None
+        mock_contact_repo.add_method.return_value = ContactMethod(
+            method_type=MethodType.EMAIL, value="j@example.com", contact_id=1, id=2
+        )
+        mock_tag_repo.find_by_id.return_value = Tag(name=TagName("work"), id=3)
+
+        await contact_service.add_contact_method(
+            1,
+            ContactMethod(
+                method_type=MethodType.EMAIL, value="j@example.com", contact_id=1
+            ),
+            mock_transaction,
+        )
+        await contact_service.assign_tag_to_contact(1, 3, mock_transaction)
+        await contact_service.delete_contact(1, mock_transaction)
+
+        assert self._pushed_event_owners(mock_event_publisher) == {
+            "ContactMethodAdded": "owner-9",
+            "TagAssigned": "owner-9",
+            "ContactDeleted": "owner-9",
+        }
+
     @pytest.mark.asyncio
     async def test_add_contact_address_success(
         self, contact_service, mock_contact_repo, mock_transaction
     ):
         """Test successful contact address addition."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         address = ContactAddress(
             street_line_1="123 Main St", country_code="AU", contact_id=1
         )
@@ -870,7 +1035,7 @@ class TestContactService:
     ):
         """Test successful contact note addition."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         note = ContactNote(content="This is a test note", contact_id=1)
         saved_note = ContactNote(content="This is a test note", contact_id=1, id=2)
 
@@ -888,7 +1053,7 @@ class TestContactService:
     async def test_get_contact_by_id(self, contact_service, mock_contact_repo):
         """Test getting contact by ID."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_id.return_value = contact
 
         # Act
@@ -902,7 +1067,7 @@ class TestContactService:
     async def test_get_contact_by_email(self, contact_service, mock_contact_repo):
         """Test getting contact by email."""
         # Arrange
-        contact = Contact(first_name="John", id=1)
+        contact = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
         mock_contact_repo.find_by_email.return_value = contact
 
         # Act
@@ -916,7 +1081,7 @@ class TestContactService:
     async def test_search_contacts(self, contact_service, mock_contact_repo):
         """Test searching contacts."""
         # Arrange
-        contacts = [Contact(first_name="John", id=1)]
+        contacts = [Contact(user_id=TEST_USER_ID, first_name="John", id=1)]
         mock_contact_repo.search.return_value = contacts
 
         # Act
@@ -930,7 +1095,7 @@ class TestContactService:
     async def test_get_all_contacts(self, contact_service, mock_contact_repo):
         """Test getting all contacts."""
         # Arrange
-        contacts = [Contact(first_name="John", id=1)]
+        contacts = [Contact(user_id=TEST_USER_ID, first_name="John", id=1)]
         mock_contact_repo.get_all.return_value = contacts
 
         # Act
@@ -944,7 +1109,7 @@ class TestContactService:
     async def test_get_contacts_by_tag(self, contact_service, mock_contact_repo):
         """Test getting contacts by tag."""
         # Arrange
-        contacts = [Contact(first_name="John", id=1)]
+        contacts = [Contact(user_id=TEST_USER_ID, first_name="John", id=1)]
         mock_contact_repo.get_contacts_by_tag.return_value = contacts
 
         # Act

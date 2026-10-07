@@ -66,7 +66,9 @@ class TestPushTagEndToEnd:
         )
 
         # --- Setup: Create a contact with a tag ---
-        contact_id = await seed_contact(db_session, first_name="Push", last_name="E2E")
+        contact_id = await seed_contact(
+            db_session, user_id=test_user, first_name="Push", last_name="E2E"
+        )
 
         # Add email
         await db_session.execute(

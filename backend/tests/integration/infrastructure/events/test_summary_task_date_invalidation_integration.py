@@ -44,7 +44,7 @@ from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.summary_invalidation_consumer import (
     SummaryInvalidationConsumer,
 )
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 from tests.integration.infrastructure.events.consumer_harness import (
     BATCH_SIZE,
     patched_consumer_engine,
@@ -403,6 +403,7 @@ class TestAnImportantDateChanging:
                 date_id,
                 ImportantDateType.BIRTHDAY.value,
                 transaction=async_connection,
+                user_id=TEST_USER_ID,
             )
         )
 
