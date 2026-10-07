@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from core_shared.models.sync_job import SyncJobStatus
@@ -222,6 +223,157 @@ class TestSyncJobHierarchyRepository:
             + stats["queued_jobs"]
             == stats["total_jobs"]
         )
+
+
+@pytest.mark.integration
+class TestSyncJobListingCursor:
+    """The listing cursor an orchestrator records on its parent row.
+
+    A smart sync reads the cursor of the newest parent that completed, so a run
+    that failed, is still running, or synced another resource never moves it.
+    """
+
+    @pytest.fixture
+    def repo(self, clean_database: AsyncConnection) -> SyncJobRepository:
+        return SyncJobRepository(clean_database)
+
+    async def _parent(
+        self,
+        repo: SyncJobRepository,
+        job_id: str,
+        *,
+        resource: str | None = "assets",
+        cursor: str | None = "2026-10-01 10:00:00",
+        status: SyncJobStatus = SyncJobStatus.COMPLETED,
+        completed_at: datetime | None = None,
+        sync_type: str = "smart",
+        user_id: str = "user-1",
+        parent_job_id: str | None = None,
+    ) -> None:
+        await repo.create(
+            job_id=job_id,
+            user_id=user_id,
+            integration_source="snipeit",
+            sync_type=sync_type,
+            status=SyncJobStatus.RUNNING.value,
+            parent_job_id=parent_job_id,
+        )
+        if resource is not None:
+            assert await repo.record_listing(
+                job_id, resource=resource, cursor=cursor, sync_type=sync_type
+            )
+        await repo.update_status(
+            job_id,
+            status.value,
+            completed_at=completed_at or datetime(2026, 10, 1, tzinfo=UTC),
+        )
+
+    async def _latest(
+        self, repo: SyncJobRepository, *, sync_type: str | None = None
+    ) -> str | None:
+        job = await repo.get_latest_completed_parent(
+            "user-1", "snipeit", "assets", sync_type=sync_type
+        )
+        return None if job is None else job.job_id
+
+    @pytest.mark.asyncio
+    async def test_record_listing_stores_resource_cursor_and_sync_type(
+        self, repo: SyncJobRepository
+    ) -> None:
+        await repo.create(
+            job_id="p",
+            user_id="user-1",
+            integration_source="snipeit",
+            sync_type="smart",
+        )
+
+        recorded = await repo.record_listing(
+            "p", resource="assets", cursor="2026-10-01 10:00:00", sync_type="full"
+        )
+
+        assert recorded is True
+        job = await repo.get_by_job_id("p")
+        assert job is not None
+        assert (job.sync_resource, job.sync_cursor, job.sync_type) == (
+            "assets",
+            "2026-10-01 10:00:00",
+            "full",
+        )
+
+    @pytest.mark.asyncio
+    async def test_record_listing_reports_a_missing_row(
+        self, repo: SyncJobRepository
+    ) -> None:
+        recorded = await repo.record_listing(
+            "missing", resource="assets", cursor=None, sync_type="smart"
+        )
+
+        assert recorded is False
+
+    @pytest.mark.asyncio
+    async def test_newest_completed_parent_wins(self, repo: SyncJobRepository) -> None:
+        await self._parent(
+            repo, "older", completed_at=datetime(2026, 10, 1, tzinfo=UTC)
+        )
+        await self._parent(
+            repo, "newer", completed_at=datetime(2026, 10, 2, tzinfo=UTC)
+        )
+
+        assert await self._latest(repo) == "newer"
+
+    @pytest.mark.asyncio
+    async def test_failed_and_unfinished_parents_are_ignored(
+        self, repo: SyncJobRepository
+    ) -> None:
+        await self._parent(repo, "ok", completed_at=datetime(2026, 10, 1, tzinfo=UTC))
+        await self._parent(
+            repo,
+            "failed",
+            status=SyncJobStatus.FAILED,
+            completed_at=datetime(2026, 10, 2, tzinfo=UTC),
+        )
+        await self._parent(
+            repo,
+            "running",
+            status=SyncJobStatus.IN_PROGRESS,
+            completed_at=datetime(2026, 10, 3, tzinfo=UTC),
+        )
+
+        assert await self._latest(repo) == "ok"
+
+    @pytest.mark.asyncio
+    async def test_other_resources_users_and_children_are_ignored(
+        self, repo: SyncJobRepository
+    ) -> None:
+        await self._parent(repo, "ok", completed_at=datetime(2026, 10, 1, tzinfo=UTC))
+        later = datetime(2026, 10, 2, tzinfo=UTC)
+        await self._parent(repo, "maint", resource="maintenances", completed_at=later)
+        await self._parent(repo, "other-user", user_id="user-2", completed_at=later)
+        await self._parent(repo, "child", parent_job_id="ok", completed_at=later)
+        await self._parent(repo, "unscoped", resource=None, completed_at=later)
+
+        assert await self._latest(repo) == "ok"
+
+    @pytest.mark.asyncio
+    async def test_filters_by_sync_type(self, repo: SyncJobRepository) -> None:
+        await self._parent(
+            repo,
+            "full",
+            sync_type="full",
+            completed_at=datetime(2026, 10, 1, tzinfo=UTC),
+        )
+        await self._parent(
+            repo, "smart", completed_at=datetime(2026, 10, 2, tzinfo=UTC)
+        )
+
+        assert await self._latest(repo, sync_type="full") == "full"
+        assert await self._latest(repo) == "smart"
+
+    @pytest.mark.asyncio
+    async def test_no_completed_parent_returns_none(
+        self, repo: SyncJobRepository
+    ) -> None:
+        assert await self._latest(repo) is None
 
 
 @pytest.mark.integration

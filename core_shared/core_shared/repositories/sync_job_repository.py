@@ -20,7 +20,8 @@ _SYNC_JOB_COLUMNS = (
     "created_at, started_at, completed_at, error_message, "
     "contacts_processed, contacts_created, contacts_updated, "
     "contacts_deleted, progress, updated_at, "
-    "parent_job_id, expected_children, completed_children, failed_children"
+    "parent_job_id, expected_children, completed_children, failed_children, "
+    "sync_resource, sync_cursor"
 )
 
 
@@ -179,6 +180,93 @@ class SyncJobRepository:
             return None
 
         return self._row_to_sync_job(row)
+
+    async def record_listing(
+        self,
+        job_id: str,
+        *,
+        resource: str,
+        cursor: str | None,
+        sync_type: str,
+    ) -> bool:
+        """Record what an orchestrator's listing covered on its parent row.
+
+        Args:
+            job_id: The orchestrator's (parent) job ID.
+            resource: The resource it listed, e.g. ``assets``.
+            cursor: The newest change the listing saw, in the integration's own
+                clock, or None when it saw none.
+            sync_type: The type the run actually performed, which differs from
+                the requested one when a smart sync ran as a full one.
+
+        Returns:
+            Whether the row exists.
+        """
+        result = await self.conn.execute(
+            text("""
+                UPDATE sync_jobs
+                SET sync_resource = :resource,
+                    sync_cursor = :cursor,
+                    sync_type = :sync_type,
+                    updated_at = :updated_at
+                WHERE job_id = :job_id
+                RETURNING job_id
+            """),
+            {
+                "job_id": job_id,
+                "resource": resource,
+                "cursor": cursor,
+                "sync_type": sync_type,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+        return result.fetchone() is not None
+
+    async def get_latest_completed_parent(
+        self,
+        user_id: str,
+        integration_source: str,
+        resource: str,
+        *,
+        sync_type: str | None = None,
+    ) -> SyncJob | None:
+        """The newest completed orchestrator run that listed ``resource``.
+
+        Only a completed parent counts: one whose batches failed, or that has
+        not finished, may not have synced everything its listing covered.
+
+        Args:
+            user_id: The user whose runs to consider.
+            integration_source: The integration, e.g. ``snipeit``.
+            resource: The resource the run listed.
+            sync_type: Only consider runs of this type (optional).
+
+        Returns:
+            The run, or None when no such run completed.
+        """
+        type_clause = "AND sync_type = :sync_type" if sync_type is not None else ""
+        query = text(
+            "SELECT " + _SYNC_JOB_COLUMNS + " "
+            "FROM sync_jobs "
+            "WHERE user_id = :user_id "
+            "AND integration_source = :integration_source "
+            "AND sync_resource = :resource "
+            "AND parent_job_id IS NULL "
+            "AND status = 'completed' " + type_clause + " "
+            "ORDER BY completed_at DESC NULLS LAST, id DESC "
+            "LIMIT 1"
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "user_id": user_id,
+                "integration_source": integration_source,
+                "resource": resource,
+                "sync_type": sync_type,
+            },
+        )
+        row = result.fetchone()
+        return None if row is None else self._row_to_sync_job(row)
 
     async def get_by_job_id(self, job_id: str) -> SyncJob | None:
         """
@@ -604,4 +692,6 @@ class SyncJobRepository:
             expected_children=row.expected_children,
             completed_children=row.completed_children,
             failed_children=row.failed_children,
+            sync_resource=row.sync_resource,
+            sync_cursor=row.sync_cursor,
         )

@@ -174,6 +174,18 @@ class SyncJob(Base):
         comment="Number of child jobs that have failed",
     )
 
+    # Incremental (smart) sync cursor, recorded by an orchestrator on its parent
+    sync_resource: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Resource an orchestrator listed (e.g. 'assets'), null if none",
+    )
+    sync_cursor: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="Newest change the listing saw, in the integration's own clock",
+    )
+
     # Audit tracking
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
