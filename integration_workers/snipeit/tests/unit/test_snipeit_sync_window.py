@@ -39,13 +39,15 @@ def _parent(
 
 
 class TestResolveSyncWindow:
-    def test_full_lists_everything_and_keeps_the_previous_cursor(self) -> None:
+    def test_full_lists_everything_and_starts_a_fresh_cursor(self) -> None:
+        """A full listing sees every record, so its own newest change is the
+        cursor; an earlier one may come from another instance's clock."""
         window = resolve_sync_window(
             SyncType.FULL, last_completed=_parent(), last_full=None, now=_NOW
         )
 
         assert window == SyncWindow(
-            since=None, sync_type=SyncType.FULL, previous_cursor=_CURSOR
+            since=None, sync_type=SyncType.FULL, previous_cursor=None
         )
 
     def test_smart_starts_an_overlap_before_the_cursor(self) -> None:
@@ -108,7 +110,7 @@ class TestResolveSyncWindow:
         )
 
         assert window.sync_type == SyncType.FULL
-        assert window.previous_cursor == _CURSOR
+        assert window.previous_cursor is None
 
     def test_smart_runs_as_full_when_settings_changed_since_the_last_run(self) -> None:
         """A changed URL, user mapping or API key can bring records into scope
@@ -123,7 +125,9 @@ class TestResolveSyncWindow:
             settings_changed_at=_NOW - timedelta(minutes=30),
         )
 
-        assert (window.since, window.sync_type) == (None, SyncType.FULL)
+        assert window == SyncWindow(
+            since=None, sync_type=SyncType.FULL, previous_cursor=None
+        )
         assert window.escalation == "Snipe-IT settings changed since the last sync"
 
     def test_settings_changed_before_the_last_run_started_do_not_matter(

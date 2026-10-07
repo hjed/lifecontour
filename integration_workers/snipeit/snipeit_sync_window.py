@@ -53,8 +53,10 @@ class SyncWindow:
         since: Fetch only records changed at or after this Snipe-IT wall-clock
             time, or every record when ``None``.
         sync_type: The type the run performs, full when a smart sync escalated.
-        previous_cursor: The cursor the run starts from, carried forward when
-            its own listing sees nothing newer.
+        previous_cursor: The cursor a smart run resumes from, carried forward
+            when its own listing sees nothing newer. ``None`` for a full run:
+            its listing sees every record, so its own newest change is the
+            cursor, and an earlier one may come from another instance's clock.
         escalation: Why a smart sync runs as a full one, or ``None``.
     """
 
@@ -86,7 +88,7 @@ def resolve_sync_window(
     """
     cursor = parse_wall_clock(last_completed.sync_cursor) if last_completed else None
     if requested is SyncType.FULL:
-        return SyncWindow(since=None, sync_type=SyncType.FULL, previous_cursor=cursor)
+        return SyncWindow(since=None, sync_type=SyncType.FULL, previous_cursor=None)
 
     if cursor is None:
         escalation = "no completed sync to resume from"
@@ -109,7 +111,7 @@ def resolve_sync_window(
     return SyncWindow(
         since=None,
         sync_type=SyncType.FULL,
-        previous_cursor=cursor,
+        previous_cursor=None,
         escalation=escalation,
     )
 
