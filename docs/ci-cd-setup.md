@@ -30,6 +30,11 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
   `pytest -c ../../pytest.ini --rootdir . tests/unit|integration/`
 - `frontend-lint`: Runs ESLint, TypeScript check, and Prettier
 - `frontend-test`: Runs Jest tests with coverage
+  - Both run only when the `frontend_checks` path filter (`frontend/**`) matches, and
+    always on pushes and release runs. The E2E jobs keep their own triggers (backend,
+    `core_shared`, frontend source and E2E infrastructure changes), so a backend-only PR
+    still runs E2E with `frontend-lint` skipped. Only a *failed* `frontend-lint` holds
+    E2E back
 - `build-test`: Tests Docker builds for both components
 - `secret-scan`: Runs gitleaks over the commits the event introduces; fails on any new
   finding. See [Secret scanning](#secret-scanning-secret-scan)
@@ -70,7 +75,10 @@ job. This is deliberate to save Actions budget — do not remove it.
   github.event.pull_request.stack.base.ref == github.event.pull_request.base.ref`
   (see GitHub's [Optimizing CI for stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/optimizing-ci-for-stacked-pull-requests)).
   Every other job depends on `changes`, directly or transitively, so it skips too. New
-  jobs must keep that dependency.
+  jobs must keep that dependency. A job whose `if` uses a status function (`!cancelled()`,
+  `always()`) no longer skips with its dependencies, so it must also require
+  `needs.changes.result == 'success'` (or success of a job that needs `changes`), as the
+  E2E jobs do.
 - Run CI on an upper layer by hand with `gh workflow run ci.yml --ref <branch>`. The
   path filter diffs against the merge-base with `main`, so the run covers the layers below.
   Re-running the skipped PR run does not work: it replays the same event.
