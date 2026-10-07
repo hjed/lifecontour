@@ -1269,7 +1269,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google"
+            session=mock_session, user_id="user-1", integration_source="google"
         )
 
         # Verify
@@ -1308,7 +1308,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google"
+            session=mock_session, user_id="user-1", integration_source="google"
         )
 
         # Verify
@@ -1332,7 +1332,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google"
+            session=mock_session, user_id="user-1", integration_source="google"
         )
 
         # Verify
@@ -1381,7 +1381,7 @@ class TestDetectLocalChanges:
 
         # Execute
         contacts = await find_contacts_to_push(
-            session=mock_session, integration_source="google"
+            session=mock_session, user_id="user-1", integration_source="google"
         )
 
         # Verify
@@ -1394,6 +1394,45 @@ class TestDetectLocalChanges:
         assert contacts[1]["id"] == 11
         assert contacts[1]["sync_action"] == "update"
         assert contacts[1]["external_id"] == "people/c987654321"
+
+    @pytest.mark.asyncio
+    async def test_reads_only_the_owners_contacts(
+        self, mock_session: AsyncMock
+    ) -> None:
+        """The push reads only the contacts of the account's owner."""
+        from worker import find_contacts_to_push
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        await find_contacts_to_push(session=mock_session, user_id="owner-a")
+
+        statement, params = mock_session.execute.call_args.args
+        assert "c.user_id = :user_id" in str(statement)
+        assert params["user_id"] == "owner-a"
+
+    @pytest.mark.asyncio
+    async def test_pending_push_reads_the_accounts_owner(
+        self, mock_session: AsyncMock
+    ) -> None:
+        """The push before a pull reads the contacts of the account's user."""
+        from worker import _push_pending_local_contacts
+
+        client = MagicMock()
+        with patch(
+            "worker.find_contacts_to_push", new_callable=AsyncMock, return_value=[]
+        ) as mock_find:
+            await _push_pending_local_contacts(
+                session=mock_session,
+                client=client,
+                google_account_email="a@gmail.com",
+                user_id="owner-a",
+            )
+
+        mock_find.assert_awaited_once_with(
+            session=mock_session, user_id="owner-a", integration_source="google"
+        )
 
 
 class TestPushSyncLogic:
