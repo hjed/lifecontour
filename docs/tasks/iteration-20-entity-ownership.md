@@ -480,7 +480,7 @@ that mechanical test change lands first, while the field is still optional:
   it on first delivery is a `StreamConsumer` change for all consumers (augment review on #1674).
 - `daily_summary_invalidation_service.py` (the `ImportantDate*` / `ContactUpdated` invalidation)
   still documents "contacts carries no owner column" and fans out to every user with a summary.
-  The events now carry `user_id`; scoping that fan-out belongs with the dashboard reads in Phase 4.
+  The events now carry `user_id`; scoping that fan-out belongs with the dashboard reads in Phase 4. **Resolved in Phase 4c.**
 - `backend/tests/unit/contacts/test_summary_prompt_builder.py::test_prompt_current_time_uses_user_timezone`
   asserts Sydney renders as `AEST` / `+10:00`, which is false during daylight saving (from
   2026-10-04 it is `AEDT` / `+11:00`). It fails on `main`, independent of this phase; fix the test
@@ -491,43 +491,122 @@ that mechanical test change lands first, while the field is still optional:
 
 ---
 
-#### Phase 4: Owned contacts — scoped reads and writes (repository, service, REST)
+#### Phase 4: Owned contacts — scoped reads and writes (repository, service, REST) ✅ DONE
 
 **PR Size:** ~450 lines
 
-- [ ] `ContactRepository` port and `SqlContactRepository`: the 14 aggregate-level methods listed in
+- [x] `ContactRepository` port and `SqlContactRepository`: the 14 aggregate-level methods listed in
   *Grounding Findings* take `user_id: str` and filter `WHERE … AND c.user_id = :user_id`. `lock`,
   `touch`, `lock_and_get_updated_at` and every sub-entity method stay keyed by `contact_id`.
-- [ ] The two dashboard contact ports take `user_id` and filter in SQL, as every other dashboard
+- [x] The two dashboard contact ports take `user_id` and filter in SQL, as every other dashboard
   port does: `UpcomingImportantDateRepository` (`upcoming_important_date_repository.py`, read by the
   home dashboard's upcoming-dates section and the `list_upcoming_important_dates` MCP tool) and
   `ContactImportanceRepository` (`contact_importance_repository.py`, the importance ranking behind
   it). This resolves the "Not scoped by user" note in `domain-architecture.md`.
   `ContactSummaryRepository` reads go through the aggregate check.
-- [ ] `ContactService`: every public method takes `user_id`; each by-id operation first resolves the
+- [x] `ContactService`: every public method takes `user_id`; each by-id operation first resolves the
   aggregate with the scoped `find_by_id` and raises `ContactNotFoundError` otherwise, then continues
   on child rows. `bulk_delete_all(user_id)` for the test-only cleanup endpoint.
-- [ ] `api/contacts/controllers.py`, `relationship_controllers.py`: pass `user.id` from the injected
+- [x] `api/contacts/controllers.py`, `relationship_controllers.py`: pass `user.id` from the injected
   `SessionUser` (already required on every route) — including avatar, history (already passes
   `reader_user_id`), summary and `test/cleanup`.
 
 **Required Test Coverage:**
-- [ ] **Integration (repository, written first):** for each scoped method, a contact seeded with
+- [x] **Integration (repository, written first):** for each scoped method, a contact seeded with
   `OTHER_USER_ID` is invisible: by-id returns `None`, lists exclude it, counts ignore it,
-  `bulk_delete_all` leaves it (`test_contact_repository_integration.py`).
-- [ ] **Unit:** `ContactService` raises `ContactNotFoundError` for a foreign id and performs no
-  child write (`test_contact_service.py`); existing unit tests updated for the signatures.
-- [ ] The REST cross-user suite is Phase 5 (kept separate for size); Phase 4's controllers are
+  `bulk_delete_all` leaves it (`test_contact_repository_ownership.py`, a file of its own).
+- [x] **Unit:** `ContactService` raises `ContactNotFoundError` for a foreign id and performs no
+  child write (`test_contact_service_ownership.py`, parametrised over every by-id operation);
+  existing unit tests updated for the signatures.
+- [x] The REST cross-user suite is Phase 5 (kept separate for size); Phase 4's controllers are
   exercised by the existing API integration tests.
 
 **E2E:** regression only.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/domain-architecture.md` — Contacts domain: the repository contract
+- [x] `docs/architecture/domain-architecture.md` — Contacts domain: the repository contract
   ("every aggregate-level method takes the acting user's id"), replacing the "Contacts have no owner
   in this system" note and the dashboard ports' "Not scoped by user" note.
 
 ---
+
+**Delivery:** a five-layer stack. The phase came to about three times its estimate: about 330
+existing test call sites name the acting user, and mypy rejects the tree between a signature and
+its callers. Every layer is deployable on its own.
+- **4a-i ✅ DONE** — `ContactService` takes a keyword-only `user_id` on every by-id, list and read
+  method. Every caller passes it: REST `user.id`, MCP `get_current_user_id`, the inbound consumer
+  `payload.user_id`, suggestion accept the accepting user. No behaviour change.
+- **4a-ii ✅ DONE** — `ContactRelationshipService` and `ContactMergeService.merge_contacts` take the
+  acting user the same way.
+- **4b-i ✅ DONE** — the repository is scoped in SQL (red first: `test_contact_repository_ownership.py`),
+  plus `ContactValidationService` and every repository caller.
+- **4b-ii ✅ DONE** — by-id operations that read only child rows prove the parent first (red first:
+  `test_contact_service_ownership.py`, relationships by id). The inbound consumer's
+  `_keep_stored_owner` is removed.
+- **4c ✅ DONE** — the dashboard ports, the contact-summary check, and daily-summary invalidation
+  targeted at the event's owner.
+
+**Decisions (recorded during implementation):**
+- **Every caller passes the owner it already holds (user decision).** The alternative was
+  transitional `*_unscoped` reads for the callers Phases 11/12 list. Instead, Phase 4 scopes those
+  callers' reads too:
+  - `TaskService._resolve_contacts` (create and link) and the task read model use the task's owner.
+  - Relationships check both ends; `merge_contacts(…, user_id)` checks both sides.
+  - Journal enrichment names and the MCP journal-contact tool use the reader.
+  - The Strava athlete search and `create_mapping` use the event's or the acting user.
+  - Immich conflict resolution uses the session or MCP user.
+  - Contact history is checked through `ContactService.get_contact_history`.
+
+  Phases 11/12 keep their integration proofs and the paths that do not go through
+  `ContactRepository` (see the notes added to each).
+- **`create_contact` takes no `user_id`.** The new contact carries its owner, stamped by every
+  converter and tool since Phase 3. `update_contact` does take one: a load-then-update caller would
+  otherwise "authorise" with the stored owner.
+- **`find_owner_id(contact_id)`** is the one read with no acting user, for the summary consumer. It
+  resolves the owner, then reads the contact as that owner. Phase 16 can reuse it for the owner's
+  timezone in `summary_consumer.py`.
+- **The inbound consumer acts as the event's owner.** Its reference lookup, email reconciliation and
+  stored-contact re-read are scoped to `payload.user_id`. A link that resolves to another user's
+  contact is invisible: `contact.updated` falls through to the create path, whose global
+  link-store idempotency check skips it, so nothing is written to either user and the link is not
+  re-pointed. This replaces Phase 3's "keep the stored owner and log the mismatch", which could no
+  longer happen, so `_keep_stored_owner` is gone.
+- **A missing or foreign contact is `ContactNotFoundError` on every by-id path.** Field updates
+  (`_get_existing_contact`) and the favourite toggle used to raise `ContactValidationError`.
+  Relationship-not-found stays a `ContactValidationError`, as it was. A relationship belongs to the
+  user when its from-contact does.
+- **Daily-summary invalidation skips an owner-less contact event and logs a warning**, the same as
+  its journal and task handlers, rather than raising `PermanentOutboxEventProcessingError`. The
+  consumer never fails an event, and a stale-summary hint is not worth a dead letter.
+  `user_ids_with_summaries` lost its only caller and is removed.
+- **Dead methods were deleted, not threaded:**
+  - `ContactService.search_contacts`, `get_contacts_by_tag` and `get_favourite_contacts`.
+  - `ContactRepository.get_contacts_by_tag`, `get_favourite_contacts` and
+    `get_favourite_contacts_count`.
+  - `ContactRelationshipService.get_relationships_from_contact` / `_to_contact`,
+    `delete_all_relationships_for_contact` and `validate_partner_relationship_compatibility`.
+
+  `get_contacts_count_by_filters` was missing from the Grounding Findings list and is scoped too.
+- `ContactSummaryService` proves the contact itself, so the refresh route no longer reads the
+  contact first.
+
+**Follow-ups (found in Phase 4):**
+- **Email uniqueness is system-wide.** `ix_contact_methods_email_unique` (migration `0027`) is on
+  `contact_methods`, which carries no owner, so a second user cannot store an address another
+  user's contact holds. The service pre-check is now per owner, and the database's
+  `DuplicateEmailError(…, 0)` names no foreign contact, but a 409 still reveals that the address
+  exists somewhere. Per-owner uniqueness needs the owner in the index (a denormalised
+  `contact_methods.user_id`, or a trigger). It is not covered by any phase yet.
+- `TaskService` `add_contacts` replacement path (`task_service.py:~1496`) still relies on the foreign
+  key and checks names only after an `IntegrityError`, so it does not refuse a foreign contact that
+  exists. It belongs with Phase 11's task-contact bullet.
+- `ContactResolver.resolve_by_email` (`journal_outbox_event_processor.py`, inbound calendar
+  attendees → journal participants) is raw SQL over every user's contacts. It does not go through
+  `ContactRepository`, so Phase 4 does not reach it. It must resolve within the journal's owner
+  (`journal_data["user_id"]`) and belongs with Phase 11's participant writes.
+- `ContactRepository.lock(contact_id)` runs before the ownership check on child-row writes (the
+  lock-ordering rule), so a foreign id briefly takes another user's row lock and then answers 404.
+  Nothing is written.
 
 #### Phase 5: REST cross-user isolation suite for contacts
 
@@ -557,6 +636,11 @@ that mechanical test change lands first, while the field is still optional:
 #### Phase 6: MCP parity for contacts
 
 **PR Size:** ~400 lines
+
+> **Already done in Phase 4:** every contact tool that calls a by-id, list or read service
+> method, plus the Immich conflict tool and the journal-contact tool, resolves the current user and
+> passes it to the scoped services; mypy required it, since the signatures changed. What remains is the isolation suite below,
+> plus any tool its reds turn up.
 
 - [ ] All 19 tools in `mcp/domains/contacts/tools.py` and the contact-touching integration tools
   (`get_contact_by_external_id`, athlete-mapping create/link, Immich conflict resolve, suggestion
@@ -743,6 +827,21 @@ resolving the divergences recorded in iterations 13 and 18.
 
 **PR Size:** ~400 lines
 
+> **Already done in Phase 4 (the user chose to pass the owner through every caller):**
+> - `TaskService._resolve_contacts` (create and link) is owner-scoped.
+> - Relationships check both ends on create, and by-id reads, updates and deletes check the
+>   from-contact.
+> - `merge_contacts(…, user_id)` scopes both sides.
+> - `ContactService.get_contact_history` proves the contact first.
+>
+> What remains:
+> - the integration proofs below
+> - `JournalContactService` / `JournalWriteService` participant writes, and inbound attendee
+>   resolution (`ContactResolver.resolve_by_email`)
+> - the task `add_contacts` replacement path (see the Phase 4 follow-ups)
+> - `ContactHistoryService`'s own entry points (the REST history route already reads the contact
+>   first)
+
 - [ ] `JournalContactService.add_contact_to_journal` and the `JournalWriteService` paths that link
   contacts (create with contacts, participant updates, attendance) check
   `contact_exists(contact_id, user_id=journal.user_id)` before writing.
@@ -776,6 +875,14 @@ resolving the divergences recorded in iterations 13 and 18.
 #### Phase 12: Integration-adjacent links — athlete mappings, suggestions, Immich conflicts
 
 **PR Size:** ~300 lines
+
+> **Already done in Phase 4:**
+> - `AthleteMappingService.create_mapping` and the Strava athlete name match are owner-scoped.
+> - Suggestion accept with an `ExistingContactTarget` reads the contact through the scoped
+>   `ContactService`.
+> - Immich "link" checks the candidate with the scoped `contact_exists` on REST and MCP.
+>
+> What remains is the integration proofs below.
 
 - [ ] `AthleteMappingService.create_mapping` resolves the contact with `(contact_id, user_id)`.
 - [ ] `ContactSuggestionService` accept with an `ExistingContactTarget` resolves the contact for the

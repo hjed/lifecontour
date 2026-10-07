@@ -602,9 +602,9 @@ reason, and states it in `_lock_journals`.
 
 It sits on a third port, `TaskContactRepository`, rather than on `TaskRepository`, so the contacts
 domain can move task contact links without also being able to change a task's text, status, anchors or
-existence. It is **not owner-scoped and could not be**: `contacts` has no owner column, so a contact
-merge has no acting user's tasks to scope to, and the operation stands in for a foreign-key cascade —
-a row filtered away would come back as exactly the silent data loss the port exists to prevent.
+existence. It is **not owner-scoped, deliberately**: the merge has already proved both contacts are the
+acting user's, and the operation stands in for a foreign-key cascade — a row filtered away would come
+back as exactly the silent data loss the port exists to prevent.
 
 The link tables' **composite primary keys** are what make link adds idempotent at the repository
 level — a retry cannot create a duplicate row. `SqlTaskRepository` cashes that in with

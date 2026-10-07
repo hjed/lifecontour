@@ -537,40 +537,6 @@ class TestInvalidatingASpanOfDays:
         )
 
 
-class TestListingTheUsersThatHaveSummaries:
-    """Who can an important-date change possibly affect?
-
-    ``contacts`` carries no owner column, so a contact event names no user. This
-    is the honest bound: invalidation only ever touches rows that exist, so the
-    users who *can* be affected are exactly the users who already have a summary
-    row. It is a small, indexed set rather than a scan of every account.
-    """
-
-    @pytest.mark.asyncio
-    async def test_every_user_with_a_row_is_listed_once(self, daily_summary_repo):
-        for user_id, day in (
-            ("user_list_a", date(2026, 4, 26)),
-            ("user_list_a", date(2026, 4, 27)),
-            ("user_list_b", date(2026, 4, 27)),
-        ):
-            await daily_summary_repo.upsert(
-                JournalDailySummary(
-                    user_id=user_id, summary_date=day, status=SummaryStatus.GENERATED
-                )
-            )
-
-        listed = await daily_summary_repo.user_ids_with_summaries()
-
-        assert listed.count("user_list_a") == 1
-        assert "user_list_b" in listed
-
-    @pytest.mark.asyncio
-    async def test_a_user_with_no_summary_is_not_listed(self, daily_summary_repo):
-        listed = await daily_summary_repo.user_ids_with_summaries()
-
-        assert "user_who_never_read_a_summary" not in listed
-
-
 class TestReleasingAClaimNobodyWillHonour:
     """What a discarded generation does with the claim it is abandoning.
 

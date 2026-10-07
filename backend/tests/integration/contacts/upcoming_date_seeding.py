@@ -41,8 +41,9 @@ async def seed_contact(
     nick_name: str | None = None,
     photo_url: str | None = None,
     is_favourite: bool = False,
+    user_id: str = contact_seeding.TEST_USER_ID,
 ) -> None:
-    """A bare contact with the display fields a dashboard row shows.
+    """A bare contact, owned by ``user_id``, with the display fields a dashboard row shows.
 
     ``is_favourite`` is here rather than left to a follow-up ``UPDATE`` because
     it is the first of the three importance signals, and a caller ordering two
@@ -50,6 +51,7 @@ async def seed_contact(
     """
     await contact_seeding.seed_contact(
         connection,
+        user_id=user_id,
         contact_id=contact_id,
         first_name=first_name,
         middle_name=middle_name,

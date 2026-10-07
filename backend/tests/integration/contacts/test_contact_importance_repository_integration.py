@@ -20,7 +20,7 @@ from app.core.contacts.adapters.sql.contact_importance_repository import (
     SqlContactImportanceRepository,
 )
 from app.core.contacts.models.importance import IMPORTANCE_WINDOW_DAYS
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
 from tests.integration.statement_recorder import recorded_statements
 
 pytestmark = pytest.mark.asyncio
@@ -41,10 +41,12 @@ async def _contact(
     *,
     is_favourite: bool = False,
     updated_at: datetime = NOW,
+    user_id: str = TEST_USER_ID,
 ) -> None:
     """A bare contact, with its own timestamps under the test's control."""
     await seed_contact(
         connection,
+        user_id=user_id,
         contact_id=contact_id,
         first_name="Contact",
         is_favourite=is_favourite,
@@ -156,7 +158,7 @@ class TestTheWindow:
             created_at=CUTOFF - timedelta(seconds=1),
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].journal_count_30d == 1
         assert signals[1].activity_count_30d == 1
@@ -173,7 +175,7 @@ class TestTheWindow:
             async_connection, entity_type="contact", entity_id=1, created_at=CUTOFF
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].journal_count_30d == 1
         assert signals[1].activity_count_30d == 1
@@ -245,7 +247,7 @@ class TestActivity:
                 created_at=NOW - timedelta(days=1),
             )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].activity_count_30d == 5
 
@@ -265,7 +267,7 @@ class TestActivity:
             created_at=NOW - timedelta(days=1),
         )
 
-        signals = await repository.for_contacts([1, 2], now=NOW)
+        signals = await repository.for_contacts([1, 2], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].journal_count_30d == 0
         assert signals[1].activity_count_30d == 0
@@ -296,7 +298,7 @@ class TestActivity:
             created_at=NOW - timedelta(days=1),
         )
 
-        signals = await repository.for_contacts([1, 2], now=NOW)
+        signals = await repository.for_contacts([1, 2], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].activity_count_30d == 0
         assert signals[2].activity_count_30d == 1
@@ -323,7 +325,7 @@ class TestActivity:
             created_at=NOW - timedelta(days=1),
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].last_activity_at == NOW - timedelta(days=200)
 
@@ -347,7 +349,7 @@ class TestActivity:
             created_at=NOW - timedelta(days=1),
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].activity_count_30d == 0
 
@@ -363,7 +365,7 @@ class TestLastActivity:
         """No journals and no history is zeros, not an absent contact."""
         await _contact(async_connection, 1, updated_at=NOW - timedelta(days=200))
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].contact_id == 1
         assert signals[1].is_favourite is False
@@ -386,7 +388,7 @@ class TestLastActivity:
             created_at=NOW - timedelta(days=5),
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].last_activity_at == NOW - timedelta(days=2)
 
@@ -405,7 +407,7 @@ class TestLastActivity:
             created_at=NOW - timedelta(days=1),
         )
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].last_activity_at == NOW - timedelta(days=1)
 
@@ -418,7 +420,7 @@ class TestLastActivity:
         await _contact(async_connection, 1, updated_at=NOW - timedelta(days=400))
         await _journal(async_connection, 1, 1, created_at=NOW - timedelta(days=300))
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].journal_count_30d == 0
         assert signals[1].last_activity_at == NOW - timedelta(days=300)
@@ -443,11 +445,26 @@ class TestTheBatch:
             )
 
         with recorded_statements(async_connection) as statements:
-            signals = await repository.for_contacts([1, 2, 3], now=NOW)
+            signals = await repository.for_contacts(
+                [1, 2, 3], now=NOW, user_id=TEST_USER_ID
+            )
 
         assert len(statements) == 1
         assert sorted(signals) == [1, 2, 3]
         assert all(signals[contact_id].journal_count_30d == 1 for contact_id in signals)
+
+    async def test_another_users_contact_is_absent(
+        self,
+        async_connection: AsyncConnection,
+        repository: SqlContactImportanceRepository,
+    ) -> None:
+        """An id that exists but is someone else's reads as an unknown one."""
+        await _contact(async_connection, 1)
+        await _contact(async_connection, 2, user_id=OTHER_USER_ID)
+
+        signals = await repository.for_contacts([1, 2], user_id=TEST_USER_ID, now=NOW)
+
+        assert set(signals) == {1}
 
     async def test_unknown_ids_are_absent_rather_than_empty_signals(
         self,
@@ -457,7 +474,7 @@ class TestTheBatch:
         """A deleted contact has no signals to report, which is not the same as zeros."""
         await _contact(async_connection, 1)
 
-        signals = await repository.for_contacts([1, 999], now=NOW)
+        signals = await repository.for_contacts([1, 999], now=NOW, user_id=TEST_USER_ID)
 
         assert sorted(signals) == [1]
 
@@ -468,7 +485,7 @@ class TestTheBatch:
     ) -> None:
         """An empty window is the common case and deserves no round trip."""
         with recorded_statements(async_connection) as statements:
-            signals = await repository.for_contacts([], now=NOW)
+            signals = await repository.for_contacts([], now=NOW, user_id=TEST_USER_ID)
 
         assert signals == {}
         assert statements == []
@@ -482,7 +499,7 @@ class TestTheBatch:
         await _contact(async_connection, 1, is_favourite=True)
         await _contact(async_connection, 2, is_favourite=False)
 
-        signals = await repository.for_contacts([1, 2], now=NOW)
+        signals = await repository.for_contacts([1, 2], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].is_favourite is True
         assert signals[2].is_favourite is False
@@ -515,7 +532,7 @@ class TestIndependenceFromSearch:
         await _contact(async_connection, 1, is_favourite=True)
         await _journal(async_connection, 1, 1, created_at=NOW - timedelta(days=1))
 
-        signals = await repository.for_contacts([1], now=NOW)
+        signals = await repository.for_contacts([1], now=NOW, user_id=TEST_USER_ID)
 
         assert signals[1].is_favourite is True
         assert signals[1].journal_count_30d == 1

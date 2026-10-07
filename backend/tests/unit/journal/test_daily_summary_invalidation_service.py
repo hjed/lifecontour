@@ -111,9 +111,7 @@ def contact_repo() -> AsyncMock:
 
 @pytest.fixture
 def summary_repo() -> AsyncMock:
-    repo = AsyncMock()
-    repo.user_ids_with_summaries.return_value = [USER_ID]
-    return repo
+    return AsyncMock()
 
 
 @pytest.fixture(autouse=True)
@@ -804,12 +802,11 @@ class TestADeletedTask:
 
 
 class TestAnImportantDateChange:
-    """The current day only — and whose current day is its own question.
+    """The current day only — the current day of the contact's owner.
 
-    ``contacts`` carries no owner column, so an important-date event names no
-    user. Invalidation only ever touches rows that exist, so the set that can be
-    affected *is* the users who already have a summary row, which is where the
-    users come from.
+    Every contact event names the contact's owner, so it is that user's day,
+    in that user's timezone, that goes stale; nobody else's summary mentions
+    the contact.
     """
 
     @pytest.mark.asyncio
@@ -817,7 +814,7 @@ class TestAnImportantDateChange:
         self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
     ) -> None:
         await service.invalidate_for_event(
-            "ImportantDateAdded", {"contact_id": 101, "date_id": 1}
+            "ImportantDateAdded", {"contact_id": 101, "user_id": USER_ID, "date_id": 1}
         )
 
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
@@ -839,7 +836,7 @@ class TestAnImportantDateChange:
         ]
 
         await service.invalidate_for_event(
-            "ImportantDateAdded", {"contact_id": 101, "date_id": 1}
+            "ImportantDateAdded", {"contact_id": 101, "user_id": USER_ID, "date_id": 1}
         )
 
         summary_repo.invalidate_for_range.assert_not_awaited()
@@ -854,7 +851,12 @@ class TestAnImportantDateChange:
         """There is no row left to test, so the safe answer is the only one."""
         await service.invalidate_for_event(
             "ImportantDateDeleted",
-            {"contact_id": 101, "date_id": 1, "date_type": "birthday"},
+            {
+                "contact_id": 101,
+                "user_id": USER_ID,
+                "date_id": 1,
+                "date_type": "birthday",
+            },
         )
 
         contact_repo.get_important_dates.assert_not_awaited()
@@ -875,6 +877,7 @@ class TestAnImportantDateChange:
             "ContactUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "changed_fields": {
                     "important_dates": [
                         "birthday:1990-03-09, work_anniversary:2015",
@@ -897,7 +900,9 @@ class TestAnImportantDateChange:
         listed one would otherwise go on naming a contact that no longer exists.
         Raised by review.
         """
-        await service.invalidate_for_event("ContactDeleted", {"contact_id": 101})
+        await service.invalidate_for_event(
+            "ContactDeleted", {"contact_id": 101, "user_id": USER_ID}
+        )
 
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
@@ -916,7 +921,11 @@ class TestAnImportantDateChange:
         """
         await service.invalidate_for_event(
             "ContactUpdated",
-            {"contact_id": 101, "changed_fields": {"merged_from": [7, 101]}},
+            {
+                "contact_id": 101,
+                "user_id": USER_ID,
+                "changed_fields": {"merged_from": [7, 101]},
+            },
         )
 
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
@@ -930,6 +939,7 @@ class TestAnImportantDateChange:
             "ContactUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "changed_fields": {"first_name": ["Ada", "Augusta"]},
             },
         )
@@ -948,6 +958,7 @@ class TestAnImportantDateChange:
             "ImportantDateUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "date_id": 1,
                 "changed_fields": {"month": [11, 4], "day": [3, 29]},
             },
@@ -972,6 +983,7 @@ class TestAnImportantDateChange:
             "ImportantDateUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "date_id": 1,
                 "changed_fields": {"month": [4, 11], "day": [29, 3]},
             },
@@ -996,6 +1008,7 @@ class TestAnImportantDateChange:
             "ImportantDateUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "date_id": 1,
                 "changed_fields": {"year": [1990, 1991]},
             },
@@ -1020,6 +1033,7 @@ class TestAnImportantDateChange:
             "ImportantDateUpdated",
             {
                 "contact_id": 101,
+                "user_id": USER_ID,
                 "date_id": 1,
                 "changed_fields": {"precision": ["no-such-precision", "day_month"]},
             },
@@ -1038,7 +1052,12 @@ class TestAnImportantDateChange:
 
         await service.invalidate_for_event(
             "ImportantDateUpdated",
-            {"contact_id": 101, "date_id": 1, "changed_fields": {"year": [1, 2]}},
+            {
+                "contact_id": 101,
+                "user_id": USER_ID,
+                "date_id": 1,
+                "changed_fields": {"year": [1, 2]},
+            },
         )
 
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
@@ -1058,44 +1077,37 @@ class TestAnImportantDateChange:
         contact_repo.get_important_dates.return_value = []
 
         await service.invalidate_for_event(
-            "ImportantDateAdded", {"contact_id": 101, "date_id": 1}
+            "ImportantDateAdded", {"contact_id": 101, "user_id": USER_ID, "date_id": 1}
         )
 
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
     @pytest.mark.asyncio
-    async def test_each_user_gets_their_own_today(
+    async def test_it_is_the_owners_today_in_the_owners_timezone(
         self,
         service: DailySummaryInvalidationService,
         date_resolver: AsyncMock,
         summary_repo: AsyncMock,
     ) -> None:
-        """Two users, two zones, two days — and the same date row.
-
-        A single "today" for the whole system would mark the wrong row for
-        whichever of them is not in UTC.
-        """
-        summary_repo.user_ids_with_summaries.return_value = [USER_ID, "user-sydney"]
+        """Only the owner's summary can mention the contact, so only theirs goes."""
         date_resolver.timezone_for.side_effect = lambda user_id: (
             SYDNEY if user_id == "user-sydney" else UTC_ZONE
         )
 
         await service.invalidate_for_event(
-            "ImportantDateAdded", {"contact_id": 101, "date_id": 1}
+            "ImportantDateAdded",
+            {"contact_id": 101, "user_id": "user-sydney", "date_id": 1},
         )
 
         assert _invalidated(summary_repo) == {
-            (USER_ID, TODAY, TODAY),
-            ("user-sydney", SYDNEY_TODAY, SYDNEY_TODAY),
+            ("user-sydney", SYDNEY_TODAY, SYDNEY_TODAY)
         }
 
     @pytest.mark.asyncio
-    async def test_a_system_with_no_summaries_yet_marks_nothing(
+    async def test_an_event_naming_no_owner_marks_nothing(
         self, service: DailySummaryInvalidationService, summary_repo: AsyncMock
     ) -> None:
-        """Invalidation creates no rows, so there is nothing to do."""
-        summary_repo.user_ids_with_summaries.return_value = []
-
+        """Whose day it is cannot be guessed; marking everyone's would be one."""
         await service.invalidate_for_event(
             "ImportantDateAdded", {"contact_id": 101, "date_id": 1}
         )

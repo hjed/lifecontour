@@ -96,7 +96,7 @@ _IMPORTANCE_QUERY = text(f"""
         WHERE
             {_ACTIVITY_PREDICATE}
     ) recent_activity ON TRUE
-    WHERE c.id = ANY(:contact_ids)
+    WHERE c.id = ANY(:contact_ids) AND c.user_id = :user_id
 """)
 
 
@@ -118,9 +118,13 @@ class SqlContactImportanceRepository(ContactImportanceRepository):
         self.conn = connection
 
     async def for_contacts(
-        self, contact_ids: Sequence[int], *, now: datetime | None = None
+        self,
+        contact_ids: Sequence[int],
+        *,
+        user_id: str,
+        now: datetime | None = None,
     ) -> dict[int, ContactImportance]:
-        """The importance signals for each of ``contact_ids`` that exists.
+        """The importance signals for each of ``user_id``'s ``contact_ids``.
 
         Args:
             contact_ids: The contacts to report on; an empty sequence short
@@ -129,7 +133,8 @@ class SqlContactImportanceRepository(ContactImportanceRepository):
                 current time.
 
         Returns:
-            A mapping from contact id to its signals, with unknown ids absent.
+            A mapping from contact id to its signals, with unknown ids and
+            other users' contacts absent.
         """
         if not contact_ids:
             return {}
@@ -140,6 +145,7 @@ class SqlContactImportanceRepository(ContactImportanceRepository):
             {
                 "cutoff": anchor - timedelta(days=IMPORTANCE_WINDOW_DAYS),
                 "contact_ids": list(contact_ids),
+                "user_id": user_id,
             },
         )
         return {

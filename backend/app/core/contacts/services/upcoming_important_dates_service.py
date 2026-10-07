@@ -136,8 +136,12 @@ class UpcomingImportantDatesService:
             days_ahead,
         )
 
-        candidates = await self.candidate_repo.candidates_for(window_month_days(window))
+        candidates = await self.candidate_repo.candidates_for(
+            window_month_days(window), user_id=user_id
+        )
         contact_ids = list(dict.fromkeys(row.contact.id for row in candidates))
-        importance = await self.importance_repo.for_contacts(contact_ids, now=moment)
+        importance = await self.importance_repo.for_contacts(
+            contact_ids, user_id=user_id, now=moment
+        )
 
         return select_upcoming_dates(candidates, window, importance)

@@ -66,11 +66,13 @@ class RecordingCandidates(UpcomingImportantDateRepository):
     def __init__(self, rows: list[ContactImportantDate] | None = None) -> None:
         self.rows = rows or []
         self.calls: list[tuple[tuple[int, int], ...]] = []
+        self.users: list[str] = []
 
     async def candidates_for(
-        self, month_days: Sequence[tuple[int, int]]
+        self, month_days: Sequence[tuple[int, int]], *, user_id: str
     ) -> list[ContactImportantDate]:
         self.calls.append(tuple(month_days))
+        self.users.append(user_id)
         return list(self.rows)
 
 
@@ -81,11 +83,17 @@ class RecordingImportance(ContactImportanceRepository):
         self.signals = signals or {}
         self.calls: list[tuple[int, ...]] = []
         self.instants: list[datetime.datetime | None] = []
+        self.users: list[str] = []
 
     async def for_contacts(
-        self, contact_ids: Sequence[int], *, now: datetime.datetime | None = None
+        self,
+        contact_ids: Sequence[int],
+        *,
+        user_id: str,
+        now: datetime.datetime | None = None,
     ) -> dict[int, ContactImportance]:
         self.calls.append(tuple(contact_ids))
+        self.users.append(user_id)
         self.instants.append(now)
         return {
             contact_id: self.signals[contact_id]
@@ -187,6 +195,19 @@ def service(
 
 class TestWhatTheQueryIsAskedFor:
     """The pairs are the whole filter, so they are asserted directly."""
+
+    async def test_both_reads_are_asked_for_the_users_own_contacts(
+        self,
+        service: UpcomingImportantDatesService,
+        candidates: RecordingCandidates,
+        importance: RecordingImportance,
+    ) -> None:
+        candidates.rows = [candidate(1, 4, month=8, day=14)]
+
+        await service.upcoming_dates(USER_ID, today=TODAY)
+
+        assert candidates.users == [USER_ID]
+        assert importance.users == [USER_ID]
 
     async def test_it_asks_for_every_day_of_the_window(
         self, service: UpcomingImportantDatesService, candidates: RecordingCandidates
