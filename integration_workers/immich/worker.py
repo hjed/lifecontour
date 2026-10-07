@@ -529,6 +529,17 @@ async def _unlink_immich_reference_for_event(
     return {"status": "unlinked", "external_id": external_id}
 
 
+def _event_owner(event_data: dict[str, Any]) -> str | None:
+    """Return the owner a contact event names, or ``None`` when it names none.
+
+    ``user_id`` columns are strings, so a numeric owner is normalised.
+    """
+    owner = event_data.get("user_id")
+    if owner is None or owner == "":
+        return None
+    return str(owner)
+
+
 async def _process_contact_merged_event(
     ctx: dict[str, Any], event_data: dict[str, Any]
 ) -> dict[str, Any]:
@@ -603,6 +614,55 @@ async def _process_contact_merged_event(
     return {"status": "success", "results": results}
 
 
+async def _push_contact_to_owner(
+    session: Any, owner: str, contact_id: int
+) -> dict[str, Any]:
+    """Push one contact to its owner's Immich account.
+
+    Failures past the database connection are logged and reported in the
+    result rather than raised, so an unreachable Immich server does not
+    redeliver the event. A connection failure propagates: the event is then
+    not acknowledged, and is retried.
+    """
+    conn = await session.connection()
+    try:
+        auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
+        api_key = await auth_service.get_api_key(owner, conn)
+        server_url = await auth_service.get_server_url(owner, conn)
+
+        if not api_key or not server_url:
+            return {"user_id": owner, "status": "skipped"}
+
+        api_client = ImmichApiClient.create(server_url, api_key)
+        try:
+            sync_service = ImmichSyncService(
+                api_client=api_client, connection=conn, user_id=owner
+            )
+            result = await sync_service.sync_contact_outbound(contact_id)
+            await session.commit()
+            return {"user_id": owner, "result": result}
+        except Exception as inner_e:  # noqa: BLE001
+            await session.rollback()
+            logger.error(
+                "Error syncing contact to Immich",
+                user_id=owner,
+                contact_id=contact_id,
+                error=str(inner_e),
+            )
+            return {"user_id": owner, "status": "error", "error": str(inner_e)}
+        finally:
+            await api_client.close()
+
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Error processing contact event for user",
+            user_id=owner,
+            contact_id=contact_id,
+            error=str(e),
+        )
+        return {"user_id": owner, "status": "error", "error": str(e)}
+
+
 @trace_arq_job
 async def process_contact_event(
     ctx: dict[str, Any], event_type: str, event_data: dict[str, Any]
@@ -610,7 +670,9 @@ async def process_contact_event(
     """Process a single contact event for Immich outbound sync.
 
     Receives domain events (ContactCreated, ContactUpdated, ContactBirthdayChanged,
-    ContactMerged) and pushes the changes to Immich for all synced accounts.
+    ContactMerged) and pushes the changes to the Immich account of the
+    contact's owner, named by ``event_data["user_id"]``. An event that names no
+    owner is skipped: it is never pushed to every connected account.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -623,6 +685,16 @@ async def process_contact_event(
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
+
+    owner = _event_owner(event_data)
+    if owner is None:
+        logger.warning(
+            "Contact event names no owner, skipping",
+            job_id=job_id,
+            event_type=event_type,
+            contact_id=event_data.get("contact_id"),
+        )
+        return {"status": "skipped", "reason": "no_owner"}
 
     # ContactMerged carries no contact_id (only survivor/source ids and the
     # external collisions to reconcile), so it is handled before the
@@ -649,74 +721,9 @@ async def process_contact_event(
     session_factory = ctx["session_factory"]
 
     async with session_factory() as session:
-        # Find all Immich integrations for all users
-        auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
-        conn = await session.connection()
+        result = await _push_contact_to_owner(session, owner, contact_id)
 
-        event_user_id = event_data.get("user_id")
-        if event_user_id is not None:
-            user_ids = [str(event_user_id)]
-        else:
-            user_ids = await auth_service.get_all_user_ids(conn)
-
-        if not user_ids:
-            logger.info(
-                "No Immich integrations found, skipping contact event",
-                contact_id=contact_id,
-                event_type=event_type,
-            )
-            return {"status": "skipped", "reason": "no_immich_integrations"}
-
-        results: list[dict[str, Any]] = []
-        # NOTE: This system is single-user by design. We iterate all
-        # user_immich_auth rows for forward-compatibility, but in
-        # practice there is only one user. The same pattern is used
-        # in periodic_sync_all_immich_accounts.
-        for user_id in user_ids:
-            try:
-                conn = await session.connection()
-                auth_service = ImmichAuthService(
-                    settings.encryption_key.get_secret_value()
-                )
-                api_key = await auth_service.get_api_key(user_id, conn)
-                server_url = await auth_service.get_server_url(user_id, conn)
-
-                if not api_key or not server_url:
-                    results.append({"user_id": user_id, "status": "skipped"})
-                    continue
-
-                api_client = ImmichApiClient.create(server_url, api_key)
-                try:
-                    sync_service = ImmichSyncService(
-                        api_client=api_client, connection=conn, user_id=user_id
-                    )
-                    result = await sync_service.sync_contact_outbound(contact_id)
-                    await session.commit()
-                    results.append({"user_id": user_id, "result": result})
-                except Exception as inner_e:  # noqa: BLE001
-                    await session.rollback()
-                    logger.error(
-                        "Error syncing contact to Immich",
-                        user_id=user_id,
-                        contact_id=contact_id,
-                        error=str(inner_e),
-                    )
-                    results.append(
-                        {"user_id": user_id, "status": "error", "error": str(inner_e)}
-                    )
-                finally:
-                    await api_client.close()
-
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    "Error processing contact event for user",
-                    user_id=user_id,
-                    contact_id=contact_id,
-                    error=str(e),
-                )
-                results.append({"user_id": user_id, "status": "error", "error": str(e)})
-
-        return {"status": "success", "results": results}
+    return {"status": "success", "results": [result]}
 
 
 async def periodic_sync_all_immich_accounts(

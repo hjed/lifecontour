@@ -162,13 +162,13 @@ def _extract_sync_metadata_upserts(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_api_client() -> AsyncMock:
     """Mock ImmichApiClient."""
     return AsyncMock()
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_connection() -> AsyncMock:
     """Mock async database connection."""
     conn = AsyncMock()
@@ -184,7 +184,7 @@ def mock_connection() -> AsyncMock:
     return conn
 
 
-@pytest.fixture()
+@pytest.fixture
 def service(
     mock_api_client: AsyncMock,
     mock_connection: AsyncMock,
@@ -221,11 +221,14 @@ class TestVersionHash:
         assert hash_b != hash_c
 
     def test_hash_deterministic(self, service: ImmichSyncService) -> None:
-        """Same inputs produce the same hash."""
-        person = _make_person("p1", "John Smith", "1990-05-15")
-        assert service.calculate_version_hash(person) == service.calculate_version_hash(
-            person
+        """Equal people, built separately, produce the same hash."""
+        first = service.calculate_version_hash(
+            _make_person("p1", "John Smith", "1990-05-15")
         )
+        second = service.calculate_version_hash(
+            _make_person("p1", "John Smith", "1990-05-15")
+        )
+        assert first == second
 
     def test_hash_without_birthdate(self, service: ImmichSyncService) -> None:
         """Hash works when birthDate is None."""
@@ -743,3 +746,20 @@ class TestBuildContactData:
 
         assert data["photo_url"] is None
         assert data["first_name"] == "Jane"
+
+
+class TestFetchUserContacts:
+    """Name-match candidates are read for the service's user only."""
+
+    @pytest.mark.asyncio
+    async def test_reads_only_the_owners_contacts(
+        self, service: ImmichSyncService, mock_connection: AsyncMock
+    ) -> None:
+        """The contacts query is filtered to the syncing user."""
+        mock_connection.execute.return_value = _make_fetchall_result([])
+
+        await service._fetch_user_contacts()
+
+        statement, params = mock_connection.execute.await_args.args
+        assert "WHERE user_id = :user_id" in str(statement)
+        assert params == {"user_id": "user-1"}

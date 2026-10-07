@@ -48,6 +48,10 @@ def _mock_session_factory() -> tuple[MagicMock, AsyncMock]:
     return factory, factory.session
 
 
+# The owner every merged event below names.
+OWNER = "owner-a"
+
+
 _IMMICH_COLLISION = {
     "external_system": "immich",
     "external_entity_type": "person",
@@ -75,6 +79,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_IMMICH_COLLISION],
@@ -107,6 +112,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [google_collision],
@@ -140,6 +146,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [malformed],
@@ -169,6 +176,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [non_person],
@@ -187,6 +195,7 @@ class TestProcessContactMerged:
             ctx=_make_ctx(),
             event_type="ContactMerged",
             event_data={
+                "user_id": OWNER,
                 "survivor_contact_id": 1,
                 "source_contact_id": 2,
                 "external_collisions": [],
@@ -215,6 +224,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_IMMICH_COLLISION],
@@ -224,3 +234,31 @@ class TestProcessContactMerged:
         assert result["status"] == "success"
         mock_client_cls.create.assert_not_called()
         mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestMergeIsScopedToTheOwner:
+    """A merge event that names no owner unlinks nothing."""
+
+    async def test_event_without_owner_unlinks_nothing(self) -> None:
+        """No owner: skipped before any database work."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory()
+
+        with patch(
+            "worker._unlink_immich_reference_for_event", new_callable=AsyncMock
+        ) as mock_unlink:
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_IMMICH_COLLISION],
+                },
+            )
+
+        assert result == {"status": "skipped", "reason": "no_owner"}
+        mock_unlink.assert_not_awaited()
+        mock_factory.assert_not_called()
