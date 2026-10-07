@@ -247,6 +247,8 @@ async def _resolve_window(
     session_factory: Any, user_id: str, resource: SyncResource, sync_type: str
 ) -> SyncWindow:
     """Work out what this run fetches from the user's earlier completed runs."""
+    from sqlalchemy import text
+
     async with session_factory() as session:
         repo = SyncJobRepository(await session.connection())
         last_completed = await repo.get_latest_completed_parent(
@@ -255,11 +257,24 @@ async def _resolve_window(
         last_full = await repo.get_latest_completed_parent(
             user_id, "snipeit", resource, sync_type=SyncType.FULL.value
         )
+        # Saving the settings (URL, user mapping) or the API key bumps these.
+        settings_changed_at = (
+            await session.execute(
+                text("""
+                    SELECT GREATEST(s.updated_at, a.updated_at)
+                    FROM snipeit_settings s
+                    LEFT JOIN user_snipe_it_auth a ON a.user_id = s.user_id
+                    WHERE s.user_id = :user_id
+                """),
+                {"user_id": user_id},
+            )
+        ).scalar_one_or_none()
     return resolve_sync_window(
         SyncType(sync_type),
         last_completed=last_completed,
         last_full=last_full,
         now=datetime.now(UTC),
+        settings_changed_at=settings_changed_at,
     )
 
 

@@ -100,17 +100,21 @@ failed batch never moves it. The overlap covers records edited while a listing
 runs and the hour that repeats when daylight saving ends.
 
 A smart sync runs as a full one, and records itself and its batches as `full`,
-when there is no cursor to resume from or no full sync of that resource has
-completed in the last 7 days. `updated_at` misses some changes, such as renaming
+when there is no cursor to resume from, when the Snipe-IT settings or API key
+were saved after the last completed run started (another URL is another clock,
+and another user mapping or key can bring in records older than the cursor), or
+when no full sync of that resource has completed in the last 7 days. Each such
+escalation is logged as a warning with its reason. `updated_at` misses some changes, such as renaming
 an asset's model or manufacturer, a record skipped by offset paging while
 another is deleted, and migrations or transformer changes that reset
 `version_hash`. Such changes reach existing rows on the next full sync, or on a
 manual sync with `force_full_sync`, not necessarily on the next periodic one.
 
-A record that fails on every run fails its parent each time, so the cursor
-never moves and every smart sync runs as a full one. That costs what every sync
-cost before smart syncs existed, and each escalation is logged as a warning
-with its reason.
+A record that fails on every run fails its parent each time, so neither the
+cursor nor the last full sync moves. Smart syncs keep resuming from the last
+completed run's cursor, refetching everything changed since it, until the last
+full sync is over 7 days old; from then on every smart sync runs as a full one. At
+worst that costs what every sync cost before smart syncs existed.
 
 ### Periodic Sync Configuration
 

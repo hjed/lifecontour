@@ -610,6 +610,47 @@ async def test_smart_orchestrator_runs_as_full_when_it_cannot_resume(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+@pytest.mark.parametrize("table", ["snipeit_settings", "user_snipe_it_auth"])
+async def test_smart_orchestrator_runs_as_full_after_settings_change(
+    kind_name: str,
+    table: str,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """A changed URL, user mapping or API key invalidates the cursor."""
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, kind_name)
+    # The test shares one transaction, so now() is the earlier run's start too.
+    await async_connection.execute(
+        text(
+            f"UPDATE {table} SET updated_at = now() + interval '1 minute' "  # noqa: S608
+            "WHERE user_id = :user_id"
+        ),
+        {"user_id": user_id},
+    )
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    assert [args[1] for _, args, _ in redis.jobs] == [[1, 2], [3]]
+    assert (await _status(repo, parent_id)).sync_type == "full"
+
+
+@pytest.mark.asyncio
 async def test_smart_maintenance_orchestrator_reconciles_every_listed_record(
     async_connection: AsyncConnection,
     session_factory: Any,
