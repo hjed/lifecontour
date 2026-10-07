@@ -104,7 +104,6 @@ class ImmichSyncService:
         integration_source: Integration source name (default ``"immich"``).
     """
 
-    _INTEGRATION_SOURCE = "immich"
     _EXTERNAL_ENTITY_TYPE = "person"
     _INTERNAL_ENTITY_TYPE = "contact"
     _ALBUM_INTEGRATION_SOURCE = "immich_album"

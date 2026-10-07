@@ -115,14 +115,12 @@ class TestPushGoesToTheOwnerOnly:
         factory = make_session_factory_mock()
         factory.session.connection.side_effect = ConnectionError("db down")
 
-        with (
-            patch("worker.ImmichSyncService") as sync_cls,
-            pytest.raises(ConnectionError, match="db down"),
-        ):
-            await process_contact_event(
-                ctx=_make_ctx(factory),
-                event_type="ContactUpdated",
-                event_data={"user_id": "owner-a", "contact_id": 42},
-            )
+        ctx = _make_ctx(factory)
+        event_data = {"user_id": "owner-a", "contact_id": 42}
+        with patch("worker.ImmichSyncService") as sync_cls:
+            with pytest.raises(ConnectionError, match="db down"):
+                await process_contact_event(
+                    ctx=ctx, event_type="ContactUpdated", event_data=event_data
+                )
 
         sync_cls.assert_not_called()
