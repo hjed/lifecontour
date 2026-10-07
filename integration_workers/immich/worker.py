@@ -619,11 +619,13 @@ async def _push_contact_to_owner(
 ) -> dict[str, Any]:
     """Push one contact to its owner's Immich account.
 
-    Failures are logged and reported in the result rather than raised, so an
-    unreachable Immich server does not redeliver the event.
+    Failures past the database connection are logged and reported in the
+    result rather than raised, so an unreachable Immich server does not
+    redeliver the event. A connection failure propagates: the event is then
+    not acknowledged, and is retried.
     """
+    conn = await session.connection()
     try:
-        conn = await session.connection()
         auth_service = ImmichAuthService(settings.encryption_key.get_secret_value())
         api_key = await auth_service.get_api_key(owner, conn)
         server_url = await auth_service.get_server_url(owner, conn)

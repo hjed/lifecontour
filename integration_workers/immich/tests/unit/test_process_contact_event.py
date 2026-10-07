@@ -103,3 +103,26 @@ class TestPushGoesToTheOwnerOnly:
 
         assert result["results"] == [{"user_id": "owner-a", "status": "skipped"}]
         sync_cls.assert_not_called()
+
+    async def test_connection_failure_propagates_for_redelivery(self) -> None:
+        """A database connection failure raises, so the event is not acknowledged.
+
+        The stream consumer acknowledges any event whose handler returns, so a
+        swallowed connection error would lose the push instead of retrying it.
+        """
+        from worker import process_contact_event
+
+        factory = make_session_factory_mock()
+        factory.session.connection.side_effect = ConnectionError("db down")
+
+        with (
+            patch("worker.ImmichSyncService") as sync_cls,
+            pytest.raises(ConnectionError, match="db down"),
+        ):
+            await process_contact_event(
+                ctx=_make_ctx(factory),
+                event_type="ContactUpdated",
+                event_data={"user_id": "owner-a", "contact_id": 42},
+            )
+
+        sync_cls.assert_not_called()
