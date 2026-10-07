@@ -3394,9 +3394,12 @@ async def _process_contact_merged_event(
     reconciled separately by the ``ContactUpdated`` event the merge also emits,
     so it is intentionally not re-pushed here.
 
-    The delete runs only in the accounts of ``owner`` (the survivor's owner,
-    who also owned the source): it is the one destructive outbound call, so it
-    never reaches another user's account.
+    The delete runs only in the accounts of ``owner`` (the survivor's owner):
+    it is the one destructive outbound call, so it never reaches another
+    user's account. Until the merge itself requires both contacts to share an
+    owner, a source owned by someone else is simply not found in this owner's
+    account, and Google answers the delete with a 404, which the client treats
+    as success.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory

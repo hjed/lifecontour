@@ -880,9 +880,12 @@ name-match read only the owner's contacts.
   tests mock.
 - **The Immich merge unlink is keyed by the source contact.** It makes no remote call; it deletes
   the source's orphaned `sync_metadata` row, now `WHERE integration_source = 'immich' AND
-  external_id = … AND internal_id = <source_contact_id>`. The source contact was the owner's, so
-  this is owner-scoped without a per-user link store, and a row for the same person id held by any
-  other contact is never touched. A first draft gated the unlink on the owner having an Immich
+  external_id = … AND internal_id = <source_contact_id>`, so a row for the same person id held by
+  any other contact is never touched. That is contact-scoped, not yet owner-scoped:
+  `ContactMergeService.merge_contacts` still loads both contacts unscoped, so the survivor and
+  source can belong to different users until Phase 11 makes the merge require one owner (augment
+  review on #1693). The same holds for the Google merge, whose delete in the survivor owner's
+  account finds nothing for a foreign source and is answered with a 404. A first draft gated the unlink on the owner having an Immich
   account instead; review found that protected nothing under the global unique key and stopped an
   owner who had disconnected Immich from having the orphan cleaned. `get_all_user_ids` is deleted
   (no caller left).

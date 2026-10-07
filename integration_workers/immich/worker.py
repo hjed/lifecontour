@@ -564,8 +564,10 @@ async def _process_contact_merged_event(
     so it is intentionally not re-pushed here.
 
     An event that names no owner never reaches this handler (see
-    ``process_contact_event``), and the unlink is keyed by the source contact,
-    which the owner held, so no other user's link is touched.
+    ``process_contact_event``). The unlink is keyed by the source contact, so
+    it removes only that contact's own link, never a row for the same person
+    id held by any other contact. It is owner-scoped only once the merge
+    requires both contacts to share an owner.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
