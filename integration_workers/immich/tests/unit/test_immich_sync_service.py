@@ -162,13 +162,13 @@ def _extract_sync_metadata_upserts(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_api_client() -> AsyncMock:
     """Mock ImmichApiClient."""
     return AsyncMock()
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_connection() -> AsyncMock:
     """Mock async database connection."""
     conn = AsyncMock()
@@ -184,7 +184,7 @@ def mock_connection() -> AsyncMock:
     return conn
 
 
-@pytest.fixture()
+@pytest.fixture
 def service(
     mock_api_client: AsyncMock,
     mock_connection: AsyncMock,
@@ -221,11 +221,14 @@ class TestVersionHash:
         assert hash_b != hash_c
 
     def test_hash_deterministic(self, service: ImmichSyncService) -> None:
-        """Same inputs produce the same hash."""
-        person = _make_person("p1", "John Smith", "1990-05-15")
-        assert service.calculate_version_hash(person) == service.calculate_version_hash(
-            person
+        """Equal people, built separately, produce the same hash."""
+        first = service.calculate_version_hash(
+            _make_person("p1", "John Smith", "1990-05-15")
         )
+        second = service.calculate_version_hash(
+            _make_person("p1", "John Smith", "1990-05-15")
+        )
+        assert first == second
 
     def test_hash_without_birthdate(self, service: ImmichSyncService) -> None:
         """Hash works when birthDate is None."""
