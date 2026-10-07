@@ -28,7 +28,7 @@ contacts_table = Table(
     "contacts",
     metadata,
     Column("id", Integer, primary_key=True),
-    # The owner. Nullable until every writer stamps one (migration 0123).
+    # The owner. Nullable until every writer stamps one (migration 0124).
     Column("user_id", String(50), nullable=True),
     Column("first_name", String(100), nullable=False),
     Column("last_name", String(100), nullable=True),

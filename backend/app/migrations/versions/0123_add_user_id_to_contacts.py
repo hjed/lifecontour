@@ -1,7 +1,7 @@
 """give every contact an owner: add contacts.user_id and assign existing rows
 
-Revision ID: 0122
-Revises: 0121
+Revision ID: 0123
+Revises: 0122
 Create Date: 2026-10-01 00:00:00.000000
 
 Contacts were the one user-created entity without an owner. This revision adds
@@ -17,7 +17,7 @@ owner evidence, or with more than one real owner, refuses unless the operator
 names the owner: ``alembic -x contacts_owner=<user_id> upgrade head``.
 
 The column stays nullable here. Until every writer stamps an owner, a contact
-created through REST or MCP still inserts ``NULL``; ``0123`` assigns those rows
+created through REST or MCP still inserts ``NULL``; ``0124`` assigns those rows
 by the same derivation and then makes the column ``NOT NULL``.
 """
 
@@ -29,15 +29,15 @@ from alembic import op
 from app.migrations.owner_derivation import assign_unowned, derive_owner, log
 
 # revision identifiers, used by Alembic.
-revision: str = "0122"
-down_revision: str | None = "0121"
+revision: str = "0123"
+down_revision: str | None = "0122"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_LABEL = "0122"
+_LABEL = "0123"
 
 # Every table that records a user at this revision — a test pins this to the
-# schema at 0121. Kept literal so the revision keeps meaning the same thing
+# schema at 0122. Kept literal so the revision keeps meaning the same thing
 # however the schema moves on.
 EVIDENCE_TABLES = (
     # Content tables (0106's REPAIRED_TABLES).

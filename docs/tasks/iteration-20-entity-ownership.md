@@ -409,20 +409,21 @@ the API, which now stamps it).
 
 **Delivery:** split three ways, because the contract alone breaks 288 test construction sites
 (mypy, 40 backend files) on top of the hand-built sync-event payloads:
-- **3a ✅ DONE** — `0122` (nullable column, owner assignment, `idx_contacts_user_id`), the shared
+- **3a ✅ DONE** — `0123` (nullable column, owner assignment, `idx_contacts_user_id`), the shared
   `app/migrations/owner_derivation.py`, `contacts_table` column and index, repository INSERT and
   row mappers, `seed_contact(user_id=…)` (required in `core_shared`; the backend wrapper defaults
   to `TEST_USER_ID`), `run_alembic(..., x_args=…)`.
-- **3b** — required `Contact.user_id`, every writer, the inbound consumer, `0123` (`SET NOT NULL`).
+- **3b** — required `Contact.user_id`, every writer, the inbound consumer, `0124` (`SET NOT NULL`).
 - **3c** — `user_id` on every `CONTACT_PUSH_EVENT_TYPES` event. **Must merge before Phase 13.**
   Safe after `NOT NULL`: nothing before Phase 13 reads the owner from an event.
 
 **Decisions (recorded during implementation):**
-- **Migration numbers:** `0122` (column) and `0123` (`NOT NULL`) — `main` took `0121` for
-  journal-series recurrence aliases — so the indicative numbers of later phases shift by two.
+- **Migration numbers:** `0123` (column) and `0124` (`NOT NULL`) — `main` took `0121` and `0122`
+  (journal-series recurrence aliases, split-series consolidation) — so the indicative numbers of
+  later phases shift by three.
 - **One derivation helper, literal evidence per revision.** `derive_owner` reads the operator
   override first, then the evidence each migration passes as its own literal tuple (revision
-  files cannot import each other, and literals keep a revision's meaning fixed). `0122`'s evidence
+  files cannot import each other, and literals keep a revision's meaning fixed). `0123`'s evidence
   is `0106`'s `REPAIRED_TABLES` plus `user_google_auth`, `user_google_integration`,
   `user_immich_auth`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`,
   `user_settings`, `sync_jobs`, `calendar_sync_tokens`, `pending_entity_mappings`,
@@ -441,7 +442,7 @@ the API, which now stamps it).
 
 **Follow-ups (found in Phase 3):**
 - Worker integration suites run `upgrade head` without resetting the schema, so a stale *local*
-  test database holding contacts and no owner evidence makes `0122` refuse; recreate the
+  test database holding contacts and no owner evidence makes `0123` refuse; recreate the
   container or pass `-x contacts_owner`. CI starts from fresh containers.
 
 ---
