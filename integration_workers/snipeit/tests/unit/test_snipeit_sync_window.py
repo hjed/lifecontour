@@ -176,6 +176,19 @@ class TestListingTracker:
         assert selected == [2, 3, 4]
         assert tracker.listed_ids == [1, 2, 3, 4]
 
+    def test_keeps_every_listed_record_with_its_asset(self) -> None:
+        """A maintenance's asset decides whether it is unsettled here."""
+        tracker = ListingTracker(
+            SyncWindow(since=_CURSOR, sync_type=SyncType.SMART, previous_cursor=None)
+        )
+        old = ListedRecord(1, _CURSOR - timedelta(days=1), asset_id=51)
+        new = ListedRecord(2, _CURSOR, asset_id=52)
+
+        tracker.select([old, new])
+
+        assert tracker.listed == [old, new]
+        assert tracker.listed_ids == [1, 2]
+
     def test_cursor_is_the_newest_change_seen(self) -> None:
         tracker = ListingTracker(
             SyncWindow(since=None, sync_type=SyncType.FULL, previous_cursor=None)

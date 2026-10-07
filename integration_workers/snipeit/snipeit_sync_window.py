@@ -39,10 +39,14 @@ FULL_RESYNC_INTERVAL = timedelta(days=7)
 
 @dataclass(frozen=True)
 class ListedRecord:
-    """A record as a listing page returns it."""
+    """A record as a listing page returns it.
+
+    ``asset_id`` is a maintenance record's asset, or ``None`` for an asset.
+    """
 
     id: int
     updated_at: datetime | None
+    asset_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -132,7 +136,7 @@ class ListingTracker:
     def __init__(self, window: SyncWindow) -> None:
         self._since = window.since
         self._newest = window.previous_cursor
-        self.listed_ids: list[int] = []
+        self.listed: list[ListedRecord] = []
 
     def select(self, records: Iterable[ListedRecord]) -> list[int]:
         """Record a listing page and return the ids of the records to fetch.
@@ -141,13 +145,18 @@ class ListingTracker:
         """
         selected: list[int] = []
         for record in records:
-            self.listed_ids.append(record.id)
+            self.listed.append(record)
             stamp = record.updated_at
             if stamp is not None and (self._newest is None or stamp > self._newest):
                 self._newest = stamp
             if self._since is None or stamp is None or stamp >= self._since:
                 selected.append(record.id)
         return selected
+
+    @property
+    def listed_ids(self) -> list[int]:
+        """The id of every record the listing returned."""
+        return [record.id for record in self.listed]
 
     @property
     def cursor(self) -> str | None:
