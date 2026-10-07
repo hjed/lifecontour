@@ -199,7 +199,11 @@ class TestSubEntityEventsReachGoogle:
             result = await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type=event_type,
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert result["status"] == "success"
@@ -223,7 +227,11 @@ class TestSubEntityEventsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactMethodAdded",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         pushed = mock_client.update_contact.call_args[1]["contact_data"]
@@ -249,7 +257,11 @@ class TestSubEntityEventsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert await _stored_version_hash(db_session, contact_id) == _NEW_ETAG
@@ -268,7 +280,11 @@ class TestSubEntityEventsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactMethodDeleted",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert mock_client.update_contact.call_args[1]["etag"] == "etag-before"
@@ -292,7 +308,11 @@ class TestInboundEchoIsNotPushedBack:
             result = await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "google_contacts"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "google_contacts",
+                },
             )
 
         assert result["status"] == "skipped"
@@ -327,7 +347,11 @@ class TestTagMembershipsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert _pushed_membership_resources(mock_client) == [
@@ -350,7 +374,11 @@ class TestTagMembershipsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         mock_client.create_contact_group.assert_called_once_with("Colleagues")
@@ -386,7 +414,11 @@ class TestTagMembershipsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagRemoved",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert _pushed_membership_resources(mock_client) == ["contactGroups/myContacts"]
@@ -411,7 +443,11 @@ class TestTagMembershipsReachGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         pushed = mock_client.update_contact.call_args[1]["contact_data"]
@@ -448,7 +484,11 @@ class TestPushDoesNotDropGoogleOnlyState:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactMethodAdded",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         assert _pushed_membership_resources(mock_client) == [
@@ -480,7 +520,11 @@ class TestPushDoesNotDropGoogleOnlyState:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         mock_client.update_contact.assert_not_called()
@@ -515,7 +559,11 @@ class TestUnresolvableTagGroupIsRetried:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="TagAssigned",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         mock_client.update_contact.assert_not_called()
@@ -551,7 +599,11 @@ class TestDeletingTheLastValueClearsGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactMethodDeleted",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         pushed = mock_client.update_contact.call_args[1]["contact_data"]
@@ -572,8 +624,60 @@ class TestDeletingTheLastValueClearsGoogle:
             await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactAddressDeleted",
-                event_data={"contact_id": contact_id, "source": "ui"},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": contact_id,
+                    "source": "ui",
+                },
             )
 
         pushed = mock_client.update_contact.call_args[1]["contact_data"]
         assert pushed["addresses"] == []
+
+
+@pytest.mark.asyncio
+class TestPushReachesOnlyTheOwnersAccount:
+    """With two connected users, a contact event reaches its owner's account."""
+
+    async def test_other_users_account_is_not_pushed_to(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """Exactly one client is built, for the owner, and one push is made."""
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO user_google_auth (
+                    user_id, google_account_email,
+                    encrypted_access_token, encrypted_refresh_token,
+                    expires_at, created_at, updated_at
+                ) VALUES ('other-user', 'other@example.com', :token, :refresh,
+                          NOW(), NOW(), NOW())
+                """
+            ),
+            {"token": b"x", "refresh": b"y"},
+        )
+        await db_session.flush()
+        mock_client = _mock_google_client()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client) as client_cls,
+        ):
+            result = await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactUpdated",
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": synced_contact["contact_id"],
+                    "source": "ui",
+                },
+            )
+
+        assert result["status"] == "success"
+        client_cls.assert_called_once()
+        assert client_cls.call_args.kwargs["user_id"] == CONTACT_OWNER
+        assert (
+            client_cls.call_args.kwargs["google_account_email"]
+            == "subentity-it@example.com"
+        )
+        mock_client.update_contact.assert_called_once()
