@@ -842,16 +842,17 @@ class ImmichSyncService:
         return result.fetchone()
 
     async def _fetch_user_contacts(self) -> list[Contact]:
-        """Fetch all contacts for the current user from the database.
+        """Fetch the syncing user's contacts from the database.
 
         Returns lightweight Contact objects with just name fields for
-        matching purposes.
+        matching purposes. Another user's contacts are never candidates.
         """
         query = text("""
             SELECT id, user_id, first_name, last_name, middle_name
             FROM contacts
+            WHERE user_id = :user_id
         """)
-        result = await self._conn.execute(query)
+        result = await self._conn.execute(query, {"user_id": self._user_id})
         rows = result.fetchall()
 
         return [

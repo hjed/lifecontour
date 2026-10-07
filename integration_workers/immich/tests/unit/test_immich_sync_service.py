@@ -743,3 +743,20 @@ class TestBuildContactData:
 
         assert data["photo_url"] is None
         assert data["first_name"] == "Jane"
+
+
+class TestFetchUserContacts:
+    """Name-match candidates are read for the service's user only."""
+
+    @pytest.mark.asyncio
+    async def test_reads_only_the_owners_contacts(
+        self, service: ImmichSyncService, mock_connection: AsyncMock
+    ) -> None:
+        """The contacts query is filtered to the syncing user."""
+        mock_connection.execute.return_value = _make_fetchall_result([])
+
+        await service._fetch_user_contacts()
+
+        statement, params = mock_connection.execute.await_args.args
+        assert "WHERE user_id = :user_id" in str(statement)
+        assert params == {"user_id": "user-1"}

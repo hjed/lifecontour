@@ -29,6 +29,8 @@ _SURVIVOR_PERSON = "11111111-1111-1111-1111-111111111111"
 _SOURCE_PERSON = "22222222-2222-2222-2222-222222222222"
 _SURVIVOR_CONTACT = 1
 _SOURCE_CONTACT = 2
+# The merged contacts' owner.
+_OWNER = "merge-owner"
 
 
 def _session_factory(db_session: AsyncSession) -> Any:
@@ -110,6 +112,7 @@ class TestContactMergedImmichReconciliation:
             ctx=_ctx(db_session),
             event_type="ContactMerged",
             event_data={
+                "user_id": _OWNER,
                 "survivor_contact_id": _SURVIVOR_CONTACT,
                 "source_contact_id": _SOURCE_CONTACT,
                 "external_collisions": [_immich_collision()],
@@ -140,6 +143,7 @@ class TestContactMergedImmichReconciliation:
             ctx=_ctx(db_session),
             event_type="ContactMerged",
             event_data={
+                "user_id": _OWNER,
                 "survivor_contact_id": _SURVIVOR_CONTACT,
                 "source_contact_id": _SOURCE_CONTACT,
                 "external_collisions": [google_collision],
@@ -166,6 +170,7 @@ class TestContactMergedImmichReconciliation:
             ctx=_ctx(db_session),
             event_type="ContactMerged",
             event_data={
+                "user_id": _OWNER,
                 "survivor_contact_id": _SURVIVOR_CONTACT,
                 "source_contact_id": _SOURCE_CONTACT,
                 "external_collisions": [_immich_collision()],
@@ -175,3 +180,27 @@ class TestContactMergedImmichReconciliation:
         # No row to remove, but the handler still acknowledges successfully.
         assert result["status"] == "success"
         assert _SURVIVOR_PERSON in await _sync_metadata_external_ids(db_session)
+
+
+@pytest.mark.asyncio
+class TestContactMergedIsScopedToTheOwner:
+    """A merge event that names no owner unlinks nothing."""
+
+    async def test_event_without_owner_leaves_links_alone(
+        self, merge_setup: AsyncSession
+    ) -> None:
+        """No owner: the event is skipped and both links remain."""
+        result = await process_contact_event(
+            ctx=_ctx(merge_setup),
+            event_type="ContactMerged",
+            event_data={
+                "survivor_contact_id": _SURVIVOR_CONTACT,
+                "source_contact_id": _SOURCE_CONTACT,
+                "external_collisions": [_immich_collision()],
+            },
+        )
+
+        assert result == {"status": "skipped", "reason": "no_owner"}
+        assert {_SURVIVOR_PERSON, _SOURCE_PERSON} <= await _sync_metadata_external_ids(
+            merge_setup
+        )
