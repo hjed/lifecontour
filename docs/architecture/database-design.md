@@ -42,7 +42,7 @@ list to the schema):
 - contacts but no owner evidence, or more than one real owner → the migration refuses and names
   what it found. The operator then names the owner: `alembic -x contacts_owner=<user_id> upgrade head`.
 
-Migration `0123` then assigned, by the same rule (owned contacts now counting as evidence), any
+Migration `0124` then assigned, by the same rule (owned contacts now counting as evidence), any
 contact created while the column was nullable, and made it `NOT NULL`. Every creation path stamps
 the acting user: REST and MCP the signed-in user, the inbound consumer the sync event's
 `user_id`, suggestion accept and Immich-conflict "create" the acting user, a merge the survivor's
