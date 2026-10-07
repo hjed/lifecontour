@@ -311,6 +311,7 @@ class TestOutboxEventProcessor:
             integration_source="google",
             external_id="people/c123456789",
             transaction=mock_connection,
+            user_id=SYNC_OWNER,
         )
 
         # Verify contact service was called correctly
@@ -1336,6 +1337,7 @@ class TestOutboxEventProcessor:
             integration_source="google",
             external_id="people/c999888777",
             transaction=mock_connection,
+            user_id=SYNC_OWNER,
         )
 
         # Verify sync metadata was called with normalized 'google'

@@ -103,7 +103,7 @@ router = APIRouter(
 async def list_contacts(
     request: Request,
     contact_service: FromDishka[ContactService],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
     limit: Annotated[
         int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
@@ -126,11 +126,13 @@ async def list_contacts(
         limit=pagination.limit,
         is_favourite=favourite,
         tag_ids=tag_ids,
+        user_id=user.id,
     )
 
     total_count = await contact_service.get_contacts_count(
         is_favourite=favourite,
         tag_ids=tag_ids,
+        user_id=user.id,
     )
 
     additional_params: dict[str, str | list[str]] = {}
@@ -174,12 +176,14 @@ async def get_contact_external_links(
     are associated with this contact, read from the canonical ``sync_metadata``
     link store.
     """
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
     # Fetch external links for this contact from the canonical link store.
-    external_references = await contact_service.get_external_references(contact_id)
+    external_references = await contact_service.get_external_references(
+        contact_id, user_id=user.id
+    )
 
     immich_server_url = await immich_token_service.get_server_url(user.id)
 
@@ -245,7 +249,7 @@ async def get_contact(
     request: Request,
     response: Response,
     contact_service: FromDishka[ContactService],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Get a single contact by ID.
@@ -254,7 +258,7 @@ async def get_contact(
     """
     base_url = get_request_base_url(request)
 
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
@@ -273,7 +277,7 @@ async def merge_contact(
     contact_merge_service: FromDishka[ContactMergeService],
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Merge another contact into this one (ITER13-001 Phase 3).
@@ -305,7 +309,7 @@ async def merge_contact(
 
     # Re-fetch the enriched survivor so the response carries the full, merged
     # aggregate (mirrors how get_contact builds its response).
-    merged = await contact_service.get_contact_by_id(contact_id)
+    merged = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not merged:
         raise ContactNotFoundError(contact_id)
 
@@ -364,7 +368,7 @@ async def update_contact(
     contact_request: ContactUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Update an existing contact.
@@ -373,7 +377,9 @@ async def update_contact(
     """
     base_url = get_request_base_url(request)
 
-    existing_contact = await contact_service.get_contact_by_id(contact_id)
+    existing_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user.id
+    )
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
@@ -388,6 +394,7 @@ async def update_contact(
         changed_by="ui",
         source=Provenance.UI,
         expected_etags=get_if_match(request),
+        user_id=user.id,
     )
     set_etag(response, "contacts", contact_id, saved_contact.updated_at)
 
@@ -402,7 +409,7 @@ async def delete_contact(
     contact_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Delete a contact.
@@ -411,7 +418,7 @@ async def delete_contact(
     deletion as an explicit unit of work (before the response is sent).
     """
     await contact_service.delete_contact(
-        contact_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id, connection, changed_by="ui", source=Provenance.UI, user_id=user.id
     )
 
 
@@ -420,7 +427,7 @@ async def delete_contact(
 async def test_cleanup_contacts(
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Test-only endpoint: Bulk delete all contacts for test cleanup.
@@ -432,7 +439,7 @@ async def test_cleanup_contacts(
     WARNING: This will delete ALL contacts for the authenticated user.
     Only use in test environments.
     """
-    await contact_service.bulk_delete_all_contacts(connection)
+    await contact_service.bulk_delete_all_contacts(connection, user_id=user.id)
 
 
 @router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
@@ -442,7 +449,7 @@ async def assign_tag_to_contact(
     tag_request: TagAssignmentRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Assign a tag to a contact.
@@ -451,12 +458,19 @@ async def assign_tag_to_contact(
     """
     tag_id = int(tag_request.data.id)
 
-    existing_contact = await contact_service.get_contact_by_id(contact_id)
+    existing_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user.id
+    )
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
     await contact_service.assign_tag_to_contact(
-        contact_id, tag_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id,
+        tag_id,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        user_id=user.id,
     )
 
 
@@ -467,19 +481,26 @@ async def remove_tag_from_contact(
     tag_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Remove a tag from a contact.
 
     Removes the relationship between the contact and the specified tag.
     """
-    existing_contact = await contact_service.get_contact_by_id(contact_id)
+    existing_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user.id
+    )
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
     await contact_service.remove_tag_from_contact(
-        contact_id, tag_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id,
+        tag_id,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        user_id=user.id,
     )
 
 
@@ -489,7 +510,7 @@ async def get_contact_tags(
     contact_id: int,
     request: Request,
     contact_service: FromDishka[ContactService],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> TagListResponse:
     """
     Get all tags assigned to a contact.
@@ -498,7 +519,9 @@ async def get_contact_tags(
     """
     base_url = get_request_base_url(request)
 
-    existing_contact = await contact_service.get_contact_by_id(contact_id)
+    existing_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user.id
+    )
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
@@ -516,7 +539,7 @@ async def toggle_contact_favourite(
     request: Request,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Toggle the favourite status of a contact.
@@ -528,7 +551,11 @@ async def toggle_contact_favourite(
 
     try:
         updated_contact = await contact_service.toggle_contact_favourite(
-            contact_id, connection, changed_by="ui", source=Provenance.UI
+            contact_id,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=user.id,
         )
 
         return ContactResponse(
@@ -548,7 +575,7 @@ async def update_contact_field(
     field_request: FieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactFieldResponse:
     """
     Update a single contact field.
@@ -572,6 +599,7 @@ async def update_contact_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Create response
@@ -605,7 +633,7 @@ async def update_contact_method_field(
     field_request: MethodFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactFieldResponse:
     """
     Update a single contact method field.
@@ -627,6 +655,7 @@ async def update_contact_method_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Create response
@@ -661,7 +690,7 @@ async def update_contact_address_field(
     field_request: AddressFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactFieldResponse:
     """
     Update a single contact address field.
@@ -683,6 +712,7 @@ async def update_contact_address_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Create response
@@ -717,7 +747,7 @@ async def update_contact_note_field(
     field_request: NoteFieldUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactFieldResponse:
     """
     Update a single contact note field.
@@ -739,6 +769,7 @@ async def update_contact_note_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Create response
@@ -784,7 +815,7 @@ async def get_contact_history(
     base_url = get_request_base_url(request)
 
     # Verify contact exists
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
@@ -792,8 +823,8 @@ async def get_contact_history(
     offset = (page - 1) * limit
 
     # Get paginated history entries from database
-    # The reader is passed to both, and to both for the same reason: this feed
-    # carries a linked task's rows, a task is owned, and a contact is not.
+    # The reader is passed to both: this feed carries a linked task's rows, and
+    # a task is owned.
     history_entries = await history_service.get_contact_history(
         contact_id=contact_id,
         limit=limit,
@@ -839,7 +870,7 @@ async def add_contact_method(
     method_request: ContactMethodCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Add a new contact method to an existing contact.
@@ -860,11 +891,18 @@ async def add_contact_method(
 
         # Add the method using the service
         await contact_service.add_contact_method(
-            contact_id, method, connection, changed_by="ui", source=Provenance.UI
+            contact_id,
+            method,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Get updated contact
-        updated_contact = await contact_service.get_contact_by_id(contact_id)
+        updated_contact = await contact_service.get_contact_by_id(
+            contact_id, user_id=user.id
+        )
         if not updated_contact:
             raise ContactNotFoundError(contact_id)
 
@@ -886,7 +924,7 @@ async def delete_contact_method(
     method_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Delete a contact method.
@@ -894,19 +932,26 @@ async def delete_contact_method(
     Removes the specified contact method from the contact.
     """
     await contact_service.delete_contact_method(
-        contact_id, method_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id,
+        method_id,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        user_id=user.id,
     )
 
 
 async def _contact_response(
-    contact_service: ContactService, contact_id: int, base_url: str
+    contact_service: ContactService, contact_id: int, base_url: str, *, user_id: str
 ) -> ContactResponse:
     """Re-read the contact and render it, for the sub-resource writes.
 
     They answer with the whole contact rather than the sub-resource, so a client
     can replace its cached contact from the response of a write to one date.
     """
-    updated_contact = await contact_service.get_contact_by_id(contact_id)
+    updated_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user_id
+    )
     if not updated_contact:
         raise ContactNotFoundError(contact_id)
 
@@ -927,7 +972,7 @@ async def add_contact_address(
     address_request: ContactAddressCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Add a new contact address to an existing contact.
@@ -948,11 +993,18 @@ async def add_contact_address(
 
         # Add the address using the service
         await contact_service.add_contact_address(
-            contact_id, address, connection, changed_by="ui", source=Provenance.UI
+            contact_id,
+            address,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=user.id,
         )
 
         # Get updated contact
-        updated_contact = await contact_service.get_contact_by_id(contact_id)
+        updated_contact = await contact_service.get_contact_by_id(
+            contact_id, user_id=user.id
+        )
         if not updated_contact:
             raise ContactNotFoundError(contact_id)
 
@@ -974,7 +1026,7 @@ async def delete_contact_address(
     address_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Delete a contact address.
@@ -982,7 +1034,12 @@ async def delete_contact_address(
     Removes the specified contact address from the contact.
     """
     await contact_service.delete_contact_address(
-        contact_id, address_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id,
+        address_id,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        user_id=user.id,
     )
 
 
@@ -1007,7 +1064,7 @@ async def add_contact_important_date(
     date_request: ImportantDateCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Add a new important date to an existing contact.
@@ -1022,14 +1079,21 @@ async def add_contact_important_date(
 
     try:
         await contact_service.add_contact_important_date(
-            contact_id, date, connection, changed_by="ui", source=Provenance.UI
+            contact_id,
+            date,
+            connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=user.id,
         )
     except ContactValidationError as e:
         if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
-    return await _contact_response(contact_service, contact_id, base_url)
+    return await _contact_response(
+        contact_service, contact_id, base_url, user_id=user.id
+    )
 
 
 @router.put("/{contact_id}/important-dates/{date_id}")
@@ -1041,7 +1105,7 @@ async def update_contact_important_date(
     date_request: ImportantDateUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Replace an existing important date.
@@ -1062,13 +1126,16 @@ async def update_contact_important_date(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=user.id,
         )
     except ContactValidationError as e:
         if CONTACT_NOT_FOUND_ERROR in str(e):
             raise ContactNotFoundError(contact_id) from e
         raise
 
-    return await _contact_response(contact_service, contact_id, base_url)
+    return await _contact_response(
+        contact_service, contact_id, base_url, user_id=user.id
+    )
 
 
 @router.delete(
@@ -1080,7 +1147,7 @@ async def delete_contact_important_date(
     date_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Delete an important date.
@@ -1088,7 +1155,12 @@ async def delete_contact_important_date(
     Removes the specified date from the contact.
     """
     await contact_service.delete_contact_important_date(
-        contact_id, date_id, connection, changed_by="ui", source=Provenance.UI
+        contact_id,
+        date_id,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        user_id=user.id,
     )
 
 
@@ -1101,7 +1173,7 @@ async def get_contact_journals(
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
     contact_relationship_repo: FromDishka[JournalContactRelationshipRepository],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
     limit: Annotated[
         int, Query(description=ITEMS_PER_PAGE_DESCRIPTION, ge=1, le=100)
@@ -1123,7 +1195,7 @@ async def get_contact_journals(
     base_url = get_request_base_url(request)
 
     # Verify contact exists
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
@@ -1149,10 +1221,10 @@ async def get_contact_journals(
 
     pagination = PaginationParams(page=page, limit=limit)
     total_count = await journal_service.count_journals_by_ids_for_user(
-        _user.id, journal_ids
+        user.id, journal_ids
     )
     journals = await journal_service.get_journals_by_ids_for_user(
-        user_id=_user.id,
+        user_id=user.id,
         journal_ids=journal_ids,
         offset=pagination.offset,
         limit=pagination.limit,
@@ -1162,7 +1234,7 @@ async def get_contact_journals(
     # have no direct relationship to the contact.
     journal_ids_in_page = [j.id for j in journals if j.id is not None]
     descendant_journals = await journal_service.find_descendants_for_user(
-        user_id=_user.id,
+        user_id=user.id,
         ancestor_ids=journal_ids_in_page,
         max_depth=5,
     )
@@ -1180,7 +1252,7 @@ async def get_contact_journals(
 
     journal_resources = await _build_journal_list_resources(
         journals=all_journals,
-        user_id=_user.id,
+        user_id=user.id,
         base_url=base_url,
         journal_service=journal_service,
         enrichment_service=enrichment_service,
@@ -1212,7 +1284,7 @@ async def refresh_contact_summary(
     contact_service: FromDishka[ContactService],
     summary_service: FromDishka[ContactSummaryService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],
+    user: FromDishka[SessionUser],
 ) -> dict[str, str]:
     """
     Request a refresh of the AI-generated summary for a contact.
@@ -1223,7 +1295,7 @@ async def refresh_contact_summary(
     bypassing the rolling-debounce buffer used by automated triggers.
     Returns 202 Accepted since the actual generation is asynchronous.
     """
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
@@ -1241,7 +1313,7 @@ async def update_contact_summary(
     contact_service: FromDishka[ContactService],
     summary_service: FromDishka[ContactSummaryService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],
+    user: FromDishka[SessionUser],
 ) -> ContactResponse:
     """
     Update a contact summary configuration (disable/override).
@@ -1251,7 +1323,7 @@ async def update_contact_summary(
     """
     base_url = get_request_base_url(request)
 
-    contact = await contact_service.get_contact_by_id(contact_id)
+    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
     if not contact:
         raise ContactNotFoundError(contact_id)
 
@@ -1268,7 +1340,9 @@ async def update_contact_summary(
     )
 
     # Re-fetch the contact with updated summary
-    updated_contact = await contact_service.get_contact_by_id(contact_id)
+    updated_contact = await contact_service.get_contact_by_id(
+        contact_id, user_id=user.id
+    )
     if not updated_contact:
         raise ContactNotFoundError(contact_id)
 

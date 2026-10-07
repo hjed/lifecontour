@@ -237,7 +237,12 @@ class ContactSuggestionService:
                 )
             case ExistingContactTarget(contact_id=contact_id):
                 return await self._add_email_to_contact(
-                    contact_id, email, transaction, changed_by, provenance
+                    contact_id,
+                    email,
+                    transaction,
+                    changed_by,
+                    provenance,
+                    user_id=user_id,
                 )
             case _:
                 assert_never(target)
@@ -249,6 +254,8 @@ class ContactSuggestionService:
         transaction: AsyncConnection,
         changed_by: str,
         provenance: Provenance,
+        *,
+        user_id: str,
     ) -> Contact:
         """Give the contact ``email`` unless it already holds it.
 
@@ -257,7 +264,9 @@ class ContactSuggestionService:
         contact since it was read. The email becomes primary only when the
         contact has no email in use - an archived one cannot be primary.
         """
-        stored = await self.contact_service.get_contact_by_id(contact_id)
+        stored = await self.contact_service.get_contact_by_id(
+            contact_id, user_id=user_id
+        )
         if stored is None:
             raise ContactNotFoundError(contact_id)
         emails = [
@@ -279,17 +288,22 @@ class ContactSuggestionService:
                 transaction,
                 changed_by=changed_by,
                 source=provenance,
+                user_id=user_id,
             )
         except DuplicateEmailError:
             # The read above is not under the contact's lock, so a concurrent
             # accept of the same suggestion can add the email first. That is
             # the outcome this one wanted, as long as it landed on this
             # contact; on any other it is a genuine conflict.
-            settled = await self.contact_service.get_contact_by_id(contact_id)
+            settled = await self.contact_service.get_contact_by_id(
+                contact_id, user_id=user_id
+            )
             if settled is None or not self._holds_email(settled, email):
                 raise
             return settled
-        updated = await self.contact_service.get_contact_by_id(contact_id)
+        updated = await self.contact_service.get_contact_by_id(
+            contact_id, user_id=user_id
+        )
         if updated is None:
             raise ContactNotFoundError(contact_id)
         return updated

@@ -84,7 +84,7 @@ class TestContactUpdatePrecondition:
 
         saved.first_name = "Augusta"
         result = await contact_service.update_contact(
-            saved, clean_database, expected_etags=[etag]
+            saved, clean_database, expected_etags=[etag], user_id=TEST_USER_ID
         )
 
         assert result.first_name == "Augusta"
@@ -103,7 +103,7 @@ class TestContactUpdatePrecondition:
         saved.first_name = "Augusta"
         with pytest.raises(PreconditionFailedError) as exc_info:
             await contact_service.update_contact(
-                saved, clean_database, expected_etags=[stale_etag]
+                saved, clean_database, expected_etags=[stale_etag], user_id=TEST_USER_ID
             )
 
         assert exc_info.value.status_code == 412
@@ -133,6 +133,7 @@ class TestContactUpdatePrecondition:
                 clean_database,
                 expected_etags=[stale_etag],
                 tag_names=["Mathematician"],
+                user_id=TEST_USER_ID,
             )
 
         assert (
@@ -151,6 +152,8 @@ class TestContactUpdatePrecondition:
         await _simulate_concurrent_write(clean_database, saved.id)
 
         saved.first_name = "Augusta"
-        result = await contact_service.update_contact(saved, clean_database)
+        result = await contact_service.update_contact(
+            saved, clean_database, user_id=TEST_USER_ID
+        )
 
         assert result.first_name == "Augusta"

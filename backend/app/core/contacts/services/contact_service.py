@@ -404,6 +404,8 @@ class ContactService:
         tag_names: list[str] | None = None,
         expected_etags: Sequence[str] | None = None,
         subresource_merge: SubResourceMerge | None = None,
+        *,
+        user_id: str,
     ) -> Contact:
         """
         Update an existing contact with transaction management.
@@ -546,6 +548,8 @@ class ContactService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         expected_etags: Sequence[str] | None = None,
+        *,
+        user_id: str,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact field with transaction management.
@@ -655,6 +659,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact method field.
@@ -753,6 +759,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact address field.
@@ -847,6 +855,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> tuple[str | None, str | None]:
         """
         Update a single contact note field.
@@ -1757,6 +1767,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """Delete a contact with transaction management."""
 
@@ -1783,7 +1795,9 @@ class ContactService:
             None, await self._execute_with_retry(_delete_operation, transaction)
         )
 
-    async def bulk_delete_all_contacts(self, transaction: AsyncConnection) -> None:
+    async def bulk_delete_all_contacts(
+        self, transaction: AsyncConnection, *, user_id: str
+    ) -> None:
         """
         Bulk delete all contacts for test cleanup.
 
@@ -1808,6 +1822,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """Assign a tag to a contact with transaction management."""
 
@@ -1860,6 +1876,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """Remove a tag from a contact with transaction management."""
 
@@ -1907,6 +1925,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> ContactMethod:
         """
         Add a contact method to an EXISTING contact with transaction management.
@@ -1986,6 +2006,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> ContactAddress:
         """
         Add a contact address to an EXISTING contact with transaction management.
@@ -2063,6 +2085,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> ContactNote:
         """
         Add a contact note to an EXISTING contact with transaction management.
@@ -2127,6 +2151,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> ImportantDate:
         """
         Add an important date to an EXISTING contact with transaction management.
@@ -2179,6 +2205,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """
         Delete a contact method with transaction management.
@@ -2235,6 +2263,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """
         Delete a contact address with transaction management.
@@ -2291,6 +2321,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> ImportantDate:
         """
         Edit one important date in place, with transaction management.
@@ -2348,6 +2380,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> None:
         """
         Delete an important date with transaction management.
@@ -2390,11 +2424,13 @@ class ContactService:
         )
 
     # Read operations (no transaction management needed)
-    async def get_contact_by_id(self, contact_id: int) -> Contact | None:
+    async def get_contact_by_id(
+        self, contact_id: int, *, user_id: str
+    ) -> Contact | None:
         """Get a contact by ID."""
         return await self.contact_repo.find_by_id(contact_id)
 
-    async def get_contact_by_email(self, email: str) -> Contact | None:
+    async def get_contact_by_email(self, email: str, *, user_id: str) -> Contact | None:
         """Get a contact by email."""
         return await self.contact_repo.find_by_email(email)
 
@@ -2403,6 +2439,8 @@ class ContactService:
         integration_source: str,
         external_id: str,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> Contact | None:
         """
         Find a contact by external reference.
@@ -2419,7 +2457,9 @@ class ContactService:
             external_system=integration_source, external_entity_id=external_id
         )
 
-    async def get_external_references(self, contact_id: int) -> list[dict[str, str]]:
+    async def get_external_references(
+        self, contact_id: int, *, user_id: str
+    ) -> list[dict[str, str]]:
         """Return a contact's external links from the canonical link store.
 
         Each entry has ``external_system`` / ``external_entity_id`` /
@@ -2427,12 +2467,8 @@ class ContactService:
         """
         return await self.contact_repo.get_external_references(contact_id)
 
-    async def search_contacts(self, query: str, limit: int = 50) -> list[Contact]:
-        """Search contacts."""
-        return await self.contact_repo.search(query, limit)
-
     async def get_all_contacts(
-        self, limit: int = 100, offset: int = 0
+        self, limit: int = 100, offset: int = 0, *, user_id: str
     ) -> list[Contact]:
         """Get all contacts with pagination."""
         return await self.contact_repo.get_all(limit, offset)
@@ -2467,6 +2503,8 @@ class ContactService:
         offset: int = 0,
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
+        *,
+        user_id: str,
     ) -> list[Contact]:
         """
         Get contacts with pagination and optional filtering.
@@ -2485,7 +2523,7 @@ class ContactService:
         """
         # If no filters are applied, use the existing get_all method
         if is_favourite is None and tag_ids is None:
-            return await self.get_all_contacts(limit, offset)
+            return await self.get_all_contacts(limit, offset, user_id=user_id)
 
         # Expand tag_ids to include descendants for hierarchical filtering
         expanded_tag_ids = (
@@ -2506,6 +2544,8 @@ class ContactService:
         self,
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
+        *,
+        user_id: str,
     ) -> int:
         """Get total count of contacts with optional filtering.
 
@@ -2527,25 +2567,20 @@ class ContactService:
             tag_ids=expanded_tag_ids,
         )
 
-    async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
-        """Get contacts by tag."""
-        return await self.contact_repo.get_contacts_by_tag(tag_id)
-
     async def get_contact_history(
         self,
         contact_id: int,
         limit: int = 50,
         *,
-        reader_user_id: str | None = None,
+        user_id: str,
     ) -> list[Any]:
         """Get contact history.
 
-        ``reader_user_id`` scopes the linked-task rows this feed carries; see
-        ``ContactHistoryService.get_contact_history``. Omitting it drops them
-        rather than exposing another user's.
+        ``user_id`` is the reader: it scopes the linked-task rows this feed
+        carries; see ``ContactHistoryService.get_contact_history``.
         """
         return await self.history_service.get_contact_history(
-            contact_id, limit, reader_user_id=reader_user_id
+            contact_id, limit, reader_user_id=user_id
         )
 
     async def toggle_contact_favourite(
@@ -2554,6 +2589,8 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        *,
+        user_id: str,
     ) -> Contact:
         """
         Toggle the favourite status of a contact.
@@ -2597,18 +2634,3 @@ class ContactService:
         return cast(
             Contact, await self._execute_with_retry(_toggle_operation, transaction)
         )
-
-    async def get_favourite_contacts(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[Contact]:
-        """
-        Get all favourite contacts with pagination.
-
-        Args:
-            limit: Maximum number of contacts to return
-            offset: Number of contacts to skip
-
-        Returns:
-            List of favourite contacts
-        """
-        return await self.contact_repo.get_favourite_contacts(limit, offset)

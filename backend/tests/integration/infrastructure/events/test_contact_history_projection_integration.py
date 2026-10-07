@@ -483,6 +483,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -528,6 +529,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -573,6 +575,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -607,6 +610,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -642,6 +646,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         assert saved_date.id is not None
         await self._drain(stream_client, test_stream_name, async_connection)
@@ -686,6 +691,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         assert saved_date.id is not None
         # Drain the add so only the edit's rows are under test.
@@ -706,6 +712,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -766,6 +773,7 @@ class TestContactProjectionEndToEnd:
             changed_by="ui",
             source=Provenance.UI,
             tag_names=["work"],
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -839,6 +847,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="mcp",
             source=Provenance.MCP,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -888,7 +897,11 @@ class TestContactProjectionEndToEnd:
 
         created.methods[0].value = "dara.after@example.com"
         await service.update_contact(
-            created, async_connection, changed_by="ui", source=Provenance.UI
+            created,
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         await self._drain(stream_client, test_stream_name, async_connection)
 
@@ -999,6 +1012,7 @@ class TestContactProjectionEndToEnd:
             async_connection,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
         # First delivery.
         await self._drain(stream_client, test_stream_name, async_connection)

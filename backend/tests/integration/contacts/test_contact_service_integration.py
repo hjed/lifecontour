@@ -163,6 +163,7 @@ class TestContactServiceIntegration:
             ),
             clean_database,
             tag_names=["New"],
+            user_id=TEST_USER_ID,
         )
 
         names = {str(t.name) for t in (updated.tags or [])}
@@ -186,7 +187,9 @@ class TestContactServiceIntegration:
         assert result.created_at is not None
 
         # Verify contact was actually saved to database
-        saved_contact = await contact_service.get_contact_by_id(result.id)
+        saved_contact = await contact_service.get_contact_by_id(
+            result.id, user_id=TEST_USER_ID
+        )
         assert saved_contact is not None
         assert saved_contact.first_name == "John"
         assert saved_contact.last_name == "Doe"
@@ -241,7 +244,9 @@ class TestContactServiceIntegration:
         assert len(result.notes) == 1
 
         # Verify contact was actually saved to database with all related data
-        saved_contact = await contact_service.get_contact_by_id(result.id)
+        saved_contact = await contact_service.get_contact_by_id(
+            result.id, user_id=TEST_USER_ID
+        )
         assert saved_contact is not None
         assert saved_contact.first_name == "Jane"
         assert saved_contact.last_name == "Smith"
@@ -269,7 +274,7 @@ class TestContactServiceIntegration:
             is_primary=True,
         )
         saved_method = await contact_service.add_contact_method(
-            saved_contact.id, email_method, clean_database
+            saved_contact.id, email_method, clean_database, user_id=TEST_USER_ID
         )
 
         # Assert
@@ -280,7 +285,7 @@ class TestContactServiceIntegration:
 
         # Verify contact can be found by email
         found_contact = await contact_service.get_contact_by_email(
-            "john.doe@example.com"
+            "john.doe@example.com", user_id=TEST_USER_ID
         )
         assert found_contact is not None
         assert found_contact.id == saved_contact.id
@@ -301,7 +306,7 @@ class TestContactServiceIntegration:
             is_primary=True,
         )
         await contact_service.add_contact_method(
-            saved_contact1.id, email_method1, clean_database
+            saved_contact1.id, email_method1, clean_database, user_id=TEST_USER_ID
         )
 
         # Create second contact
@@ -319,7 +324,7 @@ class TestContactServiceIntegration:
         # Act & Assert
         with pytest.raises(DuplicateEmailError):
             await contact_service.add_contact_method(
-                saved_contact2.id, email_method2, clean_database
+                saved_contact2.id, email_method2, clean_database, user_id=TEST_USER_ID
             )
 
     @pytest.mark.asyncio
@@ -341,7 +346,9 @@ class TestContactServiceIntegration:
         saved_contact.last_name = "Doe"
 
         # Act
-        result = await contact_service.update_contact(saved_contact, clean_database)
+        result = await contact_service.update_contact(
+            saved_contact, clean_database, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert result.id == saved_contact.id
@@ -399,7 +406,7 @@ class TestContactServiceIntegration:
 
         # Update the contact using the service
         final_contact = await contact_service.update_contact(
-            updated_contact, clean_database
+            updated_contact, clean_database, user_id=TEST_USER_ID
         )
 
         # Verify the contact was updated with all related data
@@ -410,7 +417,9 @@ class TestContactServiceIntegration:
         assert len(final_contact.notes) == 1
 
         # Verify the contact was actually saved to database
-        retrieved_contact = await contact_service.get_contact_by_id(final_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            final_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.first_name == "Robert"
         assert retrieved_contact.get_primary_email() == "robert.wilson@example.com"
@@ -430,7 +439,9 @@ class TestContactServiceIntegration:
 
         # Act & Assert
         with pytest.raises(ContactValidationError) as exc_info:
-            await contact_service.update_contact(contact, clean_database)
+            await contact_service.update_contact(
+                contact, clean_database, user_id=TEST_USER_ID
+            )
 
         assert exc_info.value.field == "id"
 
@@ -444,10 +455,14 @@ class TestContactServiceIntegration:
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         # Act
-        await contact_service.delete_contact(saved_contact.id, clean_database)
+        await contact_service.delete_contact(
+            saved_contact.id, clean_database, user_id=TEST_USER_ID
+        )
 
         # Assert - Contact should no longer exist
-        deleted_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        deleted_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert deleted_contact is None
 
     @pytest.mark.asyncio
@@ -457,7 +472,9 @@ class TestContactServiceIntegration:
         """Test contact deletion raises error when contact not found."""
         # Act & Assert
         with pytest.raises(ContactNotFoundError):
-            await contact_service.delete_contact(999, clean_database)
+            await contact_service.delete_contact(
+                999, clean_database, user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_assign_tag_to_contact_success(
@@ -478,11 +495,13 @@ class TestContactServiceIntegration:
 
         # Act
         await contact_service.assign_tag_to_contact(
-            saved_contact.id, saved_tag.id, clean_database
+            saved_contact.id, saved_tag.id, clean_database, user_id=TEST_USER_ID
         )
 
         # Assert - Verify tag assignment
-        contact_with_tags = await contact_service.get_contact_by_id(saved_contact.id)
+        contact_with_tags = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert len(contact_with_tags.tags) == 1
         assert contact_with_tags.tags[0].id == saved_tag.id
         assert str(contact_with_tags.tags[0].name) == "work"
@@ -515,7 +534,7 @@ class TestContactServiceIntegration:
             label="Work",
         )
         saved_email = await contact_service.add_contact_method(
-            saved_contact.id, email_method, clean_database
+            saved_contact.id, email_method, clean_database, user_id=TEST_USER_ID
         )
         assert saved_email.id is not None
 
@@ -528,7 +547,7 @@ class TestContactServiceIntegration:
             label="Mobile",
         )
         saved_phone = await contact_service.add_contact_method(
-            saved_contact.id, phone_method, clean_database
+            saved_contact.id, phone_method, clean_database, user_id=TEST_USER_ID
         )
         assert saved_phone.id is not None
 
@@ -545,7 +564,7 @@ class TestContactServiceIntegration:
             label="Home",
         )
         saved_address = await contact_service.add_contact_address(
-            saved_contact.id, address, clean_database
+            saved_contact.id, address, clean_database, user_id=TEST_USER_ID
         )
         assert saved_address.id is not None
 
@@ -555,7 +574,7 @@ class TestContactServiceIntegration:
             contact_id=saved_contact.id,
         )
         saved_note = await contact_service.add_contact_note(
-            saved_contact.id, note, clean_database
+            saved_contact.id, note, clean_database, user_id=TEST_USER_ID
         )
         assert saved_note.id is not None
 
@@ -566,24 +585,28 @@ class TestContactServiceIntegration:
         saved_client_tag = await tag_repo.save(client_tag)
 
         await contact_service.assign_tag_to_contact(
-            saved_contact.id, saved_work_tag.id, clean_database
+            saved_contact.id, saved_work_tag.id, clean_database, user_id=TEST_USER_ID
         )
         await contact_service.assign_tag_to_contact(
-            saved_contact.id, saved_client_tag.id, clean_database
+            saved_contact.id, saved_client_tag.id, clean_database, user_id=TEST_USER_ID
         )
 
         # Fetch full contact with all relations since update_contact uses replacement strategy
         full_contact_to_update = await contact_service.get_contact_by_id(
-            saved_contact.id
+            saved_contact.id, user_id=TEST_USER_ID
         )
         assert full_contact_to_update is not None
 
         # Update contact
         full_contact_to_update.nick_name = "Johnny"
-        await contact_service.update_contact(full_contact_to_update, clean_database)
+        await contact_service.update_contact(
+            full_contact_to_update, clean_database, user_id=TEST_USER_ID
+        )
 
         # Verify final state
-        final_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        final_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert final_contact.first_name == "John"
         assert final_contact.last_name == "Doe"
         assert final_contact.middle_name == "William"
@@ -595,7 +618,7 @@ class TestContactServiceIntegration:
 
         # Verify contact can be found by email
         found_by_email = await contact_service.get_contact_by_email(
-            "john.doe@example.com"
+            "john.doe@example.com", user_id=TEST_USER_ID
         )
         assert found_by_email.id == saved_contact.id
 
@@ -641,11 +664,13 @@ class TestContactServiceIntegration:
 
         # Assign tag
         await contact_service.assign_tag_to_contact(
-            saved_contact.id, saved_tag.id, clean_database
+            saved_contact.id, saved_tag.id, clean_database, user_id=TEST_USER_ID
         )
 
         # Fetch contact again
-        updated_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        updated_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
 
         # Verify timestamp increased
         assert updated_contact is not None

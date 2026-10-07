@@ -291,11 +291,13 @@ class TestContactToolsIntegration:
         )
 
         await contact_service.add_contact_method(
-            saved_contact.id, email_method, clean_database
+            saved_contact.id, email_method, clean_database, user_id=TEST_USER_ID
         )
 
         # Retrieve the contact to verify the email was added
-        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.get_primary_email() == "john.doe@example.com"
 
@@ -355,7 +357,9 @@ class TestContactToolsIntegration:
         assert saved_contact.notes is not None and len(saved_contact.notes) == 1
 
         # Retrieve the contact to verify all data was persisted correctly
-        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.first_name == "Jane"
         assert retrieved_contact.last_name == "Smith"
@@ -384,7 +388,9 @@ class TestContactToolsIntegration:
 
         # Retrieve the contact to verify it was saved correctly
         assert saved_contact.id is not None
-        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.first_name == "Bob"
         assert retrieved_contact.last_name is None
@@ -403,8 +409,10 @@ class TestContactToolsIntegration:
         await contact_service.create_contact(contact2, clean_database)
 
         # Test pagination
-        contacts = await contact_service.get_contacts_paginated(limit=10, offset=0)
-        total_count = await contact_service.get_contacts_count()
+        contacts = await contact_service.get_contacts_paginated(
+            limit=10, offset=0, user_id=TEST_USER_ID
+        )
+        total_count = await contact_service.get_contacts_count(user_id=TEST_USER_ID)
 
         # Verify results
         assert len(contacts) == 2
@@ -509,7 +517,9 @@ class TestContactToolsIntegration:
         assert len(created_contact.notes) == 1
 
         # Verify the contact was actually saved to database
-        saved_contact = await contact_service.get_contact_by_id(created_contact.id)
+        saved_contact = await contact_service.get_contact_by_id(
+            created_contact.id, user_id=TEST_USER_ID
+        )
         assert saved_contact is not None
         assert saved_contact.get_primary_email() == "alice.johnson@example.com"
         assert saved_contact.get_primary_phone() == "+1987654321"
@@ -590,7 +600,9 @@ class TestContactToolsIntegration:
         assert "important" in tag_names_created
 
         # Verify the contact was actually saved to the database with tags
-        retrieved_contact = await contact_service.get_contact_by_id(created_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            created_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.tags is not None
         assert len(retrieved_contact.tags) == 3
@@ -684,7 +696,7 @@ class TestContactToolsIntegration:
 
         # Update the contact using the service
         final_contact = await contact_service.update_contact(
-            updated_contact, clean_database
+            updated_contact, clean_database, user_id=TEST_USER_ID
         )
 
         # Verify the contact was updated
@@ -699,7 +711,9 @@ class TestContactToolsIntegration:
         assert len(final_contact.tags) == 1  # Only the new tag (replacement strategy)
 
         # Verify the contact was actually updated in the database
-        retrieved_contact = await contact_service.get_contact_by_id(saved_contact.id)
+        retrieved_contact = await contact_service.get_contact_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved_contact is not None
         assert retrieved_contact.first_name == "Updated"
         assert retrieved_contact.middle_name == "Middle"
@@ -1334,7 +1348,9 @@ class TestMCPTagParity:
         assert saved.id is not None
 
         # Verify initial state
-        retrieved = await contact_service.get_contact_by_id(saved.id)
+        retrieved = await contact_service.get_contact_by_id(
+            saved.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
         assert retrieved.tags is not None
         assert len(retrieved.tags) == 2
@@ -1349,10 +1365,12 @@ class TestMCPTagParity:
             last_name="Test",
             tags=[tag_b, tag_c],
         )
-        await contact_service.update_contact(updated_contact, clean_database)
+        await contact_service.update_contact(
+            updated_contact, clean_database, user_id=TEST_USER_ID
+        )
 
         # Assert: tags fully replaced
-        final = await contact_service.get_contact_by_id(saved.id)
+        final = await contact_service.get_contact_by_id(saved.id, user_id=TEST_USER_ID)
         assert final is not None
         assert final.tags is not None
         assert len(final.tags) == 2
@@ -1402,10 +1420,12 @@ class TestMCPTagParity:
             last_name="Tags",
             tags=resolved_tags,
         )
-        await contact_service.update_contact(updated_contact, clean_database)
+        await contact_service.update_contact(
+            updated_contact, clean_database, user_id=TEST_USER_ID
+        )
 
         # Assert: all three tags present
-        final = await contact_service.get_contact_by_id(saved.id)
+        final = await contact_service.get_contact_by_id(saved.id, user_id=TEST_USER_ID)
         assert final is not None
         assert final.tags is not None
         assert len(final.tags) == 3
@@ -1438,7 +1458,9 @@ class TestMCPTagParity:
         assert saved.id is not None
 
         # Verify initial state
-        retrieved = await contact_service.get_contact_by_id(saved.id)
+        retrieved = await contact_service.get_contact_by_id(
+            saved.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
         assert retrieved.tags is not None
         assert len(retrieved.tags) == 2
@@ -1451,10 +1473,12 @@ class TestMCPTagParity:
             last_name="Tags",
             tags=[],
         )
-        await contact_service.update_contact(updated_contact, clean_database)
+        await contact_service.update_contact(
+            updated_contact, clean_database, user_id=TEST_USER_ID
+        )
 
         # Assert: all tags removed
-        final = await contact_service.get_contact_by_id(saved.id)
+        final = await contact_service.get_contact_by_id(saved.id, user_id=TEST_USER_ID)
         assert final is not None
         assert final.tags is not None
         assert len(final.tags) == 0
@@ -1495,10 +1519,12 @@ class TestMCPTagParity:
             last_name="Check",
             tags=[rest_tag_b],
         )
-        await contact_service.update_contact(updated_contact, clean_database)
+        await contact_service.update_contact(
+            updated_contact, clean_database, user_id=TEST_USER_ID
+        )
 
         # Verify: contact has only rest-b (same outcome as REST assignment)
-        final = await contact_service.get_contact_by_id(saved.id)
+        final = await contact_service.get_contact_by_id(saved.id, user_id=TEST_USER_ID)
         assert final is not None
         assert final.tags is not None
         assert len(final.tags) == 1
@@ -1551,7 +1577,9 @@ class TestContactConverterAISummaryIntegration:
         await summary_repo.upsert(summary)
 
         # Retrieve the contact with summary loaded
-        retrieved = await contact_service.get_contact_by_id(saved.id)
+        retrieved = await contact_service.get_contact_by_id(
+            saved.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
         assert retrieved.summary is not None
 
@@ -1580,7 +1608,9 @@ class TestContactConverterAISummaryIntegration:
         saved = await contact_service.create_contact(contact, clean_database)
         assert saved.id is not None
 
-        retrieved = await contact_service.get_contact_by_id(saved.id)
+        retrieved = await contact_service.get_contact_by_id(
+            saved.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
 
         response = ContactConverter.to_contact_response(retrieved)
@@ -1618,7 +1648,9 @@ class TestContactConverterAISummaryIntegration:
         )
         await summary_repo.upsert(summary)
 
-        retrieved = await contact_service.get_contact_by_id(saved.id)
+        retrieved = await contact_service.get_contact_by_id(
+            saved.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
 
         response = ContactConverter.to_contact_response(retrieved)
