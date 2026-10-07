@@ -84,12 +84,17 @@ one call each (`snipeit_sync_window.py`):
 - **`smart`** fetches only the records whose listing `updated_at` is at or after
   the cursor of the user's newest *completed* run of that resource, less an
   hour's overlap. A record without a readable `updated_at` is always fetched.
-  A smart maintenance sync also fetches every listed record not yet settled
-  here (`unsettled_maintenance_ids`): one with no sync row, such as a record
-  skipped because its asset was not yet synced, and one whose sync row no live
-  journal holds, because its journal was deleted or an import's journal has not
-  arrived. Those are imported on the next sync whether or not they changed,
-  exactly as a full sync would; the check reads only the database.
+  A smart maintenance sync also fetches every listed record that is on an asset
+  synced here but not yet settled (`unsettled_maintenance_ids`): one with no
+  sync row, such as a record skipped because its asset was not yet synced; one
+  whose sync row no live journal holds, because its journal was deleted or an
+  import's journal has not arrived; and an imported one whose journal is on
+  another asset's gear, because it was moved to an asset that was not yet
+  synced when it was last fetched. Those are imported on the next sync whether
+  or not they changed, exactly as a full sync would; the check reads only the
+  database, using the asset each listing row names. Records on assets not synced
+  here are never fetched: the maintenance listing, unlike the asset listing, is
+  not filtered by the mapped Snipe-IT user, so most of them are other users'.
 
 Each orchestrator records on its parent `sync_jobs` row the resource it listed
 (`sync_resource`) and the newest `updated_at` it saw (`sync_cursor`). The cursor

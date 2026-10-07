@@ -218,7 +218,7 @@ class TestSnipeItListingTimestamps:
         ]
 
     @pytest.mark.asyncio
-    async def test_maintenance_listing_carries_updated_at(
+    async def test_maintenance_listing_carries_updated_at_and_asset(
         self, sync_service: SnipeItSyncService, mock_transport: Any
     ) -> None:
         mock_transport.add_response(
@@ -228,6 +228,7 @@ class TestSnipeItListingTimestamps:
                 "rows": [
                     {
                         "id": 7,
+                        "asset": {"id": 51, "name": "Rope"},
                         "updated_at": {
                             "datetime": "2026-10-07 09:30:05",
                             "formatted": "x",
@@ -243,7 +244,7 @@ class TestSnipeItListingTimestamps:
 
         assert pages == [
             [
-                ListedRecord(7, datetime(2026, 10, 7, 9, 30, 5)),
+                ListedRecord(7, datetime(2026, 10, 7, 9, 30, 5), asset_id=51),
                 ListedRecord(8, None),
             ]
         ]

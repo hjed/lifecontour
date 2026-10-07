@@ -689,9 +689,15 @@ class MaintenancePushContext:
         )
 
 
-def _listed(record_id: int, updated_at: SnipeItDateObject | None) -> ListedRecord:
+def _listed(
+    record_id: int,
+    updated_at: SnipeItDateObject | None,
+    asset_id: int | None = None,
+) -> ListedRecord:
     """A listing row as the id and wall-clock ``updated_at`` a sync selects by."""
-    return ListedRecord(record_id, updated_at.wall_clock() if updated_at else None)
+    return ListedRecord(
+        record_id, updated_at.wall_clock() if updated_at else None, asset_id
+    )
 
 
 class SnipeItSyncService:
@@ -1098,7 +1104,7 @@ class SnipeItSyncService:
             if not response.rows:
                 break
 
-            records = [_listed(m.id, m.updated_at) for m in response.rows]
+            records = [_listed(m.id, m.updated_at, m.asset_id) for m in response.rows]
             logger.info(
                 "Listed Snipe-IT maintenance batch",
                 page=page,

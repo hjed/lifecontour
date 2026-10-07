@@ -288,7 +288,7 @@ async def _run_snipeit_fanout(
     batch_task: str,
     child_id_prefix: str,
     after_listing: Callable[[Any, list[int]], Awaitable[object]] | None = None,
-    also_fetch: Callable[[Any, list[int]], Awaitable[set[int]]] | None = None,
+    also_fetch: Callable[[Any, list[ListedRecord]], Awaitable[set[int]]] | None = None,
 ) -> dict[str, Any]:
     """Non-blocking fan-out shared by the asset and maintenance orchestrators.
 
@@ -299,7 +299,7 @@ async def _run_snipeit_fanout(
     the parent and persists a child row per page with records to fetch (the
     parent goes ``in_progress``, or ``completed`` when there is nothing to
     sync), committing before dispatching them. A smart run also fetches the
-    ids ``also_fetch`` returns from every listed id, in batches of their own.
+    ids ``also_fetch`` returns from every listed record, in batches of their own.
     Each batch finalises its own row; the reconciler finalises the parent. A
     listing that fails part-way dispatches nothing.
 
@@ -348,9 +348,7 @@ async def _run_snipeit_fanout(
             await after_listing(sync_service, tracker.listed_ids)
         if also_fetch is not None and window.since is not None:
             selected = {record_id for ids in batches for record_id in ids}
-            extra = sorted(
-                await also_fetch(sync_service, tracker.listed_ids) - selected
-            )
+            extra = sorted(await also_fetch(sync_service, tracker.listed) - selected)
             batches += [
                 extra[start : start + _EXTRA_BATCH_SIZE]
                 for start in range(0, len(extra), _EXTRA_BATCH_SIZE)
@@ -573,8 +571,8 @@ async def sync_snipeit_maintenances(
         batch_task="sync_snipeit_maintenance_batch",
         child_id_prefix="snipeit_maint_batch",
         after_listing=_reconcile_deleted,
-        also_fetch=lambda service, listed_ids: service.unsettled_maintenance_ids(
-            listed_ids, session_factory
+        also_fetch=lambda service, listed: service.unsettled_maintenance_ids(
+            listed, session_factory
         ),
     )
 

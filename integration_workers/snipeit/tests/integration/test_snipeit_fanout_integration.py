@@ -693,7 +693,8 @@ async def test_smart_maintenance_orchestrator_also_fetches_unsettled_records(
     await _seed_completed(repo, user_id, "maintenances")
     await _seed_parent(repo, parent_id, user_id)
     redis = _RecordingRedis()
-    service = _stub_service(kind, pages=_pages_around_cursor())
+    pages = _pages_around_cursor()
+    service = _stub_service(kind, pages=pages)
     # 1 is unchanged but unsettled; 3 is both, and is fetched once.
     service.unsettled_maintenance_ids.return_value = {1, 3}
 
@@ -708,7 +709,7 @@ async def test_smart_maintenance_orchestrator_also_fetches_unsettled_records(
     )
 
     [call] = service.unsettled_maintenance_ids.await_args_list
-    assert set(call.args[0]) == {1, 2, 3}
+    assert call.args[0] == [record for page in pages for record in page]
     assert [args[1] for _, args, _ in redis.jobs] == [[2], [3], [1]]
     parent = await _status(repo, parent_id)
     assert parent.expected_children == 3
