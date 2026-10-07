@@ -16,6 +16,7 @@ from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from tests.integration.contact_seeding import TEST_USER_ID
@@ -199,7 +200,7 @@ class TestContactService:
         mock_contact_repo.find_by_id.return_value = None
 
         # Act & Assert
-        with pytest.raises(ContactValidationError, match="Contact not found"):
+        with pytest.raises(ContactNotFoundError):
             await contact_service.toggle_contact_favourite(
                 contact_id, mock_transaction, user_id=TEST_USER_ID
             )

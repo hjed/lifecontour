@@ -278,11 +278,16 @@ non-empty) and is the one the backend reads:
 - **A new contact is the event owner's.** The processor builds the inbound
   contact with the top-level `user_id`, whatever `contact_data` carries;
   `deserialize_contact` itself refuses a payload without an owner.
-- **A stored contact keeps its owner.** When the event updates an existing
-  contact — found through the link store, or reconciled by email on
-  `contact.created` — the stored owner wins and a mismatch is logged. Refusing a
-  cross-owner link belongs to the per-user link store
-  ([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 14–15).
+- **The processor acts as the event's owner.** Every contact lookup it makes —
+  the external reference on `contact.updated`, email reconciliation on
+  `contact.created`, the re-read of the stored contact — is owner-scoped to the
+  event's `user_id`, so it only ever updates or reconciles that user's
+  contacts. When a link resolves to *another* user's contact (the link store is
+  still keyed globally), the scoped lookup misses, `contact.updated` falls
+  through to the create path, and that path's link-store idempotency check
+  finds the link and skips the event: neither user's contact is written and the
+  link is not re-pointed. Giving each user their own link is the per-user link
+  store ([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 14–15).
 
 The other direction carries the owner too. Every contact domain event that workers push
 (`CONTACT_PUSH_EVENT_TYPES`: the lifecycle events, `ContactMerged`, tag membership, methods,

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from core_shared.models.contacts.exceptions import ContactValidationError
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.services.contact_service import ContactService
 
 # Import shared fixtures and factory functions
@@ -256,9 +257,7 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = None
         mock_transaction = AsyncMock()
 
-        with pytest.raises(
-            ContactValidationError
-        ):  # Should raise an exception when contact not found
+        with pytest.raises(ContactNotFoundError):
             await contact_service.update_contact_field(
                 contact_id=999,
                 field_name="first_name",
