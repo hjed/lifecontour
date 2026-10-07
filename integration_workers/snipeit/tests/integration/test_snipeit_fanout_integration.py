@@ -215,6 +215,7 @@ async def _orchestrate(
     parent_id: str,
     user_id: str,
     sync_type: str = "full",
+    job_try: int = 1,
 ) -> Any:
     """Run an orchestrator whose sync service is ``service`` (or raises it)."""
     stub = (
@@ -224,7 +225,9 @@ async def _orchestrate(
     )
     with patch("worker._create_sync_service", **stub):
         return await _worker_fn(kind.orchestrator)(
-            _ctx(session_factory, redis, parent_id), user_id, sync_type
+            _ctx(session_factory, redis, parent_id, job_try=job_try),
+            user_id,
+            sync_type,
         )
 
 
@@ -650,6 +653,42 @@ async def test_smart_orchestrator_runs_as_full_after_settings_change(
     assert [args[1] for _, args, _ in redis.jobs] == [[1, 2], [3]]
     parent = await _status(repo, parent_id)
     assert (parent.sync_type, parent.sync_cursor) == ("full", "2026-10-07 09:05:00")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sync_type", "recorded"),
+    [("smart", _CURSOR), ("full", None)],
+)
+async def test_retried_orchestrator_does_not_move_the_cursor(
+    sync_type: str,
+    recorded: str | None,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    """An earlier attempt may have queued batches whose ids arq keeps with
+    their original records, so this attempt's listing may not be what is
+    fetched: the cursor stays where the run started."""
+    kind = _KINDS["assets"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, "assets")
+    await _seed_parent(repo, parent_id, user_id)
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=_RecordingRedis(),
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type=sync_type,
+        job_try=2,
+    )
+
+    assert (await _status(repo, parent_id)).sync_cursor == recorded
 
 
 @pytest.mark.asyncio

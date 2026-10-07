@@ -40,6 +40,7 @@ from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from core_shared.worker_arq import DEFAULT_MAX_TRIES
 
+from snipeit_models import SNIPEIT_DATETIME_FORMAT
 from snipeit_rate_limiter import SnipeItRateLimitError
 from snipeit_settings import SnipeItWorkerSettings
 from snipeit_sync_window import (
@@ -238,6 +239,11 @@ def _rate_limit_defer(ctx: dict[str, Any], retry_after: float | None) -> float:
     return min(retry_after or default_retry_delay(retry_count), cap)
 
 
+def _format_cursor(cursor: datetime | None) -> str | None:
+    """A cursor as ``sync_jobs`` stores it, Snipe-IT's ``Y-m-d H:i:s``."""
+    return cursor.strftime(SNIPEIT_DATETIME_FORMAT) if cursor else None
+
+
 # Batch size for the unchanged records a smart sync fetches anyway, matching
 # the listing's page size that bounds every other batch.
 _EXTRA_BATCH_SIZE = 50
@@ -354,12 +360,20 @@ async def _run_snipeit_fanout(
                 for start in range(0, len(extra), _EXTRA_BATCH_SIZE)
             ]
 
+        # A retried attempt's earlier one may have queued batches, which arq
+        # keeps with their original records under the same child ids, so this
+        # listing is not what will be fetched: keep the cursor it started from.
+        if coerce_int(ctx.get("job_try"), 1) > 1:
+            cursor = _format_cursor(window.previous_cursor)
+        else:
+            cursor = tracker.cursor
+
         async with session_factory() as session:
             repo = SyncJobRepository(await session.connection())
             if not await repo.record_listing(
                 job_id,
                 resource=resource,
-                cursor=tracker.cursor,
+                cursor=cursor,
                 sync_type=window.sync_type.value,
             ):
                 logger.warning(

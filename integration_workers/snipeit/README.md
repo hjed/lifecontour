@@ -93,15 +93,18 @@ one call each (`snipeit_sync_window.py`):
   synced when it was last fetched. Those are imported on the next sync whether
   or not they changed, exactly as a full sync would; the check reads only the
   database, using the asset each listing row names. Records on assets not synced
-  here are never fetched: the maintenance listing, unlike the asset listing, is
-  not filtered by the mapped Snipe-IT user, so most of them are other users'.
+  here are never fetched just for being unsettled (changed ones still are, as
+  is every record in a full sync): the maintenance listing, unlike the asset
+  listing, is not filtered by the mapped Snipe-IT user, so most of them are
+  other users'.
 
 Each orchestrator records on its parent `sync_jobs` row the resource it listed
 (`sync_resource`) and the newest `updated_at` it saw (`sync_cursor`). The cursor
 is Snipe-IT's naive wall-clock time, compared only with other Snipe-IT
 timestamps, so neither the instance's timezone (which its API does not expose)
 nor clock skew matters. Only a completed parent's cursor is read: a run with a
-failed batch never moves it. The overlap covers records edited while a listing
+failed batch never moves it. A retried orchestrator keeps the cursor it started
+from, since batches an earlier attempt queued keep their original records. The overlap covers records edited while a listing
 runs and the hour that repeats when daylight saving ends.
 
 A smart sync runs as a full one, and records itself and its batches as `full`,
