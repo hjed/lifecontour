@@ -69,6 +69,37 @@ class TestPushRunsBeforePull:
         assert call_order == ["push", "pull"]
 
     @pytest.mark.asyncio
+    async def test_push_reads_the_syncing_users_contacts(
+        self, session_factory_mock: MagicMock
+    ) -> None:
+        """The push before the pull is for the account's own user."""
+        from worker import sync_google_contacts
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient"),
+            patch("worker._update_sync_job_status", new_callable=AsyncMock),
+            patch(
+                "worker._push_pending_local_contacts",
+                new_callable=AsyncMock,
+                return_value=_push_result(),
+            ) as mock_push,
+            patch(
+                "worker._perform_full_sync",
+                new_callable=AsyncMock,
+                return_value={"contacts_processed": 0},
+            ),
+        ):
+            await sync_google_contacts(
+                ctx={"session_factory": session_factory_mock},
+                google_account_email="a@example.com",
+                user_id="owner-a",
+                sync_type="full",
+            )
+
+        assert mock_push.await_args.kwargs["user_id"] == "owner-a"
+
+    @pytest.mark.asyncio
     async def test_push_runs_before_an_incremental_pull_too(
         self, session_factory_mock: MagicMock
     ) -> None:
@@ -225,6 +256,7 @@ class TestPushIsCommittedBeforeThePull:
                 session=session,
                 client=AsyncMock(),
                 google_account_email="test@example.com",
+                user_id="1",
             )
 
         session.commit.assert_awaited_once()
@@ -247,6 +279,7 @@ class TestPushIsCommittedBeforeThePull:
                 session=session,
                 client=AsyncMock(),
                 google_account_email="test@example.com",
+                user_id="1",
             )
 
         assert result["push_failed"] is True

@@ -140,17 +140,21 @@ _on_startup, _on_shutdown = build_worker_lifecycle(
 
 
 async def find_contacts_to_push(
-    session: AsyncSession, integration_source: str = "google"
+    session: AsyncSession, *, user_id: str, integration_source: str = "google"
 ) -> list[dict[str, Any]]:
     """
-    Find contacts that need to be pushed to Google.
+    Find the contacts of ``user_id`` that need to be pushed to Google.
 
     Identifies two types of contacts:
     1. Newly created contacts (no sync metadata entry)
     2. Updated contacts (updated_at > last_synced_at)
 
+    Only the owner's contacts are read: the push runs once per connected
+    account, and another user's contacts never belong in it.
+
     Args:
         session: Database session
+        user_id: Owner whose contacts are pushed (the account's user)
         integration_source: Integration source name (default: "google")
 
     Returns:
@@ -183,14 +187,19 @@ async def find_contacts_to_push(
             c.id = sm.internal_id AND
             sm.integration_source = :integration_source
         WHERE
-            -- Either no sync metadata (new contact)
-            sm.id IS NULL
-            -- Or contact updated after last sync
-            OR c.updated_at > sm.last_synced_at
+            c.user_id = :user_id
+            AND (
+                -- Either no sync metadata (new contact)
+                sm.id IS NULL
+                -- Or contact updated after last sync
+                OR c.updated_at > sm.last_synced_at
+            )
         ORDER BY c.updated_at ASC
     """)
 
-    result = await session.execute(stmt, {"integration_source": integration_source})
+    result = await session.execute(
+        stmt, {"user_id": user_id, "integration_source": integration_source}
+    )
     rows = result.fetchall()
 
     contacts = []
@@ -213,6 +222,7 @@ async def find_contacts_to_push(
 
     logger.info(
         "Found contacts to push",
+        user_id=user_id,
         integration_source=integration_source,
         total_contacts=len(contacts),
         new_contacts=sum(1 for c in contacts if c["sync_action"] == "create"),
@@ -2057,6 +2067,7 @@ async def _push_before_pull(
     session: AsyncSession,
     client: GoogleAPIClient,
     google_account_email: str,
+    user_id: str,
 ) -> dict[str, Any]:
     """Run the outbound push ahead of an inbound sync, never failing it.
 
@@ -2087,6 +2098,7 @@ async def _push_before_pull(
             session=session,
             client=client,
             google_account_email=google_account_email,
+            user_id=user_id,
         )
     except Exception as e:  # noqa: BLE001
         await session.rollback()
@@ -2201,6 +2213,7 @@ async def sync_google_contacts(
                     session=session,
                     client=client,
                     google_account_email=google_account_email,
+                    user_id=str(user_id),
                 )
             )
 
@@ -3646,14 +3659,16 @@ async def _push_pending_local_contacts(
     session: AsyncSession,
     client: GoogleAPIClient,
     google_account_email: str,
+    user_id: str,
 ) -> dict[str, Any]:
     """Push contacts with unsynced local changes to Google.
 
-    Finds contacts that are new locally or were modified since their last sync,
-    resolves the contact groups their tags need, and pushes them. Shared by the
-    standalone ``push_local_contacts_to_google`` task and by
-    ``sync_google_contacts``, which runs it before pulling so a pull cannot
-    overwrite a local edit that has not reached Google yet.
+    Finds the contacts of ``user_id`` (the account's user) that are new
+    locally or were modified since their last sync, resolves the contact groups
+    their tags need, and pushes them. Shared by the standalone
+    ``push_local_contacts_to_google`` task and by ``sync_google_contacts``,
+    which runs it before pulling so a pull cannot overwrite a local edit that
+    has not reached Google yet.
 
     Each contact commits on its own inside ``_push_single_contact``; the caller
     owns the session and any work outside the per-contact pushes.
@@ -3670,7 +3685,7 @@ async def _push_pending_local_contacts(
     }
 
     contacts_to_push = await find_contacts_to_push(
-        session=session, integration_source="google"
+        session=session, user_id=user_id, integration_source="google"
     )
 
     if not contacts_to_push:
@@ -3705,7 +3720,7 @@ async def _push_pending_local_contacts(
 
 @trace_arq_job
 async def push_local_contacts_to_google(
-    ctx: dict[str, Any], google_account_email: str, user_id: str | int = 1
+    ctx: dict[str, Any], google_account_email: str, user_id: str | int
 ) -> dict[str, Any]:
     """
     Push locally created/updated contacts to Google (two-way sync).
@@ -3716,7 +3731,7 @@ async def push_local_contacts_to_google(
     Args:
         ctx: ARQ context dictionary
         google_account_email: Google account email to sync
-        user_id: User identifier
+        user_id: The account's user, whose contacts are pushed
 
     Returns:
         Task result dictionary with push status and metrics
@@ -3773,6 +3788,7 @@ async def push_local_contacts_to_google(
                 session=session,
                 client=client,
                 google_account_email=google_account_email,
+                user_id=str(user_id),
             )
 
             metrics.update(push_result)
