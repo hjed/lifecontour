@@ -31,6 +31,7 @@ from snipeit_models import (
     SnipeItActivity,
     SnipeItAsset,
     SnipeItAssetStatusFilter,
+    SnipeItDateObject,
     SnipeItMaintenance,
     parse_wall_clock,
 )
@@ -688,6 +689,11 @@ class MaintenancePushContext:
         )
 
 
+def _listed(record_id: int, updated_at: SnipeItDateObject | None) -> ListedRecord:
+    """A listing row as the id and wall-clock ``updated_at`` a sync selects by."""
+    return ListedRecord(record_id, updated_at.wall_clock() if updated_at else None)
+
+
 class SnipeItSyncService:
     """Orchestrates Snipe-IT asset import into gear_items.
 
@@ -708,8 +714,8 @@ class SnipeItSyncService:
         self._snipeit_user_id = snipeit_user_id
         self._transformer = SnipeItDataTransformer()
 
-    async def list_asset_batches(self) -> AsyncIterator[list[int]]:
-        """Yield pages of Snipe-IT asset IDs for batch processing.
+    async def list_asset_batches(self) -> AsyncIterator[list[ListedRecord]]:
+        """Yield pages of Snipe-IT assets, with when each last changed.
 
         Snipe-IT's default hardware listing leaves out assets with an archived
         status label (such as Retired), so the archived assets are listed after
@@ -717,20 +723,20 @@ class SnipeItSyncService:
         show archived assets, is yielded once.
 
         Yields:
-            Lists of Snipe-IT asset IDs, one list per API page.
+            The listed assets, one list per API page.
         """
         seen: set[int] = set()
         for status in (None, SnipeItAssetStatusFilter.ARCHIVED):
-            async for asset_ids in self._asset_id_pages(status):
-                unseen = [asset_id for asset_id in asset_ids if asset_id not in seen]
-                seen.update(unseen)
+            async for records in self._asset_pages(status):
+                unseen = [record for record in records if record.id not in seen]
+                seen.update(record.id for record in unseen)
                 if unseen:
                     yield unseen
 
-    async def _asset_id_pages(
+    async def _asset_pages(
         self, status: SnipeItAssetStatusFilter | None
-    ) -> AsyncIterator[list[int]]:
-        """Yield the asset IDs of each page of one hardware listing."""
+    ) -> AsyncIterator[list[ListedRecord]]:
+        """Yield the assets of each page of one hardware listing."""
         page = 1
         while True:
             response = await self._api_client.list_assets(
@@ -743,15 +749,15 @@ class SnipeItSyncService:
             if not response.rows:
                 break
 
-            asset_ids = [asset.id for asset in response.rows]
+            records = [_listed(asset.id, asset.updated_at) for asset in response.rows]
             logger.info(
                 "Listed Snipe-IT asset batch",
                 status=status,
                 page=page,
-                batch_size=len(asset_ids),
+                batch_size=len(records),
                 total_expected=response.total,
             )
-            yield asset_ids
+            yield records
 
             if page * _PAGE_SIZE >= response.total:
                 break
@@ -1076,11 +1082,11 @@ class SnipeItSyncService:
 
     # -- Maintenance Sync Methods ------------------------------------------
 
-    async def list_maintenance_batches(self) -> AsyncIterator[list[int]]:
-        """Yield pages of Snipe-IT maintenance IDs for batch processing.
+    async def list_maintenance_batches(self) -> AsyncIterator[list[ListedRecord]]:
+        """Yield pages of Snipe-IT maintenance records, with when each last changed.
 
         Yields:
-            Lists of Snipe-IT maintenance IDs, one list per API page.
+            The listed maintenance records, one list per API page.
         """
         page = 1
         while True:
@@ -1092,14 +1098,14 @@ class SnipeItSyncService:
             if not response.rows:
                 break
 
-            maintenance_ids = [m.id for m in response.rows]
+            records = [_listed(m.id, m.updated_at) for m in response.rows]
             logger.info(
                 "Listed Snipe-IT maintenance batch",
                 page=page,
-                batch_size=len(maintenance_ids),
+                batch_size=len(records),
                 total_expected=response.total,
             )
-            yield maintenance_ids
+            yield records
 
             if page * _PAGE_SIZE >= response.total:
                 break

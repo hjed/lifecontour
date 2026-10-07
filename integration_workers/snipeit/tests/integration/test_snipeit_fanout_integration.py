@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -29,6 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from snipeit_rate_limiter import SnipeItRateLimitError
+from snipeit_sync_window import ListedRecord
 
 
 @dataclass(frozen=True)
@@ -153,20 +154,30 @@ def _stub_service(
     kind: _Kind,
     *,
     batches: list[list[int]] | None = None,
+    pages: list[list[ListedRecord]] | None = None,
     list_error: Exception | None = None,
     sync_result: dict[str, int] | Exception = _OK,
 ) -> MagicMock:
-    """A stand-in for ``SnipeItSyncService`` configured for one kind."""
+    """A stand-in for ``SnipeItSyncService`` configured for one kind.
 
-    async def _list() -> AsyncIterator[list[int]]:
-        for batch in batches or []:
-            yield batch
+    ``batches`` lists ids with no ``updated_at``, which every run fetches;
+    ``pages`` lists records as given.
+    """
+    listed = pages or [
+        [ListedRecord(record_id, None) for record_id in batch]
+        for batch in batches or []
+    ]
+
+    async def _list() -> AsyncIterator[list[ListedRecord]]:
+        for page in listed:
+            yield page
         if list_error is not None:
             raise list_error
 
     service = MagicMock()
     setattr(service, kind.list_method, _list)
     service.reconcile_deleted_maintenances = AsyncMock(return_value=0)
+    service.unsettled_maintenance_ids = AsyncMock(return_value=set())
     sync = (
         AsyncMock(side_effect=sync_result)
         if isinstance(sync_result, Exception)
@@ -203,6 +214,7 @@ async def _orchestrate(
     redis: _RecordingRedis,
     parent_id: str,
     user_id: str,
+    sync_type: str = "full",
 ) -> Any:
     """Run an orchestrator whose sync service is ``service`` (or raises it)."""
     stub = (
@@ -212,7 +224,7 @@ async def _orchestrate(
     )
     with patch("worker._create_sync_service", **stub):
         return await _worker_fn(kind.orchestrator)(
-            _ctx(session_factory, redis, parent_id), user_id, "full"
+            _ctx(session_factory, redis, parent_id), user_id, sync_type
         )
 
 
@@ -438,6 +450,317 @@ async def test_maintenance_orchestrator_reconciles_deletions_before_dispatch(
 
     service.reconcile_deleted_maintenances.assert_awaited_once()
     assert len(redis.jobs) == 2
+
+
+# ---------------------------------------------------------------------------
+# Smart sync (#1560)
+# ---------------------------------------------------------------------------
+
+_CURSOR = "2026-10-07 09:00:00"
+_CURSOR_AT = datetime(2026, 10, 7, 9)
+
+
+async def _seed_completed(
+    repo: SyncJobRepository,
+    user_id: str,
+    kind_name: str,
+    *,
+    cursor: str | None = _CURSOR,
+    sync_type: str = "full",
+    status: SyncJobStatus = SyncJobStatus.COMPLETED,
+    age: timedelta = timedelta(days=1),
+) -> None:
+    """A finished earlier run of this kind that recorded ``cursor``."""
+    job_id = f"earlier-{uuid4().hex}"
+    await repo.create(
+        job_id=job_id,
+        user_id=user_id,
+        integration_source="snipeit",
+        sync_type=sync_type,
+        status=SyncJobStatus.RUNNING.value,
+    )
+    await repo.record_listing(
+        job_id, resource=kind_name, cursor=cursor, sync_type=sync_type
+    )
+    await repo.update_status(job_id, status.value, completed_at=datetime.now(UTC) - age)
+
+
+def _pages_around_cursor() -> list[list[ListedRecord]]:
+    """One record older than the overlap, one inside it, one newer."""
+    return [
+        [
+            ListedRecord(1, _CURSOR_AT - timedelta(hours=2)),
+            ListedRecord(2, _CURSOR_AT - timedelta(minutes=30)),
+        ],
+        [ListedRecord(3, _CURSOR_AT + timedelta(minutes=5))],
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+async def test_smart_orchestrator_dispatches_only_records_changed_since_cursor(
+    kind_name: str,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, kind_name)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    assert [args[1] for _, args, _ in redis.jobs] == [[2], [3]]
+    parent = await _status(repo, parent_id)
+    assert (parent.sync_type, parent.sync_resource, parent.sync_cursor) == (
+        "smart",
+        kind_name,
+        "2026-10-07 09:05:00",
+    )
+    assert {c.sync_type for c in await repo.list_children(parent_id)} == {"smart"}
+
+
+@pytest.mark.asyncio
+async def test_smart_orchestrator_ignores_the_cursor_of_a_failed_run(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS["assets"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, "assets", age=timedelta(days=2))
+    await _seed_completed(
+        repo,
+        user_id,
+        "assets",
+        cursor="2026-10-07 12:00:00",
+        status=SyncJobStatus.FAILED,
+        age=timedelta(days=1),
+    )
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    assert [args[1] for _, args, _ in redis.jobs] == [[2], [3]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+@pytest.mark.parametrize(
+    "earlier",
+    [
+        pytest.param({}, id="no-earlier-run"),
+        pytest.param({"sync_type": "smart"}, id="no-full-run"),
+        pytest.param({"age": timedelta(days=8)}, id="stale-full-run"),
+    ],
+)
+async def test_smart_orchestrator_runs_as_full_when_it_cannot_resume(
+    kind_name: str,
+    earlier: dict[str, Any],
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    if earlier:
+        await _seed_completed(repo, user_id, kind_name, **earlier)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    assert [args[1] for _, args, _ in redis.jobs] == [[1, 2], [3]]
+    parent = await _status(repo, parent_id)
+    assert (parent.sync_type, parent.sync_cursor) == ("full", "2026-10-07 09:05:00")
+    assert {c.sync_type for c in await repo.list_children(parent_id)} == {"full"}
+
+
+@pytest.mark.asyncio
+async def test_smart_maintenance_orchestrator_reconciles_every_listed_record(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS["maintenances"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, "maintenances")
+    await _seed_parent(repo, parent_id, user_id)
+    service = _stub_service(kind, pages=_pages_around_cursor())
+
+    await _orchestrate(
+        kind,
+        service,
+        session_factory=session_factory,
+        redis=_RecordingRedis(),
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    [call] = service.reconcile_deleted_maintenances.await_args_list
+    assert set(call.args[0]) == {1, 2, 3}
+
+
+@pytest.mark.asyncio
+async def test_smart_maintenance_orchestrator_also_fetches_unsettled_records(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS["maintenances"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, "maintenances")
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+    service = _stub_service(kind, pages=_pages_around_cursor())
+    # 1 is unchanged but unsettled; 3 is both, and is fetched once.
+    service.unsettled_maintenance_ids.return_value = {1, 3}
+
+    await _orchestrate(
+        kind,
+        service,
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    [call] = service.unsettled_maintenance_ids.await_args_list
+    assert set(call.args[0]) == {1, 2, 3}
+    assert [args[1] for _, args, _ in redis.jobs] == [[2], [3], [1]]
+    parent = await _status(repo, parent_id)
+    assert parent.expected_children == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+async def test_full_orchestrator_does_not_look_for_unsettled_records(
+    kind_name: str,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_parent(repo, parent_id, user_id)
+    service = _stub_service(kind, pages=_pages_around_cursor())
+
+    await _orchestrate(
+        kind,
+        service,
+        session_factory=session_factory,
+        redis=_RecordingRedis(),
+        parent_id=parent_id,
+        user_id=user_id,
+    )
+
+    service.unsettled_maintenance_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind_name", ["assets", "maintenances"])
+async def test_smart_orchestrator_with_no_changes_carries_the_cursor_forward(
+    kind_name: str,
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS[kind_name]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, kind_name)
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+    unchanged = [[ListedRecord(1, _CURSOR_AT - timedelta(days=3))]]
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=unchanged),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+        sync_type="smart",
+    )
+
+    assert redis.jobs == []
+    parent = await _status(repo, parent_id)
+    assert parent.status == SyncJobStatus.COMPLETED.value
+    assert (parent.sync_type, parent.sync_cursor) == ("smart", _CURSOR)
+
+
+@pytest.mark.asyncio
+async def test_full_orchestrator_dispatches_everything_and_records_the_cursor(
+    async_connection: AsyncConnection,
+    session_factory: Any,
+    repo: SyncJobRepository,
+    user_id: str,
+) -> None:
+    kind = _KINDS["assets"]
+    parent_id = f"parent-{uuid4().hex}"
+    await _configured(async_connection, user_id)
+    await _seed_completed(repo, user_id, "assets")
+    await _seed_parent(repo, parent_id, user_id)
+    redis = _RecordingRedis()
+
+    await _orchestrate(
+        kind,
+        _stub_service(kind, pages=_pages_around_cursor()),
+        session_factory=session_factory,
+        redis=redis,
+        parent_id=parent_id,
+        user_id=user_id,
+    )
+
+    assert [args[1] for _, args, _ in redis.jobs] == [[1, 2], [3]]
+    parent = await _status(repo, parent_id)
+    assert (parent.sync_type, parent.sync_resource, parent.sync_cursor) == (
+        "full",
+        "assets",
+        "2026-10-07 09:05:00",
+    )
 
 
 @pytest.mark.asyncio
