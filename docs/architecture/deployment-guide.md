@@ -60,6 +60,40 @@ plus one that is not obvious from the dependency list:
   render alone — so a deployment missing it degrades rather than fails. CI
   installs the same package for the backend unit and integration jobs.
 
+### Frontend Image
+
+`docker/frontend/Dockerfile` is multi-stage. The published GHCR image is public, so it
+ships only what the server needs at runtime.
+
+| Stage | Built by | Contents |
+|---|---|---|
+| `development` | `docker-compose.yml` (`target: development`) | Full source and dependencies; runs `pnpm dev` against the bind-mounted `./frontend` |
+| `builder` | intermediate | `pnpm build` with `output: "standalone"`; `prebuild` writes `public/third-party-notices.txt` |
+| `runner` (default, last) | `release.yml` | Only `.next/standalone` (`server.js` plus the traced production `node_modules`), `.next/static` and `public`; runs `node server.js` as the non-root `frontend` user |
+
+The runner leaves out `.next/cache`, the dev dependencies, pnpm and its store.
+`.next/cache` matters because it holds copies of the keys `next build` generates (see
+[the audit](../security/open-source-release-audit.md#nextjs-build-generated-keys)).
+`docker/frontend/verify-image.sh <image>` smoke-tests a built runner, and CI's
+`frontend-image` job runs it.
+
+**Required environment variable:**
+
+- **`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`** (generate it with `openssl rand -base64 32`).
+  - Every build bakes a random Server Actions key into the image, and anyone can read a
+    public image.
+  - Next.js reads this variable before the baked-in key, so setting it means no published
+    key is ever used.
+  - `start.sh` **refuses to start** without it.
+  - Keep it stable across releases and replicas.
+
+**Build-time configuration:** `rewrites()` in `next.config.mjs` resolves `BACKEND_URL`
+during `next build`, and the result is fixed in `routes-manifest.json`. Setting
+`BACKEND_URL` on the running container does not move the `/api` proxy. The released image
+proxies to `http://localhost:8001`, so production must route `/api` to the backend at the
+reverse proxy (see the Nginx configuration below). The runtime `BACKEND_URL` is still read
+by `healthcheck.sh`.
+
 ### Docker Compose Configuration
 
 #### Development (docker-compose.yml)
@@ -195,12 +229,11 @@ services:
       start_period: 40s
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/hjed/lifecontour-frontend:latest  # the Dockerfile's runner stage
     restart: unless-stopped
     environment:
       - NEXT_PUBLIC_API_URL=https://your-domain.com/api
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY}  # required
     depends_on:
       - backend
     healthcheck:
@@ -500,6 +533,9 @@ RATE_LIMIT_REQUESTS_PER_MINUTE=60
 # Next.js Frontend (.env.local)
 NEXT_PUBLIC_API_URL=https://your-domain.com/api
 NEXT_PUBLIC_ENVIRONMENT=production
+
+# Required by the production image (openssl rand -base64 32); see Frontend Image
+NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=your-generated-key
 
 # Authentication (if needed on frontend)
 NEXTAUTH_URL=https://your-domain.com

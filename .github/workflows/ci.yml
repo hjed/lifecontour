@@ -44,6 +44,7 @@ jobs:
       core_shared: ${{ steps.filter.outputs.core_shared }}
       frontend: ${{ steps.filter.outputs.frontend }}
       e2e_infra: ${{ steps.filter.outputs.e2e_infra }}
+      frontend_image: ${{ steps.filter.outputs.frontend_image }}
       worker_google: ${{ steps.filter.outputs.worker_google }}
       worker_immich: ${{ steps.filter.outputs.worker_immich }}
       worker_snipeit: ${{ steps.filter.outputs.worker_snipeit }}
@@ -122,6 +123,15 @@ jobs:
               - 'docker/oauth-login-consent/**'
               - 'docker/oauth-provider/**'
               - 'docker-compose.yml'
+            # What goes into the published frontend image.
+            frontend_image:
+              - 'docker/frontend/**'
+              - 'frontend/next.config.mjs'
+              - 'frontend/package.json'
+              - 'frontend/pnpm-lock.yaml'
+              - 'frontend/pnpm-workspace.yaml'
+              - 'frontend/public/**'
+              - 'frontend/scripts/third-party-notices.ts'
             frontend:
               - 'frontend/**/*.ts'
               - 'frontend/**/*.tsx'
@@ -903,6 +913,32 @@ jobs:
           path: /tmp/e2e-docker-images.tar.gz
           retention-days: 1
           compression-level: 0  # Already gzipped
+
+  # The e2e suite serves the frontend from source, not from this image, so the
+  # published image is smoke-tested here: no build cache, dev dependencies or
+  # pnpm store, refuses to start without NEXT_SERVER_ACTIONS_ENCRYPTION_KEY,
+  # and serves pages, static assets and the third-party notices.
+  frontend-image:
+    name: Frontend Image Check
+    runs-on: ubuntu-latest
+    needs: [changes]
+    # Always when release.yml calls this workflow before publishing the image,
+    # whether from a tag or a manual dispatch. In a called workflow the github
+    # context is the caller's: github.workflow is 'Release' and event_name is
+    # never 'workflow_call'.
+    if: |
+      needs.changes.outputs.frontend_image == 'true' ||
+      github.workflow == 'Release'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build production frontend image
+        run: docker build -f docker/frontend/Dockerfile -t lifecontour-frontend:ci .
+
+      - name: Verify image
+        run: docker/frontend/verify-image.sh lifecontour-frontend:ci
 
   frontend-e2e-test:
     name: Frontend E2E Tests (${{ matrix.browser }})

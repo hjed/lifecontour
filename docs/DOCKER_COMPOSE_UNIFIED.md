@@ -97,6 +97,11 @@ docker compose --profile prod --env-file .env.prod up -d
 # Backend API: http://localhost/api
 ```
 
+The compose `frontend` service always builds the Dockerfile's `development` stage: the dev
+server over the bind-mounted source. For a production frontend, run the released
+`ghcr.io/hjed/lifecontour-frontend` image with `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` set; see
+[Deployment Guide → Frontend Image](architecture/deployment-guide.md#frontend-image).
+
 **Services started:**
 - PostgreSQL
 - Redis

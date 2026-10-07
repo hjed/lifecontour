@@ -4,6 +4,13 @@ This document contains solutions to common Docker-related issues encountered dur
 
 ## Frontend Docker Build Issues
 
+> **Superseded (ITER19-005 Phase 1b):** the frontend image is now multi-stage. The
+> published `runner` stage runs the standalone `node server.js` and needs
+> `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`. docker-compose builds the `development` stage
+> (`pnpm dev`), so `BUILD_ENV` no longer applies to the frontend. The fixes below record the
+> earlier single-stage image. See
+> [Deployment Guide → Frontend Image](../architecture/deployment-guide.md#frontend-image).
+
 ### Problem: Frontend Container Startup Failure
 
 **Error:**

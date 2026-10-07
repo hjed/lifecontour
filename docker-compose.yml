@@ -330,9 +330,9 @@ services:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
-      args:
-        BUILD_ENV: ${BUILD_ENV:-development}
-        NODE_ENV: ${NODE_ENV:-development}
+      # The bind mounts below run the source tree with `pnpm dev`; the
+      # published production image is the Dockerfile's default `runner` stage.
+      target: development
     container_name: ${CONTAINER_PREFIX:-pms}-frontend
     profiles: [dev, prod]
     environment:

@@ -30,9 +30,9 @@ is replaced or the owner grants a section 7 exception in [`LICENSE-EXCEPTIONS.md
 - The runtime (non-dev) dependencies of the six Python projects: `backend`, `core_shared` and the
   `google`, `immich`, `snipeit` and `strava` integration workers.
 - The frontend's production dependencies.
-- The frontend's devDependencies, because `docker/frontend/Dockerfile` runs a full
-  `pnpm install` with no prune, so the published image ships them. They are checked for
-  redistributability only; see [Frontend devDependencies](#frontend-devdependencies-shipped-in-the-image).
+- The frontend's devDependencies, because `docker/frontend/Dockerfile` ran a full
+  `pnpm install` with no prune, so images published before ITER19-005 Phase 1b ship them. They
+  are checked for redistributability only; see [Frontend devDependencies](#frontend-devdependencies-shipped-in-older-images).
 
 **Out of scope:**
 
@@ -120,8 +120,12 @@ Notes on the counts:
     `backend/app/core/journal/adapters/http/osm_tile_source.py`;
   - the frontend map's `TileLayer` attribution in `frontend/src/components/journals/GPXTrackMap.tsx`.
 
-### Frontend devDependencies (shipped in the image)
+### Frontend devDependencies (shipped in older images)
 
+- Since ITER19-005 Phase 1b the published frontend image is the Next.js standalone output: only
+  the traced production dependencies, and no devDependencies
+  (`docker/frontend/verify-image.sh` checks this). Images published before then are still
+  pullable and ship them, so this section stands for those.
 - There are 581 packages that are devDependencies only (`pnpm licenses list --json` minus the
   production set).
 - They are build and test tools (TypeScript, Jest, Playwright, ESLint, Tailwind's

@@ -322,6 +322,15 @@ Publishing an image therefore publishes its keys.
     ever used (including those in images already published);
   - build a multi-stage `standalone` image. It drops `.next/cache` (which holds second copies in
     `.previewinfo` and `.rscinfo`), the dev dependencies and the pnpm store.
+  - **Implemented** in Phase 1b. The runner stage of `docker/frontend/Dockerfile` ships only
+    the standalone output, and `start.sh` refuses to start without the key. CI's `frontend-image`
+    job runs `docker/frontend/verify-image.sh`, which checks both. See
+    [Deployment Guide → Frontend Image](../architecture/deployment-guide.md#frontend-image).
+    ITER19-001 Phase 4 still confirms the released image and the production setting.
+  - The published image no longer carries the cache, but `release.yml` builds with
+    `cache-to: type=gha,mode=max`, so the `builder` stage, `.next/cache` included, still reaches
+    the Actions cache on every release. Fork PRs cannot restore caches written on a tag ref, and
+    the ITER19-005 Phase 2 cache purge clears the existing ones.
 
 ### Residual risks
 
