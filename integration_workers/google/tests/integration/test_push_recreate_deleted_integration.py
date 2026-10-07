@@ -148,7 +148,11 @@ class TestRecreateContactDeletedOnGoogle:
             result = await process_contact_event(
                 ctx=_ctx(db_session),
                 event_type="ContactUpdated",
-                event_data={"contact_id": linked_contact_id, "changed_fields": {}},
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": linked_contact_id,
+                    "changed_fields": {},
+                },
             )
 
         assert result["status"] == "success"

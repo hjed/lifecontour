@@ -3339,8 +3339,32 @@ async def _delete_contact_from_google_for_event(
     return {"status": "deleted", "external_id": external_id}
 
 
+def _event_owner(event_data: dict[str, Any]) -> str | None:
+    """Return the owner a contact event names, or ``None`` when it names none.
+
+    ``user_id`` columns are strings, so a numeric owner is normalised.
+    """
+    owner = event_data.get("user_id")
+    if owner is None or owner == "":
+        return None
+    return str(owner)
+
+
+async def _owner_google_accounts(session: Any, owner: str) -> list[Any]:
+    """The owner's connected Google accounts (``user_id``, account email)."""
+    result = await session.execute(
+        text("""
+            SELECT user_id, google_account_email
+            FROM user_google_auth
+            WHERE user_id = :user_id
+        """),
+        {"user_id": owner},
+    )
+    return list(result.fetchall())
+
+
 async def _process_contact_merged_event(
-    ctx: dict[str, Any], event_data: dict[str, Any]
+    ctx: dict[str, Any], event_data: dict[str, Any], owner: str
 ) -> dict[str, Any]:
     """Reconcile a contact merge with Google Contacts (ITER13-005 Phase 2).
 
@@ -3357,10 +3381,15 @@ async def _process_contact_merged_event(
     reconciled separately by the ``ContactUpdated`` event the merge also emits,
     so it is intentionally not re-pushed here.
 
+    The delete runs only in the accounts of ``owner`` (the survivor's owner,
+    who also owned the source): it is the one destructive outbound call, so it
+    never reaches another user's account.
+
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
         event_data: The ``ContactMerged`` payload (survivor/source ids +
             ``external_collisions``)
+        owner: The merged contacts' owner, from ``event_data["user_id"]``
 
     Returns:
         Task result dictionary with reconciliation status
@@ -3379,19 +3408,11 @@ async def _process_contact_merged_event(
     session_factory = ctx["session_factory"]
 
     async with session_factory() as session:
-        # Find all Google integrations for all users. The source remote belongs
-        # to one of them; deleting a non-existent resource on the others returns
-        # a 404, which the client treats as success (mirrors ContactDeleted).
-        auth_stmt = text("""
-            SELECT user_id, google_account_email
-            FROM user_google_auth
-        """)
-        auth_result = await session.execute(auth_stmt)
-        users = auth_result.fetchall()
+        users = await _owner_google_accounts(session, owner)
 
         if not users:
             logger.info(
-                "No Google integrations found, skipping ContactMerged",
+                "Owner has no Google integration, skipping ContactMerged",
                 source_contact_id=source_contact_id,
             )
             return {"status": "skipped", "reason": "no_google_integrations"}
@@ -3447,8 +3468,9 @@ async def process_contact_event(
     """Process a single contact event for Google Contacts outbound sync.
 
     Receives domain events (ContactCreated, ContactUpdated, ContactDeleted,
-    ContactMerged) and pushes the changes to Google Contacts for all synced
-    Google accounts.
+    ContactMerged) and pushes the changes to the Google account(s) of the
+    contact's owner, named by ``event_data["user_id"]``. An event that names no
+    owner is skipped: it is never pushed to every connected account.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
@@ -3474,11 +3496,21 @@ async def process_contact_event(
         )
         return {"status": "skipped", "reason": "inbound_echo"}
 
+    owner = _event_owner(event_data)
+    if owner is None:
+        logger.warning(
+            "Contact event names no owner, skipping",
+            job_id=job_id,
+            event_type=event_type,
+            contact_id=event_data.get("contact_id"),
+        )
+        return {"status": "skipped", "reason": "no_owner"}
+
     # ContactMerged carries no contact_id (only survivor/source ids and the
     # external collisions to reconcile), so it is handled before the
     # contact_id guard below.
     if event_type == "ContactMerged":
-        return await _process_contact_merged_event(ctx, event_data)
+        return await _process_contact_merged_event(ctx, event_data, owner)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:
@@ -3509,17 +3541,11 @@ async def process_contact_event(
         # Google account we push to.
         sync_row = await _read_sync_link(session, contact_id)
 
-        # Find all Google integrations for all users
-        auth_stmt = text("""
-            SELECT user_id, google_account_email
-            FROM user_google_auth
-        """)
-        auth_result = await session.execute(auth_stmt)
-        users = auth_result.fetchall()
+        users = await _owner_google_accounts(session, owner)
 
         if not users:
             logger.info(
-                "No Google integrations found, skipping contact event",
+                "Owner has no Google integration, skipping contact event",
                 contact_id=contact_id,
                 event_type=event_type,
             )

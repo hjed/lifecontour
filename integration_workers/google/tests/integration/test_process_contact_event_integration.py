@@ -26,6 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from worker import process_contact_event
 
 _SURVIVOR_REMOTE = "people/survivor456"
+# The connected Google user who owns the merged contacts.
+_OWNER = "1"
 _SOURCE_REMOTE = "people/source123"
 
 
@@ -68,7 +70,7 @@ async def _seed_google_account(db_session: AsyncSession) -> None:
             """
         ),
         {
-            "user_id": "1",
+            "user_id": _OWNER,
             "email": "merge-it@example.com",
             "token": b"x",
             "refresh": b"y",
@@ -135,6 +137,7 @@ class TestContactMergedGoogleReconciliation:
                 ctx=_ctx(db_session),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": _OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_google_collision()],
@@ -171,6 +174,7 @@ class TestContactMergedGoogleReconciliation:
                 ctx=_ctx(db_session),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": _OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [immich_collision],
@@ -203,6 +207,7 @@ class TestContactMergedGoogleReconciliation:
                 ctx=_ctx(db_session),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": _OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_google_collision()],
@@ -213,3 +218,74 @@ class TestContactMergedGoogleReconciliation:
         remaining = await _external_ids(db_session)
         assert _SOURCE_REMOTE not in remaining
         assert _SURVIVOR_REMOTE in remaining
+
+
+@pytest.mark.asyncio
+class TestContactMergedReachesOnlyTheOwner:
+    """The merge's remote delete runs against the survivor's owner only."""
+
+    async def test_other_users_account_gets_no_delete(
+        self, merge_setup: AsyncSession
+    ) -> None:
+        """Two connected users: one client, for the owner, and one delete."""
+        db_session = merge_setup
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO user_google_auth (
+                    user_id, google_account_email,
+                    encrypted_access_token, encrypted_refresh_token,
+                    expires_at, created_at, updated_at
+                ) VALUES ('other-user', 'other@example.com', :token, :refresh,
+                          NOW(), NOW(), NOW())
+                """
+            ),
+            {"token": b"x", "refresh": b"y"},
+        )
+        await db_session.flush()
+        mock_client = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client) as client_cls,
+        ):
+            result = await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactMerged",
+                event_data={
+                    "user_id": _OWNER,
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_google_collision()],
+                },
+            )
+
+        assert result["status"] == "success"
+        client_cls.assert_called_once()
+        assert client_cls.call_args.kwargs["user_id"] == _OWNER
+        mock_client.delete_contact.assert_called_once_with(resource_name=_SOURCE_REMOTE)
+
+    async def test_merge_without_owner_deletes_nothing(
+        self, merge_setup: AsyncSession
+    ) -> None:
+        """No owner: no remote delete and both local links are left alone."""
+        db_session = merge_setup
+        mock_client = AsyncMock()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            result = await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_google_collision()],
+                },
+            )
+
+        assert result == {"status": "skipped", "reason": "no_owner"}
+        mock_client.delete_contact.assert_not_called()
+        assert {_SURVIVOR_REMOTE, _SOURCE_REMOTE} <= await _external_ids(db_session)

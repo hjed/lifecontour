@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# The owner every event below names; the mocked accounts belong to it.
+OWNER = "1"
+
 
 def _make_ctx(session_factory: Any = None) -> dict[str, Any]:
     """Build an ARQ-compatible context dict."""
@@ -91,7 +94,7 @@ class TestProcessContactEventRouting:
         result = await process_contact_event(
             ctx=_make_ctx(),
             event_type="ContactUpdated",
-            event_data={},  # no contact_id
+            event_data={"user_id": OWNER},  # no contact_id
         )
 
         assert result["status"] == "error"
@@ -107,7 +110,7 @@ class TestProcessContactEventRouting:
         result = await process_contact_event(
             ctx=_make_ctx(mock_factory),
             event_type="ContactUpdated",
-            event_data={"contact_id": 42},
+            event_data={"user_id": OWNER, "contact_id": 42},
         )
 
         assert result["status"] == "skipped"
@@ -139,7 +142,12 @@ class TestProcessContactCreated:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactCreated",
-                event_data={"contact_id": 42, "first_name": "Jane", "last_name": "Doe"},
+                event_data={
+                    "user_id": OWNER,
+                    "contact_id": 42,
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                },
             )
 
         assert result["status"] == "success"
@@ -179,6 +187,7 @@ class TestProcessContactUpdated:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactUpdated",
                 event_data={
+                    "user_id": OWNER,
                     "contact_id": 42,
                     "changed_fields": {"nick_name": ("Old", "New")},
                 },
@@ -214,7 +223,7 @@ class TestProcessContactUpdated:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactUpdated",
-                event_data={"contact_id": 42, "changed_fields": {}},
+                event_data={"user_id": OWNER, "contact_id": 42, "changed_fields": {}},
             )
 
         assert result["status"] == "success"
@@ -252,7 +261,7 @@ class TestProcessContactDeleted:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactDeleted",
-                event_data={"contact_id": 42},
+                event_data={"user_id": OWNER, "contact_id": 42},
             )
 
         assert result["status"] == "success"
@@ -277,7 +286,7 @@ class TestProcessContactDeleted:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactDeleted",
-                event_data={"contact_id": 42},
+                event_data={"user_id": OWNER, "contact_id": 42},
             )
 
         # The overall call succeeds; individual account is skipped
@@ -352,6 +361,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_GOOGLE_COLLISION],
@@ -384,6 +394,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [immich_collision],
@@ -413,6 +424,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_GOOGLE_COLLISION],
@@ -432,6 +444,7 @@ class TestProcessContactMerged:
             ctx=_make_ctx(),
             event_type="ContactMerged",
             event_data={
+                "user_id": OWNER,
                 "survivor_contact_id": 1,
                 "source_contact_id": 2,
                 "external_collisions": [],
@@ -471,6 +484,7 @@ class TestProcessContactMerged:
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactMerged",
                 event_data={
+                    "user_id": OWNER,
                     "survivor_contact_id": 1,
                     "source_contact_id": 2,
                     "external_collisions": [_GOOGLE_COLLISION, second_collision],
@@ -509,7 +523,7 @@ class TestProcessContactEventErrorHandling:
             await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactCreated",
-                event_data={"contact_id": 42},
+                event_data={"user_id": OWNER, "contact_id": 42},
             )
 
 
@@ -725,7 +739,11 @@ class TestInboundEchoGuard:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type=event_type,
-                event_data={"contact_id": 42, "source": "google_contacts"},
+                event_data={
+                    "user_id": OWNER,
+                    "contact_id": 42,
+                    "source": "google_contacts",
+                },
             )
 
         assert result["status"] == "skipped"
@@ -745,7 +763,11 @@ class TestInboundEchoGuard:
             result = await process_contact_event(
                 ctx=_make_ctx(),
                 event_type="ContactMerged",
-                event_data={"source": "google_contacts", "external_collisions": []},
+                event_data={
+                    "user_id": OWNER,
+                    "source": "google_contacts",
+                    "external_collisions": [],
+                },
             )
 
         assert result["status"] == "skipped"
@@ -775,7 +797,7 @@ class TestInboundEchoGuard:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactUpdated",
-                event_data={"contact_id": 42, "source": source},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": source},
             )
 
         assert result["status"] == "success"
@@ -803,7 +825,7 @@ class TestInboundEchoGuard:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactUpdated",
-                event_data={"contact_id": 42},
+                event_data={"user_id": OWNER, "contact_id": 42},
             )
 
         assert result["status"] == "success"
@@ -858,7 +880,7 @@ class TestNewlyRoutedContactEvents:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type=event_type,
-                event_data={"contact_id": 42, "source": "ui"},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
             )
 
         assert result["status"] == "success"
@@ -914,7 +936,7 @@ class TestEventPushSendsTagMemberships:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="TagAssigned",
-                event_data={"contact_id": 42, "source": "ui"},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
             )
 
         assert result["status"] == "success"
@@ -952,7 +974,7 @@ class TestEventPushSendsTagMemberships:
             result = await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactDeleted",
-                event_data={"contact_id": 42, "source": "ui"},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
             )
 
         assert result["status"] == "success"
@@ -1111,7 +1133,7 @@ class TestGroupLookupFailureIsNotDestructive:
                 await process_contact_event(
                     ctx=_make_ctx(mock_factory),
                     event_type="TagAssigned",
-                    event_data={"contact_id": 42, "source": "ui"},
+                    event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
                 )
 
         mock_push.assert_not_called()
@@ -1233,7 +1255,7 @@ class TestUnresolvedTagGroupsOnTheEventPath:
             await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="TagAssigned",
-                event_data={"contact_id": 42, "source": "ui"},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
             )
 
         assert mock_resolve.call_args[1]["require_all_tags"] is True
@@ -1268,7 +1290,7 @@ class TestEventPushTakesTheContactLock:
             await process_contact_event(
                 ctx=_make_ctx(mock_factory),
                 event_type="ContactCreated",
-                event_data={"contact_id": 42, "source": "ui"},
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
             )
 
         first_sql, first_params = mock_session.execute.call_args_list[0][0]
@@ -1276,3 +1298,164 @@ class TestEventPushTakesTheContactLock:
         assert "pg_advisory_xact_lock" in str(first_sql)
         assert first_params == {"key": "google-contact-push:42"}
         assert "FROM sync_metadata" in second_sql
+
+
+def _auth_query(mock_session: AsyncMock) -> tuple[str, dict[str, Any]]:
+    """Return the SQL text and parameters of the ``user_google_auth`` read."""
+    for call in mock_session.execute.call_args_list:
+        statement = str(call.args[0])
+        if "user_google_auth" in statement:
+            return statement, call.args[1]
+    raise AssertionError("no user_google_auth query was executed")
+
+
+class TestPushGoesToTheOwnerOnly:
+    """A contact event reaches only its owner's Google accounts.
+
+    Every pushed contact event names the contact's owner in ``user_id``. The
+    worker reads only that user's ``user_google_auth`` rows, and an event that
+    names no owner is skipped rather than pushed to every connected account.
+    """
+
+    @pytest.mark.parametrize("event_type", ["ContactUpdated", "ContactDeleted"])
+    @pytest.mark.asyncio
+    async def test_event_without_owner_is_skipped(self, event_type: str) -> None:
+        """No owner means no database work and no Google client."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory(
+            users=[MagicMock(user_id=OWNER, google_account_email="test@gmail.com")],
+        )
+
+        with (
+            patch("worker.GoogleAPIClient") as mock_client_cls,
+            patch(
+                "worker._push_contact_to_google_for_event", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type=event_type,
+                event_data={"contact_id": 42, "source": "ui"},
+            )
+
+        assert result == {"status": "skipped", "reason": "no_owner"}
+        mock_session.execute.assert_not_called()
+        mock_client_cls.assert_not_called()
+        mock_push.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reads_only_the_owners_accounts(self) -> None:
+        """The account lookup is filtered to the event's owner."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory(
+            users=[MagicMock(user_id="owner-a", google_account_email="a@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "created"},
+            ),
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactUpdated",
+                event_data={"user_id": "owner-a", "contact_id": 42},
+            )
+
+        statement, params = _auth_query(mock_session)
+        assert "WHERE user_id = :user_id" in statement
+        assert params == {"user_id": "owner-a"}
+
+    @pytest.mark.asyncio
+    async def test_numeric_owner_is_matched_as_a_string(self) -> None:
+        """``user_id`` columns are strings, so a numeric owner is normalised."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_session_factory(
+            users=[MagicMock(user_id="7", google_account_email="a@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "created"},
+            ),
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactUpdated",
+                event_data={"user_id": 7, "contact_id": 42},
+            )
+
+        _, params = _auth_query(mock_session)
+        assert params == {"user_id": "7"}
+
+    @pytest.mark.asyncio
+    async def test_merge_without_owner_deletes_nothing(self) -> None:
+        """The merge's remote delete never runs for an event with no owner."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_merge_session_factory(
+            users=[MagicMock(user_id=OWNER, google_account_email="test@gmail.com")],
+        )
+
+        with patch(
+            "worker._delete_contact_from_google_for_event", new_callable=AsyncMock
+        ) as mock_delete:
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_GOOGLE_COLLISION],
+                },
+            )
+
+        assert result == {"status": "skipped", "reason": "no_owner"}
+        mock_delete.assert_not_called()
+        mock_session.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_merge_reads_only_the_owners_accounts(self) -> None:
+        """The merge's account lookup is filtered to the survivor's owner."""
+        from worker import process_contact_event
+
+        mock_factory, mock_session = _mock_merge_session_factory(
+            users=[MagicMock(user_id="owner-a", google_account_email="a@gmail.com")],
+        )
+
+        with (
+            patch(
+                "worker._delete_contact_from_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "deleted"},
+            ) as mock_delete,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=_google_client()),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="ContactMerged",
+                event_data={
+                    "user_id": "owner-a",
+                    "survivor_contact_id": 1,
+                    "source_contact_id": 2,
+                    "external_collisions": [_GOOGLE_COLLISION],
+                },
+            )
+
+        assert result["status"] == "success"
+        mock_delete.assert_called_once()
+        statement, params = _auth_query(mock_session)
+        assert "WHERE user_id = :user_id" in statement
+        assert params == {"user_id": "owner-a"}
