@@ -70,6 +70,7 @@ def resolve_sync_window(
     last_completed: SyncJob | None,
     last_full: SyncJob | None,
     now: datetime,
+    settings_changed_at: datetime | None = None,
 ) -> SyncWindow:
     """Work out what a run of the ``requested`` type fetches.
 
@@ -78,6 +79,10 @@ def resolve_sync_window(
         last_completed: The newest completed run for this user and resource.
         last_full: The newest completed full run for this user and resource.
         now: The current (aware) time.
+        settings_changed_at: When the user's Snipe-IT settings or credentials
+            last changed. A cursor is only good for the listing it came from:
+            another URL is another clock, and another user mapping or API key
+            can bring in records whose ``updated_at`` predates it.
     """
     cursor = parse_wall_clock(last_completed.sync_cursor) if last_completed else None
     if requested is SyncType.FULL:
@@ -85,6 +90,8 @@ def resolve_sync_window(
 
     if cursor is None:
         escalation = "no completed sync to resume from"
+    elif _settings_changed_since(last_completed, settings_changed_at):
+        escalation = "Snipe-IT settings changed since the last sync"
     elif (
         last_full is None
         or last_full.completed_at is None
@@ -105,6 +112,16 @@ def resolve_sync_window(
         previous_cursor=cursor,
         escalation=escalation,
     )
+
+
+def _settings_changed_since(
+    run: SyncJob | None, settings_changed_at: datetime | None
+) -> bool:
+    """Whether the settings changed after ``run`` started listing."""
+    if run is None or settings_changed_at is None:
+        return False
+    started = run.started_at or run.created_at
+    return started is None or settings_changed_at > started
 
 
 class ListingTracker:

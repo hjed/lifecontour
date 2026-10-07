@@ -20,7 +20,10 @@ _CURSOR = datetime(2026, 10, 7, 9, 30)  # Snipe-IT wall clock, naive
 
 
 def _parent(
-    *, cursor: str | None = "2026-10-07 09:30:00", completed_at: datetime = _NOW
+    *,
+    cursor: str | None = "2026-10-07 09:30:00",
+    completed_at: datetime = _NOW,
+    started_at: datetime | None = None,
 ) -> SyncJob:
     return SyncJob(
         job_id="p",
@@ -28,6 +31,7 @@ def _parent(
         integration_source="snipeit",
         sync_type="smart",
         status="completed",
+        started_at=started_at or completed_at - timedelta(minutes=5),
         completed_at=completed_at,
         sync_resource="assets",
         sync_cursor=cursor,
@@ -105,6 +109,37 @@ class TestResolveSyncWindow:
 
         assert window.sync_type == SyncType.FULL
         assert window.previous_cursor == _CURSOR
+
+    def test_smart_runs_as_full_when_settings_changed_since_the_last_run(self) -> None:
+        """A changed URL, user mapping or API key can bring records into scope
+        whose ``updated_at`` predates the cursor, or come from another clock."""
+        last = _parent(completed_at=_NOW - timedelta(hours=1))
+
+        window = resolve_sync_window(
+            SyncType.SMART,
+            last_completed=last,
+            last_full=last,
+            now=_NOW,
+            settings_changed_at=_NOW - timedelta(minutes=30),
+        )
+
+        assert (window.since, window.sync_type) == (None, SyncType.FULL)
+        assert window.escalation == "Snipe-IT settings changed since the last sync"
+
+    def test_settings_changed_before_the_last_run_started_do_not_matter(
+        self,
+    ) -> None:
+        last = _parent(completed_at=_NOW - timedelta(hours=1))
+
+        window = resolve_sync_window(
+            SyncType.SMART,
+            last_completed=last,
+            last_full=last,
+            now=_NOW,
+            settings_changed_at=_NOW - timedelta(days=2),
+        )
+
+        assert window.sync_type == SyncType.SMART
 
 
 class TestListingTracker:
