@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.mcp.http_helpers import (
     MCP_PATH,
     call_mcp_tool,
@@ -28,7 +29,9 @@ from tests.integration.mcp.http_helpers import (
 
 
 async def _save_tag(connection: AsyncConnection, name: str) -> None:
-    await SqlJournalTagRepository(connection).save(JournalTag(name=name))
+    await SqlJournalTagRepository(connection).save(
+        JournalTag(user_id=TEST_USER_ID, name=name)
+    )
 
 
 async def _initialize_session(client: Any) -> str:

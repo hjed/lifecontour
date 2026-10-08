@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest_asyncio.fixture
@@ -54,7 +55,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_save_new_tag(self, tag_repo):
         """Test saving a new tag."""
-        tag = JournalTag(name="work")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
         assert saved_tag.id is not None
@@ -83,7 +84,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_find_tag_by_id(self, tag_repo):
         """Test finding a tag by ID."""
-        tag = JournalTag(name="work")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
         found_tag = await tag_repo.find_by_id(saved_tag.id)
@@ -93,7 +94,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_find_tag_by_name(self, tag_repo):
         """Test finding a tag by name."""
-        tag = JournalTag(name="work")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work")
         await tag_repo.save(tag)
 
         found_tag = await tag_repo.find_by_name("work")
@@ -109,7 +110,7 @@ class TestJournalTagRepositoryIntegration:
         """Test updating a tag."""
         import asyncio
 
-        tag = JournalTag(name="work", color="#FF0000")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work", color="#FF0000")
         saved_tag = await tag_repo.save(tag)
 
         # Add a small delay to ensure updated_at is different from created_at
@@ -124,6 +125,7 @@ class TestJournalTagRepositoryIntegration:
     async def test_save_and_find_tag_with_description(self, tag_repo):
         """Test description round-trips through insert and find_by_id."""
         tag = JournalTag(
+            user_id=TEST_USER_ID,
             name="work",
             color="#FF0000",
             description="Work-related journal entries",
@@ -138,7 +140,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_save_tag_without_description_stores_null(self, tag_repo):
         """Test description is nullable, so tags may omit it."""
-        saved_tag = await tag_repo.save(JournalTag(name="work"))
+        saved_tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="work"))
 
         found_tag = await tag_repo.find_by_id(saved_tag.id)
         assert found_tag is not None
@@ -147,7 +149,7 @@ class TestJournalTagRepositoryIntegration:
     async def test_update_tag_description(self, tag_repo):
         """Test the update path persists a changed description."""
         saved_tag = await tag_repo.save(
-            JournalTag(name="work", description="Original text")
+            JournalTag(user_id=TEST_USER_ID, name="work", description="Original text")
         )
 
         saved_tag.description = "Revised text"
@@ -159,8 +161,8 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_update_tag_reparent_persists(self, tag_repo):
         """Test the update path persists a changed parent, including clearing it."""
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
-        child = await tag_repo.save(JournalTag(name="climbing"))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        child = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="climbing"))
 
         child.parent_id = parent.id
         await tag_repo.save(child)
@@ -176,14 +178,16 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_find_by_name_is_case_insensitive(self, tag_repo):
         """Test the uniqueness lookup matches regardless of case."""
-        await tag_repo.save(JournalTag(name="Training"))
+        await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="Training"))
 
         assert await tag_repo.find_by_name("training") is not None
         assert await tag_repo.find_by_name("TRAINING") is not None
 
     async def test_find_by_name_returns_description(self, tag_repo):
         """Test find_by_name selects the description column."""
-        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+        await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
+        )
 
         found_tag = await tag_repo.find_by_name("work")
         assert found_tag is not None
@@ -191,24 +195,31 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_get_all_returns_description(self, tag_repo):
         """Test get_all selects the description column."""
-        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+        await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
+        )
 
         tags = await tag_repo.get_all()
         assert [t.description for t in tags] == ["Work entries"]
 
     async def test_get_root_tags_returns_description(self, tag_repo):
         """Test get_root_tags selects the description column."""
-        await tag_repo.save(JournalTag(name="work", description="Work entries"))
+        await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
+        )
 
         tags = await tag_repo.get_root_tags()
         assert [t.description for t in tags] == ["Work entries"]
 
     async def test_get_children_returns_description(self, tag_repo):
         """Test get_children selects the description column."""
-        parent = await tag_repo.save(JournalTag(name="work"))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="work"))
         await tag_repo.save(
             JournalTag(
-                name="work-meetings", parent_id=parent.id, description="Standups"
+                user_id=TEST_USER_ID,
+                name="work-meetings",
+                parent_id=parent.id,
+                description="Standups",
             )
         )
 
@@ -217,7 +228,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_delete_tag(self, tag_repo):
         """Test deleting a tag."""
-        tag = JournalTag(name="work")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
         await tag_repo.delete(saved_tag.id)
@@ -227,8 +238,8 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_get_all_tags(self, tag_repo):
         """Test getting all tags."""
-        tag1 = JournalTag(name="work")
-        tag2 = JournalTag(name="personal")
+        tag1 = JournalTag(user_id=TEST_USER_ID, name="work")
+        tag2 = JournalTag(user_id=TEST_USER_ID, name="personal")
         await tag_repo.save(tag1)
         await tag_repo.save(tag2)
 
@@ -240,10 +251,12 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_get_root_tags(self, tag_repo):
         """Test getting root tags (no parent)."""
-        root_tag = JournalTag(name="root")
+        root_tag = JournalTag(user_id=TEST_USER_ID, name="root")
         saved_root = await tag_repo.save(root_tag)
 
-        child_tag = JournalTag(name="child", parent_id=saved_root.id)
+        child_tag = JournalTag(
+            user_id=TEST_USER_ID, name="child", parent_id=saved_root.id
+        )
         await tag_repo.save(child_tag)
 
         root_tags = await tag_repo.get_root_tags()
@@ -253,11 +266,15 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_get_children(self, tag_repo):
         """Test getting child tags."""
-        parent_tag = JournalTag(name="parent")
+        parent_tag = JournalTag(user_id=TEST_USER_ID, name="parent")
         saved_parent = await tag_repo.save(parent_tag)
 
-        child1 = JournalTag(name="child1", parent_id=saved_parent.id)
-        child2 = JournalTag(name="child2", parent_id=saved_parent.id)
+        child1 = JournalTag(
+            user_id=TEST_USER_ID, name="child1", parent_id=saved_parent.id
+        )
+        child2 = JournalTag(
+            user_id=TEST_USER_ID, name="child2", parent_id=saved_parent.id
+        )
         await tag_repo.save(child1)
         await tag_repo.save(child2)
 
@@ -269,13 +286,17 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_tag_hierarchy(self, tag_repo):
         """Test tag hierarchy with multiple levels."""
-        root = JournalTag(name="root")
+        root = JournalTag(user_id=TEST_USER_ID, name="root")
         saved_root = await tag_repo.save(root)
 
-        level1 = JournalTag(name="level1", parent_id=saved_root.id)
+        level1 = JournalTag(
+            user_id=TEST_USER_ID, name="level1", parent_id=saved_root.id
+        )
         saved_level1 = await tag_repo.save(level1)
 
-        level2 = JournalTag(name="level2", parent_id=saved_level1.id)
+        level2 = JournalTag(
+            user_id=TEST_USER_ID, name="level2", parent_id=saved_level1.id
+        )
         await tag_repo.save(level2)
 
         # Check root has one child
@@ -288,7 +309,7 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_tag_with_color(self, tag_repo):
         """Test saving and retrieving tag with color."""
-        tag = JournalTag(name="important", color="#FF0000")
+        tag = JournalTag(user_id=TEST_USER_ID, name="important", color="#FF0000")
         saved_tag = await tag_repo.save(tag)
 
         found_tag = await tag_repo.find_by_id(saved_tag.id)
@@ -318,7 +339,7 @@ class TestJournalTagRepositoryIntegration:
                 ),
             )
         )
-        saved_tag = await tag_repo.save(JournalTag(name="doomed"))
+        saved_tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="doomed"))
         await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
 
         await tag_repo.delete(saved_tag.id)
@@ -332,8 +353,10 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_delete_sets_child_parent_id_null(self, tag_repo):
         """Test deleting a parent tag re-parents its children to NULL."""
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
-        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        child = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
+        )
 
         await tag_repo.delete(parent.id)
 
@@ -365,8 +388,10 @@ class TestJournalTagRepositoryIntegration:
     async def test_merge_into_repoints_assignments(self, tag_repo, async_connection):
         """Test merging moves the source tag's assignments onto the target."""
         journal = await self._save_journal(async_connection, "Hike")
-        source = await tag_repo.save(JournalTag(name="hiking"))
-        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
+        target = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
         await tag_repo.assign_tag(journal.id, source.id)
 
         await tag_repo.merge_into(source.id, target.id)
@@ -386,8 +411,10 @@ class TestJournalTagRepositoryIntegration:
         from sqlalchemy import text
 
         journal = await self._save_journal(async_connection, "Both tags")
-        source = await tag_repo.save(JournalTag(name="hiking"))
-        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
+        target = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
         await tag_repo.assign_tag(journal.id, source.id)
         await tag_repo.assign_tag(journal.id, target.id)
 
@@ -406,9 +433,13 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_merge_into_reparents_children_to_target(self, tag_repo):
         """Test the source's children are adopted by the target, not orphaned."""
-        source = await tag_repo.save(JournalTag(name="hiking"))
-        target = await tag_repo.save(JournalTag(name="bushwalking"))
-        child = await tag_repo.save(JournalTag(name="day walks", parent_id=source.id))
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
+        target = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
+        child = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="day walks", parent_id=source.id)
+        )
 
         await tag_repo.merge_into(source.id, target.id)
 
@@ -423,9 +454,13 @@ class TestJournalTagRepositoryIntegration:
         able to write a self-cycle if a future caller reaches it directly — a
         tag that is its own parent would poison every later ancestry walk.
         """
-        source = await tag_repo.save(JournalTag(name="outdoors"))
-        target = await tag_repo.save(JournalTag(name="climbing", parent_id=source.id))
-        sibling = await tag_repo.save(JournalTag(name="hiking", parent_id=source.id))
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        target = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=source.id)
+        )
+        sibling = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking", parent_id=source.id)
+        )
 
         await tag_repo.merge_into(source.id, target.id)
 
@@ -448,7 +483,7 @@ class TestJournalTagRepositoryIntegration:
         rejects this first; this pins the repository's own contract.
         """
         journal = await self._save_journal(async_connection, "Kept")
-        tag = await tag_repo.save(JournalTag(name="hiking"))
+        tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
         await tag_repo.assign_tag(journal.id, tag.id)
 
         with pytest.raises(ValueError, match="distinct source and target"):
@@ -461,8 +496,10 @@ class TestJournalTagRepositoryIntegration:
 
     async def test_merge_into_deletes_source_tag(self, tag_repo):
         """Test the source tag is gone after the merge and the target survives."""
-        source = await tag_repo.save(JournalTag(name="hiking"))
-        target = await tag_repo.save(JournalTag(name="bushwalking"))
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
+        target = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
 
         await tag_repo.merge_into(source.id, target.id)
 
@@ -491,8 +528,8 @@ class TestJournalTagRepositoryIntegration:
         saved_journal = await journal_repo.save(journal)
 
         # Create tags
-        tag1 = JournalTag(name="work")
-        tag2 = JournalTag(name="personal")
+        tag1 = JournalTag(user_id=TEST_USER_ID, name="work")
+        tag2 = JournalTag(user_id=TEST_USER_ID, name="personal")
         saved_tag1 = await tag_repo.save(tag1)
         saved_tag2 = await tag_repo.save(tag2)
 
@@ -546,7 +583,7 @@ class TestJournalTagRepositoryIntegration:
         )
 
         saved_tag = await tag_repo.save(
-            JournalTag(name="work", description="Work entries")
+            JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
         )
         await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
 
@@ -574,7 +611,7 @@ class TestJournalTagRepositoryIntegration:
         saved_journal = await journal_repo.save(journal)
 
         # Create a tag
-        tag = JournalTag(name="work")
+        tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
         # Assign tag to journal
@@ -607,8 +644,8 @@ class TestJournalTagRepositoryIntegration:
         saved_journal = await journal_repo.save(journal)
 
         # Create tags
-        tag1 = JournalTag(name="work")
-        tag2 = JournalTag(name="personal")
+        tag1 = JournalTag(user_id=TEST_USER_ID, name="work")
+        tag2 = JournalTag(user_id=TEST_USER_ID, name="personal")
         saved_tag1 = await tag_repo.save(tag1)
         saved_tag2 = await tag_repo.save(tag2)
 
@@ -655,7 +692,9 @@ class TestAssignmentChangeReporting:
     async def test_assign_tag_reports_new_then_duplicate(
         self, tag_repo, sample_journal_id
     ):
-        tag = await tag_repo.save(JournalTag(name="assign-reporting"))
+        tag = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="assign-reporting")
+        )
 
         assert await tag_repo.assign_tag(sample_journal_id, tag.id) is True
         assert await tag_repo.assign_tag(sample_journal_id, tag.id) is False
@@ -666,7 +705,9 @@ class TestAssignmentChangeReporting:
     async def test_remove_tag_reports_deleted_then_absent(
         self, tag_repo, sample_journal_id
     ):
-        tag = await tag_repo.save(JournalTag(name="remove-reporting"))
+        tag = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="remove-reporting")
+        )
         await tag_repo.assign_tag(sample_journal_id, tag.id)
 
         assert await tag_repo.remove_tag(sample_journal_id, tag.id) is True
@@ -675,7 +716,9 @@ class TestAssignmentChangeReporting:
     async def test_remove_tag_reports_absent_when_never_assigned(
         self, tag_repo, sample_journal_id
     ):
-        tag = await tag_repo.save(JournalTag(name="never-assigned"))
+        tag = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="never-assigned")
+        )
 
         assert await tag_repo.remove_tag(sample_journal_id, tag.id) is False
 
@@ -693,7 +736,7 @@ class TestGetJournalIdsForTag:
         self, tag_repo, async_connection, sample_journal_id
     ):
         second_journal_id = await _create_journal(async_connection, "Second subject")
-        tag = await tag_repo.save(JournalTag(name="fan-out"))
+        tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="fan-out"))
         await tag_repo.assign_tag(sample_journal_id, tag.id)
         await tag_repo.assign_tag(second_journal_id, tag.id)
 
@@ -705,15 +748,17 @@ class TestGetJournalIdsForTag:
         self, tag_repo, async_connection, sample_journal_id
     ):
         other_journal_id = await _create_journal(async_connection, "Other subject")
-        tag = await tag_repo.save(JournalTag(name="wanted"))
-        other_tag = await tag_repo.save(JournalTag(name="unwanted"))
+        tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="wanted"))
+        other_tag = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="unwanted")
+        )
         await tag_repo.assign_tag(sample_journal_id, tag.id)
         await tag_repo.assign_tag(other_journal_id, other_tag.id)
 
         assert await tag_repo.get_journal_ids_for_tag(tag.id) == [sample_journal_id]
 
     async def test_returns_empty_for_an_unassigned_tag(self, tag_repo):
-        tag = await tag_repo.save(JournalTag(name="unassigned"))
+        tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="unassigned"))
 
         assert await tag_repo.get_journal_ids_for_tag(tag.id) == []
 
@@ -723,7 +768,7 @@ class TestGetJournalIdsForTag:
 
     async def test_reflects_a_removed_assignment(self, tag_repo, sample_journal_id):
         """Un-assigning must drop the journal, or a rename would over-report."""
-        tag = await tag_repo.save(JournalTag(name="transient"))
+        tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="transient"))
         await tag_repo.assign_tag(sample_journal_id, tag.id)
         await tag_repo.remove_tag(sample_journal_id, tag.id)
 
@@ -735,10 +780,12 @@ class TestGetDescendantsForTags:
     """Recursive descendant lookup backing hierarchical journal tag filtering."""
 
     async def test_returns_all_levels_of_descendants(self, tag_repo):
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
-        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        child = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
+        )
         grandchild = await tag_repo.save(
-            JournalTag(name="sport-climbing", parent_id=child.id)
+            JournalTag(user_id=TEST_USER_ID, name="sport-climbing", parent_id=child.id)
         )
 
         descendants = await tag_repo.get_descendants_for_tags([parent.id])
@@ -746,13 +793,19 @@ class TestGetDescendantsForTags:
         assert {tag.id for tag in descendants} == {child.id, grandchild.id}
 
     async def test_handles_multiple_roots_in_one_call(self, tag_repo):
-        first_root = await tag_repo.save(JournalTag(name="work"))
+        first_root = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="work"))
         first_child = await tag_repo.save(
-            JournalTag(name="work-meetings", parent_id=first_root.id)
+            JournalTag(
+                user_id=TEST_USER_ID, name="work-meetings", parent_id=first_root.id
+            )
         )
-        second_root = await tag_repo.save(JournalTag(name="personal"))
+        second_root = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="personal")
+        )
         second_child = await tag_repo.save(
-            JournalTag(name="personal-health", parent_id=second_root.id)
+            JournalTag(
+                user_id=TEST_USER_ID, name="personal-health", parent_id=second_root.id
+            )
         )
 
         descendants = await tag_repo.get_descendants_for_tags(
@@ -762,29 +815,34 @@ class TestGetDescendantsForTags:
         assert {tag.id for tag in descendants} == {first_child.id, second_child.id}
 
     async def test_leaf_tag_has_no_descendants(self, tag_repo):
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
-        leaf = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        leaf = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
+        )
 
         assert await tag_repo.get_descendants_for_tags([leaf.id]) == []
 
     async def test_empty_input_returns_empty_list(self, tag_repo):
-        await tag_repo.save(JournalTag(name="outdoors"))
+        await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
 
         assert await tag_repo.get_descendants_for_tags([]) == []
 
     async def test_excludes_ancestors_and_unrelated_tags(self, tag_repo):
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
-        child = await tag_repo.save(JournalTag(name="climbing", parent_id=parent.id))
-        await tag_repo.save(JournalTag(name="unrelated"))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        child = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
+        )
+        await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="unrelated"))
 
         descendants = await tag_repo.get_descendants_for_tags([child.id])
 
         assert descendants == []
 
     async def test_maps_full_tag_row(self, tag_repo):
-        parent = await tag_repo.save(JournalTag(name="outdoors"))
+        parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
         child = await tag_repo.save(
             JournalTag(
+                user_id=TEST_USER_ID,
                 name="climbing",
                 parent_id=parent.id,
                 color="#FF0000",

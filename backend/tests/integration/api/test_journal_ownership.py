@@ -365,8 +365,12 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
     )
 
     tag_repo = SqlJournalTagRepository(async_connection)
-    assigned = await tag_repo.save(JournalTag(name="their-assigned-tag"))
-    unassigned = await tag_repo.save(JournalTag(name="their-other-tag"))
+    assigned = await tag_repo.save(
+        JournalTag(user_id=OTHER_USER_ID, name="their-assigned-tag")
+    )
+    unassigned = await tag_repo.save(
+        JournalTag(user_id=OTHER_USER_ID, name="their-other-tag")
+    )
     assert assigned.id is not None
     assert unassigned.id is not None
     await tag_repo.assign_tag(journal_id, assigned.id)

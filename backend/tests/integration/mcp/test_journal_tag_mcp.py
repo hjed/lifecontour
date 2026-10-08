@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
@@ -121,7 +122,12 @@ class TestUpdateJournalTagMCPTool:
     ):
         """The tool updates a tag and the write is committed."""
         tag = await journal_tag_repo.save(
-            JournalTag(name="training", color="#00FF00", description="Old")
+            JournalTag(
+                user_id=TEST_USER_ID,
+                name="training",
+                color="#00FF00",
+                description="Old",
+            )
         )
 
         raw = await call_update_journal_tag(
@@ -152,7 +158,12 @@ class TestUpdateJournalTagMCPTool:
     ):
         """Omitted arguments leave the corresponding fields untouched."""
         tag = await journal_tag_repo.save(
-            JournalTag(name="training", color="#00FF00", description="Keep me")
+            JournalTag(
+                user_id=TEST_USER_ID,
+                name="training",
+                color="#00FF00",
+                description="Keep me",
+            )
         )
 
         await call_update_journal_tag(
@@ -172,9 +183,11 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """move_to_root clears the parent, since an omitted parent_id means no change."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         await call_update_journal_tag(
@@ -193,8 +206,12 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A tag can be re-parented under another tag."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
-        child = await journal_tag_repo.save(JournalTag(name="climbing"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
+        child = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing")
+        )
 
         await call_update_journal_tag(
             authenticated_lifespan_client,
@@ -212,8 +229,10 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A name held by another tag is rejected and nothing is written."""
-        await journal_tag_repo.save(JournalTag(name="training"))
-        other = await journal_tag_repo.save(JournalTag(name="reflection"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
+        other = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="reflection")
+        )
 
         raw = await call_update_journal_tag(
             authenticated_lifespan_client,
@@ -232,9 +251,11 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A tag cannot become its own ancestor."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         raw = await call_update_journal_tag(
@@ -271,7 +292,9 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An empty-string parent_id is rejected, not silently ignored."""
-        tag = await journal_tag_repo.save(JournalTag(name="training"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="training")
+        )
 
         raw = await call_update_journal_tag(
             authenticated_lifespan_client,
@@ -306,7 +329,9 @@ class TestUpdateJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        tag = await journal_tag_repo.save(JournalTag(name="mcp-rename-source"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-rename-source")
+        )
         journal_id = await _create_journal(async_connection)
         await journal_tag_repo.assign_tag(journal_id, tag.id)
         await async_connection.execute(text("DELETE FROM outbox_events"))
@@ -344,7 +369,9 @@ class TestDeleteJournalTagMCPTool:
         journal_tag_repo,
     ):
         """The tool deletes an unused tag and the write is committed."""
-        tag = await journal_tag_repo.save(JournalTag(name="obsolete"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="obsolete")
+        )
 
         raw = await call_delete_journal_tag(
             authenticated_lifespan_client, {"tag_id": str(tag.id)}
@@ -378,7 +405,9 @@ class TestDeleteJournalTagMCPTool:
                 ),
             )
         )
-        tag = await journal_tag_repo.save(JournalTag(name="in-use"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="in-use")
+        )
         await journal_tag_repo.assign_tag(journal.id, tag.id)
 
         raw = await call_delete_journal_tag(
@@ -422,7 +451,9 @@ class TestDeleteJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        tag = await journal_tag_repo.save(JournalTag(name="mcp-delete-subject"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-delete-subject")
+        )
         journal_id = await _create_journal(async_connection)
         await journal_tag_repo.assign_tag(journal_id, tag.id)
         await async_connection.execute(text("DELETE FROM outbox_events"))
@@ -490,10 +521,14 @@ class TestMergeJournalTagMCPTool:
                 ),
             )
         )
-        source = await journal_tag_repo.save(JournalTag(name="hiking"))
-        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
+        )
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="day walks", parent_id=source.id)
+            JournalTag(user_id=TEST_USER_ID, name="day walks", parent_id=source.id)
         )
         await journal_tag_repo.assign_tag(journal.id, source.id)
 
@@ -524,7 +559,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """Merging a tag into itself is reported rather than silently deleting it."""
-        tag = await journal_tag_repo.save(JournalTag(name="hiking"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -544,9 +581,11 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """Merging a tag into its own child is reported and changes nothing."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         raw = await call_merge_journal_tag(
@@ -566,7 +605,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An unknown target reports not-found and leaves the source in place."""
-        source = await journal_tag_repo.save(JournalTag(name="hiking"))
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -587,7 +628,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An unknown source reports not-found and leaves the target in place."""
-        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -614,8 +657,12 @@ class TestMergeJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        source = await journal_tag_repo.save(JournalTag(name="mcp-merge-source"))
-        target = await journal_tag_repo.save(JournalTag(name="mcp-merge-target"))
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-merge-source")
+        )
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-merge-target")
+        )
         journal_id = await _create_journal(async_connection)
         await journal_tag_repo.assign_tag(journal_id, source.id)
         await async_connection.execute(text("DELETE FROM outbox_events"))
@@ -671,8 +718,8 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """Mounted MCP HTTP calls should resolve request-scoped dependencies."""
-        await journal_tag_repo.save(JournalTag(name="training"))
-        await journal_tag_repo.save(JournalTag(name="reflection"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="reflection"))
 
         payload = await call_list_journal_tags(
             authenticated_lifespan_client, {"limit": 10}
@@ -691,6 +738,7 @@ class TestListJournalTagsMCPTool:
         """The tool exposes colour and description for each tag."""
         await journal_tag_repo.save(
             JournalTag(
+                user_id=TEST_USER_ID,
                 name="training",
                 color="#00FF00",
                 description="Structured training sessions",
@@ -710,9 +758,13 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """The tool exposes parent_id so AI callers can reconstruct the tree."""
-        parent = await journal_tag_repo.save(JournalTag(name="activities"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="activities")
+        )
         await journal_tag_repo.save(
-            JournalTag(name="activities-climbing", parent_id=parent.id)
+            JournalTag(
+                user_id=TEST_USER_ID, name="activities-climbing", parent_id=parent.id
+            )
         )
 
         payload = await call_list_journal_tags(authenticated_lifespan_client)
@@ -728,7 +780,7 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """Tags created without a description serialise it as null."""
-        await journal_tag_repo.save(JournalTag(name="training"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
 
         payload = await call_list_journal_tags(authenticated_lifespan_client)
 
@@ -741,9 +793,9 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """The limit argument bounds how many tags are returned."""
-        await journal_tag_repo.save(JournalTag(name="alpha"))
-        await journal_tag_repo.save(JournalTag(name="beta"))
-        await journal_tag_repo.save(JournalTag(name="gamma"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="alpha"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="beta"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="gamma"))
 
         payload = await call_list_journal_tags(
             authenticated_lifespan_client, {"limit": 2}

@@ -57,6 +57,7 @@ from app.infrastructure.events.history_projection_consumer import (
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_relay import OutboxRelay
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.infrastructure.events.projection_harness import (
     GROUP_NAME,
     patched_projection_engine,
@@ -718,7 +719,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Tag history subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=f"Hiking-{uuid4()}")
+            JournalTag(user_id=TEST_USER_ID, name=f"Hiking-{uuid4()}")
         )
         assert tag.id is not None
 
@@ -764,7 +765,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Replay subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=f"Replay-{uuid4()}")
+            JournalTag(user_id=TEST_USER_ID, name=f"Replay-{uuid4()}")
         )
         assert tag.id is not None
 
@@ -879,7 +880,7 @@ class TestJournalTagHistoryProjectionE2E:
         untagged_id = await self._journal_id(async_connection, "Untagged bystander")
         old_name = f"Hiking-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=old_name)
+            JournalTag(user_id=TEST_USER_ID, name=old_name)
         )
         assert tag.id is not None
         for journal_id in tagged_ids:
@@ -929,7 +930,7 @@ class TestJournalTagHistoryProjectionE2E:
         journal_id = await self._journal_id(async_connection, "Rename replay subject")
         old_name = f"ReplayRename-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=old_name)
+            JournalTag(user_id=TEST_USER_ID, name=old_name)
         )
         assert tag.id is not None
         await tag_service.assign_tag(
@@ -979,7 +980,7 @@ class TestJournalTagHistoryProjectionE2E:
         untagged_id = await self._journal_id(async_connection, "Untagged bystander")
         tag_name = f"Doomed-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=tag_name)
+            JournalTag(user_id=TEST_USER_ID, name=tag_name)
         )
         assert tag.id is not None
         for journal_id in tagged_ids:
@@ -1022,7 +1023,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Delete replay subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(name=f"ReplayDoomed-{uuid4()}")
+            JournalTag(user_id=TEST_USER_ID, name=f"ReplayDoomed-{uuid4()}")
         )
         assert tag.id is not None
         await tag_service.assign_tag(
@@ -1066,8 +1067,8 @@ class TestJournalTagHistoryProjectionE2E:
         repo = SqlJournalTagRepository(async_connection)
         source_name = f"Hiking-{uuid4()}"
         target_name = f"Bushwalking-{uuid4()}"
-        source_tag = await repo.save(JournalTag(name=source_name))
-        target_tag = await repo.save(JournalTag(name=target_name))
+        source_tag = await repo.save(JournalTag(user_id=TEST_USER_ID, name=source_name))
+        target_tag = await repo.save(JournalTag(user_id=TEST_USER_ID, name=target_name))
         assert source_tag.id is not None
         assert target_tag.id is not None
         for journal_id in (source_only_id, both_id):
@@ -1121,8 +1122,12 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Merge replay subject")
         repo = SqlJournalTagRepository(async_connection)
-        source_tag = await repo.save(JournalTag(name=f"ReplaySource-{uuid4()}"))
-        target_tag = await repo.save(JournalTag(name=f"ReplayTarget-{uuid4()}"))
+        source_tag = await repo.save(
+            JournalTag(user_id=TEST_USER_ID, name=f"ReplaySource-{uuid4()}")
+        )
+        target_tag = await repo.save(
+            JournalTag(user_id=TEST_USER_ID, name=f"ReplayTarget-{uuid4()}")
+        )
         assert source_tag.id is not None
         assert target_tag.id is not None
         await tag_service.assign_tag(

@@ -18,6 +18,7 @@ from app.core.journal.models.journal_tag import JournalTag
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.meilisearch_client import get_index_name
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -207,7 +208,7 @@ class TestJournalTagReindexing:
         # The journal tag namespace is global and its names are unique, so a
         # fixed name would collide with a concurrently running test.
         saved = await SqlJournalTagRepository(conn).save(
-            JournalTag(name=f"{prefix}-{uuid4()}")
+            JournalTag(user_id=TEST_USER_ID, name=f"{prefix}-{uuid4()}")
         )
         assert saved.id is not None
         return saved.id

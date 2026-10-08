@@ -29,8 +29,8 @@ async def _insert_tag(
     """Insert a journal tag and return its id."""
     result = await connection.execute(
         text("""
-        INSERT INTO journal_tags (name, color, parent_id)
-        VALUES (:name, '#FF0000', :parent_id)
+        INSERT INTO journal_tags (user_id, name, color, parent_id)
+        VALUES ('test-user-123', :name, '#FF0000', :parent_id)
         RETURNING id
         """),
         {"name": name, "parent_id": parent_id},
@@ -578,8 +578,8 @@ class TestJournalRepositoryFiltering:
         # Create test tags
         tag1_result = await async_connection.execute(
             text("""
-            INSERT INTO journal_tags (name, color)
-            VALUES (:name, :color)
+            INSERT INTO journal_tags (user_id, name, color)
+            VALUES ('test-user-123', :name, :color)
             RETURNING id
             """),
             {"name": "Work", "color": "#FF0000"},
@@ -590,8 +590,8 @@ class TestJournalRepositoryFiltering:
 
         tag2_result = await async_connection.execute(
             text("""
-            INSERT INTO journal_tags (name, color)
-            VALUES (:name, :color)
+            INSERT INTO journal_tags (user_id, name, color)
+            VALUES ('test-user-123', :name, :color)
             RETURNING id
             """),
             {"name": "Personal", "color": "#00FF00"},
