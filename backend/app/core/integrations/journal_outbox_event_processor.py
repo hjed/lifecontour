@@ -36,6 +36,7 @@ from core_shared.models.journals.journal_types import JournalType
 from core_shared.models.journals.review_item import ReviewItem, ReviewReason
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
+    FitnessDurationCorrectedData,
     JournalSeriesCancelledEventData,
     JournalStatusEventData,
     JournalSyncEventData,
@@ -90,6 +91,9 @@ EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
 EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED = "journal_event.series_cancelled"
+EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED = (
+    "journal_event.fitness_duration_corrected"
+)
 EVENT_TYPE_JOURNAL_REVIEW_DETECT_MATCHES = "journal_review.detect_matches"
 
 # Buffer around "now" for recurring-cancellation decisions, mirroring the
@@ -307,6 +311,8 @@ class JournalOutboxEventProcessor:
             return await self._process_journal_cancelled(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED:
             return await self._process_journal_series_cancelled(event)
+        if event.event_type == EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED:
+            return await self._process_fitness_duration_corrected(event)
 
         raise JournalOutboxEventProcessingError(
             f"Unknown journal event type: {event.event_type}"
@@ -834,6 +840,56 @@ class JournalOutboxEventProcessor:
             "status": "success",
             "event_type": EVENT_TYPE_JOURNAL_EVENT_CONFLICTED,
             "external_event_id": external_event_id,
+        }
+
+    async def _process_fitness_duration_corrected(
+        self, event: OutboxEvent
+    ) -> dict[str, Any]:
+        """
+        Process a journal_event.fitness_duration_corrected event.
+
+        Strava journals were once synced with moving time as their duration;
+        the worker's backfill sends the elapsed time to store instead. The
+        write is a compare-and-set against the durations the sync could have
+        written, so a duration the user has edited — or a journal they don't
+        own — is left alone. Like every inbound fitness write it publishes no
+        journal event, so the day's summary is invalidated directly.
+        """
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        payload = FitnessDurationCorrectedData.model_validate(event_data)
+
+        changed = await SqlFitnessDataRepository(
+            self.connection
+        ).set_duration_if_unchanged(
+            journal_id=payload.journal_id,
+            user_id=payload.user_id,
+            expected=payload.expected_durations,
+            corrected=payload.corrected_duration,
+        )
+        if not changed:
+            logger.info(
+                "Fitness duration is not a synced value, skipping correction",
+                journal_id=payload.journal_id,
+                strava_activity_ids=payload.strava_activity_ids,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED,
+                "reason": "no_matching_duration",
+                "journal_id": payload.journal_id,
+            }
+
+        await self._invalidate_summary_for_journal(payload.journal_id)
+        logger.info(
+            "Corrected fitness duration to elapsed time",
+            journal_id=payload.journal_id,
+            corrected_duration=payload.corrected_duration,
+            strava_activity_ids=payload.strava_activity_ids,
+        )
+        return {
+            "status": "corrected",
+            "event_type": EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED,
+            "journal_id": payload.journal_id,
         }
 
     async def _process_journal_cancelled(self, event: OutboxEvent) -> dict[str, Any]:

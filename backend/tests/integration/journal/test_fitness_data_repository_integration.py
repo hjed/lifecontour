@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import EventDateRange, FitnessData, Journal
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.fitness_data_repository import (
@@ -226,3 +227,143 @@ class TestFitnessDataRepositoryDelete:
         """Test deleting non-existent fitness data does not raise error."""
         # Should not raise an error
         await fitness_data_repository.delete(99999)
+
+
+@pytest.mark.integration
+class TestFitnessDataRepositorySetDurationIfUnchanged:
+    """Compare-and-set of the duration, used to correct synced durations."""
+
+    async def test_updates_when_duration_is_an_expected_value(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        test_journal: Journal,
+    ) -> None:
+        journal_id: int = test_journal.id  # type: ignore[assignment]
+        await fitness_data_repository.save(
+            create_test_fitness_data(journal_id=journal_id, duration=3300)
+        )
+
+        changed = await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=journal_id,
+            user_id=test_journal.user_id,
+            expected=[3000, 3300],
+            corrected=3600,
+        )
+
+        assert changed is True
+        found = await fitness_data_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.duration == 3600
+        assert found.distance == 5000
+
+    async def test_bumps_updated_at(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        async_connection: AsyncConnection,
+        test_journal: Journal,
+    ) -> None:
+        """now() is the transaction time, so start from a known past value."""
+        journal_id: int = test_journal.id  # type: ignore[assignment]
+        await fitness_data_repository.save(
+            create_test_fitness_data(journal_id=journal_id, duration=3000)
+        )
+        past = datetime(2020, 1, 1, tzinfo=UTC)
+        await async_connection.execute(
+            text(
+                "UPDATE journal_fitness_data SET updated_at = :past "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"past": past, "journal_id": journal_id},
+        )
+
+        await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=journal_id,
+            user_id=test_journal.user_id,
+            expected=[3000],
+            corrected=3600,
+        )
+
+        found = await fitness_data_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.updated_at is not None
+        assert found.updated_at > past
+
+    async def test_leaves_an_edited_duration_alone(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        test_journal: Journal,
+    ) -> None:
+        journal_id: int = test_journal.id  # type: ignore[assignment]
+        await fitness_data_repository.save(
+            create_test_fitness_data(journal_id=journal_id, duration=4200)
+        )
+
+        changed = await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=journal_id,
+            user_id=test_journal.user_id,
+            expected=[3000],
+            corrected=3600,
+        )
+
+        assert changed is False
+        found = await fitness_data_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.duration == 4200
+
+    async def test_leaves_a_null_duration_alone(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        test_journal: Journal,
+    ) -> None:
+        journal_id: int = test_journal.id  # type: ignore[assignment]
+        await fitness_data_repository.save(
+            create_test_fitness_data(journal_id=journal_id, duration=None)
+        )
+
+        changed = await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=journal_id,
+            user_id=test_journal.user_id,
+            expected=[3000],
+            corrected=3600,
+        )
+
+        assert changed is False
+        found = await fitness_data_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.duration is None
+
+    async def test_ignores_another_users_journal(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        test_journal: Journal,
+    ) -> None:
+        journal_id: int = test_journal.id  # type: ignore[assignment]
+        await fitness_data_repository.save(
+            create_test_fitness_data(journal_id=journal_id, duration=3000)
+        )
+
+        changed = await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=journal_id,
+            user_id="someone-else",
+            expected=[3000],
+            corrected=3600,
+        )
+
+        assert changed is False
+        found = await fitness_data_repository.find_by_journal_id(journal_id)
+        assert found is not None
+        assert found.duration == 3000
+
+    async def test_returns_false_without_fitness_data(
+        self,
+        fitness_data_repository: SqlFitnessDataRepository,
+        test_journal: Journal,
+    ) -> None:
+        changed = await fitness_data_repository.set_duration_if_unchanged(
+            journal_id=test_journal.id,  # type: ignore[arg-type]
+            user_id=test_journal.user_id,
+            expected=[3000],
+            corrected=3600,
+        )
+
+        assert changed is False

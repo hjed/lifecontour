@@ -1,5 +1,6 @@
 """SQL implementation of FitnessDataRepository."""
 
+from collections.abc import Sequence
 from typing import Any
 
 from core_shared.models.journals import FitnessData
@@ -110,6 +111,37 @@ class SqlFitnessDataRepository(FitnessDataRepository):
         )
         row = result.fetchone()
         return self._row_to_fitness_data(row)
+
+    async def set_duration_if_unchanged(
+        self,
+        journal_id: int,
+        user_id: str,
+        expected: Sequence[int],
+        corrected: int,
+    ) -> bool:
+        """Set the duration only while it still holds one of ``expected``."""
+        query = text(
+            """
+            UPDATE journal_fitness_data AS f
+            SET duration = :corrected, updated_at = now()
+            FROM journals AS j
+            WHERE f.journal_id = :journal_id
+              AND j.id = f.journal_id
+              AND j.user_id = :user_id
+              AND f.duration = ANY(:expected)
+            RETURNING f.journal_id
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "journal_id": journal_id,
+                "user_id": user_id,
+                "expected": list(expected),
+                "corrected": corrected,
+            },
+        )
+        return result.fetchone() is not None
 
     async def delete(self, journal_id: int) -> None:
         """Delete fitness data by journal ID."""

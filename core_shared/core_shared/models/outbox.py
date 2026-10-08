@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from .base import Base
 from .outbox_events import (
     ContactSyncEventData,
+    FitnessDurationCorrectedData,
     ImmichAlbumSyncEventData,
     JournalSeriesCancelledEventData,
     JournalSyncEventData,
@@ -239,6 +240,47 @@ class OutboxEvent(Base):
             event_type=f"journal_event.{sync_action}",
             event_data=payload.model_dump(),
             aggregate_id=existing_journal_id or 0,
+        )
+
+    @classmethod
+    def create_fitness_duration_correction_event(
+        cls,
+        *,
+        journal_id: int,
+        user_id: str,
+        expected_durations: list[int],
+        corrected_duration: int,
+        strava_activity_ids: list[str],
+    ) -> OutboxEvent:
+        """
+        Create an outbox event correcting a journal's synced fitness duration.
+
+        Args:
+            journal_id: Journal whose duration to correct
+            user_id: Owner of the journal
+            expected_durations: Durations (seconds) the sync could have
+                stored; the backend applies the correction only while the
+                stored duration is one of them
+            corrected_duration: Duration (seconds) to store instead
+            strava_activity_ids: Strava activities the durations cover
+
+        Returns:
+            OutboxEvent instance ready to be saved
+
+        Raises:
+            pydantic.ValidationError: If the payload is invalid
+        """
+        payload = FitnessDurationCorrectedData(
+            journal_id=journal_id,
+            user_id=user_id,
+            expected_durations=expected_durations,
+            corrected_duration=corrected_duration,
+            strava_activity_ids=strava_activity_ids,
+        )
+        return cls(
+            event_type="journal_event.fitness_duration_corrected",
+            event_data=payload.model_dump(),
+            aggregate_id=journal_id,
         )
 
     @classmethod

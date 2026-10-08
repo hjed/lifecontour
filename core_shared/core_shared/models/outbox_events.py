@@ -12,7 +12,7 @@ backend and integration workers.
 
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, NonNegativeInt
 
 # ── Contact Sync ──────────────────────────────────────────────────────
 
@@ -261,6 +261,39 @@ class MatchDetectionEventData(BaseModel):
     created_at: str = Field(description="ISO-8601 timestamp of event creation")
 
 
+# ── Fitness Duration Correction ──────────────────────────────────────
+
+
+class FitnessDurationCorrectedData(BaseModel):
+    """Payload for ``journal_event.fitness_duration_corrected`` events.
+
+    Published by the Strava worker's one-off backfill, which corrects
+    durations synced as moving time to elapsed time. The backend applies it
+    as a compare-and-set: the duration changes only while it still holds one
+    of ``expected_durations`` — a value the sync itself could have written —
+    so a duration the user edited is never overwritten.
+    """
+
+    journal_id: int = Field(description="Journal whose fitness duration to correct")
+    user_id: str = Field(
+        min_length=1,
+        description="Owner of the journal; the backend ignores a journal it "
+        "does not own",
+    )
+    expected_durations: list[NonNegativeInt] = Field(
+        min_length=1,
+        description="Durations in seconds the sync could have stored; the "
+        "correction applies only while the stored duration is one of them",
+    )
+    corrected_duration: NonNegativeInt = Field(
+        description="Total elapsed time in seconds across the linked activities"
+    )
+    strava_activity_ids: list[str] = Field(
+        default_factory=list,
+        description="Strava activities the durations were summed over",
+    )
+
+
 # ── Union type and dispatcher ────────────────────────────────────────
 
 
@@ -272,6 +305,7 @@ OutboxEventData = (
     | JournalSeriesCancelledEventData
     | ImmichAlbumSyncEventData
     | MatchDetectionEventData
+    | FitnessDurationCorrectedData
 )
 """Union of all outbox event payload types."""
 
@@ -286,6 +320,7 @@ _EVENT_TYPE_DISPATCH: list[tuple[str, type[BaseModel]]] = [
     ("journal_event.conflicted", JournalStatusEventData),
     ("journal_event.series_cancelled", JournalSeriesCancelledEventData),
     ("journal_event.cancelled", JournalStatusEventData),
+    ("journal_event.fitness_duration_corrected", FitnessDurationCorrectedData),
     ("immich_album.", ImmichAlbumSyncEventData),
     ("journal_review.", MatchDetectionEventData),
 ]
