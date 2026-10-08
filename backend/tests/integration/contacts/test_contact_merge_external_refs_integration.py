@@ -182,7 +182,7 @@ class TestDifferentServiceCarryOver:
         await _add_sync_metadata(async_connection, source_id, "immich", "person-uuid")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await _linked_systems(async_connection, survivor_id) == {
@@ -212,7 +212,7 @@ class TestSameServiceCollision:
         await _add_sync_metadata(async_connection, source_id, "google", "people/src")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         # Survivor keeps exactly its own google link; the source's is removed.
@@ -263,7 +263,7 @@ class TestSameServiceCollision:
         )
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         # The contact's google sync row carried over; the unrelated album row stays
@@ -291,7 +291,7 @@ class TestSameServiceCollision:
         await _add_sync_metadata(async_connection, source_id, "immich", "person-uuid")
 
         await merge_service.merge_contacts(
-            survivor_id, source_id, transaction=async_connection
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await _count_sync_metadata(async_connection, source_id) == 0

@@ -113,6 +113,7 @@ class TestContactRelationshipService:
             to_contact_id=2,
             relationship_type=RelationshipType.FRIEND,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         # Verify
@@ -144,6 +145,7 @@ class TestContactRelationshipService:
                 to_contact_id=2,
                 relationship_type=RelationshipType.FRIEND,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
         mock_relationship_repo.create.assert_not_called()
@@ -166,6 +168,7 @@ class TestContactRelationshipService:
                 to_contact_id=999,
                 relationship_type=RelationshipType.FRIEND,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
         mock_relationship_repo.create.assert_not_called()
@@ -189,6 +192,7 @@ class TestContactRelationshipService:
                 to_contact_id=1,
                 relationship_type=RelationshipType.FRIEND,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
         assert "cannot have a relationship with itself" in str(exc_info.value)
@@ -232,6 +236,7 @@ class TestContactRelationshipService:
             relationship_type=RelationshipType.PARTNER,
             create_bidirectional=True,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         # Verify both relationships created
@@ -255,7 +260,9 @@ class TestContactRelationshipService:
             sample_relationship
         ]
 
-        relationships = await service.get_relationships_for_contact(1)
+        relationships = await service.get_relationships_for_contact(
+            1, user_id=TEST_USER_ID
+        )
 
         assert len(relationships) == 1
         assert relationships[0] == sample_relationship
@@ -284,6 +291,7 @@ class TestContactRelationshipService:
             relationship_id=1,
             relationship_type=RelationshipType.COLLEAGUE,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert result.relationship_type == RelationshipType.COLLEAGUE
@@ -309,6 +317,7 @@ class TestContactRelationshipService:
                 relationship_id=999,
                 relationship_type=RelationshipType.COLLEAGUE,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
         assert "Relationship with ID 999 not found" in str(exc_info.value)
@@ -329,6 +338,7 @@ class TestContactRelationshipService:
         await service.delete_relationship(
             relationship_id=1,
             transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         mock_relationship_repo.get_by_id.assert_called_once_with(1)
@@ -352,6 +362,7 @@ class TestContactRelationshipService:
             await service.delete_relationship(
                 relationship_id=999,
                 transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
         assert "Relationship with ID 999 not found" in str(exc_info.value)

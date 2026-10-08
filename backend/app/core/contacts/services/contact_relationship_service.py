@@ -51,6 +51,7 @@ class ContactRelationshipService:
         to_user: bool = False,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        user_id: str,
     ) -> ContactRelationship | list[ContactRelationship]:
         """
         Create a new relationship between contacts or from a contact to the user.
@@ -192,7 +193,7 @@ class ContactRelationshipService:
             return created_relationship
 
     async def get_relationships_for_contact(
-        self, contact_id: int
+        self, contact_id: int, *, user_id: str
     ) -> list[ContactRelationship]:
         """
         Get all relationships for a contact.
@@ -205,34 +206,6 @@ class ContactRelationshipService:
         """
         return await self.relationship_repo.get_relationships_for_contact(contact_id)
 
-    async def get_relationships_from_contact(
-        self, contact_id: int
-    ) -> list[ContactRelationship]:
-        """
-        Get relationships where the contact is the initiator.
-
-        Args:
-            contact_id: ID of the contact
-
-        Returns:
-            List of relationships from the contact
-        """
-        return await self.relationship_repo.get_relationships_from_contact(contact_id)
-
-    async def get_relationships_to_contact(
-        self, contact_id: int
-    ) -> list[ContactRelationship]:
-        """
-        Get relationships where the contact is the recipient.
-
-        Args:
-            contact_id: ID of the contact
-
-        Returns:
-            List of relationships to the contact
-        """
-        return await self.relationship_repo.get_relationships_to_contact(contact_id)
-
     @transactional
     async def update_relationship(
         self,
@@ -242,6 +215,7 @@ class ContactRelationshipService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        user_id: str,
     ) -> ContactRelationship:
         """
         Update an existing relationship.
@@ -316,6 +290,7 @@ class ContactRelationshipService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        user_id: str,
     ) -> None:
         """
         Delete a relationship.
@@ -354,41 +329,8 @@ class ContactRelationshipService:
             )
         )
 
-    @transactional
-    async def delete_all_relationships_for_contact(
-        self,
-        contact_id: int,
-        *,
-        transaction: AsyncConnection,
-        changed_by: str = "system",
-        source: Provenance = Provenance.SYSTEM,
-    ) -> None:
-        """
-        Delete all relationships for a contact.
-
-        Args:
-            contact_id: ID of the contact
-            transaction: Active request connection; required (keyword-only) so
-                @transactional commits this write before the response (#945).
-        """
-        relationships = await self.get_relationships_for_contact(contact_id)
-        for relationship in relationships:
-            if relationship.id:
-                await self.relationship_repo.delete(relationship.id)
-                await self.event_publisher.publish(
-                    ContactRelationshipDeleted(
-                        relationship_id=relationship.id,
-                        from_contact_id=relationship.from_contact_id,
-                        to_contact_id=relationship.to_contact_id,
-                        relationship_type=relationship.relationship_type.value,
-                        to_user=relationship.to_user,
-                        source=source,
-                        changed_by=changed_by,
-                    )
-                )
-
     async def get_relationship_by_id(
-        self, relationship_id: int
+        self, relationship_id: int, *, user_id: str
     ) -> ContactRelationship | None:
         """
         Get a relationship by ID.
@@ -401,54 +343,12 @@ class ContactRelationshipService:
         """
         return await self.relationship_repo.get_by_id(relationship_id)
 
-    async def validate_partner_relationship_compatibility(
-        self,
-        from_contact_id: int,
-        to_contact_id: int,
-        relationship_type: RelationshipType,
-    ) -> None:
-        """
-        Validate that a partner relationship doesn't conflict with existing ones.
-
-        Currently only validates partner relationship conflicts. This method
-        can be expanded to include other relationship compatibility rules.
-
-        Args:
-            from_contact_id: ID of the contact initiating the relationship
-            to_contact_id: ID of the contact receiving the relationship
-            relationship_type: Type of relationship to validate
-
-        Raises:
-            ContactValidationError: If partner relationship conflicts exist
-        """
-        # Get existing relationships between these contacts
-        existing_relationships = (
-            await self.relationship_repo.get_relationships_for_contact(from_contact_id)
-        )
-
-        # Check for conflicting relationships
-        for rel in existing_relationships:
-            if (
-                rel.from_contact_id == from_contact_id
-                and rel.to_contact_id == to_contact_id
-            ) or (
-                rel.from_contact_id == to_contact_id
-                and rel.to_contact_id == from_contact_id
-            ):
-                # Check for incompatible relationship types
-                if (
-                    relationship_type == RelationshipType.PARTNER
-                    and rel.relationship_type == RelationshipType.PARTNER
-                ):
-                    raise ContactValidationError(
-                        "relationship",
-                        "Partner relationship already exists between these contacts",
-                    )
-
     async def resolve_relationship_contact_names(
         self,
         relationships: list[ContactRelationship],
         viewing_contact_id: int,
+        *,
+        user_id: str,
     ) -> list[ContactRelationship]:
         """
         Populate to_contact_name on each relationship with the other contact's display name.

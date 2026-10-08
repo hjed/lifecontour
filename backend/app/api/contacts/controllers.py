@@ -305,6 +305,7 @@ async def merge_contact(
         changed_by="ui",
         source=Provenance.UI,
         overrides=overrides_dict,
+        user_id=user.id,
     )
 
     # Re-fetch the enriched survivor so the response carries the full, merged

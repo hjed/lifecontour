@@ -465,6 +465,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = None,
         merge_service: ContactMergeService = mcp_depends(get_contact_merge_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Merge a source contact into a surviving contact.
@@ -492,6 +493,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             changed_by="mcp",
             source=Provenance.MCP,
             overrides=overrides,
+            user_id=user_id,
         )
 
         response = ContactConverter.to_contact_response(merged)
@@ -1167,6 +1169,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         relationship_service: ContactRelationshipService = mcp_depends(
             get_contact_relationship_service
         ),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         List all relationships for a specific contact.
@@ -1183,13 +1186,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         try:
             relationships = await relationship_service.get_relationships_for_contact(
-                contact_id
+                contact_id, user_id=user_id
             )
 
             # Resolve the names of the "other" contact
             resolved_relationships = (
                 await relationship_service.resolve_relationship_contact_names(
-                    relationships, contact_id
+                    relationships, contact_id, user_id=user_id
                 )
             )
 
@@ -1232,6 +1235,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             get_contact_relationship_service
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Add a new relationship between two contacts.
@@ -1264,6 +1268,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     transaction=connection,
                     changed_by="mcp",
                     source=Provenance.MCP,
+                    user_id=user_id,
                 ),
             )
 
@@ -1271,7 +1276,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             [
                 resolved_rel
             ] = await relationship_service.resolve_relationship_contact_names(
-                [created_relationship], request.contact_id
+                [created_relationship], request.contact_id, user_id=user_id
             )
 
             schema = ContactRelationshipConverter.to_relationship_response(
@@ -1300,6 +1305,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             get_contact_relationship_service
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Update an existing contact relationship.
@@ -1322,7 +1328,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
             # Fetch the existing relationship to determine direction
             existing_relationship = await relationship_service.get_relationship_by_id(
-                request.relationship_id
+                request.relationship_id, user_id=user_id
             )
             if not existing_relationship:
                 raise ContactValidationError(
@@ -1350,12 +1356,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 transaction=connection,
                 changed_by="mcp",
                 source=Provenance.MCP,
+                user_id=user_id,
             )
 
             [
                 resolved_rel
             ] = await relationship_service.resolve_relationship_contact_names(
-                [updated_relationship], request.contact_id
+                [updated_relationship], request.contact_id, user_id=user_id
             )
 
             schema = ContactRelationshipConverter.to_relationship_response(
@@ -1387,6 +1394,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             get_contact_relationship_service
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Remove a relationship between two contacts.
@@ -1406,7 +1414,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         try:
             existing_relationship = await relationship_service.get_relationship_by_id(
-                relationship_id
+                relationship_id, user_id=user_id
             )
             if not existing_relationship:
                 raise ContactValidationError(
@@ -1427,6 +1435,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 transaction=connection,
                 changed_by="mcp",
                 source=Provenance.MCP,
+                user_id=user_id,
             )
 
             logger.info(

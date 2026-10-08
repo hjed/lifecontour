@@ -131,7 +131,10 @@ class TestContactMergePreconditions:
     ) -> None:
         with pytest.raises(ContactMergeConflictError):
             await merge_service.merge_contacts(
-                SURVIVOR_ID, SURVIVOR_ID, transaction=mock_transaction
+                SURVIVOR_ID,
+                SURVIVOR_ID,
+                transaction=mock_transaction,
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -145,7 +148,7 @@ class TestContactMergePreconditions:
         )
         with pytest.raises(ContactNotFoundError):
             await merge_service.merge_contacts(
-                999, SOURCE_ID, transaction=mock_transaction
+                999, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
     @pytest.mark.asyncio
@@ -159,7 +162,7 @@ class TestContactMergePreconditions:
         )
         with pytest.raises(ContactNotFoundError):
             await merge_service.merge_contacts(
-                SURVIVOR_ID, 999, transaction=mock_transaction
+                SURVIVOR_ID, 999, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
 
@@ -176,7 +179,7 @@ class TestContactMergeDelegation:
         survivor,
     ) -> None:
         result = await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         mock_relationship_repo.repoint_contact.assert_awaited_once_with(
@@ -195,7 +198,7 @@ class TestContactMergeDelegation:
         mock_transaction,
     ) -> None:
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         for repoint in (
@@ -226,7 +229,7 @@ class TestContactMergeDelegation:
         manager.attach_mock(mock_contact_repo.delete, "delete")
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         mock_history_repo.repoint_entity_history.assert_awaited_once_with(
@@ -264,7 +267,7 @@ class TestContactMergeDelegation:
         manager.attach_mock(mock_contact_repo.delete, "delete")
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         mock_history_repo.repoint_contact_task_history.assert_awaited_once_with(
@@ -287,7 +290,7 @@ class TestContactMergeDelegation:
         what keeps the contacts domain from constructing task events.
         """
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         mock_task_merge_service.repoint_contact_links.assert_awaited_once_with(
@@ -317,6 +320,7 @@ class TestContactMergeDelegation:
             transaction=mock_transaction,
             changed_by="user-1",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
 
         kwargs = mock_task_merge_service.repoint_contact_links.await_args.kwargs
@@ -346,7 +350,7 @@ class TestContactMergeDelegation:
         manager.attach_mock(mock_contact_repo.delete, "delete")
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         ordered = [call[0] for call in manager.mock_calls]
@@ -379,7 +383,7 @@ class TestContactMergeScalarPolicy:
         )
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -407,7 +411,7 @@ class TestContactMergeScalarPolicy:
         )
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -434,7 +438,7 @@ class TestContactMergeScalarPolicy:
         )
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -450,7 +454,7 @@ class TestContactMergeOwner:
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         saved = cast(Contact, mock_contact_repo.save.await_args.args[0])
@@ -462,7 +466,7 @@ class TestContactMergeOwner:
     ) -> None:
         """Workers reconcile a merge only in the owner's accounts."""
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         owners = {
@@ -492,7 +496,7 @@ class TestContactMergeSideEffects:
         mock_transaction,
     ) -> None:
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         published = [c.args[0] for c in mock_event_publisher.publish.await_args_list]
@@ -522,7 +526,7 @@ class TestContactMergeSideEffects:
         mock_transaction,
     ) -> None:
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         event = self._published(mock_event_publisher)["ContactSummaryRefreshRequested"]
@@ -541,6 +545,7 @@ class TestContactMergeSideEffects:
             transaction=mock_transaction,
             changed_by="ui",
             source=Provenance.UI,
+            user_id=TEST_USER_ID,
         )
 
         event = self._published(mock_event_publisher)["ContactMerged"]
@@ -567,7 +572,7 @@ class TestContactMergeSideEffects:
         instead, which has no integration side effects.
         """
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         published = self._published(mock_event_publisher)
@@ -607,7 +612,7 @@ class TestContactMergeExternalReferences:
         manager.attach_mock(mock_contact_repo.delete, "delete")
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         mock_sync_metadata_repo.repoint_contact_links.assert_awaited_once_with(
@@ -637,7 +642,7 @@ class TestContactMergeExternalReferences:
         mock_sync_metadata_repo.repoint_contact_links.return_value = [collision]
 
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         event = self._published(mock_event_publisher)["ContactMerged"]
@@ -659,7 +664,7 @@ class TestContactMergeExternalReferences:
         mock_transaction,
     ) -> None:
         await merge_service.merge_contacts(
-            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction
+            SURVIVOR_ID, SOURCE_ID, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         event = self._published(mock_event_publisher)["ContactMerged"]
@@ -735,6 +740,7 @@ class TestContactMergeOverrides:
             SOURCE_ID,
             transaction=mock_transaction,
             overrides={field: custom_value},
+            user_id=TEST_USER_ID,
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -753,6 +759,7 @@ class TestContactMergeOverrides:
             SOURCE_ID,
             transaction=mock_transaction,
             overrides={"company": "SrcCo"},
+            user_id=TEST_USER_ID,
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -771,6 +778,7 @@ class TestContactMergeOverrides:
             SOURCE_ID,
             transaction=mock_transaction,
             overrides={"is_favourite": False},
+            user_id=TEST_USER_ID,
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -788,6 +796,7 @@ class TestContactMergeOverrides:
             SOURCE_ID,
             transaction=mock_transaction,
             overrides={"company": "CustomCo"},
+            user_id=TEST_USER_ID,
         )
 
         saved = self._saved_contact(mock_contact_repo)
@@ -806,6 +815,7 @@ class TestContactMergeOverrides:
             SOURCE_ID,
             transaction=mock_transaction,
             overrides={"company": "CustomCo"},
+            user_id=TEST_USER_ID,
         )
 
         published = [c.args[0] for c in mock_event_publisher.publish.await_args_list]

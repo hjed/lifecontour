@@ -50,6 +50,7 @@ from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.infrastructure.events.projection_harness import (
     relay_and_project,
 )
@@ -195,7 +196,7 @@ class TestTheRecordsReachTheSurvivor:
         assert await feed(history_repo, survivor) == []
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await feed(history_repo, survivor) == [
@@ -227,7 +228,7 @@ class TestTheRecordsReachTheSurvivor:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         gone = await async_connection.execute(
@@ -266,7 +267,7 @@ class TestTheRecordsReachTheSurvivor:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await feed(history_repo, survivor) == [
@@ -298,7 +299,7 @@ class TestTheRecordsReachTheSurvivor:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
 
         assert await feed(history_repo, bystander) == [
@@ -341,7 +342,7 @@ class TestTheMergesOwnAnnouncementStaysWhereItBelongs:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
         await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-contact-merge"
@@ -377,7 +378,7 @@ class TestTheMergesOwnAnnouncementStaysWhereItBelongs:
         )
 
         await contact_merge.merge_contacts(
-            survivor, absorbed, transaction=async_connection
+            survivor, absorbed, transaction=async_connection, user_id=TEST_USER_ID
         )
         await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-contact-merge"
