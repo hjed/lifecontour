@@ -490,7 +490,9 @@ class ContactService:
                     await self._resolve_tag_names(contact, tag_names, transaction)
 
             # Get current contact and calculate changes
-            current_contact = await self._get_existing_contact(contact.id)
+            current_contact = await self._get_existing_contact(
+                contact.id, user_id=user_id
+            )
             # A contact's owner never changes. The repository never writes a
             # new one; adopting the stored owner here keeps the aggregate this
             # update saves, returns and publishes in agreement with the row.
@@ -589,7 +591,9 @@ class ContactService:
             )
 
             # Get current contact
-            current_contact = await self._get_existing_contact(contact_id)
+            current_contact = await self._get_existing_contact(
+                contact_id, user_id=user_id
+            )
 
             # Get current field value
             old_value = getattr(current_contact, field_name)
@@ -622,7 +626,10 @@ class ContactService:
 
             # Validate the updated contact
             await self.contact_validation.validate_contact_update(
-                updated_contact, transaction, exclude_contact_id=contact_id
+                updated_contact,
+                transaction,
+                exclude_contact_id=contact_id,
+                user_id=user_id,
             )
 
             # Save the updated contact
@@ -687,7 +694,9 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Get current contact with methods
-            current_contact = await self._get_existing_contact(contact_id)
+            current_contact = await self._get_existing_contact(
+                contact_id, user_id=user_id
+            )
 
             # Find the method to update
             method_to_update = None
@@ -784,7 +793,9 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Get current contact with addresses
-            current_contact = await self._get_existing_contact(contact_id)
+            current_contact = await self._get_existing_contact(
+                contact_id, user_id=user_id
+            )
 
             # Find the address to update
             address_to_update = None
@@ -880,7 +891,9 @@ class ContactService:
             await self.contact_repo.lock(contact_id)
 
             # Get current contact with notes
-            current_contact = await self._get_existing_contact(contact_id)
+            current_contact = await self._get_existing_contact(
+                contact_id, user_id=user_id
+            )
 
             # Find the note to update
             note_to_update = None
@@ -1012,9 +1025,11 @@ class ContactService:
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required after save")
 
-    async def _get_existing_contact(self, contact_id: int) -> Contact:
-        """Get existing contact by ID, raising error if not found."""
-        current_contact = await self.contact_repo.find_by_id(contact_id)
+    async def _get_existing_contact(self, contact_id: int, *, user_id: str) -> Contact:
+        """Get ``user_id``'s contact by ID, raising error if not found."""
+        current_contact = await self.contact_repo.find_by_id(
+            contact_id, user_id=user_id
+        )
         if current_contact is None:
             raise ContactValidationError(
                 "id", f"Contact with ID {contact_id} not found"
@@ -1520,7 +1535,10 @@ class ContactService:
             for method in contact.methods:
                 if method.method_type == MethodType.EMAIL:
                     await self.contact_validation.validate_email_uniqueness(
-                        method.value, transaction, exclude_contact_id=exclude_contact_id
+                        method.value,
+                        transaction,
+                        exclude_contact_id=exclude_contact_id,
+                        user_id=contact.user_id,
                     )
 
         # Validate addresses
@@ -1552,7 +1570,7 @@ class ContactService:
             # Validate primary method constraints
             if method.is_primary:
                 await self.contact_validation.validate_primary_method(
-                    contact_id, method.method_type, transaction
+                    contact_id, method.method_type, transaction, user_id=user_id
                 )
 
             saved_method = await self.contact_repo.add_method(contact_id, method)
@@ -1600,7 +1618,7 @@ class ContactService:
             # Validate primary address constraints
             if address.is_primary:
                 await self.contact_validation.validate_primary_address(
-                    contact_id, transaction
+                    contact_id, transaction, user_id=user_id
                 )
 
             saved_address = await self.contact_repo.add_address(contact_id, address)
@@ -1775,11 +1793,11 @@ class ContactService:
         async def _delete_operation() -> None:
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Delete contact
-            await self.contact_repo.delete(contact_id)
+            await self.contact_repo.delete(contact_id, user_id=user_id)
 
             # Publish event; the history projection records the deletion marker.
             event = ContactDeleted(
@@ -1811,7 +1829,7 @@ class ContactService:
         # _execute_with_retry, so commit explicitly via the unit of work.
         if isinstance(transaction, AsyncConnection):
             async with unit_of_work(transaction):
-                await self.contact_repo.bulk_delete_all(transaction)
+                await self.contact_repo.bulk_delete_all(transaction, user_id=user_id)
         else:
             await self.contact_repo.bulk_delete_all(transaction)
 
@@ -1834,12 +1852,12 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Validate tag limit
             await self.contact_validation.validate_contact_tag_limit(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Validate tag exists
@@ -1888,7 +1906,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Get tag for event
@@ -1956,19 +1974,19 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Validate email uniqueness if it's an email
             if method.method_type == MethodType.EMAIL:
                 await self.contact_validation.validate_email_uniqueness(
-                    method.value, transaction
+                    method.value, transaction, user_id=user_id
                 )
 
             # Validate primary method constraints
             if method.is_primary:
                 await self.contact_validation.validate_primary_method(
-                    contact_id, method.method_type, transaction
+                    contact_id, method.method_type, transaction, user_id=user_id
                 )
 
             # Add method
@@ -2036,7 +2054,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Validate address format
@@ -2047,7 +2065,7 @@ class ContactService:
             # Validate primary address constraints
             if address.is_primary:
                 await self.contact_validation.validate_primary_address(
-                    contact_id, transaction
+                    contact_id, transaction, user_id=user_id
                 )
 
             # Add address
@@ -2114,7 +2132,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Add note
@@ -2165,7 +2183,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Ensure type constraints are satisfied by running python validation
@@ -2227,7 +2245,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Get the method to validate it exists and belongs to the contact
@@ -2285,7 +2303,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Get the address to validate it exists and belongs to the contact
@@ -2339,7 +2357,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Get the existing date to validate it exists and belongs to the
@@ -2394,7 +2412,7 @@ class ContactService:
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
-                contact_id, transaction
+                contact_id, transaction, user_id=user_id
             )
 
             # Get the date to validate it exists and belongs to the contact
@@ -2428,11 +2446,11 @@ class ContactService:
         self, contact_id: int, *, user_id: str
     ) -> Contact | None:
         """Get a contact by ID."""
-        return await self.contact_repo.find_by_id(contact_id)
+        return await self.contact_repo.find_by_id(contact_id, user_id=user_id)
 
     async def get_contact_by_email(self, email: str, *, user_id: str) -> Contact | None:
         """Get a contact by email."""
-        return await self.contact_repo.find_by_email(email)
+        return await self.contact_repo.find_by_email(email, user_id=user_id)
 
     async def find_contact_by_external_reference(
         self,
@@ -2454,7 +2472,9 @@ class ContactService:
             Contact if found, None otherwise
         """
         return await self.contact_repo.find_by_external_reference(
-            external_system=integration_source, external_entity_id=external_id
+            external_system=integration_source,
+            external_entity_id=external_id,
+            user_id=user_id,
         )
 
     async def get_external_references(
@@ -2471,7 +2491,7 @@ class ContactService:
         self, limit: int = 100, offset: int = 0, *, user_id: str
     ) -> list[Contact]:
         """Get all contacts with pagination."""
-        return await self.contact_repo.get_all(limit, offset)
+        return await self.contact_repo.get_all(limit, offset, user_id=user_id)
 
     async def _expand_tag_ids_with_descendants(self, tag_ids: list[int]) -> list[int]:
         """Expand tag IDs to include all descendant tag IDs.
@@ -2538,6 +2558,7 @@ class ContactService:
             tag_ids=expanded_tag_ids,
             limit=limit,
             offset=offset,
+            user_id=user_id,
         )
 
     async def get_contacts_count(
@@ -2553,7 +2574,7 @@ class ContactService:
         include all its descendant tags.
         """
         if is_favourite is None and tag_ids is None:
-            return await self.contact_repo.get_count()
+            return await self.contact_repo.get_count(user_id=user_id)
 
         # Expand tag_ids to include descendants for hierarchical filtering
         expanded_tag_ids = (
@@ -2565,6 +2586,7 @@ class ContactService:
         return await self.contact_repo.get_contacts_count_by_filters(
             is_favourite=is_favourite,
             tag_ids=expanded_tag_ids,
+            user_id=user_id,
         )
 
     async def get_contact_history(
@@ -2608,7 +2630,7 @@ class ContactService:
 
         async def _toggle_operation() -> Contact:
             # Find the contact
-            contact = await self.contact_repo.find_by_id(contact_id)
+            contact = await self.contact_repo.find_by_id(contact_id, user_id=user_id)
             if not contact:
                 raise ContactValidationError("id", "Contact not found")
 

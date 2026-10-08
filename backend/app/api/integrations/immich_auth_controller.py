@@ -276,7 +276,9 @@ async def list_immich_conflicts(
     all_candidate_ids = {
         cid for c in conflicts for cid in (c["candidate_contact_ids"] or [])
     }
-    name_rows = await contact_repo.find_names_by_ids(list(all_candidate_ids))
+    name_rows = await contact_repo.find_names_by_ids(
+        list(all_candidate_ids), user_id=str(user.id)
+    )
 
     def _candidate(contact_id: int) -> ImmichConflictCandidate:
         first_name, last_name, photo_url = name_rows.get(contact_id, (None, None, None))
@@ -376,9 +378,9 @@ async def resolve_immich_conflict(
                 status_code=400, detail="contact_id is required when action is 'link'"
             )
 
-        # Validate the contact exists before linking
+        # Validate the contact is the user's own before linking
         if request.action == ConflictResolutionAction.LINK:
-            if not await contact_repo.contact_exists(contact_id):
+            if not await contact_repo.contact_exists(contact_id, user_id=str(user.id)):
                 raise HTTPException(
                     status_code=404,
                     detail=f"Contact {contact_id} not found",

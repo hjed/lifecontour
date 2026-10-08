@@ -312,7 +312,9 @@ class TestRoundTrips:
 
         model = await read_service.read_model(USER_ID, TASK_ID)
 
-        read_contact_repo.find_names_by_ids.assert_awaited_once_with([5, 9])
+        read_contact_repo.find_names_by_ids.assert_awaited_once_with(
+            [5, 9], user_id=USER_ID
+        )
         assert [contact.display_name for contact in model.contacts] == [
             "Sarah Chen",
             "Mo Farah",

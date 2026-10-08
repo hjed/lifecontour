@@ -107,7 +107,7 @@ class TestContactUpdatePrecondition:
             )
 
         assert exc_info.value.status_code == 412
-        persisted = await contact_repo.find_by_id(saved.id)
+        persisted = await contact_repo.find_by_id(saved.id, user_id=TEST_USER_ID)
         assert persisted.first_name == "Ada"
 
     @pytest.mark.asyncio

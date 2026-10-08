@@ -167,15 +167,15 @@ async def link_journal_to_contact(
     # Create repositories
     repos = create_journal_tool_repositories(db_connection)
 
-    # Check that contact and journal exist. The journal is read owner-scoped:
-    # linking writes a row to it, so somebody else's must be as unreachable
-    # here as it is through the read tool (#1267).
+    # Check that contact and journal exist. Both are read owner-scoped:
+    # linking writes a row to each, so somebody else's must be as unreachable
+    # here as it is through the read tools (#1267).
     user_id = await get_current_user_id()
     journal = await repos.journal_repo.find_by_id_for_user(journal_id, str(user_id))
     if not journal:
         raise ValueError(f"Could not find journal with ID {journal_id}")
 
-    contact = await repos.contact_repo.find_by_id(contact_id)
+    contact = await repos.contact_repo.find_by_id(contact_id, user_id=str(user_id))
     if not contact:
         raise ValueError(f"Could not find contact with ID {contact_id}")
 

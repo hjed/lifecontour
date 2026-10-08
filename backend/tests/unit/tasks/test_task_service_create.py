@@ -312,7 +312,9 @@ class TestCreateTask:
 
         await create(service, mock_transaction, contact_ids=[3, 5])
 
-        mock_contact_repo.find_names_by_ids.assert_awaited_once_with([3, 5])
+        mock_contact_repo.find_names_by_ids.assert_awaited_once_with(
+            [3, 5], user_id=USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_accepts_the_same_journal_as_both_anchors(

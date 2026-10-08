@@ -441,7 +441,9 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 raise ValueError("contact_id is required when action is 'link'.")
 
             if action == "link":
-                if not await contact_repo.contact_exists(resolved_contact_id):
+                if not await contact_repo.contact_exists(
+                    resolved_contact_id, user_id=user_id
+                ):
                     raise ValueError(f"Contact {resolved_contact_id} not found.")
 
             updated = await repo.resolve(

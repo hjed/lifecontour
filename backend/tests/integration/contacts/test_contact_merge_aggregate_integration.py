@@ -240,7 +240,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert {m.value for m in (survivor.methods or [])} == {
             "survivor@example.com",
@@ -270,8 +270,10 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        assert await contact_repo.find_by_id(source_id) is None
-        assert await contact_repo.find_by_id(survivor_id) is not None
+        assert await contact_repo.find_by_id(source_id, user_id=TEST_USER_ID) is None
+        assert (
+            await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID) is not None
+        )
 
     @pytest.mark.asyncio
     async def test_duplicate_primary_email_demoted_and_coexists(
@@ -291,7 +293,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         emails = [
             m for m in (survivor.methods or []) if m.method_type == MethodType.EMAIL
@@ -317,7 +319,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         phones = [
             m for m in (survivor.methods or []) if m.method_type == MethodType.PHONE
@@ -341,7 +343,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert [(m.value, m.is_archived) for m in survivor.methods or []] == [
             ("+61400000001", False)
@@ -365,7 +367,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert [(a.street_line_1, a.is_archived) for a in survivor.addresses or []] == [
             ("1 Shared St", False)
@@ -394,7 +396,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert [
             (m.value, m.is_primary, m.is_archived) for m in survivor.methods or []
@@ -424,7 +426,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert [
             (a.street_line_1, a.is_primary, a.is_archived)
@@ -449,7 +451,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert sum(m.is_primary for m in survivor.methods or []) == 1
 
@@ -471,7 +473,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert {(m.value, m.is_primary) for m in survivor.methods or []} == {
             ("+61400000009", True),
@@ -494,7 +496,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         addresses = survivor.addresses or []
         assert len(addresses) == 2
@@ -521,7 +523,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert {t.id for t in (survivor.tags or [])} == {shared, source_only}
 
@@ -541,7 +543,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         birthdays = [
             d
@@ -569,7 +571,7 @@ class TestContactMergeAggregateIntegration:
             survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
         )
 
-        survivor = await contact_repo.find_by_id(survivor_id)
+        survivor = await contact_repo.find_by_id(survivor_id, user_id=TEST_USER_ID)
         assert survivor is not None
         assert survivor.first_name == "Survivor"
         assert survivor.last_name == "Keep"  # survivor wins on conflict

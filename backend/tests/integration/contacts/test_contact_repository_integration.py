@@ -90,7 +90,9 @@ class TestContactRepositoryIntegration:
         assert updated_contact.updated_at is not None
 
         # Verify the contact was actually updated in the database
-        found_contact = await contact_repo.find_by_id(saved_contact.id)
+        found_contact = await contact_repo.find_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert found_contact.last_name == "Doe"
         assert found_contact.nick_name == "Johnny"
 
@@ -102,7 +104,9 @@ class TestContactRepositoryIntegration:
         saved_contact = await contact_repo.save(contact)
 
         # Act
-        found_contact = await contact_repo.find_by_id(saved_contact.id)
+        found_contact = await contact_repo.find_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert found_contact is not None
@@ -114,7 +118,7 @@ class TestContactRepositoryIntegration:
     async def test_find_by_id_not_existing(self, contact_repo):
         """Test finding contact by ID when it doesn't exist."""
         # Act
-        found_contact = await contact_repo.find_by_id(999)
+        found_contact = await contact_repo.find_by_id(999, user_id=TEST_USER_ID)
 
         # Assert
         assert found_contact is None
@@ -136,7 +140,9 @@ class TestContactRepositoryIntegration:
         await contact_repo.add_method(saved_contact.id, email_method)
 
         # Act
-        found_contact = await contact_repo.find_by_email("john.doe@example.com")
+        found_contact = await contact_repo.find_by_email(
+            "john.doe@example.com", user_id=TEST_USER_ID
+        )
 
         # Assert
         assert found_contact is not None
@@ -147,7 +153,9 @@ class TestContactRepositoryIntegration:
     async def test_find_by_email_not_existing(self, contact_repo):
         """Test finding contact by email when it doesn't exist."""
         # Act
-        found_contact = await contact_repo.find_by_email("nonexistent@example.com")
+        found_contact = await contact_repo.find_by_email(
+            "nonexistent@example.com", user_id=TEST_USER_ID
+        )
 
         # Assert
         assert found_contact is None
@@ -330,7 +338,7 @@ class TestContactRepositoryIntegration:
             ),
         )
 
-        loaded = await contact_repo.find_by_id(contact.id)
+        loaded = await contact_repo.find_by_id(contact.id, user_id=TEST_USER_ID)
         assert loaded is not None
         assert [m.is_archived for m in loaded.methods or []] == [True]
         assert [a.is_archived for a in loaded.addresses or []] == [True]
@@ -407,7 +415,9 @@ class TestContactRepositoryIntegration:
             ),
         )
 
-        found = await contact_repo.find_by_email("old.address@example.com")
+        found = await contact_repo.find_by_email(
+            "old.address@example.com", user_id=TEST_USER_ID
+        )
 
         assert found is not None
         assert found.id == contact.id
@@ -440,10 +450,12 @@ class TestContactRepositoryIntegration:
         saved_contact = await contact_repo.save(contact)
 
         # Act
-        await contact_repo.delete(saved_contact.id)
+        await contact_repo.delete(saved_contact.id, user_id=TEST_USER_ID)
 
         # Assert - Contact should no longer exist
-        found_contact = await contact_repo.find_by_id(saved_contact.id)
+        found_contact = await contact_repo.find_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert found_contact is None
 
     @pytest.mark.asyncio
@@ -459,7 +471,7 @@ class TestContactRepositoryIntegration:
         await contact_repo.save(contact3)
 
         # Act
-        results = await contact_repo.search("John")
+        results = await contact_repo.search("John", user_id=TEST_USER_ID)
 
         # Assert
         assert len(results) >= 1
@@ -477,7 +489,7 @@ class TestContactRepositoryIntegration:
         await contact_repo.save(contact2)
 
         # Act
-        all_contacts = await contact_repo.get_all()
+        all_contacts = await contact_repo.get_all(user_id=TEST_USER_ID)
 
         # Assert
         assert len(all_contacts) >= 2
@@ -504,73 +516,11 @@ class TestContactRepositoryIntegration:
         assert saved_contact.is_favourite is True
 
         # Verify retrieval
-        retrieved = await contact_repo.find_by_id(saved_contact.id)
+        retrieved = await contact_repo.find_by_id(
+            saved_contact.id, user_id=TEST_USER_ID
+        )
         assert retrieved is not None
         assert retrieved.is_favourite is True
-
-    @pytest.mark.asyncio
-    async def test_get_favourite_contacts(self, contact_repo):
-        """Test getting favourite contacts."""
-        # Arrange - Create contacts with different favourite status
-        contact1 = Contact(
-            user_id=TEST_USER_ID, first_name="Fav1", last_name="User", is_favourite=True
-        )
-        contact2 = Contact(
-            user_id=TEST_USER_ID, first_name="Fav2", last_name="User", is_favourite=True
-        )
-        contact3 = Contact(
-            user_id=TEST_USER_ID,
-            first_name="Regular",
-            last_name="User",
-            is_favourite=False,
-        )
-
-        await contact_repo.save(contact1)
-        await contact_repo.save(contact2)
-        await contact_repo.save(contact3)
-
-        # Act
-        favourites = await contact_repo.get_favourite_contacts()
-
-        # Assert
-        assert len(favourites) >= 2  # At least the two we just created
-        favourite_names = [c.first_name for c in favourites]
-        assert "Fav1" in favourite_names
-        assert "Fav2" in favourite_names
-        assert "Regular" not in favourite_names
-
-    @pytest.mark.asyncio
-    async def test_get_favourite_contacts_count(self, contact_repo):
-        """Test getting count of favourite contacts."""
-        # Arrange - Create contacts with different favourite status
-        contact1 = Contact(
-            user_id=TEST_USER_ID,
-            first_name="FavCount1",
-            last_name="User",
-            is_favourite=True,
-        )
-        contact2 = Contact(
-            user_id=TEST_USER_ID,
-            first_name="FavCount2",
-            last_name="User",
-            is_favourite=True,
-        )
-        contact3 = Contact(
-            user_id=TEST_USER_ID,
-            first_name="RegularCount",
-            last_name="User",
-            is_favourite=False,
-        )
-
-        await contact_repo.save(contact1)
-        await contact_repo.save(contact2)
-        await contact_repo.save(contact3)
-
-        # Act
-        count = await contact_repo.get_favourite_contacts_count()
-
-        # Assert
-        assert count >= 2  # At least the two we just created
 
     @pytest.mark.asyncio
     async def test_get_contacts_by_filters_favourite_only(self, contact_repo):
@@ -600,7 +550,9 @@ class TestContactRepositoryIntegration:
         await contact_repo.save(contact3)
 
         # Act
-        filtered = await contact_repo.get_contacts_by_filters(is_favourite=True)
+        filtered = await contact_repo.get_contacts_by_filters(
+            is_favourite=True, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert len(filtered) >= 2  # At least the two we just created
@@ -639,7 +591,9 @@ class TestContactRepositoryIntegration:
         )
 
         # Act
-        count = await contact_repo.get_contacts_count_by_filters(is_favourite=True)
+        count = await contact_repo.get_contacts_count_by_filters(
+            is_favourite=True, user_id=TEST_USER_ID
+        )
 
         # Assert
         assert count == 2
@@ -669,7 +623,7 @@ class TestContactRepositoryIntegration:
 
         # Act
         count = await contact_repo.get_contacts_count_by_filters(
-            tag_ids=[work_tag.id, client_tag.id]
+            tag_ids=[work_tag.id, client_tag.id], user_id=TEST_USER_ID
         )
 
         # Assert
@@ -693,7 +647,7 @@ class TestContactOwnerPersistence:
         saved = await contact_repo.save(Contact(first_name="Ada", user_id=TEST_USER_ID))
 
         assert saved.id is not None
-        found = await contact_repo.find_by_id(saved.id)
+        found = await contact_repo.find_by_id(saved.id, user_id=TEST_USER_ID)
         assert found is not None
         assert found.user_id == TEST_USER_ID
 
@@ -705,10 +659,10 @@ class TestContactOwnerPersistence:
             Contact(first_name="Ada", user_id=TEST_USER_ID, is_favourite=True)
         )
 
-        favourites = await contact_repo.get_favourite_contacts()
-        filtered = await contact_repo.get_contacts_by_filters(is_favourite=True)
+        filtered = await contact_repo.get_contacts_by_filters(
+            is_favourite=True, user_id=TEST_USER_ID
+        )
 
-        assert [c.user_id for c in favourites] == [TEST_USER_ID]
         assert [c.user_id for c in filtered] == [TEST_USER_ID]
 
     @pytest.mark.asyncio
@@ -723,7 +677,7 @@ class TestContactOwnerPersistence:
         saved.last_name = "Lovelace"
         await contact_repo.save(saved)
 
-        found = await contact_repo.find_by_id(saved.id)
+        found = await contact_repo.find_by_id(saved.id, user_id=TEST_USER_ID)
         assert found is not None
         assert (found.last_name, found.user_id) == ("Lovelace", TEST_USER_ID)
 

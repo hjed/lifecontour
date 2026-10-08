@@ -70,7 +70,9 @@ async def test_add_and_get_important_dates(
     assert ImportantDateType.WORK_ANNIVERSARY in types
 
     # Retrieve via find_by_id
-    reloaded_contact = await contact_repo.find_by_id(sample_contact.id)
+    reloaded_contact = await contact_repo.find_by_id(
+        sample_contact.id, user_id=TEST_USER_ID
+    )
     assert reloaded_contact is not None
     assert reloaded_contact.important_dates is not None
     assert len(reloaded_contact.important_dates) == 2

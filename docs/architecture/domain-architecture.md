@@ -76,9 +76,26 @@ domain/
 - **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService, AddressValidationService, UpcomingImportantDatesService
   (see *[Upcoming important dates](#upcoming-important-dates)*)
 - **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher, ContactImportanceRepository, UpcomingImportantDateRepository
+- **Ownership**: every contact has exactly one owner (`contacts.user_id`), set at creation and
+  never changed. **Every aggregate-level `ContactRepository` method takes the acting user's id
+  and filters on it in SQL** — `find_by_id`, `contact_exists`, `find_names_by_ids`,
+  `find_by_email`, `find_by_external_reference`, `search`, `get_all`, `get_count`,
+  `get_contacts_by_filters`, `get_contacts_count_by_filters`, `delete`, `bulk_delete_all` — so
+  another user's contact is indistinguishable from a missing one (`None`, absent from a list, not
+  counted, `ContactNotFoundError` on delete). Child-row methods (methods, addresses, notes, tags,
+  important dates, links) and `lock` / `touch` / `lock_and_get_updated_at` stay keyed by the
+  contact id: the service proves the contact is the user's first, through
+  `ContactValidationService.validate_contact_exists`. Every `ContactService`,
+  `ContactRelationshipService` and `ContactMergeService` method that reads or acts on a contact
+  takes a keyword-only `user_id` (REST passes the session user, MCP the authenticated user, the
+  inbound consumer the sync event's owner); `create_contact` is the exception, because the new
+  contact carries its owner. The one read with no acting user is `find_owner_id`, for the summary
+  consumer: it resolves the owner, then reads the contact as that owner
 - **Business Rules**:
   - Contact name validation (first_name required)
-  - Email uniqueness validation
+  - Email uniqueness validation: the service checks within the owner's contacts; the
+    system-wide `ix_contact_methods_email_unique` index still refuses an address another user's
+    contact holds, with a `DuplicateEmailError` that names no contact of theirs
   - Tag naming constraints (alphanumeric, -, _, & only)
   - Maximum 25 tags per contact
   - Primary contact method enforcement (one primary per type)
@@ -138,11 +155,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   - **Contact links are a plain reference.** They carry no relationship type, no role and no
     attendance status — unlike journal-contact relationships, which carry all three — and nothing
     parses contacts out of the task text. They are editable in **any** status, so no status is read
-    or written when one is added or removed, and both operations are idempotent. The enforceable
-    half of "the contact must be the acting user's" is **existence**: `contacts` has no owner column
-    in this system, a divergence recorded in
-    [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md) and inherited here rather than
-    faked. Unlinking deliberately does *not* require the contact to still exist, because
+    or written when one is added or removed, and both operations are idempotent. A linked contact
+    must be the acting user's: `TaskService._resolve_contacts` checks with the owner-scoped
+    `find_names_by_ids`, so another user's contact is not found. Unlinking deliberately does *not* require the contact to still exist, because
     `task_contacts` cascades from the contact side and the row is already gone
   - **A journal's role decides which rules reach it.** Only *intermediate* journals are rows in
     `task_intermediate_journals`; the creating and due journals are columns on the task. So the
@@ -184,8 +199,7 @@ the *creating* journal where it arose and the *due* journal where it matters.
   owner-scoped by contract, and each of the other two hands a *different domain* the narrow
   capability its own data integrity needs — moving journal links, moving contact links — without
   handing it the ability to change a task's text, status or existence. Neither is owner-scoped,
-  because each stands in for what a foreign key would otherwise do; `TaskContactRepository` could
-  not be in any case, since `contacts` has no `user_id` column
+  because each stands in for what a foreign key would otherwise do
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
   link-role grouping a journal's task list is built on, see
@@ -796,12 +810,12 @@ Three things about the service half are load-bearing:
   the resolver's per-journal wrapper — the shape batch callers need, and the reason the resolver splits
   that way.
 
-**Contacts have no owner in this system.** The `contacts` table carries no `user_id`
-(`app/infrastructure/contacts/contact_tables.py`), so "the linked contact must belong to the acting
-user" is not enforceable at the data layer; the service enforces contact **existence** instead. Recorded
-as a divergence in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md), matching the same
-finding in iteration 13's contact merge. If contacts ever gain ownership, `TaskService._resolve_contacts`
-is the single place the rule lands.
+**A linked contact must be the acting user's.** `TaskService._resolve_contacts` is the single place
+the rule lands: it resolves the contacts with the owner-scoped `find_names_by_ids`, so a create or a
+link naming another user's contact raises `ContactNotFoundError`, exactly as a missing one does. This
+resolves the divergence recorded in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md).
+The batch replace path (`add_contacts`) still relies on the foreign key and is scoped with the other
+cross-entity links in [iteration 20](../tasks/iteration-20-entity-ownership.md) Phase 11.
 
 ### Task read model and lapsed derivation
 

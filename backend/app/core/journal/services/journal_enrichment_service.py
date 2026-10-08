@@ -172,7 +172,8 @@ class JournalEnrichmentService:
     async def enrich(self, journal_id: int, user_id: str) -> JournalEnrichment:
         """Everything shown alongside one journal.
 
-        ``user_id`` scopes the series: only the owner's series are reported.
+        ``user_id`` scopes the series and the contacts' names: only the owner's
+        are reported.
         """
         type_rows = await self._read_type_rows(journal_id)
         abseil_pitches = (
@@ -191,7 +192,7 @@ class JournalEnrichmentService:
         return JournalEnrichment(
             type_rows=type_rows,
             abseil_pitches=abseil_pitches,
-            contacts=await self._read_contacts(journal_id),
+            contacts=await self._read_contacts(journal_id, user_id=user_id),
             tags=await self.tag_repo.get_tags_for_journal(journal_id),
             series=await self.series_repo.get_series_for_journal(journal_id, user_id),
             calendars=calendars,
@@ -217,17 +218,22 @@ class JournalEnrichmentService:
                 type_rows[journal_type] = row
         return type_rows
 
-    async def _read_contacts(self, journal_id: int) -> list[EnrichedContact]:
+    async def _read_contacts(
+        self, journal_id: int, *, user_id: str
+    ) -> list[EnrichedContact]:
         relationships = await self.contact_relationship_repo.get_by_journal(journal_id)
         if not relationships:
             return []
         names = await self.contact_repo.find_names_by_ids(
-            list(dict.fromkeys(rel.contact_id for rel in relationships))
+            list(dict.fromkeys(rel.contact_id for rel in relationships)),
+            user_id=user_id,
         )
         contacts: list[EnrichedContact] = []
         for rel in relationships:
             # The relationship's foreign key cascades on contact delete, so
-            # every contact is found; the fallback keeps the type total.
+            # every contact is found unless it is another user's: the lookup
+            # is owner-scoped, so such a link names no one. The fallback keeps
+            # the type total.
             first_name, last_name, photo_url = names.get(
                 rel.contact_id, (None, None, None)
             )

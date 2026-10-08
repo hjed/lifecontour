@@ -50,7 +50,7 @@ def source() -> Contact:
 def mock_contact_repo(mock_transaction, survivor, source) -> AsyncMock:
     repo = AsyncMock()
     repo.transaction = mock_transaction
-    repo.find_by_id.side_effect = lambda cid: (
+    repo.find_by_id.side_effect = lambda cid, *, user_id: (
         survivor if cid == SURVIVOR_ID else source if cid == SOURCE_ID else None
     )
     # save() echoes the contact it was handed so callers can inspect the merge.
@@ -141,7 +141,7 @@ class TestContactMergePreconditions:
     async def test_missing_survivor_raises_not_found(
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             None
             if cid == 999
             else Contact(user_id=TEST_USER_ID, id=cid, first_name="Source")
@@ -155,7 +155,7 @@ class TestContactMergePreconditions:
     async def test_missing_source_raises_not_found(
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             Contact(user_id=TEST_USER_ID, id=cid, first_name="Survivor")
             if cid == SURVIVOR_ID
             else None
@@ -211,7 +211,9 @@ class TestContactMergeDelegation:
             repoint.assert_awaited_once_with(SOURCE_ID, SURVIVOR_ID, mock_transaction)
 
         # The source is deleted only after the aggregate has been re-pointed.
-        mock_contact_repo.delete.assert_awaited_once_with(SOURCE_ID)
+        mock_contact_repo.delete.assert_awaited_once_with(
+            SOURCE_ID, user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_repoints_history_then_deletes_source(
@@ -369,7 +371,7 @@ class TestContactMergeScalarPolicy:
     async def test_survivor_value_kept_when_source_empty(
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             Contact(
                 user_id=TEST_USER_ID,
                 id=SURVIVOR_ID,
@@ -394,7 +396,7 @@ class TestContactMergeScalarPolicy:
     async def test_source_value_used_when_survivor_empty(
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             Contact(
                 user_id=TEST_USER_ID,
                 id=SURVIVOR_ID,
@@ -421,7 +423,7 @@ class TestContactMergeScalarPolicy:
     async def test_survivor_wins_when_both_differ(
         self, merge_service, mock_contact_repo, mock_transaction
     ) -> None:
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             Contact(
                 user_id=TEST_USER_ID,
                 id=SURVIVOR_ID,
@@ -444,6 +446,41 @@ class TestContactMergeScalarPolicy:
         saved = self._saved_contact(mock_contact_repo)
         assert saved.first_name == "Survivor"
         assert saved.last_name == "Keep"
+
+    @pytest.mark.parametrize("foreign_id", [SURVIVOR_ID, SOURCE_ID])
+    @pytest.mark.asyncio
+    async def test_a_foreign_contact_is_not_found_and_nothing_merges(
+        self,
+        merge_service,
+        mock_contact_repo,
+        mock_task_merge_service,
+        mock_event_publisher,
+        mock_transaction,
+        foreign_id: int,
+    ) -> None:
+        """Either side belonging to another user reads as missing (404, not 403)."""
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
+            Contact(user_id=user_id, id=cid, first_name="Mine")
+            if user_id == TEST_USER_ID and cid != foreign_id
+            else None
+        )
+
+        with pytest.raises(ContactNotFoundError):
+            await merge_service.merge_contacts(
+                SURVIVOR_ID,
+                SOURCE_ID,
+                transaction=mock_transaction,
+                user_id=TEST_USER_ID,
+            )
+
+        assert all(
+            call.kwargs["user_id"] == TEST_USER_ID
+            for call in mock_contact_repo.find_by_id.await_args_list
+        )
+        mock_contact_repo.delete.assert_not_awaited()
+        mock_contact_repo.save.assert_not_awaited()
+        assert mock_task_merge_service.method_calls == []
+        mock_event_publisher.publish.assert_not_awaited()
 
 
 class TestContactMergeOwner:
@@ -689,7 +726,7 @@ class TestContactMergeOverrides:
     @staticmethod
     def _conflicting(mock_contact_repo: AsyncMock) -> None:
         """Both contacts hold differing non-empty values for every scalar field."""
-        mock_contact_repo.find_by_id.side_effect = lambda cid: (
+        mock_contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
             Contact(
                 user_id=TEST_USER_ID,
                 id=SURVIVOR_ID,

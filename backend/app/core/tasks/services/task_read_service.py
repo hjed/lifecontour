@@ -584,7 +584,8 @@ class TaskReadService:
                 contact_id
                 for task in tasks
                 for contact_id in contacts.get(task.id or 0, [])
-            )
+            ),
+            user_id=user_id,
         )
 
         models = [
@@ -675,7 +676,7 @@ class TaskReadService:
         return ref
 
     async def _contact_refs_by_id(
-        self, contact_ids: Sequence[int]
+        self, contact_ids: Sequence[int], *, user_id: str
     ) -> dict[int, TaskContactRef]:
         """Every contact across every task, keyed by id, from one name lookup.
 
@@ -685,12 +686,15 @@ class TaskReadService:
 
         An id with no row is simply absent: ``task_contacts`` cascades from the
         contact side, so a deleted contact takes its link with it and this is
-        only reachable through a race.
+        only reachable through a race. Another user's contact is absent too:
+        the lookup is owner-scoped.
         """
         if not contact_ids:
             return {}
 
-        names = await self.contact_repo.find_names_by_ids(list(contact_ids))
+        names = await self.contact_repo.find_names_by_ids(
+            list(contact_ids), user_id=user_id
+        )
         refs: dict[int, TaskContactRef] = {}
         for contact_id in contact_ids:
             found = names.get(contact_id)

@@ -469,7 +469,9 @@ class TestCancellationLeavesTheTaskAlone:
         mention_id = await _seed_instance(
             processor, calendar_id=calendar_id, suffix="links_mention"
         )
-        contact_id = await create_contact(async_connection, first_name="Priya")
+        contact_id = await create_contact(
+            async_connection, first_name="Priya", user_id=USER_ID
+        )
         task_id = await create_task(
             async_connection,
             creating_journal_id=creating_id,

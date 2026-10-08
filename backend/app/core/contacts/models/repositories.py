@@ -58,42 +58,64 @@ class DomainEventProtocol(Protocol):
 
 
 class ContactRepository(ABC):
-    """Repository interface for contact operations."""
+    """Repository interface for contact operations.
+
+    **Owner scoping is part of the contract.** Every method that reads or
+    deletes the aggregate takes the acting user's id and filters on it in SQL,
+    so another user's contact is indistinguishable from a missing one. The
+    child-row methods (methods, addresses, notes, tags, important dates, links)
+    and ``lock`` / ``touch`` / ``lock_and_get_updated_at`` stay keyed by the
+    contact id: the service proves the contact is the user's first.
+    """
 
     @abstractmethod
-    async def find_by_id(self, contact_id: int) -> Contact | None:
-        """Find a contact by ID with all related data."""
+    async def find_by_id(self, contact_id: int, *, user_id: str) -> Contact | None:
+        """Find ``user_id``'s contact by ID with all related data.
+
+        Another user's contact is ``None``, exactly as a missing one is.
+        """
         pass
 
     @abstractmethod
-    async def contact_exists(self, contact_id: int) -> bool:
-        """Return whether a contact with the given ID exists.
+    async def contact_exists(self, contact_id: int, *, user_id: str) -> bool:
+        """Return whether ``user_id`` owns a contact with the given ID.
 
         A lightweight existence check that does not hydrate the aggregate.
         """
         pass
 
     @abstractmethod
-    async def find_names_by_ids(
-        self, contact_ids: list[int]
-    ) -> dict[int, tuple[str | None, str | None, str | None]]:
-        """Fetch (first_name, last_name, photo_url) for multiple contacts in a single query.
+    async def find_owner_id(self, contact_id: int) -> str | None:
+        """Return the owner of a contact, or ``None`` if there is no such contact.
 
-        Returns a dict mapping contact_id to (first_name, last_name, photo_url).
-        Only contacts that exist are included in the result.
+        Only for a background consumer that acts on a contact with no acting
+        user (summary generation): it resolves the owner, then reads the
+        contact as that owner. Never use it to authorise a request - a request
+        has an acting user and passes it to the scoped reads.
         """
         pass
 
     @abstractmethod
-    async def find_by_email(self, email: str) -> Contact | None:
-        """Find a contact by email address."""
+    async def find_names_by_ids(
+        self, contact_ids: list[int], *, user_id: str
+    ) -> dict[int, tuple[str | None, str | None, str | None]]:
+        """Fetch (first_name, last_name, photo_url) for multiple contacts in a single query.
+
+        Returns a dict mapping contact_id to (first_name, last_name, photo_url).
+        Only ``user_id``'s contacts are included in the result.
+        """
+        pass
+
+    @abstractmethod
+    async def find_by_email(self, email: str, *, user_id: str) -> Contact | None:
+        """Find ``user_id``'s contact by email address."""
         pass
 
     @abstractmethod
     async def find_by_external_reference(
-        self, external_system: str, external_entity_id: str
+        self, external_system: str, external_entity_id: str, *, user_id: str
     ) -> Contact | None:
-        """Find a contact by external reference."""
+        """Find ``user_id``'s contact by external reference."""
         pass
 
     @abstractmethod
@@ -105,18 +127,22 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def search(self, query: str, limit: int = 50) -> list[Contact]:
-        """Search contacts by name, email, or notes."""
+    async def search(
+        self, query: str, limit: int = 50, *, user_id: str
+    ) -> list[Contact]:
+        """Search ``user_id``'s contacts by name, email, or notes."""
         pass
 
     @abstractmethod
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[Contact]:
-        """Get all contacts with pagination."""
+    async def get_all(
+        self, limit: int = 100, offset: int = 0, *, user_id: str
+    ) -> list[Contact]:
+        """Get all of ``user_id``'s contacts with pagination."""
         pass
 
     @abstractmethod
-    async def get_count(self) -> int:
-        """Get total count of contacts."""
+    async def get_count(self, *, user_id: str) -> int:
+        """Get the total count of ``user_id``'s contacts."""
         pass
 
     @abstractmethod
@@ -159,34 +185,22 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, contact_id: int) -> None:
-        """Delete a contact and all related data."""
-        pass
+    async def delete(self, contact_id: int, *, user_id: str) -> None:
+        """Delete ``user_id``'s contact and all related data.
 
-    @abstractmethod
-    async def bulk_delete_all(self, transaction: Any) -> None:
-        """
-        Bulk delete all contacts and related data for test cleanup.
-
-        WARNING: This will delete ALL contacts. Only use in test environments.
+        Raises ``ContactNotFoundError`` for another user's contact, exactly as
+        for a missing one, and leaves it in place.
         """
         pass
 
     @abstractmethod
-    async def get_contacts_by_tag(self, tag_id: int) -> list[Contact]:
-        """Get all contacts with a specific tag."""
-        pass
+    async def bulk_delete_all(self, transaction: Any, *, user_id: str) -> None:
+        """
+        Bulk delete all of ``user_id``'s contacts and related data for test cleanup.
 
-    @abstractmethod
-    async def get_favourite_contacts(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[Contact]:
-        """Get all favourite contacts with pagination."""
-        pass
-
-    @abstractmethod
-    async def get_favourite_contacts_count(self) -> int:
-        """Get total count of favourite contacts."""
+        WARNING: This deletes every contact the user owns. Only use in test
+        environments.
+        """
         pass
 
     @abstractmethod
@@ -196,8 +210,10 @@ class ContactRepository(ABC):
         tag_ids: list[int] | None = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        user_id: str,
     ) -> list[Contact]:
-        """Get contacts filtered by favourite status and/or tags."""
+        """Get ``user_id``'s contacts filtered by favourite status and/or tags."""
         pass
 
     @abstractmethod
@@ -205,8 +221,10 @@ class ContactRepository(ABC):
         self,
         is_favourite: bool | None = None,
         tag_ids: list[int] | None = None,
+        *,
+        user_id: str,
     ) -> int:
-        """Get the distinct count of contacts filtered by favourite status and/or tags."""
+        """Count ``user_id``'s contacts filtered by favourite status and/or tags."""
         pass
 
     @abstractmethod
