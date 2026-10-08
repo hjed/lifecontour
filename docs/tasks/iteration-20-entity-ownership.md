@@ -1165,7 +1165,10 @@ first and the contract last:
   `AlbumSyncReadRepository.find_link` / `delete`, the `find_by_external_reference` join, the
   inbound contact processor, the Immich album processor, the Snipe-IT superseded check and the
   journal-merge gear pairs. ✅
-- **15b** — Google, Immich and Strava worker lookups, updates and deletes.
+- **15b** — Google (`_find_existing_external_ids`, `_delete_sync_link`, `_repoint_sync_link`, with
+  the account's owner threaded from the event or job), Immich (`_find_sync_metadata`,
+  `_find_external_reference`, `_find_album_sync_metadata`, the merge unlink) and Strava
+  (`_find_existing_journal_id`, `_find_stored_version_hash`). ✅
 - **15c** — Snipe-IT worker (sync service and stream consumer).
 - **15d** — migration `0127`, removal of the cross-owner refusal, documentation.
 
@@ -1183,6 +1186,10 @@ first and the contract last:
   `user_id` (Phase 4, through `contacts.user_id`); its join now also requires the link's owner.
   Both MCP external-id tools were already owner-scoped through their join; their foreign-link
   tests pin it.
+- **Strava's `journal_fitness_data` fallback is scoped too.** `_find_existing_journal_id` falls back
+  to the fitness row's `strava_activity_id` for activities imported before sync rows existed; it
+  matched any user's journal, so it now joins `journals` on the syncing user. Strava has no
+  `find_by_external_id` (named above); these two helpers are its lookups.
 - **Album participants were a live leak.** An album tagging an Immich person another user had
   linked made that user's contact a participant of this user's journal; the person lookup is now
   the album owner's.

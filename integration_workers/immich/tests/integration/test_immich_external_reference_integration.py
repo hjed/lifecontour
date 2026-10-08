@@ -235,3 +235,46 @@ class TestLinkOwner:
             )
         ).fetchall()
         assert [tuple(row) for row in rows] == [("other-user", 77, "theirs")]
+
+
+async def _seed_other_users_link(
+    connection: Any, *, integration_source: str, external_id: str
+) -> None:
+    await connection.execute(
+        text(
+            """
+            INSERT INTO sync_metadata
+                (user_id, internal_id, integration_source, external_id,
+                 version_hash, sync_status, last_synced_at,
+                 internal_entity_type, external_entity_type)
+            VALUES ('someone-else', 777, :source, :external_id, 'vh', 'success',
+                    NOW(), 'contact', 'person')
+            """
+        ),
+        {"source": integration_source, "external_id": external_id},
+    )
+
+
+class TestLookupsAreTheSyncingUsers:
+    """Another user's link for the same Immich id is never this user's."""
+
+    @pytest.mark.asyncio
+    async def test_person_link_of_another_user_is_not_found(
+        self, sync_service: ImmichSyncService, async_connection: Any
+    ) -> None:
+        await _seed_other_users_link(
+            async_connection, integration_source="immich", external_id="person-x"
+        )
+
+        assert await sync_service._find_external_reference("person-x") is None
+        assert await sync_service._find_sync_metadata("person-x") is None
+
+    @pytest.mark.asyncio
+    async def test_album_link_of_another_user_is_not_found(
+        self, sync_service: ImmichSyncService, async_connection: Any
+    ) -> None:
+        await _seed_other_users_link(
+            async_connection, integration_source="immich_album", external_id="album-x"
+        )
+
+        assert await sync_service._find_album_sync_metadata("album-x") is None

@@ -81,6 +81,7 @@ async def _seed_google_account(db_session: AsyncSession) -> None:
 async def _seed_sync_metadata(
     db_session: AsyncSession, internal_id: int, external_id: str
 ) -> None:
+    """Seed ``_OWNER``'s link; the merged contacts need not exist locally."""
     await db_session.execute(
         text(
             """
@@ -89,10 +90,10 @@ async def _seed_sync_metadata(
                  version_hash, sync_status, last_synced_at,
                  created_at, updated_at)
             VALUES
-                ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', :ext, 'etag', 'success', NOW(), NOW(), NOW())
+                (:uid, :cid, 'google', :ext, 'etag', 'success', NOW(), NOW(), NOW())
             """
         ),
-        {"cid": internal_id, "ext": external_id},
+        {"uid": _OWNER, "cid": internal_id, "ext": external_id},
     )
 
 

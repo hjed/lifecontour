@@ -57,21 +57,25 @@ def _immich_collision() -> dict[str, str]:
 
 
 async def _seed_sync_metadata(
-    db_session: AsyncSession, internal_id: int, external_id: str
+    db_session: AsyncSession,
+    internal_id: int,
+    external_id: str,
+    *,
+    user_id: str = _OWNER,
 ) -> None:
     await db_session.execute(
         text(
             """
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id,
+                (user_id, internal_id, integration_source, external_id,
                  version_hash, sync_status, last_synced_at,
                  retry_count, created_at, updated_at)
             VALUES
-                (:cid, 'immich', :ext, 'etag', 'success', NOW(),
+                (:uid, :cid, 'immich', :ext, 'etag', 'success', NOW(),
                  0, NOW(), NOW())
             """
         ),
-        {"cid": internal_id, "ext": external_id},
+        {"uid": user_id, "cid": internal_id, "ext": external_id},
     )
 
 
@@ -192,6 +196,30 @@ class TestContactMergedIsScopedToTheOwner:
         """Only the source contact's own link is unlinked, never another's."""
         other_contact = 99
         await _seed_sync_metadata(db_session, other_contact, _SOURCE_PERSON)
+        await db_session.flush()
+
+        result = await process_contact_event(
+            ctx=_ctx(db_session),
+            event_type="ContactMerged",
+            event_data={
+                "user_id": _OWNER,
+                "survivor_contact_id": _SURVIVOR_CONTACT,
+                "source_contact_id": _SOURCE_CONTACT,
+                "external_collisions": [_immich_collision()],
+            },
+        )
+
+        assert result["status"] == "success"
+        assert _SOURCE_PERSON in await _sync_metadata_external_ids(db_session)
+
+    async def test_another_owners_link_is_left_alone(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A link another user holds for the same person and contact id (a
+        mis-owned row) is not the merging owner's to unlink."""
+        await _seed_sync_metadata(
+            db_session, _SOURCE_CONTACT, _SOURCE_PERSON, user_id="someone-else"
+        )
         await db_session.flush()
 
         result = await process_contact_event(

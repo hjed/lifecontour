@@ -493,6 +493,8 @@ async def _unlink_immich_reference_for_event(
     session: Any,
     external_id: str,
     contact_id: int | None,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Unlink an orphaned Immich link locally, triggered by a domain event.
 
@@ -507,6 +509,7 @@ async def _unlink_immich_reference_for_event(
         session: Database session
         external_id: Immich person id of the orphaned source link
         contact_id: Internal id of the source contact whose link is unlinked
+        user_id: The merging owner; only their link is removed
 
     Returns:
         Result dict with status
@@ -516,11 +519,13 @@ async def _unlink_immich_reference_for_event(
     await session.execute(
         text("""
             DELETE FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
               AND internal_id = :contact_id
         """),
         {
+            "user_id": user_id,
             "integration_source": "immich",
             "external_id": external_id,
             "contact_id": contact_id,
@@ -547,7 +552,7 @@ def _event_owner(event_data: dict[str, Any]) -> str | None:
 
 
 async def _process_contact_merged_event(
-    ctx: dict[str, Any], event_data: dict[str, Any]
+    ctx: dict[str, Any], event_data: dict[str, Any], *, owner: str
 ) -> dict[str, Any]:
     """Reconcile a contact merge with Immich.
 
@@ -564,15 +569,15 @@ async def _process_contact_merged_event(
     so it is intentionally not re-pushed here.
 
     An event that names no owner never reaches this handler (see
-    ``process_contact_event``). The unlink is keyed by the source contact, so
-    it removes only that contact's own link, never a row for the same person
-    id held by any other contact. It is owner-scoped only once the merge
-    requires both contacts to share an owner.
+    ``process_contact_event``). The unlink is keyed by the owner and the source
+    contact, so it removes only that owner's link for that contact, never a
+    row for the same person id held by any other contact or user.
 
     Args:
         ctx: ARQ-compatible context dictionary with session_factory
         event_data: The ``ContactMerged`` payload (survivor/source ids +
             ``external_collisions``)
+        owner: The owner the event names (the survivor's)
 
     Returns:
         Task result dictionary with reconciliation status
@@ -619,6 +624,7 @@ async def _process_contact_merged_event(
                 session=session,
                 external_id=source_external_id,
                 contact_id=source_contact_id,
+                user_id=owner,
             )
             results.append(result)
         await session.commit()
@@ -712,7 +718,7 @@ async def process_contact_event(
     # external collisions to reconcile), so it is handled before the
     # contact_id guard below.
     if event_type == "ContactMerged":
-        return await _process_contact_merged_event(ctx, event_data)
+        return await _process_contact_merged_event(ctx, event_data, owner=owner)
 
     contact_id = event_data.get("contact_id")
     if not contact_id:

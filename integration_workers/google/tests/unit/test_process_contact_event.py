@@ -701,6 +701,7 @@ class TestDeleteContactFromGoogleForEvent:
             contact_id=42,
             external_id="people/c123",
             google_account_email="test@gmail.com",
+            user_id="owner-1",
         )
 
         assert result["status"] == "deleted"

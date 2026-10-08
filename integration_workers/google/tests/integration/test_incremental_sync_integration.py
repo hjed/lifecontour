@@ -79,15 +79,15 @@ class TestIncrementalSyncIntegration:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id,
+                    (user_id, internal_id, integration_source, external_id,
                      version_hash, sync_status, last_synced_at,
                      created_at, updated_at)
                 VALUES
-                    (1, 'google', 'people/updated123',
+                    (:user_id, 1, 'google', 'people/updated123',
                      'etag_old', 'success', :now, :now, :now)
                 """
             ),
-            {"now": now},
+            {"user_id": test_user, "now": now},
         )
         await db_session.commit()
 
@@ -219,15 +219,15 @@ class TestIncrementalSyncIntegration:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id,
+                    (user_id, internal_id, integration_source, external_id,
                      version_hash, sync_status, last_synced_at,
                      created_at, updated_at)
                 VALUES
-                    (1, 'google', :external_id,
+                    (:user_id, 1, 'google', :external_id,
                      'etag_old', 'success', :now, :now, :now)
                 """
             ),
-            {"external_id": known_external_id, "now": now},
+            {"user_id": test_user, "external_id": known_external_id, "now": now},
         )
         await db_session.commit()
 

@@ -1076,3 +1076,47 @@ class TestJournalLookupForImportedActivity:
         assert event is not None
         assert event.event_type == "journal_event.cancelled"
         assert event.event_data["existing_journal_id"] == 42
+
+
+def _recording_session(mock_session: MagicMock) -> list[tuple[str, dict[str, Any]]]:
+    """Record every statement and its parameters; every lookup finds nothing."""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute(query: Any, params: Any = None) -> MagicMock:
+        calls.append((str(query), dict(params or {})))
+        result = MagicMock()
+        result.fetchone.return_value = None
+        return result
+
+    mock_session.execute = AsyncMock(side_effect=execute)
+    return calls
+
+
+class TestLookupsAreTheSyncingUsers:
+    """An activity id is matched only against the syncing user's links and
+    journals, never another user's."""
+
+    @pytest.mark.asyncio()
+    async def test_journal_lookup_is_keyed_by_the_owner(
+        self, sync_service: StravaSyncService, mock_session: MagicMock
+    ) -> None:
+        calls = _recording_session(mock_session)
+
+        await sync_service._find_existing_journal_id("12345", mock_session)
+
+        assert len(calls) == 2
+        for query, params in calls:
+            assert "user_id = :user_id" in query
+            assert params["user_id"] == sync_service._user_id
+
+    @pytest.mark.asyncio()
+    async def test_version_hash_lookup_is_keyed_by_the_owner(
+        self, sync_service: StravaSyncService, mock_session: MagicMock
+    ) -> None:
+        calls = _recording_session(mock_session)
+
+        await sync_service._find_stored_version_hash("12345", mock_session)
+
+        [(query, params)] = calls
+        assert "user_id = :user_id" in query
+        assert params["user_id"] == sync_service._user_id

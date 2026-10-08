@@ -432,6 +432,9 @@ class StravaSyncService:
         It remains the fallback for activities imported before sync metadata was
         recorded for them.
 
+        Both are read for the syncing user only: another user's link or journal
+        for the same activity is never this user's.
+
         Args:
             strava_activity_id: Strava activity ID string.
             session: Database session.
@@ -443,13 +446,14 @@ class StravaSyncService:
             text("""
                 SELECT internal_id AS journal_id
                 FROM sync_metadata
-                WHERE integration_source = 'strava'
+                WHERE user_id = :user_id
+                  AND integration_source = 'strava'
                   AND internal_entity_type = 'journal'
                   AND external_id = :strava_id
                   AND internal_id IS NOT NULL
                 LIMIT 1
             """),
-            {"strava_id": strava_activity_id},
+            {"user_id": self._user_id, "strava_id": strava_activity_id},
         )
         row = result.fetchone()
         if row is not None:
@@ -458,12 +462,14 @@ class StravaSyncService:
 
         result = await session.execute(
             text("""
-                SELECT journal_id
-                FROM journal_fitness_data
-                WHERE strava_activity_id = :strava_id
+                SELECT f.journal_id
+                FROM journal_fitness_data f
+                JOIN journals j ON j.id = f.journal_id
+                WHERE j.user_id = :user_id
+                  AND f.strava_activity_id = :strava_id
                 LIMIT 1
             """),
-            {"strava_id": strava_activity_id},
+            {"user_id": self._user_id, "strava_id": strava_activity_id},
         )
         row = result.fetchone()
         return row.journal_id if row is not None else None
@@ -473,8 +479,8 @@ class StravaSyncService:
     ) -> str | None:
         """Look up the stored version hash for a Strava activity.
 
-        Queries ``sync_metadata`` for an entry matching the Strava
-        activity ID.  Returns ``None`` if no row exists or if the
+        Queries ``sync_metadata`` for the syncing user's entry matching the
+        Strava activity ID.  Returns ``None`` if no row exists or if the
         ``version_hash`` column has been set to ``'invalidated_for_type_backfill'``
         (e.g. by a data migration that invalidates stale entries).
 
@@ -489,11 +495,12 @@ class StravaSyncService:
             text("""
                 SELECT version_hash
                 FROM sync_metadata
-                WHERE integration_source = 'strava'
+                WHERE user_id = :user_id
+                  AND integration_source = 'strava'
                   AND external_id = :strava_id
                 LIMIT 1
             """),
-            {"strava_id": strava_activity_id},
+            {"user_id": self._user_id, "strava_id": strava_activity_id},
         )
         row = result.fetchone()
         if row is None:

@@ -1023,22 +1023,33 @@ async def _create_contact_in_google(
 _PERSON_IDENTITY_FIELDS = frozenset({"etag", "resourceName", "metadata"})
 
 
-async def _delete_sync_link(session: AsyncSession, external_id: str) -> None:
-    """Remove the Google sync link for one remote person."""
+async def _delete_sync_link(
+    session: AsyncSession, external_id: str, *, user_id: str
+) -> None:
+    """Remove ``user_id``'s Google sync link for one remote person."""
     await session.execute(
         text("""
             DELETE FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """),
-        {"integration_source": "google", "external_id": external_id},
+        {
+            "user_id": user_id,
+            "integration_source": "google",
+            "external_id": external_id,
+        },
     )
 
 
 async def _repoint_sync_link(
-    session: AsyncSession, old_external_id: str, new_external_id: str
+    session: AsyncSession,
+    old_external_id: str,
+    new_external_id: str,
+    *,
+    user_id: str,
 ) -> None:
-    """Move a Google sync link from one remote person to its replacement.
+    """Move ``user_id``'s Google sync link from one remote person to its replacement.
 
     Updated in place rather than deleted and re-inserted so the link keeps its
     ``reference_data`` — the backend's ``synced_tags`` record, which is how an
@@ -1048,10 +1059,12 @@ async def _repoint_sync_link(
         text("""
             UPDATE sync_metadata
             SET external_id = :new_external_id
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :old_external_id
         """),
         {
+            "user_id": user_id,
             "integration_source": "google",
             "old_external_id": old_external_id,
             "new_external_id": new_external_id,
@@ -1066,6 +1079,8 @@ async def _update_or_recreate_contact_in_google(
     external_id: str,
     person_data: dict[str, Any],
     etag: str | None,
+    *,
+    user_id: str,
 ) -> tuple[dict[str, Any], bool]:
     """Update the linked Google person, recreating it if Google deleted it.
 
@@ -1099,7 +1114,9 @@ async def _update_or_recreate_contact_in_google(
         if key not in _PERSON_IDENTITY_FIELDS
     }
     result = await client.create_contact(create_data)
-    await _repoint_sync_link(session, external_id, result["resourceName"])
+    await _repoint_sync_link(
+        session, external_id, result["resourceName"], user_id=user_id
+    )
     return result, True
 
 
@@ -1130,6 +1147,7 @@ async def _update_contact_in_google(
         external_id=contact["external_id"],
         person_data=person_data,
         etag=contact.get("version_hash"),
+        user_id=user_id,
     )
 
     # Update sync metadata with new ETag
@@ -1529,14 +1547,17 @@ async def _find_existing_external_ids(
     session: AsyncSession,
     external_ids: list[str],
     integration_source: str,
+    *,
+    user_id: str,
 ) -> set[str]:
     """
-    Find which external IDs already have sync metadata.
+    Find which external IDs already have ``user_id``'s sync metadata.
 
     Args:
         session: Database session
         external_ids: List of external IDs to check
         integration_source: Integration source (e.g., 'google')
+        user_id: The syncing account's owner
 
     Returns:
         Set of external IDs that already have sync metadata
@@ -1548,13 +1569,15 @@ async def _find_existing_external_ids(
     stmt = text("""
         SELECT external_id
         FROM sync_metadata
-        WHERE integration_source = :integration_source
+        WHERE user_id = :user_id
+          AND integration_source = :integration_source
           AND external_id = ANY(:external_ids)
     """)
 
     result = await session.execute(
         stmt,
         {
+            "user_id": user_id,
             "integration_source": integration_source,
             "external_ids": external_ids,
         },
@@ -1620,7 +1643,7 @@ async def _perform_full_sync(
             google_person.resource_name for google_person, _ in serialized_contacts
         ]
         existing_external_ids = await _find_existing_external_ids(
-            session, batch_external_ids, "google"
+            session, batch_external_ids, "google", user_id=str(user_id)
         )
 
         # Process each contact using outbox pattern
@@ -1760,7 +1783,7 @@ async def _perform_incremental_sync(
         google_person.resource_name for google_person, _ in serialized_contacts
     ]
     existing_external_ids = await _find_existing_external_ids(
-        session, batch_external_ids, "google"
+        session, batch_external_ids, "google", user_id=str(user_id)
     )
 
     # Process changed contacts using outbox pattern
@@ -3332,6 +3355,7 @@ async def _push_contact_to_google_for_event(
             external_id=external_id,  # type: ignore[arg-type]
             person_data=person_data,
             etag=version_hash,
+            user_id=user_id,
         )
         await _upsert_sync_metadata(
             session=session,
@@ -3361,6 +3385,8 @@ async def _delete_contact_from_google_for_event(
     contact_id: int | None,
     external_id: str,
     google_account_email: str,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Delete a contact from Google, triggered by a domain event.
 
@@ -3371,13 +3397,14 @@ async def _delete_contact_from_google_for_event(
             passes the absorbed source id)
         external_id: Google resource name
         google_account_email: Google account email
+        user_id: The account's owner, whose link is removed
 
     Returns:
         Result dict with status
     """
     await client.delete_contact(resource_name=external_id)
 
-    await _delete_sync_link(session, external_id)
+    await _delete_sync_link(session, external_id, user_id=user_id)
 
     logger.info(
         "Deleted contact from Google via event",
@@ -3496,6 +3523,7 @@ async def _process_contact_merged_event(
                         contact_id=source_contact_id,
                         external_id=collision["source_external_id"],
                         google_account_email=google_account_email,
+                        user_id=user_id,
                     )
                     results.append(result)
 
@@ -3649,6 +3677,7 @@ async def process_contact_event(
                         contact_id=contact_id,
                         external_id=sync_row.external_id,
                         google_account_email=google_account_email,
+                        user_id=user_id,
                     )
                 else:
                     # ContactCreated or ContactUpdated
