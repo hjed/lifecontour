@@ -38,6 +38,14 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
+# Tag names are unique case-insensitively (migration 0048).
+_NAME_INDEX = "uq_journal_tags_name_lower"
+
+
+def _is_duplicate_name(error: IntegrityError) -> bool:
+    """Whether ``error`` is the owner's name index rejecting a duplicate."""
+    return _NAME_INDEX in str(error) or "duplicate key" in str(error).lower()
+
 
 class JournalTagService:
     """Service for persisting journal tags as committed units of work."""
@@ -67,7 +75,7 @@ class JournalTagService:
             return await self.tag_repo.save(tag)
         except IntegrityError as e:
             # Check if it's a duplicate name error
-            if "uq_journal_tags_name" in str(e) or "duplicate key" in str(e).lower():
+            if _is_duplicate_name(e):
                 raise JournalValidationError(
                     "name",
                     f"A journal tag with the name '{tag.name}' already exists. "
@@ -159,7 +167,7 @@ class JournalTagService:
         except IntegrityError as e:
             # A concurrent insert can take the name between the uniqueness
             # check above and this write; map it the same way create_tag does.
-            if "uq_journal_tags_name" in str(e) or "duplicate key" in str(e).lower():
+            if _is_duplicate_name(e):
                 raise JournalValidationError(
                     "name",
                     f"A journal tag with the name '{updated.name}' already exists. "

@@ -88,7 +88,7 @@ class TestCreateTag:
         """A duplicate-name IntegrityError becomes a JournalValidationError."""
         tag = JournalTag(user_id=TEST_USER_ID, name="Work", color="#3B82F6")
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name", {}, Exception("dup")
+            "uq_journal_tags_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError):
@@ -551,7 +551,7 @@ class TestUpdateTag:
             mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
         )
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name", {}, Exception("dup")
+            "uq_journal_tags_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError) as exc_info:
@@ -1372,7 +1372,7 @@ class TestRenameTagEvents:
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name", {}, Exception("dup")
+            "uq_journal_tags_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError):

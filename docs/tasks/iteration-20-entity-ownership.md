@@ -808,15 +808,27 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 **Required Documentation Updates:**
 - [ ] `docs/architecture/database-design.md` — journal tags.
 
-**Delivery:** a four-layer stack, each layer deployable on its own (the Phase 3 shape):
+**Delivery:** a stack, each layer deployable on its own (the Phase 3 shape). The test churn of
+the owner (233 test constructions, ~160 repository/service test calls) splits 10b in two and 10c
+in three to keep each PR near 500 lines:
 - **10a ✅ DONE** — `0127` (nullable `journal_tags.user_id`, per-tag owner assignment,
   `idx_journal_tags_user_id`); `JournalTag.user_id` (optional); the repository writes it on
   INSERT only and maps it; REST `POST /tags` stamps the session user and the find-or-create in
   `JournalWriteService._process_journal_tags` stamps the journal's owner. Reads still global.
-- **10b** — test-only: every test `JournalTag(...)` and raw `INSERT INTO journal_tags` names an
-  owner, through shared helpers.
-- **10c** — `0128` (`NOT NULL`, per-user unique index), required `JournalTag.user_id`, the scoped
-  repository and services, REST and MCP callers passing the acting user.
+- **10b ✅ DONE** (two layers, unit then integration) — test-only: every test `JournalTag(...)`
+  names an owner and every raw `INSERT INTO journal_tags` writes the test user (inline, rather
+  than a seeding helper: seven inserts in five files, each with its own column list).
+- **10c1 ✅ DONE** — `0128`: owns any tag still without an owner (as `0127`), refuses if a
+  journal carries another owner's tag or a tag sits under another owner's tag (`0127`'s per-tag
+  derivation can split a parent from its child), then `SET NOT NULL`. `JournalTag.user_id`
+  required. Name uniqueness stays global in this layer: while `find_by_name` is still global, two
+  owners' `Family` tags would let a journal's tag-name list pick up the other's (augment review on
+  #1723), so the index swap waits for the scoped reads.
+- **10c2** — owner-scoped reads (`find_by_id`, `find_by_name`, `get_all`, `get_children`,
+  `get_root_tags`, `get_descendants_for_tags`) through the hierarchy, tag, write and journal
+  services and the REST / MCP callers.
+- **10c3** — owner-scoped writes (`delete`, `merge_into`, `assign_tag`, the update guard in
+  `save`); creating a tag checks its parent belongs to the same owner.
 - **10d** — the REST and MCP cross-user isolation suites; documentation.
 
 **Decisions (recorded during implementation):**
