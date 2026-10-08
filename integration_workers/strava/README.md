@@ -56,7 +56,7 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
         reconcile_in_progress_parents,  # shared fan-out reconciler (ITER14-003)
-        func(backfill_strava_elapsed_durations, timeout=1800),  # one-off
+        func(backfill_strava_elapsed_durations, timeout=3600),  # one-off
     ]
     # build_worker_lifecycle(log_consumer_errors=True), then enqueue the
     # duration backfill (see below)
@@ -158,22 +158,26 @@ Worker startup enqueues it for every user in `user_strava_auth` whose Redis
 marker `strava:backfill:elapsed_duration:v1:{user_id}` is unset; the job sets
 the marker when it succeeds.
 
-The job lists all of the athlete's activities (200 per page), then for each
-journal linked to Strava sums its activities' times — a journal holds several
-after an additive merge. It emits one `journal_event.fitness_duration_corrected`
-outbox event per journal carrying:
+The job lists all of the athlete's activities (200 per page), waiting out the
+15-minute rate limit in place. A daily limit defers the whole job; nothing is
+written until every page is listed. It then emits
+`journal_event.fitness_duration_corrected` outbox events, each carrying the
+duration the sync wrote (`expected_durations`) and the one to store instead
+(`corrected_duration`):
 
-- `corrected_duration`: the total elapsed time;
-- `expected_durations`: every total the sync could have stored — all moving
-  time, or a moving/elapsed mix for a merge made after the change.
+- a journal's total moving time across its linked activities → their total
+  elapsed time (a journal holds several after an additive merge);
+- for a merged journal, also each activity's moving time → its elapsed time,
+  as a webhook update of one merged activity re-saved that activity alone.
 
-The backend applies it as a compare-and-set, so a duration the user has edited
-(it matches no expected value) is left alone. A journal with an activity no
-longer on Strava, or merged with a non-Strava journal, is skipped.
+The backend applies each as a compare-and-set, so a duration the user has
+edited (it matches no expected value) is left alone. A journal with an activity
+no longer on Strava, or merged with a manual or non-Strava journal, matches
+nothing and is left as it is.
 
-A rate limit defers the whole job (nothing is written until every page is
-listed). To run it again, delete the user's marker key and restart the worker;
-an already-corrected duration matches no expected value, so a rerun changes
+To run it again, delete the user's marker key and restart the worker (startup
+clears arq's retained result for the job so it can be enqueued again). An
+already-corrected duration matches no expected value, so a rerun changes
 nothing.
 
 ## Stream Consumer

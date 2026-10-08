@@ -845,10 +845,10 @@ async def periodic_sync_all_strava_accounts(
         raise
 
 
-# One-off backfill of fitness durations from moving to elapsed time. A long
-# history pages slowly under the rate limiter, so it gets more than arq's
-# default 300s job timeout.
-DURATION_BACKFILL_TIMEOUT_S = 1800
+# One-off backfill of fitness durations from moving to elapsed time. Its
+# listing waits out 15-minute rate-limit windows in place, so it gets room for
+# a few of those rather than arq's default 300s job timeout.
+DURATION_BACKFILL_TIMEOUT_S = 3600
 
 
 def duration_backfill_marker(user_id: str) -> str:
@@ -945,9 +945,13 @@ async def _enqueue_duration_backfills(ctx: dict[str, Any]) -> None:
     """Enqueue the duration backfill for each user whose marker is unset.
 
     The deterministic job id keeps a restart from queueing a second copy
-    while one is pending. Best-effort: a failure is logged and the worker
-    starts regardless, retrying on its next startup.
+    while one is queued or running. arq also refuses an id whose *result* it
+    still keeps (for an hour), which would silently skip a restart after a
+    failed run or a deleted marker — so that result is cleared first. Best-
+    effort: a failure is logged and the worker starts regardless, retrying on
+    its next startup.
     """
+    from arq.constants import result_key_prefix
     from sqlalchemy import text
 
     try:
@@ -960,13 +964,18 @@ async def _enqueue_duration_backfills(ctx: dict[str, Any]) -> None:
         for user_id in user_ids:
             if await ctx["redis"].exists(duration_backfill_marker(user_id)):
                 continue
-            await ctx["redis"].enqueue_job(
+            job_id = f"strava-duration-backfill-v1-{user_id}"
+            await ctx["redis"].delete(f"{result_key_prefix}{job_id}")
+            job = await ctx["redis"].enqueue_job(
                 "backfill_strava_elapsed_durations",
                 user_id,
-                _job_id=f"strava-duration-backfill-v1-{user_id}",
+                _job_id=job_id,
                 _queue_name=STRAVA_ARQ_QUEUE_NAME,
             )
-            logger.info("Enqueued Strava duration backfill", user_id=user_id)
+            if job is None:
+                logger.info("Strava duration backfill already queued", user_id=user_id)
+            else:
+                logger.info("Enqueued Strava duration backfill", user_id=user_id)
     except Exception:
         logger.exception("Failed to enqueue Strava duration backfills")
 

@@ -525,8 +525,8 @@ class TestBackfillStravaElapsedDurations:
         api_client.close.assert_awaited_once()
 
     def test_is_registered_with_a_long_timeout(self, worker_mod: Any) -> None:
-        """A long history pages slowly under the rate limiter; arq's 300s
-        default could cut it off before the marker is ever written."""
+        """The listing waits out 15-minute rate-limit windows in place; arq's
+        300s default would cut it off before the marker is ever written."""
         from arq.worker import get_kwargs
 
         kwargs: dict[str, Any] = get_kwargs(worker_mod.StravaWorkerSettings)
@@ -536,8 +536,14 @@ class TestBackfillStravaElapsedDurations:
             if getattr(f, "name", None) == "backfill_strava_elapsed_durations"
         )
 
+        from duration_backfill import StravaDurationBackfillService
+
         assert backfill.timeout_s == worker_mod.DURATION_BACKFILL_TIMEOUT_S
-        assert worker_mod.DURATION_BACKFILL_TIMEOUT_S >= 1800
+        # Room for at least two waits plus the listing itself.
+        assert (
+            worker_mod.DURATION_BACKFILL_TIMEOUT_S
+            > 2 * StravaDurationBackfillService.MAX_RATE_LIMIT_WAIT_S
+        )
 
 
 def _session_factory_with_users(*user_ids: str) -> Any:
@@ -577,6 +583,32 @@ class TestEnqueueDurationBackfills:
             _job_id="strava-duration-backfill-v1-pending",
             _queue_name=worker_mod.STRAVA_ARQ_QUEUE_NAME,
         )
+
+    @pytest.mark.asyncio
+    async def test_clears_a_retained_result_before_enqueueing(
+        self, worker_mod: Any
+    ) -> None:
+        """arq refuses a job id whose result it still keeps (an hour), so a
+        restart after a failed run, or after deleting the marker, would
+        otherwise queue nothing. A queued or running copy still dedups: its
+        job key is untouched."""
+        from arq.constants import result_key_prefix
+
+        order: list[str] = []
+        redis = AsyncMock()
+        redis.exists = AsyncMock(return_value=0)
+        redis.delete = AsyncMock(side_effect=lambda *_: order.append("delete"))
+        redis.enqueue_job = AsyncMock(
+            side_effect=lambda *_a, **_k: order.append("enqueue")
+        )
+        ctx = {"redis": redis, "session_factory": _session_factory_with_users("u")}
+
+        await worker_mod._enqueue_duration_backfills(ctx)
+
+        redis.delete.assert_awaited_once_with(
+            f"{result_key_prefix}strava-duration-backfill-v1-u"
+        )
+        assert order == ["delete", "enqueue"]
 
     @pytest.mark.asyncio
     async def test_a_failure_does_not_stop_the_worker_starting(
