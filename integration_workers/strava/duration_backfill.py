@@ -4,21 +4,23 @@ One-off backfill of Strava fitness durations from moving time to elapsed time.
 Strava journals were once synced with ``moving_time`` as their duration; it is
 now ``elapsed_time``. Re-syncing would overwrite whatever the user has edited,
 so instead this compares each journal's stored duration with what the sync
-would have written and corrects only an exact match. The comparison happens in
-the backend, atomically, as a compare-and-set: the worker sends the values the
-sync could have written (``expected_durations``) and the duration to store.
+wrote and corrects only an exact match. The comparison happens in the backend,
+atomically, as a compare-and-set: the worker sends the value the sync wrote
+(``expected_durations``) and the duration to store.
 
 A journal may hold several Strava activities: an ADDITIVE merge sums their
-durations and keeps every Strava link on the survivor, so the totals here are
-sums over all of a journal's linked activities.
+durations and keeps every Strava link on the survivor, so the merge's total is
+a sum over all of a journal's linked activities. A later webhook update of one
+of them re-saved that activity's moving time alone, so each linked activity is
+also a correction of its own.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from itertools import product
 from typing import Any
 
 import structlog
@@ -27,13 +29,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from strava_api_client import StravaAPIClient
+from strava_rate_limiter import StravaRateLimitError
 
 logger = structlog.get_logger(__name__)
-
-# A journal links to at most this many activities before only the all-moving
-# total is expected: 2**n - 1 mixed totals grow quickly, and merges of more
-# than a handful of activities are implausible.
-MAX_MIXED_LINKS = 6
 
 
 @dataclass(frozen=True)
@@ -54,40 +52,62 @@ class DurationCorrection:
     strava_activity_ids: tuple[str, ...]
 
 
-def _expected_durations(times: Sequence[ActivityTimes]) -> tuple[int, ...]:
-    """Every total the sync could have stored, except the already correct one.
+def _corrections_for(
+    journal_id: int, activity_ids: tuple[str, ...], times: Sequence[ActivityTimes]
+) -> list[DurationCorrection]:
+    """The journal's total, then — for a merged journal — each activity alone.
 
-    Each activity contributed its moving time (synced before the fix) or its
-    elapsed time (re-synced after it, then merged). The all-elapsed total is
-    excluded: a journal holding it needs no correction.
+    Only values the sync itself wrote (moving time) are expected: a merge with
+    a manual or non-Strava journal adds a part no expected value contains, so
+    that journal is left alone. Corrections that would change nothing, or
+    repeat one already planned, are dropped.
     """
-    corrected = sum(t.elapsed_time for t in times)
-    if len(times) > MAX_MIXED_LINKS:
-        totals = {sum(t.moving_time for t in times)}
-    else:
-        totals = {
-            sum(choice)
-            for choice in product(*((t.moving_time, t.elapsed_time) for t in times))
-        }
-    totals.discard(corrected)
-    return tuple(sorted(totals))
+    candidates = [
+        (
+            sum(t.moving_time for t in times),
+            sum(t.elapsed_time for t in times),
+            activity_ids,
+        )
+    ]
+    if len(times) > 1:
+        candidates += [
+            (t.moving_time, t.elapsed_time, (activity_id,))
+            for activity_id, t in zip(activity_ids, times, strict=True)
+        ]
+
+    corrections: list[DurationCorrection] = []
+    planned: set[tuple[int, int]] = set()
+    for expected, corrected, ids in candidates:
+        if expected == corrected or (expected, corrected) in planned:
+            continue
+        planned.add((expected, corrected))
+        corrections.append(
+            DurationCorrection(
+                journal_id=journal_id,
+                expected_durations=(expected,),
+                corrected_duration=corrected,
+                strava_activity_ids=ids,
+            )
+        )
+    return corrections
 
 
 def plan_corrections(
     links: Mapping[int, Sequence[str]],
     activities: Mapping[str, ActivityTimes],
 ) -> list[DurationCorrection]:
-    """Plan the duration correction for each Strava-linked journal.
+    """Plan the duration corrections for each Strava-linked journal.
 
     Args:
         links: Journal id → the Strava activity ids linked to it.
         activities: Strava activity id → its moving and elapsed times.
 
     Returns:
-        One correction per journal whose duration would change, in journal
-        order. A journal with any linked activity missing from
-        ``activities`` (e.g. deleted on Strava) is skipped: without that
-        activity's moving time the synced value is unknown.
+        The corrections, in journal order: the journal's total first, then
+        (for a merged journal) one per activity. A journal with any linked
+        activity missing from ``activities`` (e.g. deleted on Strava) is
+        skipped: without that activity's moving time the synced value is
+        unknown.
     """
     corrections: list[DurationCorrection] = []
     for journal_id in sorted(links):
@@ -95,17 +115,7 @@ def plan_corrections(
         if not activity_ids or any(a not in activities for a in activity_ids):
             continue
         times = [activities[a] for a in activity_ids]
-        expected = _expected_durations(times)
-        if not expected:
-            continue
-        corrections.append(
-            DurationCorrection(
-                journal_id=journal_id,
-                expected_durations=expected,
-                corrected_duration=sum(t.elapsed_time for t in times),
-                strava_activity_ids=activity_ids,
-            )
-        )
+        corrections += _corrections_for(journal_id, activity_ids, times)
     return corrections
 
 
@@ -113,20 +123,32 @@ class StravaDurationBackfillService:
     """Emits the duration corrections for one user's Strava journals.
 
     Every page of the athlete's activities is listed before anything is
-    written, so a failure part-way (e.g. a rate limit) leaves no events
-    behind and the job can simply run again.
+    written, so a failure part-way leaves no events behind and the job can
+    simply run again. The 15-minute rate limit is waited out in place rather
+    than failing: a retried job restarts at page 1, so on a long enough
+    history it would hit the same limit every time and never finish.
 
     Args:
         api_client: Authenticated ``StravaAPIClient`` for the user.
         user_id: Internal user ID that owns the Strava connection.
+        sleep: Awaitable sleep, injectable for tests.
     """
 
     # Strava's maximum page size for the activity list.
     PAGE_SIZE = 200
+    # Longest wait taken in place: the 15-minute window. Anything longer
+    # (the daily limit gives no retry hint) is raised for the job to defer.
+    MAX_RATE_LIMIT_WAIT_S = 15 * 60
 
-    def __init__(self, api_client: StravaAPIClient, user_id: str) -> None:
+    def __init__(
+        self,
+        api_client: StravaAPIClient,
+        user_id: str,
+        sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    ) -> None:
         self._api_client = api_client
         self._user_id = user_id
+        self._sleep = sleep
 
     async def run(self, session_factory: Any) -> dict[str, int]:
         """List the activities, plan the corrections and write their events.
@@ -170,9 +192,22 @@ class StravaDurationBackfillService:
         times: dict[str, ActivityTimes] = {}
         page = 1
         while True:
-            activities = await self._api_client.list_activities(
-                page=page, per_page=self.PAGE_SIZE
-            )
+            try:
+                activities = await self._api_client.list_activities(
+                    page=page, per_page=self.PAGE_SIZE
+                )
+            except StravaRateLimitError as exc:
+                wait = exc.retry_after
+                if wait is None or wait > self.MAX_RATE_LIMIT_WAIT_S:
+                    raise
+                logger.info(
+                    "Waiting out the Strava rate limit",
+                    user_id=self._user_id,
+                    page=page,
+                    wait_seconds=wait,
+                )
+                await self._sleep(wait)
+                continue
             if not activities:
                 return times
             for activity in activities:

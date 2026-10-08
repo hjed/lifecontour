@@ -6,7 +6,6 @@ duration is still the one the sync wrote — so anything else is a user's edit.
 """
 
 from duration_backfill import (
-    MAX_MIXED_LINKS,
     ActivityTimes,
     DurationCorrection,
     plan_corrections,
@@ -34,10 +33,29 @@ class TestPlanCorrections:
         ]
 
     def test_a_merged_journal_sums_every_linked_activity(self) -> None:
-        """An ADDITIVE merge sums durations and keeps every Strava link.
+        """An ADDITIVE merge sums durations and keeps every Strava link."""
+        corrections = plan_corrections(
+            links={7: ["111", "222"]},
+            activities={
+                "111": _times(moving=3000, elapsed=3600),
+                "222": _times(moving=1200, elapsed=1500),
+            },
+        )
 
-        Mixed sums cover a merge done after the fix shipped, where one side
-        was re-synced with elapsed time and the other still held moving time.
+        assert corrections[0] == DurationCorrection(
+            journal_id=7,
+            expected_durations=(4200,),
+            corrected_duration=5100,
+            strava_activity_ids=("111", "222"),
+        )
+
+    def test_a_merged_journal_overwritten_by_one_activity_is_corrected_to_it(
+        self,
+    ) -> None:
+        """A webhook update of one merged activity re-saved its moving time alone.
+
+        The sync now writes that activity's elapsed time, so that is the
+        correction — one per linked activity, each its own compare-and-set.
         """
         corrections = plan_corrections(
             links={7: ["111", "222"]},
@@ -47,23 +65,50 @@ class TestPlanCorrections:
             },
         )
 
-        assert len(corrections) == 1
-        correction = corrections[0]
-        assert correction.corrected_duration == 5100
-        assert set(correction.expected_durations) == {4200, 4500, 4800}
-        assert correction.strava_activity_ids == ("111", "222")
+        assert corrections[1:] == [
+            DurationCorrection(
+                journal_id=7,
+                expected_durations=(3000,),
+                corrected_duration=3600,
+                strava_activity_ids=("111",),
+            ),
+            DurationCorrection(
+                journal_id=7,
+                expected_durations=(1200,),
+                corrected_duration=1500,
+                strava_activity_ids=("222",),
+            ),
+        ]
 
-    def test_the_already_correct_total_is_never_expected(self) -> None:
+    def test_a_merged_duration_with_a_manual_part_matches_nothing(self) -> None:
+        """Two activities (100/200 each) merged with a manual 100: stored 300.
+
+        Only values the sync itself wrote are expected, so the manual part is
+        never folded into a correction.
+        """
         corrections = plan_corrections(
             links={7: ["111", "222"]},
             activities={
-                "111": _times(moving=3000, elapsed=3600),
-                "222": _times(moving=1500, elapsed=1500),
+                "111": _times(moving=100, elapsed=200),
+                "222": _times(moving=100, elapsed=200),
             },
         )
 
-        assert 5100 not in corrections[0].expected_durations
-        assert set(corrections[0].expected_durations) == {4500}
+        assert all(300 not in c.expected_durations for c in corrections)
+
+    def test_identical_activity_corrections_are_not_repeated(self) -> None:
+        corrections = plan_corrections(
+            links={7: ["111", "222"]},
+            activities={
+                "111": _times(moving=100, elapsed=200),
+                "222": _times(moving=100, elapsed=200),
+            },
+        )
+
+        assert [(c.expected_durations, c.corrected_duration) for c in corrections] == [
+            ((200,), 400),
+            ((100,), 200),
+        ]
 
     def test_an_activity_that_never_stopped_needs_no_correction(self) -> None:
         corrections = plan_corrections(
@@ -94,15 +139,3 @@ class TestPlanCorrections:
         )
 
         assert [c.journal_id for c in corrections] == [7, 9]
-
-    def test_beyond_the_mix_cap_only_the_all_moving_total_is_expected(
-        self,
-    ) -> None:
-        ids = [str(n) for n in range(MAX_MIXED_LINKS + 1)]
-        corrections = plan_corrections(
-            links={7: ids},
-            activities={i: _times(moving=100, elapsed=150) for i in ids},
-        )
-
-        assert corrections[0].expected_durations == (100 * len(ids),)
-        assert corrections[0].corrected_duration == 150 * len(ids)

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from duration_backfill import StravaDurationBackfillService
 from strava_models import StravaActivity
+from strava_rate_limiter import StravaRateLimitError
 
 USER_ID = "duration-backfill-user"
 OTHER_USER_ID = "someone-else"
@@ -39,15 +40,25 @@ def _activity(activity_id: int, *, moving: int, elapsed: int) -> StravaActivity:
 
 
 class _StubStravaClient:
-    """Serves a fixed activity list in pages, recording the pages asked for."""
+    """Serves a fixed activity list in pages, recording the pages asked for.
 
-    def __init__(self, activities: list[StravaActivity]) -> None:
+    ``rate_limits`` are raised, in order, by the first requests.
+    """
+
+    def __init__(
+        self,
+        activities: list[StravaActivity],
+        rate_limits: list[StravaRateLimitError] | None = None,
+    ) -> None:
         self._activities = activities
+        self._rate_limits = list(rate_limits or [])
         self.requests: list[tuple[int, int]] = []
 
     async def list_activities(
         self, *, page: int = 1, per_page: int = 30, **_: Any
     ) -> list[StravaActivity]:
+        if self._rate_limits:
+            raise self._rate_limits.pop(0)
         self.requests.append((page, per_page))
         start = (page - 1) * per_page
         return self._activities[start : start + per_page]
@@ -92,15 +103,22 @@ async def _link(
     )
 
 
-async def _correction_events(session: AsyncSession) -> dict[int, dict[str, Any]]:
+async def _correction_events(
+    session: AsyncSession,
+) -> dict[int, list[dict[str, Any]]]:
+    """Each journal's correction events, in the order they were written."""
     result = await session.execute(
         text("""
             SELECT aggregate_id, event_data FROM outbox_events
             WHERE event_type = 'journal_event.fitness_duration_corrected'
+            ORDER BY id
         """)
     )
-    # Raw SQL hands JSONB back as text on this driver.
-    return {row.aggregate_id: json.loads(row.event_data) for row in result}
+    events: dict[int, list[dict[str, Any]]] = {}
+    for row in result:
+        # Raw SQL hands JSONB back as text on this driver.
+        events.setdefault(row.aggregate_id, []).append(json.loads(row.event_data))
+    return events
 
 
 def _session_factory(session: AsyncSession) -> Any:
@@ -132,14 +150,21 @@ async def test_emits_a_correction_per_linked_journal(db_session: AsyncSession) -
         user_id=USER_ID,
     ).run(_session_factory(db_session))
 
-    assert result == {"journals": 2, "corrections": 2}
+    assert result == {"journals": 2, "corrections": 4}
     events = await _correction_events(db_session)
-    assert events[single]["expected_durations"] == [3000]
-    assert events[single]["corrected_duration"] == 3600
-    assert events[single]["user_id"] == USER_ID
-    assert set(events[merged]["expected_durations"]) == {4200, 4300, 4500}
-    assert events[merged]["corrected_duration"] == 4600
-    assert sorted(events[merged]["strava_activity_ids"]) == ["222", "333"]
+    assert [
+        (e["expected_durations"], e["corrected_duration"]) for e in events[single]
+    ] == [([3000], 3600)]
+    assert events[single][0]["user_id"] == USER_ID
+    # The merged total, then each activity for a webhook-overwritten duration.
+    assert [
+        (e["expected_durations"], e["corrected_duration"], e["strava_activity_ids"])
+        for e in events[merged]
+    ] == [
+        ([4200], 4600, ["222", "333"]),
+        ([1000], 1100, ["222"]),
+        ([3200], 3500, ["333"]),
+    ]
 
 
 @pytest.mark.asyncio
@@ -180,7 +205,7 @@ async def test_a_journal_linked_only_by_its_fitness_activity_id_is_corrected(
     ).run(_session_factory(db_session))
 
     events = await _correction_events(db_session)
-    assert events[journal_id]["expected_durations"] == [3000]
+    assert events[journal_id][0]["expected_durations"] == [3000]
 
 
 @pytest.mark.asyncio
@@ -202,3 +227,52 @@ async def test_pages_through_every_activity(db_session: AsyncSession) -> None:
     page_size = StravaDurationBackfillService.PAGE_SIZE
     assert client.requests == [(1, page_size), (2, page_size), (3, page_size)]
     assert journal_id in await _correction_events(db_session)
+
+
+@pytest.mark.asyncio
+async def test_waits_out_the_short_rate_limit_window_and_carries_on(
+    db_session: AsyncSession,
+) -> None:
+    """Retrying the job would restart at page 1 and could hit the 15-minute
+    limit again forever on a long history, so the listing waits instead."""
+    journal_id = await _seed_journal(db_session, duration=3000)
+    await _link(db_session, journal_id, 111)
+    await db_session.flush()
+    client = _StubStravaClient(
+        [_activity(111, moving=3000, elapsed=3600)],
+        rate_limits=[StravaRateLimitError("15-minute limit", retry_after=42)],
+    )
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    await StravaDurationBackfillService(
+        api_client=client,  # type: ignore[arg-type]
+        user_id=USER_ID,
+        sleep=fake_sleep,
+    ).run(_session_factory(db_session))
+
+    assert slept == [42]
+    assert journal_id in await _correction_events(db_session)
+
+
+@pytest.mark.asyncio
+async def test_the_daily_rate_limit_stops_without_writing(
+    db_session: AsyncSession,
+) -> None:
+    journal_id = await _seed_journal(db_session, duration=3000)
+    await _link(db_session, journal_id, 111)
+    await db_session.flush()
+    client = _StubStravaClient(
+        [_activity(111, moving=3000, elapsed=3600)],
+        rate_limits=[StravaRateLimitError("daily limit", retry_after=None)],
+    )
+
+    with pytest.raises(StravaRateLimitError):
+        await StravaDurationBackfillService(
+            api_client=client,  # type: ignore[arg-type]
+            user_id=USER_ID,
+        ).run(_session_factory(db_session))
+
+    assert await _correction_events(db_session) == {}
