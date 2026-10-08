@@ -12,7 +12,7 @@ import random
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from arq import Retry, run_worker
+from arq import Retry, func, run_worker
 from arq.typing import StartupShutdown, WorkerSettingsBase
 from core_shared import (
     SharedARQWorkerSettings,
@@ -193,9 +193,35 @@ def _create_sync_service(
     Returns:
         Ready-to-use StravaSyncService.
     """
+    from strava_sync_service import StravaSyncService
+
+    return StravaSyncService(
+        api_client=_create_api_client(
+            user_id, auth_data, worker_settings, session_factory
+        ),
+        user_id=user_id,
+    )
+
+
+def _create_api_client(
+    user_id: str,
+    auth_data: dict[str, Any],
+    worker_settings: StravaSettings,
+    session_factory: Any,
+) -> Any:
+    """Create a StravaAPIClient authenticated as the user.
+
+    Args:
+        user_id: Internal user ID.
+        auth_data: Dict with encrypted_access_token and encrypted_refresh_token.
+        worker_settings: Strava worker settings (contains encryption key, client creds).
+        session_factory: Session factory used to persist refreshed tokens.
+
+    Returns:
+        Ready-to-use StravaAPIClient.
+    """
     from strava_api_client import StravaAPIClient
     from strava_auth_service import StravaAuthService
-    from strava_sync_service import StravaSyncService
 
     auth_service = StravaAuthService(
         encryption_key=worker_settings.encryption_key.get_secret_value(),
@@ -209,16 +235,11 @@ def _create_sync_service(
     async def on_token_refresh(tokens: Any) -> None:
         await _update_user_tokens(session_factory, user_id, tokens, auth_service)
 
-    api_client = StravaAPIClient(
+    return StravaAPIClient(
         access_token=access_token,
         refresh_token_value=refresh_token,
         auth_service=auth_service,
         on_token_refresh=on_token_refresh,
-    )
-
-    return StravaSyncService(
-        api_client=api_client,
-        user_id=user_id,
     )
 
 
@@ -824,6 +845,75 @@ async def periodic_sync_all_strava_accounts(
         raise
 
 
+# One-off backfill of fitness durations from moving to elapsed time. A long
+# history pages slowly under the rate limiter, so it gets more than arq's
+# default 300s job timeout.
+DURATION_BACKFILL_TIMEOUT_S = 1800
+
+
+def duration_backfill_marker(user_id: str) -> str:
+    """Redis key recording that the user's duration backfill has completed.
+
+    Delete it to have the next worker startup run the backfill again; a rerun
+    is harmless, as an already-corrected duration matches no expected value.
+    """
+    return f"strava:backfill:elapsed_duration:v1:{user_id}"
+
+
+@trace_arq_job
+async def backfill_strava_elapsed_durations(
+    ctx: dict[str, Any], user_id: str
+) -> dict[str, Any]:
+    """
+    ARQ task: correct the user's synced Strava durations to elapsed time.
+
+    Lists every activity and emits a compare-and-set correction for each
+    Strava journal (see ``duration_backfill``); the backend leaves any
+    duration the user has edited alone. On success records the user's marker
+    so the startup hook does not enqueue it again. A rate limit defers the
+    whole job: nothing is written until every page has been listed.
+
+    Args:
+        ctx: ARQ worker context (``redis``, ``session_factory``, ``settings``).
+        user_id: Internal user ID.
+
+    Returns:
+        Dict with the backfill status and counts.
+    """
+    from duration_backfill import StravaDurationBackfillService
+
+    session_factory = ctx["session_factory"]
+    worker_settings: StravaSettings = ctx["settings"]
+
+    auth_data = await _resolve_user_by_id(session_factory, user_id)
+    if auth_data is None:
+        logger.error("No Strava auth found for duration backfill", user_id=user_id)
+        return {"status": "error", "reason": "no_auth"}
+
+    api_client = _create_api_client(
+        user_id, auth_data, worker_settings, session_factory
+    )
+    try:
+        counts = await StravaDurationBackfillService(
+            api_client=api_client, user_id=user_id
+        ).run(session_factory)
+    except StravaRateLimitError as exc:
+        defer = _rate_limit_defer(exc)
+        logger.warning(
+            "Rate limit reached in duration backfill, retrying",
+            user_id=user_id,
+            defer_seconds=defer,
+        )
+        raise Retry(defer=defer) from exc
+    finally:
+        await api_client.close()
+
+    await ctx["redis"].set(
+        duration_backfill_marker(user_id), datetime.now(UTC).isoformat()
+    )
+    return {"status": "completed", **counts}
+
+
 async def _run_stream_consumer(session_factory: Any, worker_settings: Any) -> None:
     """Adapt the Strava stream consumer to the shared lifecycle factory's shape.
 
@@ -851,6 +941,42 @@ _on_startup, _on_shutdown = build_worker_lifecycle(
 )
 
 
+async def _enqueue_duration_backfills(ctx: dict[str, Any]) -> None:
+    """Enqueue the duration backfill for each user whose marker is unset.
+
+    The deterministic job id keeps a restart from queueing a second copy
+    while one is pending. Best-effort: a failure is logged and the worker
+    starts regardless, retrying on its next startup.
+    """
+    from sqlalchemy import text
+
+    try:
+        async with ctx["session_factory"]() as session:
+            result = await session.execute(
+                text("SELECT user_id FROM user_strava_auth ORDER BY user_id")
+            )
+            user_ids = [str(row.user_id) for row in result.fetchall()]
+
+        for user_id in user_ids:
+            if await ctx["redis"].exists(duration_backfill_marker(user_id)):
+                continue
+            await ctx["redis"].enqueue_job(
+                "backfill_strava_elapsed_durations",
+                user_id,
+                _job_id=f"strava-duration-backfill-v1-{user_id}",
+                _queue_name=STRAVA_ARQ_QUEUE_NAME,
+            )
+            logger.info("Enqueued Strava duration backfill", user_id=user_id)
+    except Exception:
+        logger.exception("Failed to enqueue Strava duration backfills")
+
+
+async def _on_startup_with_backfill(ctx: dict[str, Any]) -> None:
+    """Shared startup (session factory, stream consumer), then the backfill."""
+    await _on_startup(ctx)
+    await _enqueue_duration_backfills(ctx)
+
+
 # ARQ Worker Settings
 class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
     """ARQ worker configuration.
@@ -871,12 +997,16 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
         reconcile_in_progress_parents,
+        func(
+            backfill_strava_elapsed_durations,
+            timeout=DURATION_BACKFILL_TIMEOUT_S,
+        ),
     ]
 
     # Worker lifecycle (shared factory). Cast to arq's StartupShutdown Protocol:
     # the hooks accept ``ctx`` but the shared LifecycleHook alias is a plain
     # positional Callable, which the Protocol's named-parameter form rejects.
-    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup)
+    on_startup: StartupShutdown = cast("StartupShutdown", _on_startup_with_backfill)
     on_shutdown: StartupShutdown = cast("StartupShutdown", _on_shutdown)
 
     # Redis settings (shared helper).
