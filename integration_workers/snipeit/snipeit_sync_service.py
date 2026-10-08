@@ -245,7 +245,8 @@ class _GearUsage:
 
 # The check-in row of a checkout row, matched on the same (asset, journal).
 _CHECKIN_OF_CHECKOUT = (
-    "ci.integration_source = 'snipeit_checkin' "
+    "ci.user_id = co.user_id "
+    "AND ci.integration_source = 'snipeit_checkin' "
     "AND ci.external_id = replace(co.external_id, 'snipeit_checkout:', "
     "'snipeit_checkin:')"
 )
@@ -488,30 +489,44 @@ async def _lock_asset_maintenances(session: Any, asset_id: int) -> None:
     )
 
 
-async def _delete_maintenance_claim(session: Any, journal_id: int) -> None:
-    """Delete the journal's maintenance claim, if it has one."""
+async def _delete_maintenance_claim(
+    session: Any, journal_id: int, *, user_id: str
+) -> None:
+    """Delete ``user_id``'s maintenance claim on the journal, if it has one."""
     await session.execute(
         text("""
             DELETE FROM sync_metadata
-            WHERE integration_source = :claim_source
+            WHERE user_id = :user_id
+              AND integration_source = :claim_source
               AND external_id = :journal_id
         """),
-        {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "journal_id": str(journal_id)},
+        {
+            "user_id": user_id,
+            "claim_source": _MAINTENANCE_CLAIM_SOURCE,
+            "journal_id": str(journal_id),
+        },
     )
 
 
-async def _fetch_maintenance_claim(session: Any, journal_id: int) -> Any:
-    """The journal's maintenance claim row, with its age in seconds, or ``None``."""
+async def _fetch_maintenance_claim(
+    session: Any, journal_id: int, *, user_id: str
+) -> Any:
+    """``user_id``'s claim row on the journal, with its age in seconds, or ``None``."""
     result = await session.execute(
         text("""
             SELECT sync_status, reference_data,
                    extract(epoch from (now() - updated_at)) AS age_seconds
             FROM sync_metadata
-            WHERE integration_source = :claim_source
+            WHERE user_id = :user_id
+              AND integration_source = :claim_source
               AND external_id = :journal_id
             FOR UPDATE
         """),
-        {"claim_source": _MAINTENANCE_CLAIM_SOURCE, "journal_id": str(journal_id)},
+        {
+            "user_id": user_id,
+            "claim_source": _MAINTENANCE_CLAIM_SOURCE,
+            "journal_id": str(journal_id),
+        },
     )
     return result.fetchone()
 
@@ -842,11 +857,12 @@ class SnipeItSyncService:
                             text("""
                                 SELECT version_hash, internal_uuid
                                 FROM sync_metadata
-                                WHERE integration_source = 'snipeit'
+                                WHERE user_id = :user_id
+                                  AND integration_source = 'snipeit'
                                   AND external_id = :external_id
                                 FOR UPDATE
                             """),
-                            {"external_id": external_id},
+                            {"user_id": self._user_id, "external_id": external_id},
                         )
                         existing_meta = result.fetchone()
 
@@ -1081,10 +1097,12 @@ class SnipeItSyncService:
                         SET version_hash = :version_hash,
                             last_synced_at = now(),
                             updated_at = now()
-                        WHERE integration_source = 'snipeit'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit'
                           AND external_id = :external_id
                     """),
                     {
+                        "user_id": self._user_id,
                         "version_hash": updated_transformed.version_hash,
                         "external_id": external_id,
                     },
@@ -1223,11 +1241,13 @@ class SnipeItSyncService:
                         CAST(:asset_ids AS bigint[])
                     ) AS listed(maintenance_id, asset_id)
                     JOIN sync_metadata a
-                      ON a.integration_source = 'snipeit'
+                      ON a.user_id = :user_id
+                     AND a.integration_source = 'snipeit'
                      AND a.external_id = CAST(listed.asset_id AS text)
                      AND a.internal_uuid IS NOT NULL
                     LEFT JOIN sync_metadata m
-                      ON m.integration_source = 'snipeit_maintenance'
+                      ON m.user_id = :user_id
+                     AND m.integration_source = 'snipeit_maintenance'
                      AND m.external_id = 'snipeit_maint:' || listed.maintenance_id
                     WHERE m.id IS NULL
                        OR NOT (
@@ -1258,6 +1278,7 @@ class SnipeItSyncService:
                        )
                 """),
                 {
+                    "user_id": self._user_id,
                     "maintenance_ids": [record.id for record in on_an_asset],
                     "asset_ids": [record.asset_id for record in on_an_asset],
                     "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
@@ -1283,11 +1304,10 @@ class SnipeItSyncService:
         link is kept for the same reason. An echo row, a push row naming an
         imported journal, is deleted: the import's link names its record.
 
-        Sync rows record no user, and each user's sync asks their own Snipe-IT.
-        A row another user's live journal holds, by its push or its import
-        link, is left to that user's sync. A row no journal holds belongs to
-        nobody: every user's inbound sync would import its record as a new
-        journal anyway, so forgetting it changes nothing for anyone.
+        Each user's sync asks their own Snipe-IT, so only this user's rows are
+        candidates: another user's row for the same id names a record in their
+        instance. A row another user's live journal holds, by its push or its
+        import link, is left alone as well.
 
         Only reads are sent to Snipe-IT, so running this again is harmless.
 
@@ -1308,7 +1328,8 @@ class SnipeItSyncService:
                 text("""
                     SELECT m.external_id
                     FROM sync_metadata m
-                    WHERE m.integration_source = 'snipeit_maintenance'
+                    WHERE m.user_id = :user_id
+                      AND m.integration_source = 'snipeit_maintenance'
                       AND NOT EXISTS (
                           SELECT 1
                           FROM journals j
@@ -1385,7 +1406,8 @@ class SnipeItSyncService:
                 result = await session.execute(
                     text("""
                         DELETE FROM sync_metadata m
-                        WHERE m.integration_source = 'snipeit_maintenance'
+                        WHERE m.user_id = :user_id
+                          AND m.integration_source = 'snipeit_maintenance'
                           AND m.external_id = :external_id
                           AND NOT EXISTS (
                               SELECT 1
@@ -1404,6 +1426,7 @@ class SnipeItSyncService:
                         RETURNING m.id
                     """),
                     {
+                        "user_id": self._user_id,
                         "external_id": external_id,
                         "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
                     },
@@ -1450,10 +1473,11 @@ class SnipeItSyncService:
                     text("""
                         SELECT internal_uuid
                         FROM sync_metadata
-                        WHERE integration_source = 'snipeit'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit'
                           AND external_id = :external_id
                     """),
-                    {"external_id": asset_external_id},
+                    {"user_id": self._user_id, "external_id": asset_external_id},
                 )
                 asset_meta = asset_result.fetchone()
 
@@ -1492,11 +1516,12 @@ class SnipeItSyncService:
                                EXTRACT(EPOCH FROM now() - last_synced_at)
                                    AS age_seconds
                         FROM sync_metadata
-                        WHERE integration_source = 'snipeit_maintenance'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
                         FOR UPDATE
                     """),
-                    {"external_id": external_id},
+                    {"user_id": self._user_id, "external_id": external_id},
                 )
                 existing_meta = meta_result.fetchone()
 
@@ -1564,10 +1589,11 @@ class SnipeItSyncService:
                         text("""
                             UPDATE sync_metadata
                             SET internal_uuid = NULL
-                            WHERE integration_source = 'snipeit_maintenance'
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_maintenance'
                               AND external_id = :external_id
                         """),
-                        {"external_id": external_id},
+                        {"user_id": self._user_id, "external_id": external_id},
                     )
                 elif existing_meta and existing_journal_id is None:
                     # No link, and no journal named: either the create event
@@ -1827,7 +1853,9 @@ class SnipeItSyncService:
         # A failed attempt's record carries what was sent then, which an edit
         # since may have changed; one on another asset is not this record.
         async with session_factory() as session:
-            earlier_row = await _fetch_maintenance_claim(session, journal_id)
+            earlier_row = await _fetch_maintenance_claim(
+                session, journal_id, user_id=self._user_id
+            )
         _raise_if_claim_in_flight(journal_id, earlier_row)
         earlier_claim = (
             MaintenanceClaim.from_reference(earlier_row.reference_data)
@@ -2033,10 +2061,11 @@ class SnipeItSyncService:
                     text("""
                         SELECT 1
                         FROM sync_metadata
-                        WHERE integration_source = 'snipeit_maintenance'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
                     """),
-                    {"external_id": external_id},
+                    {"user_id": self._user_id, "external_id": external_id},
                 )
                 if recorded.fetchone():
                     return False
@@ -2071,7 +2100,9 @@ class SnipeItSyncService:
                     != "inserted"
                 ):
                     return False
-                await _delete_maintenance_claim(session, journal_id)
+                await _delete_maintenance_claim(
+                    session, journal_id, user_id=self._user_id
+                )
         logger.info(
             "Linked a Snipe-IT maintenance to the journal whose push created it",
             maintenance_id=maintenance.id,
@@ -2098,10 +2129,14 @@ class SnipeItSyncService:
             text("""
                 SELECT external_id
                 FROM sync_metadata
-                WHERE integration_source = 'snipeit_maintenance'
+                WHERE user_id = :user_id
+                  AND integration_source = 'snipeit_maintenance'
                   AND external_id = ANY(:external_ids)
             """),
-            {"external_ids": [f"snipeit_maint:{m.id}" for m in candidates]},
+            {
+                "user_id": self._user_id,
+                "external_ids": [f"snipeit_maint:{m.id}" for m in candidates],
+            },
         )
         recorded = {row.external_id for row in rows.fetchall()}
         other_claims = [
@@ -2150,10 +2185,15 @@ class SnipeItSyncService:
                     # Deleted since this push read it. Neither claiming nor
                     # linking is right: a record posted now belongs to nothing,
                     # and one whose response is lost leaves nothing to clean up.
-                    await _delete_maintenance_claim(session, journal_id)
+                    await _delete_maintenance_claim(
+                        session, journal_id, user_id=self._user_id
+                    )
                     return "journal_gone"
                 _raise_if_claim_in_flight(
-                    journal_id, await _fetch_maintenance_claim(session, journal_id)
+                    journal_id,
+                    await _fetch_maintenance_claim(
+                        session, journal_id, user_id=self._user_id
+                    ),
                 )
 
                 free = await self._free_maintenance(session, journal_id, candidates)
@@ -2168,7 +2208,9 @@ class SnipeItSyncService:
                     )
                     == "inserted"
                 ):
-                    await _delete_maintenance_claim(session, journal_id)
+                    await _delete_maintenance_claim(
+                        session, journal_id, user_id=self._user_id
+                    )
                     logger.info(
                         "Linked an existing Snipe-IT maintenance instead of creating one",
                         journal_id=journal_id,
@@ -2256,7 +2298,9 @@ class SnipeItSyncService:
                         journal_id=journal_id,
                         external_id=external_id,
                     )
-                    await _delete_maintenance_claim(session, journal_id)
+                    await _delete_maintenance_claim(
+                        session, journal_id, user_id=self._user_id
+                    )
                     return True
                 if outcome == "taken":
                     logger.error(
@@ -2265,7 +2309,9 @@ class SnipeItSyncService:
                         external_id=external_id,
                     )
                     return False
-                await _delete_maintenance_claim(session, journal_id)
+                await _delete_maintenance_claim(
+                    session, journal_id, user_id=self._user_id
+                )
         return False
 
     async def _release_maintenance_claim(
@@ -2274,7 +2320,9 @@ class SnipeItSyncService:
         """Remove the journal's claim once its record will not be created."""
         async with session_factory() as session:
             async with session.begin():
-                await _delete_maintenance_claim(session, journal_id)
+                await _delete_maintenance_claim(
+                    session, journal_id, user_id=self._user_id
+                )
 
     async def _fail_maintenance_claim(
         self, journal_id: int, session_factory: Any, error_message: str
@@ -2292,10 +2340,12 @@ class SnipeItSyncService:
                             SET sync_status = 'failed',
                                 error_message = :error_message,
                                 updated_at = now()
-                            WHERE integration_source = :claim_source
+                            WHERE user_id = :user_id
+                              AND integration_source = :claim_source
                               AND external_id = :journal_id
                         """),
                         {
+                            "user_id": self._user_id,
                             "claim_source": _MAINTENANCE_CLAIM_SOURCE,
                             "journal_id": str(journal_id),
                             "error_message": error_message[:255],
@@ -2386,10 +2436,12 @@ class SnipeItSyncService:
                             SET version_hash = :version_hash,
                                 last_synced_at = now(),
                                 updated_at = now()
-                            WHERE integration_source = 'snipeit_maintenance'
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_maintenance'
                               AND internal_uuid = :journal_id
                         """),
                         {
+                            "user_id": self._user_id,
                             "version_hash": version_hash,
                             "journal_id": str(journal_id),
                         },
@@ -2520,10 +2572,11 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         DELETE FROM sync_metadata
-                        WHERE integration_source = 'snipeit_maintenance'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_maintenance'
                           AND external_id = :external_id
                     """),
-                    {"external_id": external_id},
+                    {"user_id": self._user_id, "external_id": external_id},
                 )
 
         logger.info(
@@ -2645,11 +2698,12 @@ class SnipeItSyncService:
                         SELECT sync_status, reference_data,
                                extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
-                        WHERE integration_source = 'snipeit_checkout'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkout'
                           AND external_id = :external_id
                         FOR UPDATE SKIP LOCKED
                     """),
-                    {"external_id": external_id},
+                    {"user_id": self._user_id, "external_id": external_id},
                 )
                 row = checkout_meta_result.fetchone()
                 if row:
@@ -2679,10 +2733,11 @@ class SnipeItSyncService:
                         text("""
                             UPDATE sync_metadata
                             SET sync_status = 'pending', updated_at = now()
-                            WHERE integration_source = 'snipeit_checkout'
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_checkout'
                               AND external_id = :external_id
                         """),
-                        {"external_id": external_id},
+                        {"user_id": self._user_id, "external_id": external_id},
                     )
                 else:
                     insert_result = await session.execute(
@@ -2847,11 +2902,13 @@ class SnipeItSyncService:
                             error_message = NULL,
                             reference_data = :reference_data,
                             updated_at = now()
-                        WHERE integration_source = 'snipeit_checkout'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkout'
                           AND internal_uuid = :internal_uuid
                           AND external_id = :external_id
                     """),
                     {
+                        "user_id": self._user_id,
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "version_hash": version_hash,
@@ -2922,13 +2979,15 @@ class SnipeItSyncService:
                     LEFT JOIN sync_metadata ci
                         ON {_CHECKIN_OF_CHECKOUT}
                         AND ci.sync_status = 'success'
-                    WHERE co.integration_source = 'snipeit_checkout'
+                    WHERE co.user_id = :user_id
+                      AND co.integration_source = 'snipeit_checkout'
                       AND co.external_id LIKE :asset_prefix
                       AND co.external_id <> :external_id
                       AND (co.sync_status <> 'success' OR ci.id IS NULL)
                     LIMIT 1
                 """),
                 {
+                    "user_id": self._user_id,
                     "asset_prefix": f"snipeit_checkout:{asset_id}:%",
                     "external_id": pair.checkout_external_id,
                 },
@@ -2966,11 +3025,13 @@ class SnipeItSyncService:
                     text("""
                         UPDATE sync_metadata
                         SET reference_data = :reference_data, updated_at = now()
-                        WHERE integration_source = 'snipeit_checkout'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkout'
                           AND internal_uuid = :internal_uuid
                           AND external_id = :external_id
                     """),
                     {
+                        "user_id": self._user_id,
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "reference_data": json.dumps(
@@ -3184,11 +3245,13 @@ class SnipeItSyncService:
                                 || CAST(:claim AS jsonb)
                             )::text,
                             updated_at = now()
-                        WHERE integration_source = :source
+                        WHERE user_id = :user_id
+                          AND integration_source = :source
                           AND internal_uuid = :journal_id
                           AND external_id = :external_id
                     """),
                     {
+                        "user_id": self._user_id,
                         "claim": json.dumps({"snipeit_log_id": log_id}),
                         "source": source,
                         "journal_id": str(journal_id),
@@ -3244,10 +3307,12 @@ class SnipeItSyncService:
                             SET sync_status = 'failed',
                                 updated_at = now(),
                                 error_message = :error_message
-                            WHERE integration_source = 'snipeit_checkout'
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_checkout'
                               AND external_id = :external_id
                         """),
                         {
+                            "user_id": self._user_id,
                             "external_id": pair.checkout_external_id,
                             "error_message": error_message,
                         },
@@ -3313,10 +3378,11 @@ class SnipeItSyncService:
                 text("""
                     SELECT sync_status, reference_data
                     FROM sync_metadata
-                    WHERE integration_source = 'snipeit_checkout'
+                    WHERE user_id = :user_id
+                      AND integration_source = 'snipeit_checkout'
                       AND external_id = :external_id
                 """),
-                {"external_id": pair.checkout_external_id},
+                {"user_id": self._user_id, "external_id": pair.checkout_external_id},
             )
             checkout_row = checkout_result.fetchone()
 
@@ -3339,11 +3405,12 @@ class SnipeItSyncService:
                     text("""
                         SELECT sync_status, extract(epoch from (now() - updated_at)) as age_seconds
                         FROM sync_metadata
-                        WHERE integration_source = 'snipeit_checkin'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkin'
                           AND external_id = :external_id
                         FOR UPDATE SKIP LOCKED
                     """),
-                    {"external_id": external_id},
+                    {"user_id": self._user_id, "external_id": external_id},
                 )
                 row = checkin_meta_result.fetchone()
                 if row:
@@ -3366,9 +3433,11 @@ class SnipeItSyncService:
                         text("""
                             UPDATE sync_metadata
                             SET sync_status = 'pending', updated_at = now()
-                            WHERE integration_source = 'snipeit_checkin' AND external_id = :external_id
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_checkin'
+                              AND external_id = :external_id
                         """),
-                        {"external_id": external_id},
+                        {"user_id": self._user_id, "external_id": external_id},
                     )
                 else:
                     insert_result = await session.execute(
@@ -3577,11 +3646,13 @@ class SnipeItSyncService:
                             error_message = :error_message,
                             reference_data = :reference_data,
                             updated_at = now()
-                        WHERE integration_source = 'snipeit_checkin'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkin'
                           AND internal_uuid = :internal_uuid
                           AND external_id = :external_id
                     """),
                     {
+                        "user_id": self._user_id,
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "error_message": error_message,
@@ -3606,11 +3677,13 @@ class SnipeItSyncService:
                             SET sync_status = 'failed',
                                 updated_at = now(),
                                 error_message = :error_message
-                            WHERE integration_source = 'snipeit_checkin'
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_checkin'
                               AND internal_uuid = :internal_uuid
                               AND external_id = :external_id
                         """),
                         {
+                            "user_id": self._user_id,
                             "internal_uuid": str(journal_id),
                             "external_id": external_id,
                             "error_message": error_message,
@@ -3852,12 +3925,14 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         DELETE FROM sync_metadata
-                        WHERE (integration_source = 'snipeit_checkout'
-                               AND external_id = :checkout_external_id)
-                           OR (integration_source = 'snipeit_checkin'
-                               AND external_id = :checkin_external_id)
+                        WHERE user_id = :user_id
+                          AND ((integration_source = 'snipeit_checkout'
+                                AND external_id = :checkout_external_id)
+                               OR (integration_source = 'snipeit_checkin'
+                                   AND external_id = :checkin_external_id))
                     """),
                     {
+                        "user_id": self._user_id,
                         "checkout_external_id": pair.checkout_external_id,
                         "checkin_external_id": pair.checkin_external_id,
                     },
@@ -3917,13 +3992,15 @@ class SnipeItSyncService:
                         SET sync_status = 'failed',
                             error_message = :error_message,
                             updated_at = now()
-                        WHERE integration_source = 'snipeit_checkout'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkout'
                           AND external_id = :external_id
                           AND sync_status = 'success'
                           AND reference_data = :recorded_reference
                         RETURNING id
                     """),
                     {
+                        "user_id": self._user_id,
                         "external_id": pair.checkout_external_id,
                         "recorded_reference": recorded_reference,
                         "error_message": f"Superseded: {reason}",
@@ -3939,10 +4016,11 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         DELETE FROM sync_metadata
-                        WHERE integration_source = 'snipeit_checkin'
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkin'
                           AND external_id = :external_id
                     """),
-                    {"external_id": pair.checkin_external_id},
+                    {"user_id": self._user_id, "external_id": pair.checkin_external_id},
                 )
 
         logger.info(

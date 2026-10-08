@@ -1196,7 +1196,12 @@ first and the contract last:
   the account's owner threaded from the event or job), Immich (`_find_sync_metadata`,
   `_find_external_reference`, `_find_album_sync_metadata`, the merge unlink) and Strava
   (`_find_existing_journal_id`, `_find_stored_version_hash`). ✅
-- **15c** — Snipe-IT worker (sync service and stream consumer).
+- **15c** — Snipe-IT worker: all 18 UPDATE / DELETE statements in `snipeit_sync_service.py`, every
+  lookup or join on an asset, maintenance, claim or pair external id (including the
+  `unsettled_maintenance_ids` / `reconcile_deleted_maintenances` / `_return_abandoned_asset` joins),
+  the `_delete_maintenance_claim` / `_fetch_maintenance_claim` helpers (now `user_id`-keyed), the
+  check-in-of-checkout join (`ci.user_id = co.user_id`), and the stream consumer's `JournalDeleted`
+  fast path. ✅
 - **15d** — migration `0127`, removal of the cross-owner refusal, documentation.
 
 **Decisions (recorded during implementation):**
@@ -1213,6 +1218,11 @@ first and the contract last:
   `user_id` (Phase 4, through `contacts.user_id`); its join now also requires the link's owner.
   Both MCP external-id tools were already owner-scoped through their join; their foreign-link
   tests pin it.
+- **Snipe-IT test placement.** A flow whose only observable effect is the owner inserting a row for
+  an id another user holds (asset sync, checkout / check-in push) cannot be exercised while the
+  global index refuses that insert; those are covered by the both-owners tests in 15d. 15c tests the
+  rest directly against another user's row: claims, record reconciliation, pair unlock / finalise /
+  supersede / forget, and the check-in join.
 - **Strava's `journal_fitness_data` fallback is scoped too.** `_find_existing_journal_id` falls back
   to the fitness row's `strava_activity_id` for activities imported before sync rows existed; it
   matched any user's journal, so it now joins `journals` on the syncing user. Strava has no
