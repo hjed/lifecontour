@@ -156,6 +156,7 @@ Tracks synchronization state between external systems and internal entities:
 from core_shared import SyncMetadata, SyncStatus
 
 class SyncMetadata(Base):
+    user_id: str                   # Owner of the linked entity; part of the link key
     internal_id: Optional[int]     # FK to internal entity (int); null when UUID-keyed
     internal_uuid: Optional[str]   # FK to internal entity (UUID, e.g. Snipe-IT)
     integration_source: str        # 'google', 'immich', etc.
@@ -259,45 +260,50 @@ relocated to `SyncMetadataRepository` (`upsert_contact_link`, `repoint_contact_l
 returning `IntegrationLinkCollision`), `IntegrationLinkRepository`
 (`find_contact_with_birthday`) and `SqlContactRepository` (`contact_exists`).
 
-**Every link has an owner (ITER20-004 Phase 14 — expand).** `sync_metadata.user_id`
-records the owner of the linked entity. Migration `0126_add_user_id_to_sync_metadata`
-added it (nullable) and backfilled every existing row from the entity it points at:
-a contact link from `contacts.user_id` (`internal_id`), a journal link from
-`journals.user_id` (`internal_id`, or the journal id stored as text in
-`internal_uuid` by Snipe-IT), a gear link from `gear_items.user_id`
-(`internal_uuid`). A row without `internal_entity_type` — older rows, and every
-row the Snipe-IT worker writes — is typed by its `integration_source`. A row no
-entity owns (it names none, or one since deleted) is logged and given the site's
-one owner (`app.migrations.owner_derivation`; `-x sync_metadata_owner=<id>`
-overrides).
+**The link store is per-user (ITER20-004 Phases 14–15).** `sync_metadata.user_id`
+(`NOT NULL`) records the owner of the linked entity, and the canonical link key is
+**`(user_id, integration_source, external_id)`** — the unique index
+`uq_sync_metadata_user_source_external`. Two users may each link the same external
+id: Snipe-IT ids are per instance, so two users' instances hand out the same asset
+and maintenance ids, and two users can link one Google or Immich person.
 
-Every writer — the backend's `SyncMetadataRepository.upsert` /
-`upsert_contact_link` / `link_journal_if_unlinked`, `AlbumSyncReadRepository.upsert_link`,
-and the Google, Immich and Snipe-IT workers' inserts — stamps `user_id` and
-conflicts on the per-user key `uq_sync_metadata_user_source_external
-(user_id, integration_source, external_id)`. **Transition state:** the column is
-written but not yet read — lookups still key on `(integration_source,
-external_id)` — and the global unique index `idx_sync_metadata_integration_external`
-still exists. It is what refuses a write for an external id **another** user
-already links (the per-user conflict target finds no row, so the insert trips the
-global index), where the old `DO UPDATE` silently re-pointed the link:
+- **Writers** — the backend's `SyncMetadataRepository.upsert` /
+  `upsert_contact_link` / `link_journal_if_unlinked`, `AlbumSyncReadRepository.upsert_link`,
+  and the Google, Immich and Snipe-IT workers' inserts — stamp the owner and conflict
+  on the per-user key. A second user's write for the same external id is that
+  user's own row; nothing re-points or refuses it. A backend link write runs in a
+  savepoint (`execute_link_write`), so the `IntegrityError` a concurrent insert of
+  the same owner's link can raise (`ON CONFLICT` is race-safe only on its arbiter)
+  leaves the caller's unit of work usable, and is re-raised for a retry.
+- **Lookups, updates and deletes** take the owner. A statement that matches a link
+  by its external id (`=`, `= ANY`, `LIKE`, a join, a `NOT EXISTS`) and every
+  `UPDATE` / `DELETE` on `sync_metadata` filters `user_id = :user_id`:
+  `SyncMetadataRepository.find_by_external_id` / `find_and_lock` /
+  `update_reference_data` / the contact and journal merge repoints,
+  `IntegrationLinkRepository.find_link_by_external` /
+  `get_contact_ids_by_immich_person_ids`, `AlbumSyncReadRepository.find_link` /
+  `delete`, `ContactRepository.find_by_external_reference`, and every worker
+  statement. The owner is the event's (`payload.user_id`, or
+  `journal_data["user_id"]` on album and Snipe-IT maintenance events, which fail
+  when it is missing), the acting user's (REST, MCP, merges) or the sync job's.
+- **A lookup keyed only by an internal id** (a contact, journal or gear item id), or
+  joined through an owner-scoped entity (`journals.user_id`, `contacts.user_id`),
+  needs no owner filter: the link is a child row of an aggregate the caller has
+  already proven is the user's.
 
-- the backend raises `ExternalLinkOwnedByAnotherUserError` (the write runs in a
-  savepoint, so the caller's unit of work stays usable). Only a holder with a
-  *different, non-null* owner is another user's: a row with no owner yet, or the
-  same owner's link inserted concurrently (`ON CONFLICT` is race-safe only on its
-  arbiter index), re-raises the `IntegrityError` to be retried. An
-  inbound contact event fails permanently (dead-lettered, not retried), the
-  REST Immich conflict-resolve answers 409 and the MCP tool an error;
-- the workers count it as a failed item and carry on (Google's per-contact push,
-  Immich's per-person savepoint, Snipe-IT's per-asset/per-record session);
-- the `DO NOTHING` writers (`link_journal_if_unlinked`, the Snipe-IT push,
-  checkout and check-in rows) still skip a row the owner already has, but raise
-  on one another user has.
-
-Phase 15 makes the column `NOT NULL`, drops the global index, and keys every
-lookup (and every update/delete still keyed by `(integration_source,
-external_id)`) by the owner.
+Migration `0126_add_user_id_to_sync_metadata` added the column and backfilled every
+row from the entity it points at: a contact link from `contacts.user_id`
+(`internal_id`), a journal link from `journals.user_id` (`internal_id`, or the
+journal id stored as text in `internal_uuid` by Snipe-IT), a gear link from
+`gear_items.user_id` (`internal_uuid`). A row without `internal_entity_type` — older
+rows, and every row the Snipe-IT worker writes — is typed by its
+`integration_source`. A row no entity owns (it names none, or one since deleted) is
+logged and given the site's one owner (`app.migrations.sync_metadata_owner`, using
+`app.migrations.owner_derivation`; `-x sync_metadata_owner=<id>` overrides).
+Migration `0127_sync_metadata_user_scoped_unique_key` re-ran that assignment over
+rows a not-yet-deployed writer left unowned, made the column `NOT NULL`, and dropped
+the global `(integration_source, external_id)` index; its downgrade refuses while
+two owners hold one external id.
 
 #### Contact Sync Events Name the Owner
 

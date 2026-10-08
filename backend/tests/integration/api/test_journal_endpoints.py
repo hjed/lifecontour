@@ -3763,10 +3763,10 @@ class TestPhotoAlbumTypeManagement:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata (
-                    internal_id, integration_source, external_id,
+                    user_id, internal_id, integration_source, external_id,
                     last_synced_at, version_hash, sync_status
                 ) VALUES (
-                    :id, 'immich_album', 'album-x', now(), 'h', 'success'
+                    (SELECT user_id FROM journals WHERE id = :id), :id, 'immich_album', 'album-x', now(), 'h', 'success'
                 )
             """),
             {"id": journal_id},

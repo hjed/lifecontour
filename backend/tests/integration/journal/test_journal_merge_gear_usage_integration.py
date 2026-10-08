@@ -340,17 +340,19 @@ class TestMergeGearUsage:
             ]
         )
 
-    async def test_only_the_owners_snipeit_pairs_move(
+    async def test_only_the_owners_snipeit_pairs_move_or_block(
         self,
         merge_service: JournalMergeService,
         journal_repo: SqlJournalRepository,
         clean_database: AsyncConnection,
     ) -> None:
-        """A pair another user's instance keyed to the source's id is not the
-        owner's to move."""
+        """Pairs another user's instance keyed to these journal ids are not the
+        owner's: one on the source is not moved, and one on the target does not
+        count as the target already having that asset's pair."""
         target_id = await self._journal(journal_repo, "Trip")
         source_id = await self._journal(journal_repo, "Gear for the trip")
         for owner, journal_id, asset in (
+            ("other-user-456", target_id, 41),
             (USER_ID, source_id, 41),
             # Another user's pair keyed to the source id stays where it is.
             ("other-user-456", source_id, 43),
@@ -387,6 +389,7 @@ class TestMergeGearUsage:
             (r.user_id, r.internal_uuid, r.external_id) for r in rows
         ) == sorted(
             [
+                ("other-user-456", str(target_id), f"snipeit_checkout:41:{target_id}"),
                 (USER_ID, str(target_id), f"snipeit_checkout:41:{target_id}"),
                 ("other-user-456", str(source_id), f"snipeit_checkout:43:{source_id}"),
             ]

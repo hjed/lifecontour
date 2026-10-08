@@ -37,6 +37,7 @@ ALLOWED = frozenset(
         "backend/tests/integration/integrations/test_backfill_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_dedupe_bug_created_contacts_migration.py",
         "backend/tests/integration/integrations/test_drop_external_references_migration.py",
+        "backend/tests/integration/integrations/test_sync_metadata_user_scoped_key_migration.py",
         "backend/tests/integration/mcp/test_reassign_synthetic_owner_migration.py",
     }
 )

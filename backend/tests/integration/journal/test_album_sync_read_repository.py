@@ -15,9 +15,6 @@ from core_shared.models.journals import EventDateRange, Journal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.adapters.sql.sync_metadata_repository import (
-    ExternalLinkOwnedByAnotherUserError,
-)
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -49,15 +46,16 @@ async def _make_album_journal(
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id,
+                user_id, internal_id, integration_source, external_id,
                 last_synced_at, version_hash, sync_status,
                 internal_entity_type, external_entity_type, reference_data
             ) VALUES (
-                :internal_id, 'immich_album', :external_id, now(), 'h', 'success',
-                'journal', 'album', :reference_data
+                :user_id, :internal_id, 'immich_album', :external_id, now(), 'h',
+                'success', 'journal', 'album', :reference_data
             )
         """),
         {
+            "user_id": USER_ID,
             "internal_id": saved.id,
             "external_id": album_id,
             "reference_data": reference_data,
@@ -332,7 +330,7 @@ class TestAlbumLinkWrite:
 
 @pytest.mark.integration
 class TestAlbumLinkOwner:
-    """``upsert_link`` stamps the journal's owner and never takes another's link."""
+    """Album links are the journal owner's: stamped, read and deleted by owner."""
 
     async def test_upsert_link_stamps_the_owner(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
@@ -364,32 +362,34 @@ class TestAlbumLinkOwner:
         )
         assert owners == [USER_ID]
 
-    async def test_another_owners_album_link_is_refused(
+    async def test_another_owner_links_the_same_album_in_its_own_row(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
     ) -> None:
         journal_id = await _make_album_sync_metadata_only(
-            async_connection, album_id="album-taken"
+            async_connection, album_id="album-shared"
         )
 
-        with pytest.raises(ExternalLinkOwnedByAnotherUserError):
-            await repo.upsert_link(
-                journal_id,
-                "album-taken",
-                {"album_name": "Taken"},
-                version_hash="v2",
-                bump_anchor=True,
-                user_id="someone-else-456",
-            )
+        await repo.upsert_link(
+            journal_id,
+            "album-shared",
+            {"album_name": "Theirs"},
+            version_hash="v2",
+            bump_anchor=True,
+            user_id="someone-else-456",
+        )
 
         owners = (
             await async_connection.execute(
                 text(
                     "SELECT user_id, version_hash FROM sync_metadata "
-                    "WHERE external_id = 'album-taken'"
+                    "WHERE external_id = 'album-shared' ORDER BY user_id"
                 )
             )
         ).fetchall()
-        assert [tuple(row) for row in owners] == [(USER_ID, "h")]
+        assert [tuple(row) for row in owners] == [
+            (USER_ID, "h"),
+            ("someone-else-456", "v2"),
+        ]
 
     async def test_find_link_ignores_another_owners_album(
         self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection

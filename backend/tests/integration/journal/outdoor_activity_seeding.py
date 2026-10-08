@@ -268,11 +268,11 @@ class Seeder:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_uuid, integration_source, external_id,
+                    (user_id, internal_uuid, integration_source, external_id,
                      last_synced_at, version_hash, sync_status, retry_count,
                      created_at, updated_at)
                 VALUES
-                    (:journal_id, 'snipeit_checkin', :external_id, now(),
+                    ((SELECT user_id FROM journals WHERE id::text = :journal_id), :journal_id, 'snipeit_checkin', :external_id, now(),
                      'CHECKED_IN', :sync_status, 0, now(), now())
                 """
             ),
@@ -309,11 +309,11 @@ class Seeder:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_uuid, integration_source, external_id,
+                    (user_id, internal_uuid, integration_source, external_id,
                      last_synced_at, version_hash, sync_status, retry_count,
                      created_at, updated_at)
                 VALUES
-                    (:id, 'snipeit', :asset_id, now(), 'ASSET', 'success', 0,
+                    ((SELECT user_id FROM gear_items WHERE id::text = :id), :id, 'snipeit', :asset_id, now(), 'ASSET', 'success', 0,
                      now(), now())
                 """
             ),

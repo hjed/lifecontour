@@ -347,13 +347,15 @@ class TestSnipeItLinkOwner:
     """An asset another user already links is a failed asset, not a takeover."""
 
     @pytest.mark.asyncio
-    async def test_an_asset_another_user_links_fails_and_the_batch_continues(
+    async def test_an_asset_id_another_users_instance_uses_is_synced_too(
         self,
         sync_service: SnipeItSyncService,
         mock_transport: Any,
         async_connection: AsyncConnection,
         session_factory: Any,
     ) -> None:
+        """Snipe-IT ids are per instance: another user's asset 31 is not this
+        user's, so this user's asset 31 is imported with its own link."""
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
@@ -364,30 +366,23 @@ class TestSnipeItLinkOwner:
             """)
         )
         mock_transport.add_response(
-            "/hardware/31", json_data=_asset_json(31, "Their rope"), method="GET"
-        )
-        mock_transport.add_response(
-            "/hardware/32", json_data=_asset_json(32, "My rope"), method="GET"
+            "/hardware/31", json_data=_asset_json(31, "My rope"), method="GET"
         )
 
-        result = await sync_service.sync_asset_batch([31, 32], session_factory)
+        result = await sync_service.sync_asset_batch([31], session_factory)
 
-        assert (result["synced"], result["failed"]) == (1, 1)
+        assert (result["synced"], result["failed"]) == (1, 0)
         links = (
             await async_connection.execute(
                 text("""
-                    SELECT external_id, user_id, version_hash FROM sync_metadata
-                    WHERE integration_source = 'snipeit'
-                      AND external_id IN ('31', '32')
-                    ORDER BY external_id
+                    SELECT user_id, version_hash FROM sync_metadata
+                    WHERE integration_source = 'snipeit' AND external_id = '31'
+                    ORDER BY user_id
                 """)
             )
         ).fetchall()
-        assert [(row.external_id, row.user_id) for row in links] == [
-            ("31", "other-user"),
-            ("32", "user-123"),
-        ]
+        assert [row.user_id for row in links] == ["other-user", "user-123"]
         assert links[0].version_hash == "theirs"
-        assert [row.name for row in await _gear_rows_for(async_connection, "32")] == [
+        assert [row.name for row in await _gear_rows_for(async_connection, "31")] == [
             "My rope"
         ]

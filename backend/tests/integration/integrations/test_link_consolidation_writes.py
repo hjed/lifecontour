@@ -16,11 +16,7 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.outbox_event_processor import (
-    OutboxEventProcessingError,
-    OutboxEventProcessor,
-    PermanentOutboxEventProcessingError,
-)
+from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
@@ -226,50 +222,22 @@ class TestLinkConsolidationWrites:
         assert json.loads(row.reference_data)["synced_tags"] == ["Family"]
 
 
+async def _google_links(conn: AsyncConnection, external_id: str) -> set[Any]:
+    result = await conn.execute(
+        text(
+            "SELECT user_id, internal_id FROM sync_metadata "
+            "WHERE integration_source = 'google' AND external_id = :eid"
+        ),
+        {"eid": external_id},
+    )
+    return {tuple(row) for row in result.fetchall()}
+
+
 @pytest.mark.integration
 @pytest.mark.usefixtures("clean_database")
 class TestInboundLinkOwner:
-    """An inbound contact never takes over an external id another user links."""
-
-    @pytest.mark.asyncio
-    async def test_another_users_link_fails_the_event_permanently(
-        self, async_connection: AsyncConnection
-    ) -> None:
-        external_id = "people/cTaken"
-        # Another user's link that names no contact yet, so the idempotency
-        # check does not short-circuit and the creation reaches the link write.
-        await async_connection.execute(
-            text(
-                "INSERT INTO sync_metadata "
-                "(user_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status) "
-                "VALUES ('other-user-456', 'google', :eid, now(), 'theirs', 'pending')"
-            ),
-            {"eid": external_id},
-        )
-        processor = OutboxEventProcessor(
-            build_contact_service(async_connection), async_connection
-        )
-
-        with pytest.raises(PermanentOutboxEventProcessingError):
-            await processor.process_event(
-                _contact_event(
-                    "contact.created",
-                    external_id=external_id,
-                    first_name="Mine",
-                    last_name="Too",
-                    etag="etag-mine",
-                    tag="VIP",
-                )
-            )
-
-        row = await _sync_metadata_row(async_connection, external_id)
-        assert row is not None
-        assert (row.user_id, row.internal_id, row.version_hash) == (
-            "other-user-456",
-            None,
-            "theirs",
-        )
+    """An inbound contact is linked for its event's owner, whoever else links
+    the same external id."""
 
     @pytest.mark.asyncio
     async def test_another_users_link_is_not_this_users_processed_event(
@@ -277,7 +245,7 @@ class TestInboundLinkOwner:
     ) -> None:
         """The idempotency check reads the event owner's links only: another
         user's contact for the same external id never answers this user's
-        ``contact.created`` as already processed."""
+        ``contact.created`` as already processed. Both links then exist."""
         external_id = "people/cTheirs"
         their_contact = await seed_contact(
             async_connection, user_id="other-user-456", first_name="Theirs"
@@ -294,53 +262,20 @@ class TestInboundLinkOwner:
             build_contact_service(async_connection), async_connection
         )
 
-        # Until the global key goes the link write is refused; what matters is
-        # that the event was not resolved to the other user's contact.
-        with pytest.raises(PermanentOutboxEventProcessingError):
-            await processor.process_event(
-                _contact_event(
-                    "contact.created",
-                    external_id=external_id,
-                    first_name="Mine",
-                    last_name="Too",
-                    etag="etag-mine",
-                    tag="VIP",
-                )
+        result = await processor.process_event(
+            _contact_event(
+                "contact.created",
+                external_id=external_id,
+                first_name="Mine",
+                last_name="Too",
+                etag="etag-mine",
+                tag="VIP",
             )
-
-    @pytest.mark.asyncio
-    async def test_an_update_whose_link_has_no_owner_yet_is_retried(
-        self, async_connection: AsyncConnection
-    ) -> None:
-        """A link written owner-less (a pre-release writer, mid rolling deploy)
-        does not match the owner-keyed upsert. The update fails retryably
-        rather than being acknowledged with the link's version hash stale."""
-        external_id = "people/cUnowned"
-        contact_id = await seed_contact(
-            async_connection, first_name="Old", last_name="Name"
-        )
-        await _seed_google_link(
-            async_connection,
-            external_id=external_id,
-            internal_id=contact_id,
-            version_hash="old-etag",
-            reference_data=json.dumps({"resource_name": external_id}),
-            user_id=None,
-        )
-        processor = OutboxEventProcessor(
-            build_contact_service(async_connection), async_connection
         )
 
-        with pytest.raises(OutboxEventProcessingError) as failed:
-            await processor.process_event(
-                _contact_event(
-                    "contact.updated",
-                    external_id=external_id,
-                    first_name="New",
-                    last_name="Name",
-                    etag="new-etag",
-                    tag="VIP",
-                )
-            )
-
-        assert not isinstance(failed.value, PermanentOutboxEventProcessingError)
+        assert result["status"] == "success"
+        assert result["contact_id"] != their_contact
+        assert await _google_links(async_connection, external_id) == {
+            ("other-user-456", their_contact),
+            (TEST_USER_ID, result["contact_id"]),
+        }

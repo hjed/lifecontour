@@ -411,17 +411,13 @@ class TestPushLinkOwner:
         ).scalar_one()
         assert owner == CONTACT_OWNER
 
-    async def test_a_resource_another_user_links_is_a_failed_contact(
+    async def test_a_resource_another_user_links_is_linked_for_this_user_too(
         self,
         db_session: AsyncSession,
         push_contact_data: dict,  # type: ignore[type-arg]
     ) -> None:
-        """The global index refuses the write and the push counts an error.
-
-        The failed contact's rollback also discards this test's seed (the
-        fixture's transaction), so the row itself is not re-read here; that
-        the other owner's row survives is the backend repository suite's.
-        """
+        """Another user's link for the same resource name is theirs: the push
+        links this user's contact in its own row beside it."""
         contact_id = push_contact_data["contact_id"]
         await db_session.execute(
             text(
@@ -444,5 +440,15 @@ class TestPushLinkOwner:
             user_id=CONTACT_OWNER,
         )
 
-        assert result["error_count"] == 1
-        assert result["pushed_count"] == 0
+        assert result["error_count"] == 0
+        assert result["pushed_count"] == 1
+        links = await db_session.execute(
+            text(
+                "SELECT user_id, internal_id FROM sync_metadata "
+                "WHERE external_id = 'people/c999'"
+            )
+        )
+        assert {tuple(row) for row in links.fetchall()} == {
+            ("other-user", 4242),
+            (CONTACT_OWNER, contact_id),
+        }

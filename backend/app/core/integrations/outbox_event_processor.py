@@ -41,7 +41,6 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import keep_archived
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
-    ExternalLinkOwnedByAnotherUserError,
     SyncMetadataRepository,
 )
 from app.core.integrations.utils.version_hash import calculate_contact_version_hash
@@ -212,13 +211,6 @@ class OutboxEventProcessor:
                 message="Outbox event has permanent invalid payload",
             )
             raise
-        except ExternalLinkOwnedByAnotherUserError as e:
-            # Another user already links this external id; retrying cannot
-            # change that, and the link is never re-pointed to this owner.
-            self._log_processing_failure(
-                event, e, message="Outbox event links an id another user holds"
-            )
-            raise PermanentOutboxEventProcessingError(str(e)) from e
         except Exception as e:
             self._log_processing_failure(
                 event, e, message="Failed to process outbox event"
@@ -906,8 +898,6 @@ class OutboxEventProcessor:
                 external_entity_type="person",
                 reference_data=json.dumps(initial_ref_data),
             )
-        except ExternalLinkOwnedByAnotherUserError:
-            raise
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to write sync_metadata link for contact "
@@ -1154,11 +1144,10 @@ class OutboxEventProcessor:
                 internal_entity_type="contact",
                 external_entity_type="person",
             )
-        except ExternalLinkOwnedByAnotherUserError, IntegrityError:
+        except IntegrityError:
             # The write ran in a savepoint, so swallowing it would commit the
-            # contact with a stale link: a link another user holds fails the
-            # event for good, one with no owner yet (or a concurrent insert of
-            # the owner's own) fails it to be retried.
+            # contact with a stale link: a concurrent insert of the owner's own
+            # link fails the event to be retried.
             raise
         except Exception as e:  # noqa: BLE001
             logger.warning(
