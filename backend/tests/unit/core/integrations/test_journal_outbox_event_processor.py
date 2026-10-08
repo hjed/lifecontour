@@ -332,6 +332,8 @@ class TestJournalOutboxEventProcessor:
         """Create mock database connection."""
         conn = AsyncMock(spec=AsyncConnection)
         conn.execute = AsyncMock()
+        # The sync_metadata link write runs in a savepoint.
+        conn.begin_nested = AsyncMock()
         return conn
 
     @pytest.fixture
@@ -1386,6 +1388,8 @@ class TestStravaFitnessDataProcessing:
         """Create mock database connection."""
         conn = AsyncMock(spec=AsyncConnection)
         conn.execute = AsyncMock()
+        # The sync_metadata link write runs in a savepoint.
+        conn.begin_nested = AsyncMock()
         return conn
 
     @pytest.fixture
@@ -1895,6 +1899,8 @@ class TestGPXRouteAndSyncMetadata:
     def mock_connection(self) -> AsyncMock:
         conn = AsyncMock(spec=AsyncConnection)
         conn.execute = AsyncMock()
+        # The sync_metadata link write runs in a savepoint.
+        conn.begin_nested = AsyncMock()
         return conn
 
     @pytest.fixture
@@ -2093,6 +2099,8 @@ class TestGPXRouteAndSyncMetadata:
         assert params["external_id"] == "99999"
         assert params["version_hash"] == version_hash
         assert params["internal_id"] == 42
+        # The link belongs to the journal's owner.
+        assert params["user_id"] == _make_journal().user_id
 
     @pytest.mark.asyncio
     async def test_persist_sync_metadata_skips_for_google(
@@ -2140,6 +2148,8 @@ class TestStravaMatchDetectionEmission:
     def mock_connection(self) -> AsyncMock:
         conn = AsyncMock(spec=AsyncConnection)
         conn.execute = AsyncMock()
+        # The sync_metadata link write runs in a savepoint.
+        conn.begin_nested = AsyncMock()
         return conn
 
     @pytest.fixture
@@ -3258,6 +3268,8 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
     def mock_connection(self) -> AsyncMock:
         conn = AsyncMock(spec=AsyncConnection)
         conn.execute = AsyncMock()
+        # The sync_metadata link write runs in a savepoint.
+        conn.begin_nested = AsyncMock()
         return conn
 
     @pytest.fixture

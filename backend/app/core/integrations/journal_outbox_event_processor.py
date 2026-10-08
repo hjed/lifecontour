@@ -487,6 +487,7 @@ class JournalOutboxEventProcessor:
         # Save sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
             journal_id=created_journal.id,
+            user_id=created_journal.user_id,
             event_data=payload.model_dump(),
         )
 
@@ -771,6 +772,7 @@ class JournalOutboxEventProcessor:
         # Update sync metadata for integration tracking (Strava-sourced events)
         await self._persist_sync_metadata(
             journal_id=existing_journal_id,
+            user_id=existing_journal.user_id,
             event_data=payload.model_dump(),
         )
 
@@ -2647,6 +2649,7 @@ class JournalOutboxEventProcessor:
     async def _persist_sync_metadata(
         self,
         journal_id: int,
+        user_id: str,
         event_data: dict[str, Any],
     ) -> None:
         """Create or update SyncMetadata for Strava-sourced events.
@@ -2657,6 +2660,7 @@ class JournalOutboxEventProcessor:
 
         Args:
             journal_id: ID of the journal linked to this sync record.
+            user_id: The journal's owner, who owns the link.
             event_data: The full outbox event data dict.
         """
         integration_source = event_data.get("integration_source")
@@ -2687,6 +2691,7 @@ class JournalOutboxEventProcessor:
         sync_metadata_repo = SyncMetadataRepository(self.connection)
 
         await sync_metadata_repo.upsert(
+            user_id=user_id,
             internal_id=journal_id,
             integration_source="strava",
             external_id=sync_data.strava_activity_id,

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from immich_models import ImmichPerson
 from immich_sync_service import ImmichSyncService
@@ -169,3 +170,68 @@ class TestAutoLinkDualWrite:
         assert row.internal_id == contact_id
         assert row.internal_entity_type == "contact"
         assert row.external_entity_type == "person"
+
+
+class TestLinkOwner:
+    """The worker's link is the syncing user's and never re-points another's."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_sync_metadata_stamps_the_syncing_user(
+        self,
+        sync_service: ImmichSyncService,
+        async_connection: Any,
+    ) -> None:
+        await sync_service._upsert_sync_metadata(
+            external_id="person-owned",
+            internal_id=4343,
+            version_hash="vh-1",
+        )
+        await sync_service._upsert_sync_metadata(
+            external_id="person-owned",
+            internal_id=4343,
+            version_hash="vh-2",
+        )
+
+        rows = (
+            await async_connection.execute(
+                text(
+                    "SELECT user_id, version_hash FROM sync_metadata "
+                    "WHERE external_id = 'person-owned'"
+                )
+            )
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [(CONTACT_OWNER, "vh-2")]
+
+    @pytest.mark.asyncio
+    async def test_a_person_another_user_links_is_refused(
+        self,
+        sync_service: ImmichSyncService,
+        async_connection: Any,
+    ) -> None:
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (user_id, internal_id, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status)
+                VALUES ('other-user', 77, 'immich', 'person-taken',
+                        now(), 'theirs', 'success')
+            """)
+        )
+
+        with pytest.raises(IntegrityError):
+            async with async_connection.begin_nested():
+                await sync_service._upsert_sync_metadata(
+                    external_id="person-taken",
+                    internal_id=4444,
+                    version_hash="mine",
+                )
+
+        rows = (
+            await async_connection.execute(
+                text(
+                    "SELECT user_id, internal_id, version_hash FROM sync_metadata "
+                    "WHERE external_id = 'person-taken'"
+                )
+            )
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [("other-user", 77, "theirs")]

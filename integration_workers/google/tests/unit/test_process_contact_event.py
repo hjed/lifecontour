@@ -585,6 +585,7 @@ class TestPushContactToGoogleForEvent:
                 google_account_email="test@gmail.com",
                 external_id=None,
                 version_hash=None,
+                user_id=OWNER,
             )
 
         assert result["status"] == "created"
@@ -646,6 +647,7 @@ class TestPushContactToGoogleForEvent:
                 google_account_email="test@gmail.com",
                 external_id="people/c123",
                 version_hash="etag-old",
+                user_id=OWNER,
             )
 
         assert result["status"] == "updated"
@@ -674,6 +676,7 @@ class TestPushContactToGoogleForEvent:
             google_account_email="test@gmail.com",
             external_id=None,
             version_hash=None,
+            user_id=OWNER,
         )
 
         assert result["status"] == "skipped"

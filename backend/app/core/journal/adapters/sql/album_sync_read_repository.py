@@ -23,6 +23,10 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    execute_link_write,
+)
+
 logger = structlog.get_logger()
 
 INTEGRATION_SOURCE = "immich_album"
@@ -83,6 +87,7 @@ class AlbumSyncReadRepository:
         *,
         version_hash: str,
         bump_anchor: bool,
+        user_id: str,
     ) -> None:
         """Upsert the canonical ``(journal, album)`` link in ``sync_metadata``.
 
@@ -99,6 +104,12 @@ class AlbumSyncReadRepository:
         Owning ``updated_at`` here (rather than via a separate generic
         ``sync_metadata`` upsert, which would unconditionally bump it) is what
         keeps the anchor meaningful on the consolidated link store.
+
+        The link is stamped with, and keyed by, the journal's owner
+        ``user_id``.
+
+        Raises:
+            ExternalLinkOwnedByAnotherUserError: Another user links the album.
         """
         now = datetime.now(UTC)
         # The anchor for a freshly inserted row: advancing it (now) is only
@@ -106,19 +117,20 @@ class AlbumSyncReadRepository:
         insert_anchor = now if bump_anchor else _UNSYNCED_ANCHOR
 
         # A SQL CASE keeps the conditional anchor parametrised (no f-strings).
-        await self.conn.execute(
+        await execute_link_write(
+            self.conn,
             text("""
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id, last_synced_at,
-                     version_hash, sync_status, retry_count,
+                    (user_id, internal_id, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
                      internal_entity_type, external_entity_type, reference_data,
                      created_at, updated_at)
                 VALUES
-                    (:journal_id, :integration_source, :external_entity_id, :now,
-                     :version_hash, 'success', 0,
+                    (:user_id, :journal_id, :integration_source, :external_entity_id,
+                     :now, :version_hash, 'success', 0,
                      :internal_entity_type, :external_entity_type, :reference_data,
                      :now, :insert_anchor)
-                ON CONFLICT (integration_source, external_id)
+                ON CONFLICT (user_id, integration_source, external_id)
                 DO UPDATE SET
                     internal_id = EXCLUDED.internal_id,
                     last_synced_at = EXCLUDED.last_synced_at,
@@ -134,6 +146,7 @@ class AlbumSyncReadRepository:
                     END
             """),
             {
+                "user_id": user_id,
                 "journal_id": journal_id,
                 "integration_source": INTEGRATION_SOURCE,
                 "external_entity_id": album_id,
@@ -145,6 +158,9 @@ class AlbumSyncReadRepository:
                 "insert_anchor": insert_anchor,
                 "bump_anchor": bump_anchor,
             },
+            user_id=user_id,
+            integration_source=INTEGRATION_SOURCE,
+            external_id=album_id,
         )
 
     async def find_by_journal_id(self, journal_id: int) -> dict[str, Any] | None:

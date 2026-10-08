@@ -281,7 +281,7 @@ class JournalMergeService:
 
         # 7. Re-point integration links in the canonical link store
         await self._repoint_integration_links(
-            target_id, source_id, fitness_merge_mode, transaction
+            target_id, source_id, target.user_id, fitness_merge_mode, transaction
         )
         await self._repoint_gear_usage_pairs(target_id, source_id, transaction)
 
@@ -610,6 +610,7 @@ class JournalMergeService:
         self,
         target_id: int,
         source_id: int,
+        owner_id: str,
         fitness_merge_mode: FitnessMergeMode,
         transaction: AsyncConnection,
     ) -> None:
@@ -656,9 +657,10 @@ class JournalMergeService:
             await sync_metadata_repo.link_journal_if_unlinked(
                 target_id,
                 STRAVA_SOURCE,
-                source_activity_id,
-                STRAVA_ACTIVITY_ENTITY_TYPE,
-                transaction,
+                user_id=owner_id,
+                external_id=source_activity_id,
+                external_entity_type=STRAVA_ACTIVITY_ENTITY_TYPE,
+                transaction=transaction,
             )
 
         if collisions:

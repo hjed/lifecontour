@@ -913,11 +913,12 @@ name-match read only the owner's contacts.
 
 #### Phase 14: Per-user link store — expand and backfill
 
-**PR Size:** ~400 lines (`core_shared`, backend, all four workers' upserts)
+**PR Size:** ~400 lines estimated (`core_shared`, backend, all four workers' upserts); ~1,850
+measured, shipped as one PR (see *Decisions*)
 
-> **Migration number:** indicative `0125_add_user_id_to_sync_metadata.py`.
+> **Migration number:** `0126_add_user_id_to_sync_metadata.py`.
 
-- [ ] Migration `0125`: `sync_metadata.user_id VARCHAR(50)` **nullable**; backfill from the owning
+- [x] Migration `0126`: `sync_metadata.user_id VARCHAR(50)` **nullable**; backfill from the owning
   entity by `internal_entity_type` (`contact` → `contacts.user_id`, `journal` → `journals.user_id`,
   `gear_item` → `gear_items.user_id` via `internal_uuid`; a NULL entity type is derived from
   `integration_source` with the `0089` mapping); rows still unresolved (orphans) take the
@@ -926,7 +927,7 @@ name-match read only the owner's contacts.
   external_id)` now**, alongside the global one — valid while the column is nullable because
   PostgreSQL treats NULLs as distinct, and required now so that writers have a conflict target to
   move to before Phase 15 drops the global index.
-- [ ] `SyncMetadata` model column. **Every one of the seven writers** listed in *Grounding
+- [x] `SyncMetadata` model column. **Every one of the seven writers** listed in *Grounding
   Findings* stamps `user_id` **and moves its `ON CONFLICT` target to
   `(user_id, integration_source, external_id)`** in this phase: backend `upsert`,
   `upsert_contact_link`, `repoint_contact_links` and `link_journal_if_unlinked` (the journal's
@@ -934,19 +935,19 @@ name-match read only the owner's contacts.
   keep inserting owner-less rows after the backfill), the album `upsert_link`, and the Google,
   Immich, Snipe-IT and Strava upserts (the job's user). No writer may still name the global key
   when Phase 15 drops it.
-- [ ] **The still-present global index is the cross-owner guard.** With writers conflicting on the
+- [x] **The still-present global index is the cross-owner guard.** With writers conflicting on the
   per-user key, a same-owner re-sync updates as before, and a write for the same
   `(integration_source, external_id)` by a *different* owner finds no per-user conflict, attempts
   the insert, and trips `idx_sync_metadata_integration_external` — an `IntegrityError` the backend
   surfaces as the existing `IntegrationLinkCollision` and the workers log as a failed item (the sync
   continues). Today's `DO UPDATE` silently re-points such a row to the later writer, so this is a
   strict improvement, and no `WHERE` clause on the update is needed.
-- [ ] Reads unchanged in this phase (still by `(source, external_id)`).
+- [x] Reads unchanged in this phase (still by `(source, external_id)`).
 
 **Required Test Coverage:**
-- [ ] **Integration (migration, first):** each entity type backfills from its owner; orphan rows
+- [x] **Integration (migration, first):** each entity type backfills from its owner; orphan rows
   take the derived owner and are logged; re-run is idempotent; downgrade drops the column.
-- [ ] **Integration (backend repository) + unit (each worker):** every writer sets `user_id` and
+- [x] **Integration (backend repository) + unit (each worker):** every writer sets `user_id` and
   conflicts on the per-user key (a same-owner re-sync updates in place; `link_journal_if_unlinked`
   stamps the journal's owner); an upsert for the same `(source, external_id)` by a different owner
   raises / reports a collision and leaves the first owner's row intact. A grep gate in the PR:
@@ -955,8 +956,63 @@ name-match read only the owner's contacts.
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/integration-architecture.md` — `sync_metadata` gains an owner (transition
+- [x] `docs/architecture/integration-architecture.md` — `sync_metadata` gains an owner (transition
   state: written, not yet read).
+
+**Status:** ✅ DONE — every link carries its entity's owner, every writer stamps it and conflicts on
+`(user_id, integration_source, external_id)`, and a write for an external id another user links is
+refused instead of re-pointed. Lookups are unchanged until Phase 15.
+
+**Decisions (recorded during implementation):**
+- **One PR, not a stack (user decision).** The measured diff is ~1,850 lines (about two thirds tests and docs). Once a writer
+  conflicts on the per-user key, a row written owner-less by a writer not yet updated no longer
+  matches it, and the next owner-aware upsert for that row trips the global index. Shipping every
+  writer together means that state never exists after the backfill. Tests that seeded owner-less
+  rows before running a writer now seed an owner.
+- **The collision is a new error, not `IntegrationLinkCollision` (user decision).** That class is
+  the dataclass the merge repoints *return*; it is never raised. The backend writers run their
+  insert through `execute_link_write` (`sync_metadata_repository.py`), which wraps it in a
+  savepoint and turns a violation of `idx_sync_metadata_integration_external` into
+  `ExternalLinkOwnedByAnotherUserError(integration_source, external_id)` — never naming the other
+  owner. It first reads who holds the key: only a *different, non-null* owner is another user's.
+  A holder with no owner (written owner-less by a pre-release writer during a rolling deploy) or
+  the same owner (two concurrent inserts of one link: `ON CONFLICT` is race-safe only on its
+  arbiter, so the loser can trip the global index — augment review on #1710) re-raises the
+  `IntegrityError` for the caller to retry. The `contact.updated` processor re-raises both errors
+  from its final link write, which it used to log and swallow: under the savepoint, swallowing
+  would now commit the contact with a stale link instead of failing the event.
+  The inbound contact processor fails the event permanently; the REST Immich
+  conflict-resolve answers 409 and the MCP tool an error; the Strava and album processors let it
+  fail the event through their generic error (retried, then dead-lettered). The workers do not
+  translate it: Google's per-contact push rolls back and counts an error, Immich's per-person
+  savepoint contains it, Snipe-IT's per-asset/per-record session fails that item. A Google
+  *event* push (not the periodic batch) re-raises it, as it does any error, so the event is
+  retried and then dead-lettered.
+- **The entity type of an untyped row comes from its source.** The Snipe-IT worker never writes
+  `internal_entity_type`, and `snipeit_checkin` / `snipeit_maintenance_claim` were added after the
+  `0089` mapping, so `0126` extends it (both → `journal`). Snipe-IT keeps a journal id as text in
+  `internal_uuid`; the join casts it only when it is 1–9 digits, so a gear UUID never reaches the
+  cast.
+- **Orphans** are every row still unowned after the joins: rows naming no entity (an imported
+  maintenance row, a push row whose journal was deleted) and rows naming a deleted entity
+  (`sync_metadata` has no FK). Each is logged, then assigned the derived owner; the derivation runs
+  only when an orphan exists, so a site with none never refuses.
+- **`DO NOTHING` writers** (`link_journal_if_unlinked`; Snipe-IT push, checkout and check-in rows)
+  still skip a row the owner already holds, but now raise on a row another user holds. A journal
+  merge (one owner, Phase 11) therefore fails rather than silently leaving the other user's link.
+- **Updates and deletes are unchanged.** `repoint_contact_links` / `repoint_journal_links` were
+  listed above as writers but contain no insert (UPDATE/DELETE only); they move a link between
+  entities of one owner. They are on the Phase 15 list below.
+- **`run_alembic` returns alembic's output** (stdout + stderr, where its log lines go), so the
+  migration test asserts that each orphan is logged.
+
+**Follow-ups (found in Phase 14):**
+- **Phase 15 must scope every UPDATE / DELETE keyed by `(integration_source, external_id)` or by
+  the internal id**, not only the reads: once the global index goes, each would match every
+  user's row. Today: `SyncMetadataRepository.update_reference_data`, the repoint UPDATE/DELETE
+  pairs in `repoint_contact_links` / `repoint_journal_links`, `AlbumSyncReadRepository.delete`,
+  the Snipe-IT pair UPDATE in `journal_merge_service.py`, Google `worker.py` (2), Immich
+  `worker.py` (1) and 19 statements in `snipeit_sync_service.py`.
 
 ---
 
@@ -964,14 +1020,16 @@ name-match read only the owner's contacts.
 
 **PR Size:** ~300 lines
 
-> **Migration number:** indicative `0126_sync_metadata_user_scoped_unique_key.py`.
+> **Migration number:** indicative `0127_sync_metadata_user_scoped_unique_key.py`.
 
-- [ ] Migration `0126`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
+- [ ] Migration `0127`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
   not-yet-deployed writer during the Phase 14 rollout); `SET NOT NULL`; drop
   `idx_sync_metadata_integration_external`. The per-user unique index already exists and every
   writer already conflicts on it (Phase 14), so dropping the global index invalidates no conflict
   target and no sync write fails across the deploy. Downgrade recreates the global index (refusing
   if two owners now hold the same external id) and makes the column nullable again.
+- [ ] Every UPDATE / DELETE on `sync_metadata` keyed by `(integration_source, external_id)` or
+  the internal id is scoped by the owner (list in Phase 14's *Follow-ups*).
 - [ ] `SyncMetadataRepository.find_by_external_id(user_id, source, external_id)`, `find_and_lock`,
   `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`;
   the inbound consumer's idempotency check uses the event's owner; MCP
@@ -1028,7 +1086,7 @@ name-match read only the owner's contacts.
 **PR Size:** ~250 lines (docs)
 
 - [ ] `docs/architecture/database-design.md` — an *Ownership* section listing every owner-bearing
-  table, the child-through-parent rule, and the owner-derivation migrations (`0106`, `0121`–`0126`).
+  table, the child-through-parent rule, and the owner-derivation migrations (`0106`, `0121`–`0127`).
 - [ ] `docs/architecture/domain-architecture.md` — one *Ownership* section stating the repository
   contract for contacts, tags and journal tags; remove the last "single-user" wording.
 - [ ] `docs/architecture/api-design.md`, `integration-architecture.md` — consistency pass.

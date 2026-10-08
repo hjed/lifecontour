@@ -37,11 +37,11 @@ async def _insert_checkout_metadata(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_checkout', :external_id, :journal_id,
+                ('user-123', 'snipeit_checkout', :external_id, :journal_id,
                  now(), 'hash', :sync_status, NULL, 0, now(), now())
         """),
         {
@@ -98,11 +98,11 @@ async def _insert_gear_usage_journal(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit', :asset_id, :gear_item_id,
+                ('user-123', 'snipeit', :asset_id, :gear_item_id,
                  now(), 'hash', 'success', NULL, 0, now(), now())
         """),
         {"asset_id": asset_id, "gear_item_id": gear_item_id},
@@ -572,7 +572,7 @@ class TestCheckinSyncIntegration:
         # The snipeit_checkin sync_metadata row was recorded as success.
         meta_result = await async_connection.execute(
             text("""
-                SELECT internal_uuid, sync_status
+                SELECT user_id, internal_uuid, sync_status
                 FROM sync_metadata
                 WHERE integration_source = 'snipeit_checkin'
                   AND external_id = :external_id
@@ -581,6 +581,7 @@ class TestCheckinSyncIntegration:
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        assert meta_row.user_id == "user-123"
         assert meta_row.internal_uuid == str(journal_id)
         assert meta_row.sync_status == "success"
 
@@ -654,11 +655,11 @@ class TestCheckinSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_checkin', :external_id, :journal_id,
+                    ('user-123', 'snipeit_checkin', :external_id, :journal_id,
                      now(), 'CHECKED_IN', 'success', NULL, 0, now(), now())
             """),
             {
@@ -735,11 +736,11 @@ async def _insert_recorded_sync_row(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status, reference_data,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                (:source, :external_id, :journal_id,
+                ('user-123', :source, :external_id, :journal_id,
                  now(), 'hash', :sync_status, :reference_data,
                  :error_message, 0, now(), now())
         """),
@@ -2289,11 +2290,11 @@ class TestInFlightCheckinIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_checkin', :external_id, :journal_id,
+                    ('user-123', 'snipeit_checkin', :external_id, :journal_id,
                      now(), 'PENDING', 'pending', NULL, 0, now(), now())
             """),
             {
@@ -2345,11 +2346,11 @@ class TestLateCheckinRerecordIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_checkin', :external_id, :journal_id,
+                    ('user-123', 'snipeit_checkin', :external_id, :journal_id,
                      now(), 'PENDING', 'failed', 'Snipe-IT API error: 502', 0,
                      now(), now())
             """),
@@ -2459,11 +2460,11 @@ class TestPreviousAssetHeldElsewhereIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_checkin', :external_id, :journal_id,
+                    ('user-123', 'snipeit_checkin', :external_id, :journal_id,
                      now(), 'CHECKED_IN', :sync_status, NULL, 0, now(), now())
             """),
             {

@@ -15,6 +15,9 @@ from core_shared.models.journals import EventDateRange, Journal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    ExternalLinkOwnedByAnotherUserError,
+)
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -135,15 +138,15 @@ async def _make_album_sync_metadata_only(
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id,
+                user_id, internal_id, integration_source, external_id,
                 last_synced_at, version_hash, sync_status,
                 internal_entity_type, external_entity_type
             ) VALUES (
-                :internal_id, 'immich_album', :external_id, now(), 'h', 'success',
-                'journal', 'album'
+                :user_id, :internal_id, 'immich_album', :external_id, now(), 'h',
+                'success', 'journal', 'album'
             )
         """),
-        {"internal_id": saved.id, "external_id": album_id},
+        {"user_id": USER_ID, "internal_id": saved.id, "external_id": album_id},
     )
     return saved.id
 
@@ -180,7 +183,12 @@ class TestAlbumLinkWrite:
         reference_data = {"album_name": "Mirrored Trip", "asset_count": 12}
 
         await repo.upsert_link(
-            journal_id, album_id, reference_data, version_hash="v1", bump_anchor=True
+            journal_id,
+            album_id,
+            reference_data,
+            version_hash="v1",
+            bump_anchor=True,
+            user_id=USER_ID,
         )
 
         # The album reference_data is written onto the canonical sync_metadata link.
@@ -223,6 +231,7 @@ class TestAlbumLinkWrite:
             {"album_name": "Recovered"},
             version_hash="v2",
             bump_anchor=True,
+            user_id=USER_ID,
         )
 
         row = (
@@ -282,6 +291,7 @@ class TestAlbumLinkWrite:
             {"album_name": "A"},
             version_hash="v2",
             bump_anchor=False,
+            user_id=USER_ID,
         )
         assert (
             await _sync_metadata_anchor(async_connection, album_id, journal_id) == past
@@ -294,6 +304,7 @@ class TestAlbumLinkWrite:
             {"album_name": "B"},
             version_hash="v3",
             bump_anchor=True,
+            user_id=USER_ID,
         )
         assert (
             await _sync_metadata_anchor(async_connection, album_id, journal_id) > past
@@ -317,3 +328,65 @@ class TestAlbumLinkWrite:
             {"journal_id": journal_id},
         )
         assert int(remaining.scalar_one()) == 0
+
+
+@pytest.mark.integration
+class TestAlbumLinkOwner:
+    """``upsert_link`` stamps the journal's owner and never takes another's link."""
+
+    async def test_upsert_link_stamps_the_owner(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id="album-owned"
+        )
+
+        await repo.upsert_link(
+            journal_id,
+            "album-owned",
+            {"album_name": "Owned"},
+            version_hash="v1",
+            bump_anchor=True,
+            user_id=USER_ID,
+        )
+
+        owners = (
+            (
+                await async_connection.execute(
+                    text(
+                        "SELECT user_id FROM sync_metadata "
+                        "WHERE external_id = 'album-owned'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert owners == [USER_ID]
+
+    async def test_another_owners_album_link_is_refused(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id="album-taken"
+        )
+
+        with pytest.raises(ExternalLinkOwnedByAnotherUserError):
+            await repo.upsert_link(
+                journal_id,
+                "album-taken",
+                {"album_name": "Taken"},
+                version_hash="v2",
+                bump_anchor=True,
+                user_id="someone-else-456",
+            )
+
+        owners = (
+            await async_connection.execute(
+                text(
+                    "SELECT user_id, version_hash FROM sync_metadata "
+                    "WHERE external_id = 'album-taken'"
+                )
+            )
+        ).fetchall()
+        assert [tuple(row) for row in owners] == [(USER_ID, "h")]

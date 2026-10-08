@@ -228,3 +228,48 @@ async def test_resolve_immich_conflict_link_nonexistent_contact(
     errors = response.json()["errors"]
     assert len(errors) == 1
     assert "not found" in errors[0]["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_immich_conflict_for_a_person_another_user_links(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    pending_conflict: int,
+) -> None:
+    """Linking a person another user already links is a 409; nothing changes."""
+    contact_id = await seed_contact(
+        async_connection, first_name="John", last_name="Doe"
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (user_id, internal_id, integration_source, external_id,
+                 last_synced_at, version_hash, sync_status, internal_entity_type)
+            VALUES ('other-user-456', 999, 'immich', 'person-123',
+                    now(), 'theirs', 'success', 'contact')
+        """)
+    )
+
+    response = await authenticated_client.post(
+        f"/api/integrations/immich/conflicts/{pending_conflict}/resolve",
+        json={"action": "link", "contact_id": contact_id},
+    )
+
+    assert response.status_code == 409
+    assert "other-user-456" not in response.text
+    links = (
+        await async_connection.execute(
+            text(
+                "SELECT user_id, internal_id FROM sync_metadata "
+                "WHERE external_id = 'person-123'"
+            )
+        )
+    ).fetchall()
+    assert [tuple(row) for row in links] == [("other-user-456", 999)]
+    status = (
+        await async_connection.execute(
+            text("SELECT status FROM pending_entity_mappings WHERE id = :id"),
+            {"id": pending_conflict},
+        )
+    ).scalar_one()
+    assert status == "unresolved"

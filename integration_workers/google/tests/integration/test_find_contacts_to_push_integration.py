@@ -26,11 +26,11 @@ async def _link(
         text(
             """
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id,
+                (user_id, internal_id, integration_source, external_id,
                  version_hash, sync_status, last_synced_at,
                  internal_entity_type, external_entity_type,
                  created_at, updated_at)
-            VALUES (:cid, 'google', :ext, 'etag', 'success', :synced_at,
+            VALUES ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', :ext, 'etag', 'success', :synced_at,
                     'contact', 'person', NOW(), NOW())
             """
         ),

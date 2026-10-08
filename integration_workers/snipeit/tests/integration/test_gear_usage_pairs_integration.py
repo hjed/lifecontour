@@ -56,11 +56,11 @@ async def _add_gear_item(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit', :asset_id, :gear_item_id,
+                ('user-123', 'snipeit', :asset_id, :gear_item_id,
                  now(), 'hash', 'success', NULL, 0, now(), now())
         """),
         {"asset_id": asset_id, "gear_item_id": gear_item_id},
@@ -366,11 +366,11 @@ class TestSeveralGearItems:
             await async_connection.execute(
                 text("""
                     INSERT INTO sync_metadata
-                        (integration_source, external_id, internal_uuid,
+                        (user_id, integration_source, external_id, internal_uuid,
                          last_synced_at, version_hash, sync_status,
                          error_message, retry_count, created_at, updated_at)
                     VALUES
-                        ('snipeit_checkout', :external_id, :journal_id,
+                        ('user-123', 'snipeit_checkout', :external_id, :journal_id,
                          now(), 'hash', 'success', NULL, 0, now(), now())
                 """),
                 {

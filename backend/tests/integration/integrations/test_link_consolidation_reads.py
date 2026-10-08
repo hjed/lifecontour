@@ -45,12 +45,15 @@ async def _seed_sync_metadata(
     await conn.execute(
         text(
             "INSERT INTO sync_metadata "
-            "(internal_id, integration_source, external_id, last_synced_at, "
-            "version_hash, sync_status, internal_entity_type, external_entity_type) "
-            "VALUES (:internal_id, :integration_source, :external_id, now(), "
-            ":version_hash, 'success', :internal_entity_type, :external_entity_type)"
+            "(user_id, internal_id, integration_source, external_id, "
+            "last_synced_at, version_hash, sync_status, internal_entity_type, "
+            "external_entity_type) "
+            "VALUES (:user_id, :internal_id, :integration_source, :external_id, "
+            "now(), :version_hash, 'success', :internal_entity_type, "
+            ":external_entity_type)"
         ),
         {
+            "user_id": TEST_USER_ID,
             "internal_id": internal_id,
             "integration_source": integration_source,
             "external_id": external_id,

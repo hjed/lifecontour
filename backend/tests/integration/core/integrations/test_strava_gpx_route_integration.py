@@ -234,7 +234,7 @@ class TestStravaGPXRouteIntegration:
 
         sync_result = await async_connection.execute(
             text("""
-                SELECT internal_id, integration_source, external_id,
+                SELECT user_id, internal_id, integration_source, external_id,
                        version_hash, sync_status
                 FROM sync_metadata
                 WHERE integration_source = 'strava' AND external_id = '77777'
@@ -242,6 +242,14 @@ class TestStravaGPXRouteIntegration:
         )
         sync_row = sync_result.fetchone()
         assert sync_row is not None, "SyncMetadata row should exist"
+        # The link belongs to the journal's owner.
+        journal_owner = (
+            await async_connection.execute(
+                text("SELECT user_id FROM journals WHERE id = :jid"),
+                {"jid": journal_id},
+            )
+        ).scalar_one()
+        assert sync_row.user_id == journal_owner
         assert sync_row.internal_id == journal_id
         assert sync_row.integration_source == "strava"
         assert sync_row.external_id == "77777"
@@ -308,7 +316,9 @@ class TestStravaGPXRouteIntegration:
                 WHERE integration_source = 'strava' AND external_id = '55555'
             """),
         )
-        sync_row = sync_result.fetchone()
+        sync_rows = sync_result.fetchall()
+        assert len(sync_rows) == 1, "The owner's re-sync updates its link in place"
+        sync_row = sync_rows[0]
         assert sync_row is not None
         assert sync_row.version_hash == "2" * 64, "Version hash should be updated"
 

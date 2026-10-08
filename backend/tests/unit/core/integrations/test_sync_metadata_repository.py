@@ -10,9 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    ExternalLinkOwnedByAnotherUserError,
     SyncMetadataRepository,
+    execute_link_write,
 )
 
 
@@ -145,6 +149,7 @@ class TestSyncMetadataRepository:
 
         # Execute
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",
@@ -183,6 +188,7 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",
@@ -301,6 +307,7 @@ class TestSyncMetadataRepository:
 
         # Execute
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",
@@ -313,3 +320,55 @@ class TestSyncMetadataRepository:
         assert result is not None
         assert result.sync_status == "failed"
         assert result.error_message == "API error"
+
+
+class TestExecuteLinkWrite:
+    """Which global-index violations are another user's link."""
+
+    @staticmethod
+    def _global_index_violation() -> IntegrityError:
+        return IntegrityError(
+            "INSERT INTO sync_metadata ...",
+            {},
+            Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_sync_metadata_integration_external"'
+            ),
+        )
+
+    def _connection(self, holder: str | None) -> AsyncMock:
+        """The insert trips the global index; the holder's owner is ``holder``."""
+        holder_result = MagicMock()
+        holder_result.scalar_one_or_none.return_value = holder
+        connection = AsyncMock()
+        connection.execute.side_effect = [self._global_index_violation(), holder_result]
+        return connection
+
+    async def _write(self, connection: AsyncMock) -> None:
+        await execute_link_write(
+            connection,
+            text("INSERT INTO sync_metadata ..."),
+            {},
+            user_id="owner-1",
+            integration_source="google",
+            external_id="people/1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_link_another_user_holds_is_refused(self) -> None:
+        with pytest.raises(ExternalLinkOwnedByAnotherUserError):
+            await self._write(self._connection(holder="owner-2"))
+
+    @pytest.mark.asyncio
+    async def test_the_same_owners_concurrent_insert_is_not_another_users(
+        self,
+    ) -> None:
+        """Two concurrent inserts of one owner's link can trip the global index
+        (only the per-user arbiter is race-safe): the loser is retryable."""
+        with pytest.raises(IntegrityError):
+            await self._write(self._connection(holder="owner-1"))
+
+    @pytest.mark.asyncio
+    async def test_an_unowned_holder_is_not_another_users(self) -> None:
+        with pytest.raises(IntegrityError):
+            await self._write(self._connection(holder=None))

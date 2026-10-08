@@ -33,6 +33,7 @@ ALLOWED = frozenset(
         # Migration tests seeding a schema at a pinned revision.
         "backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py",
         "backend/tests/integration/contacts/test_require_contacts_user_id_migration.py",
+        "backend/tests/integration/integrations/test_add_user_id_to_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_backfill_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_dedupe_bug_created_contacts_migration.py",
         "backend/tests/integration/integrations/test_drop_external_references_migration.py",

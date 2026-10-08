@@ -871,20 +871,26 @@ class ImmichSyncService:
         internal_id: int,
         version_hash: str,
     ) -> None:
-        """Create or update SyncMetadata for a person-to-contact mapping."""
+        """Create or update SyncMetadata for a person-to-contact mapping.
+
+        The link is the syncing user's, keyed by ``(user_id, integration_source,
+        external_id)``: a person another user already links is refused by the
+        global unique index (an ``IntegrityError`` the caller's per-person
+        savepoint contains) rather than re-pointed.
+        """
         now = datetime.now(UTC)
         query = text("""
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id,
+                (user_id, internal_id, integration_source, external_id,
                  last_synced_at, version_hash, sync_status,
                  internal_entity_type, external_entity_type,
                  retry_count, created_at, updated_at)
             VALUES
-                (:internal_id, :integration_source, :external_id,
+                (:user_id, :internal_id, :integration_source, :external_id,
                  :now, :version_hash, 'success',
                  :internal_entity_type, :external_entity_type,
                  0, :now, :now)
-            ON CONFLICT (integration_source, external_id)
+            ON CONFLICT (user_id, integration_source, external_id)
             DO UPDATE SET
                 internal_id = EXCLUDED.internal_id,
                 last_synced_at = EXCLUDED.last_synced_at,
@@ -902,6 +908,7 @@ class ImmichSyncService:
         await self._conn.execute(
             query,
             {
+                "user_id": self._user_id,
                 "internal_id": internal_id,
                 "integration_source": self._integration_source,
                 "external_id": external_id,

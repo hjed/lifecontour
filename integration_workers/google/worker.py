@@ -987,6 +987,8 @@ async def _create_contact_in_google(
     contact: dict[str, Any],
     person_data: dict[str, Any],
     google_account_email: str,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Create a new contact in Google and update sync metadata."""
     logger.info(
@@ -1004,6 +1006,7 @@ async def _create_contact_in_google(
         external_id=result["resourceName"],
         etag=result.get("etag"),
         integration_source="google",
+        user_id=user_id,
     )
 
     logger.info(
@@ -1106,6 +1109,8 @@ async def _update_contact_in_google(
     contact: dict[str, Any],
     person_data: dict[str, Any],
     google_account_email: str,
+    *,
+    user_id: str,
 ) -> bool:
     """Update an existing contact in Google and update sync metadata.
 
@@ -1134,6 +1139,7 @@ async def _update_contact_in_google(
         external_id=result["resourceName"],
         etag=result.get("etag"),
         integration_source="google",
+        user_id=user_id,
     )
 
     logger.info(
@@ -1233,6 +1239,8 @@ async def _push_single_contact(
     google_account_email: str,
     metrics: dict[str, int],
     group_name_to_resource: dict[str, str] | None = None,
+    *,
+    user_id: str,
 ) -> None:
     """Push a single contact to Google, committing its link on success.
 
@@ -1269,13 +1277,23 @@ async def _push_single_contact(
 
         if contact["sync_action"] == "create":
             await _create_contact_in_google(
-                session, client, contact, person_data, google_account_email
+                session,
+                client,
+                contact,
+                person_data,
+                google_account_email,
+                user_id=user_id,
             )
             metrics["created_count"] += 1
             metrics["pushed_count"] += 1
         elif contact["sync_action"] == "update":
             recreated = await _update_contact_in_google(
-                session, client, contact, person_data, google_account_email
+                session,
+                client,
+                contact,
+                person_data,
+                google_account_email,
+                user_id=user_id,
             )
             metrics["created_count" if recreated else "updated_count"] += 1
             metrics["pushed_count"] += 1
@@ -1302,6 +1320,8 @@ async def push_contacts_to_google(
     contacts: list[dict[str, Any]],
     google_account_email: str,
     group_name_to_resource: dict[str, str] | None = None,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """
     Push local contacts to Google.
@@ -1311,6 +1331,7 @@ async def push_contacts_to_google(
         client: Google Contacts API client
         contacts: List of contacts to push (from find_contacts_to_push)
         google_account_email: Google account email
+        user_id: The contacts' owner, who owns each link the push writes
 
     Returns:
         Dictionary with push metrics
@@ -1331,6 +1352,7 @@ async def push_contacts_to_google(
             google_account_email,
             metrics,
             group_name_to_resource=group_name_to_resource,
+            user_id=user_id,
         )
 
     logger.info(
@@ -1348,9 +1370,16 @@ async def _upsert_sync_metadata(
     external_id: str,
     etag: str | None,
     integration_source: str,
+    *,
+    user_id: str,
 ) -> None:
     """
     Upsert sync metadata after successful push.
+
+    The link is keyed by ``(user_id, integration_source, external_id)``: a
+    re-push updates the owner's own row, and a resource name another user
+    already links is refused by the global unique index (an ``IntegrityError``
+    the caller counts as a failed contact) rather than re-pointed.
 
     Args:
         session: Database session
@@ -1358,6 +1387,7 @@ async def _upsert_sync_metadata(
         external_id: Google resource name
         etag: Google ETag
         integration_source: Integration source name
+        user_id: The contact's owner
     """
     # Calculate version hash from ETag
     # Use empty string when no ETag is provided (version_hash column is NOT NULL)
@@ -1370,14 +1400,14 @@ async def _upsert_sync_metadata(
     # omits them never clears existing values.
     stmt = text("""
         INSERT INTO sync_metadata
-            (internal_id, integration_source, external_id, last_synced_at,
+            (user_id, internal_id, integration_source, external_id, last_synced_at,
              version_hash, sync_status, internal_entity_type, external_entity_type,
              created_at, updated_at)
         VALUES
-            (:internal_id, :integration_source, :external_id, :last_synced_at,
-             :version_hash, :sync_status, :internal_entity_type,
+            (:user_id, :internal_id, :integration_source, :external_id,
+             :last_synced_at, :version_hash, :sync_status, :internal_entity_type,
              :external_entity_type, :created_at, :updated_at)
-        ON CONFLICT (integration_source, external_id)
+        ON CONFLICT (user_id, integration_source, external_id)
         DO UPDATE SET
             internal_id = EXCLUDED.internal_id,
             last_synced_at = EXCLUDED.last_synced_at,
@@ -1395,6 +1425,7 @@ async def _upsert_sync_metadata(
     await session.execute(
         stmt,
         {
+            "user_id": user_id,
             "internal_id": internal_id,
             "integration_source": integration_source,
             "external_id": external_id,
@@ -3205,6 +3236,8 @@ async def _push_contact_to_google_for_event(
     external_id: str | None,
     version_hash: str | None,
     group_name_to_resource: dict[str, str] | None = None,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Push a single contact to Google, triggered by a domain event.
 
@@ -3222,6 +3255,7 @@ async def _push_contact_to_google_for_event(
         group_name_to_resource: Tag name to Google contact-group resource name.
             Passing it (even empty) is what includes ``memberships`` in the
             payload, so tag changes reach Google and removed tags are cleared.
+        user_id: The contact's owner, who owns the link the push writes.
 
     Returns:
         Result dict with status and resource details
@@ -3281,6 +3315,7 @@ async def _push_contact_to_google_for_event(
             external_id=result["resourceName"],
             etag=result.get("etag"),
             integration_source="google",
+            user_id=user_id,
         )
         logger.info(
             "Created contact in Google via event",
@@ -3304,6 +3339,7 @@ async def _push_contact_to_google_for_event(
             external_id=result["resourceName"],
             etag=result.get("etag"),
             integration_source="google",
+            user_id=user_id,
         )
         logger.info(
             "Pushed contact update to Google via event",
@@ -3640,6 +3676,7 @@ async def process_contact_event(
                         external_id=external_id,
                         version_hash=version_hash,
                         group_name_to_resource=group_name_to_resource,
+                        user_id=owner,
                     )
 
                 results.append(result)
@@ -3718,6 +3755,7 @@ async def _push_pending_local_contacts(
         contacts=contacts_to_push,
         google_account_email=google_account_email,
         group_name_to_resource=reverse_group_mapping,
+        user_id=user_id,
     )
 
 

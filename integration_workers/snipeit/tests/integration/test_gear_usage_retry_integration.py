@@ -264,11 +264,11 @@ async def _checkout_row(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_checkout', :external_id, :journal_id,
+                ('user-123', 'snipeit_checkout', :external_id, :journal_id,
                  now(), 'hash', :sync_status, :error_message, 0,
                  now() - make_interval(secs => :age), now() - make_interval(secs => :age))
         """),
@@ -288,11 +288,11 @@ async def _checked_in(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid,
+                (user_id, integration_source, external_id, internal_uuid,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_checkin', :external_id, :journal_id,
+                ('user-123', 'snipeit_checkin', :external_id, :journal_id,
                  now(), 'CHECKED_IN', 'success', NULL, 0, now(), now())
         """),
         {

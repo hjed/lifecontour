@@ -16,7 +16,11 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+from app.core.integrations.outbox_event_processor import (
+    OutboxEventProcessingError,
+    OutboxEventProcessor,
+    PermanentOutboxEventProcessingError,
+)
 from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 from tests.integration.integrations.link_consolidation_helpers import (
     build_contact_service,
@@ -26,7 +30,8 @@ from tests.integration.integrations.link_consolidation_helpers import (
 async def _sync_metadata_row(conn: AsyncConnection, external_id: str) -> Any:
     result = await conn.execute(
         text(
-            "SELECT internal_id, version_hash, reference_data FROM sync_metadata "
+            "SELECT user_id, internal_id, version_hash, reference_data "
+            "FROM sync_metadata "
             "WHERE integration_source = 'google' AND external_id = :eid"
         ),
         {"eid": external_id},
@@ -71,17 +76,19 @@ async def _seed_google_link(
     internal_id: int,
     version_hash: str,
     reference_data: str,
+    user_id: str | None = TEST_USER_ID,
 ) -> None:
     await conn.execute(
         text(
             "INSERT INTO sync_metadata "
-            "(internal_id, integration_source, external_id, last_synced_at, "
+            "(user_id, internal_id, integration_source, external_id, last_synced_at, "
             "version_hash, sync_status, internal_entity_type, external_entity_type, "
             "reference_data) "
-            "VALUES (:iid, 'google', :eid, now(), :vh, 'success', 'contact', "
+            "VALUES (:uid, :iid, 'google', :eid, now(), :vh, 'success', 'contact', "
             "'person', :rd)"
         ),
         {
+            "uid": user_id,
             "iid": internal_id,
             "eid": external_id,
             "vh": version_hash,
@@ -120,6 +127,7 @@ class TestLinkConsolidationWrites:
         # One canonical sync_metadata link carrying the contact reference_data.
         row = await _sync_metadata_row(async_connection, external_id)
         assert row is not None
+        assert row.user_id == TEST_USER_ID
         assert row.internal_id == result["contact_id"]
         assert row.reference_data is not None
         ref = json.loads(row.reference_data)
@@ -188,12 +196,13 @@ class TestLinkConsolidationWrites:
         await async_connection.execute(
             text(
                 "INSERT INTO sync_metadata "
-                "(internal_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status, internal_entity_type, external_entity_type) "
-                "VALUES (:iid, 'google', :eid, now(), 'old-etag', 'success', "
+                "(user_id, internal_id, integration_source, external_id, "
+                "last_synced_at, version_hash, sync_status, internal_entity_type, "
+                "external_entity_type) "
+                "VALUES (:uid, :iid, 'google', :eid, now(), 'old-etag', 'success', "
                 "'contact', 'person')"
             ),
-            {"iid": contact_id, "eid": external_id},
+            {"uid": TEST_USER_ID, "iid": contact_id, "eid": external_id},
         )
 
         processor = OutboxEventProcessor(
@@ -215,3 +224,86 @@ class TestLinkConsolidationWrites:
         assert row is not None
         assert row.reference_data is not None
         assert json.loads(row.reference_data)["synced_tags"] == ["Family"]
+
+
+@pytest.mark.integration
+@pytest.mark.usefixtures("clean_database")
+class TestInboundLinkOwner:
+    """An inbound contact never takes over an external id another user links."""
+
+    @pytest.mark.asyncio
+    async def test_another_users_link_fails_the_event_permanently(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        external_id = "people/cTaken"
+        # Another user's link that names no contact yet, so the idempotency
+        # check does not short-circuit and the creation reaches the link write.
+        await async_connection.execute(
+            text(
+                "INSERT INTO sync_metadata "
+                "(user_id, integration_source, external_id, last_synced_at, "
+                "version_hash, sync_status) "
+                "VALUES ('other-user-456', 'google', :eid, now(), 'theirs', 'pending')"
+            ),
+            {"eid": external_id},
+        )
+        processor = OutboxEventProcessor(
+            build_contact_service(async_connection), async_connection
+        )
+
+        with pytest.raises(PermanentOutboxEventProcessingError):
+            await processor.process_event(
+                _contact_event(
+                    "contact.created",
+                    external_id=external_id,
+                    first_name="Mine",
+                    last_name="Too",
+                    etag="etag-mine",
+                    tag="VIP",
+                )
+            )
+
+        row = await _sync_metadata_row(async_connection, external_id)
+        assert row is not None
+        assert (row.user_id, row.internal_id, row.version_hash) == (
+            "other-user-456",
+            None,
+            "theirs",
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_update_whose_link_has_no_owner_yet_is_retried(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A link written owner-less (a pre-release writer, mid rolling deploy)
+        does not match the owner-keyed upsert. The update fails retryably
+        rather than being acknowledged with the link's version hash stale."""
+        external_id = "people/cUnowned"
+        contact_id = await seed_contact(
+            async_connection, first_name="Old", last_name="Name"
+        )
+        await _seed_google_link(
+            async_connection,
+            external_id=external_id,
+            internal_id=contact_id,
+            version_hash="old-etag",
+            reference_data=json.dumps({"resource_name": external_id}),
+            user_id=None,
+        )
+        processor = OutboxEventProcessor(
+            build_contact_service(async_connection), async_connection
+        )
+
+        with pytest.raises(OutboxEventProcessingError) as failed:
+            await processor.process_event(
+                _contact_event(
+                    "contact.updated",
+                    external_id=external_id,
+                    first_name="New",
+                    last_name="Name",
+                    etag="new-etag",
+                    tag="VIP",
+                )
+            )
+
+        assert not isinstance(failed.value, PermanentOutboxEventProcessingError)

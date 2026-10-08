@@ -79,6 +79,7 @@ async def _mark_photo_album(conn: AsyncConnection, journal_id: int) -> None:
         {"album_name": "Trip"},
         version_hash="hash",
         bump_anchor=True,
+        user_id=USER_ID,
     )
 
 

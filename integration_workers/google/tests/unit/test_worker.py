@@ -1506,6 +1506,7 @@ class TestPushSyncLogic:
                     client=mock_google_client,
                     contacts=local_contacts,
                     google_account_email="test@example.com",
+                    user_id="1",
                 )
 
                 # Verify
@@ -1564,6 +1565,7 @@ class TestPushSyncLogic:
                     client=mock_google_client,
                     contacts=local_contacts,
                     google_account_email="test@example.com",
+                    user_id="1",
                 )
 
                 # Verify
@@ -1622,6 +1624,7 @@ class TestPushSyncLogic:
                 client=mock_google_client,
                 contacts=local_contacts,
                 google_account_email="test@example.com",
+                user_id="1",
             )
 
             # Verify - should log conflict but not fail entire sync
@@ -1671,6 +1674,7 @@ class TestPushSyncLogic:
                 client=mock_google_client,
                 contacts=local_contacts,
                 google_account_email="test@example.com",
+                user_id="1",
             )
 
             # Verify - should log conflict but not fail entire sync
@@ -1730,6 +1734,7 @@ class TestPushSyncLogic:
                     client=mock_google_client,
                     contacts=local_contacts,
                     google_account_email="test@example.com",
+                    user_id="1",
                 )
 
                 # Verify
@@ -1785,6 +1790,7 @@ class TestPushSyncLogic:
                     client=mock_google_client,
                     contacts=local_contacts,
                     google_account_email="test@example.com",
+                    user_id="1",
                 )
 
                 # Verify sync_metadata was updated
@@ -1795,6 +1801,7 @@ class TestPushSyncLogic:
                     external_id="people/c_metadata_test",
                     etag="etag_metadata",
                     integration_source="google",
+                    user_id="1",
                 )
 
 
@@ -1819,6 +1826,7 @@ class TestUpsertSyncMetadataEntityTypes:
             external_id="people/c_entity_types",
             etag="etag-1",
             integration_source="google",
+            user_id="owner-1",
         )
 
         session.execute.assert_called_once()
@@ -1828,6 +1836,27 @@ class TestUpsertSyncMetadataEntityTypes:
         assert "external_entity_type" in sql
         assert params["internal_entity_type"] == "contact"
         assert params["external_entity_type"] == "person"
+
+    @pytest.mark.asyncio
+    async def test_upsert_sync_metadata_is_keyed_by_the_owner(self):
+        """The link is stamped with its owner and conflicts on the per-user key,
+        so a re-sync updates the owner's own row and never another user's."""
+        from worker import _upsert_sync_metadata
+
+        session = AsyncMock()
+
+        await _upsert_sync_metadata(
+            session=session,
+            internal_id=21,
+            external_id="people/c_owner",
+            etag="etag-1",
+            integration_source="google",
+            user_id="owner-1",
+        )
+
+        stmt, params = session.execute.call_args[0]
+        assert "ON CONFLICT (user_id, integration_source, external_id)" in str(stmt)
+        assert params["user_id"] == "owner-1"
 
 
 class TestContactTypeNormalization:

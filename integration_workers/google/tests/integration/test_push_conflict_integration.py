@@ -112,6 +112,7 @@ class TestPushContactsWithRealDB:
             contacts=contacts,
             google_account_email="test@example.com",
             group_name_to_resource=group_mapping,
+            user_id=CONTACT_OWNER,
         )
 
         assert result["pushed_count"] == 1
@@ -148,11 +149,11 @@ class TestPushContactsWithRealDB:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id,
+                    (user_id, internal_id, integration_source, external_id,
                      version_hash, sync_status, last_synced_at,
                      created_at, updated_at)
                 VALUES
-                    (:cid, 'google', 'people/c999',
+                    ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', 'people/c999',
                      'etag_old', 'success', NOW(), NOW(), NOW())
                 """
             ),
@@ -178,6 +179,7 @@ class TestPushContactsWithRealDB:
             contacts=contacts,
             google_account_email="test@example.com",
             group_name_to_resource={"push-tag": "contactGroups/pushGroup"},
+            user_id=CONTACT_OWNER,
         )
 
         assert result["pushed_count"] == 1
@@ -225,6 +227,7 @@ class TestPushContactsWithRealDB:
             contacts=contacts,
             google_account_email="test@example.com",
             group_name_to_resource=group_mapping,
+            user_id=CONTACT_OWNER,
         )
 
         # Verify the Google API was called with memberships: the tag's group,
@@ -272,6 +275,7 @@ class TestPushContactsWithRealDB:
             contacts=contacts,
             google_account_email="test@example.com",
             group_name_to_resource={},
+            user_id=CONTACT_OWNER,
         )
 
         call_args = mock_client.create_contact.call_args
@@ -323,6 +327,7 @@ class TestPushConflictHandling:
             client=mock_client,
             contacts=contacts,
             google_account_email="test@example.com",
+            user_id=CONTACT_OWNER,
         )
 
         assert result["pushed_count"] == 0
@@ -367,9 +372,77 @@ class TestPushConflictHandling:
             client=mock_client,
             contacts=contacts,
             google_account_email="test@example.com",
+            user_id=CONTACT_OWNER,
         )
 
         assert result["pushed_count"] == 0
         assert result["error_count"] == 1
         # 500 is not a conflict
         assert result["conflict_count"] == 0
+
+
+@pytest.mark.asyncio
+class TestPushLinkOwner:
+    """A push links the contact for its owner and never takes another's link."""
+
+    async def test_create_push_stamps_the_owner(
+        self,
+        db_session: AsyncSession,
+        push_contact_data: dict,  # type: ignore[type-arg]
+    ) -> None:
+        contact_id = push_contact_data["contact_id"]
+
+        await push_contacts_to_google(
+            session=db_session,
+            client=_make_mock_google_client(),
+            contacts=[{"id": contact_id, "sync_action": "create", "external_id": None}],
+            google_account_email="test@example.com",
+            user_id=CONTACT_OWNER,
+        )
+
+        owner = (
+            await db_session.execute(
+                text(
+                    "SELECT user_id FROM sync_metadata "
+                    "WHERE integration_source = 'google' "
+                    "AND external_id = 'people/c999'"
+                )
+            )
+        ).scalar_one()
+        assert owner == CONTACT_OWNER
+
+    async def test_a_resource_another_user_links_is_a_failed_contact(
+        self,
+        db_session: AsyncSession,
+        push_contact_data: dict,  # type: ignore[type-arg]
+    ) -> None:
+        """The global index refuses the write and the push counts an error.
+
+        The failed contact's rollback also discards this test's seed (the
+        fixture's transaction), so the row itself is not re-read here; that
+        the other owner's row survives is the backend repository suite's.
+        """
+        contact_id = push_contact_data["contact_id"]
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO sync_metadata
+                    (user_id, internal_id, integration_source, external_id,
+                     version_hash, sync_status, last_synced_at)
+                VALUES ('other-user', 4242, 'google', 'people/c999',
+                        'etag_theirs', 'success', NOW())
+                """
+            )
+        )
+        await db_session.flush()
+
+        result = await push_contacts_to_google(
+            session=db_session,
+            client=_make_mock_google_client(),
+            contacts=[{"id": contact_id, "sync_action": "create", "external_id": None}],
+            google_account_email="test@example.com",
+            user_id=CONTACT_OWNER,
+        )
+
+        assert result["error_count"] == 1
+        assert result["pushed_count"] == 0
