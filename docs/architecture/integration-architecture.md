@@ -259,6 +259,44 @@ relocated to `SyncMetadataRepository` (`upsert_contact_link`, `repoint_contact_l
 returning `IntegrationLinkCollision`), `IntegrationLinkRepository`
 (`find_contact_with_birthday`) and `SqlContactRepository` (`contact_exists`).
 
+**Every link has an owner (ITER20-004 Phase 14 — expand).** `sync_metadata.user_id`
+records the owner of the linked entity. Migration `0126_add_user_id_to_sync_metadata`
+added it (nullable) and backfilled every existing row from the entity it points at:
+a contact link from `contacts.user_id` (`internal_id`), a journal link from
+`journals.user_id` (`internal_id`, or the journal id stored as text in
+`internal_uuid` by Snipe-IT), a gear link from `gear_items.user_id`
+(`internal_uuid`). A row without `internal_entity_type` — older rows, and every
+row the Snipe-IT worker writes — is typed by its `integration_source`. A row no
+entity owns (it names none, or one since deleted) is logged and given the site's
+one owner (`app.migrations.owner_derivation`; `-x sync_metadata_owner=<id>`
+overrides).
+
+Every writer — the backend's `SyncMetadataRepository.upsert` /
+`upsert_contact_link` / `link_journal_if_unlinked`, `AlbumSyncReadRepository.upsert_link`,
+and the Google, Immich and Snipe-IT workers' inserts — stamps `user_id` and
+conflicts on the per-user key `uq_sync_metadata_user_source_external
+(user_id, integration_source, external_id)`. **Transition state:** the column is
+written but not yet read — lookups still key on `(integration_source,
+external_id)` — and the global unique index `idx_sync_metadata_integration_external`
+still exists. It is what refuses a write for an external id **another** user
+already links (the per-user conflict target finds no row, so the insert trips the
+global index), where the old `DO UPDATE` silently re-pointed the link:
+
+- the backend raises `ExternalLinkOwnedByAnotherUserError` (the write runs in a
+  savepoint, so the caller's unit of work stays usable; a row with no owner yet
+  is not another user's, so its `IntegrityError` is re-raised and retried); an
+  inbound contact event fails permanently (dead-lettered, not retried), the
+  REST Immich conflict-resolve answers 409 and the MCP tool an error;
+- the workers count it as a failed item and carry on (Google's per-contact push,
+  Immich's per-person savepoint, Snipe-IT's per-asset/per-record session);
+- the `DO NOTHING` writers (`link_journal_if_unlinked`, the Snipe-IT push,
+  checkout and check-in rows) still skip a row the owner already has, but raise
+  on one another user has.
+
+Phase 15 makes the column `NOT NULL`, drops the global index, and keys every
+lookup (and every update/delete still keyed by `(integration_source,
+external_id)`) by the owner.
+
 #### Contact Sync Events Name the Owner
 
 `contact.created` / `contact.updated` events (`ContactSyncEventData`, built by

@@ -60,6 +60,13 @@ class SyncMetadata(Base):
     external_id: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="External system's ID for this entity"
     )
+    # Owner of the linked entity. Unique with (integration_source, external_id)
+    # through ``uq_sync_metadata_user_source_external``; every writer stamps it.
+    user_id: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Owner of the linked entity",
+    )
 
     # Sync state tracking
     last_synced_at: Mapped[datetime] = mapped_column(

@@ -256,6 +256,7 @@ async def test_create_album_409_when_already_linked(
         integration_source="immich_album",
         external_id="existing-album",
         version_hash="v1",
+        user_id=USER_ID,
         internal_id=journal_id,
     )
     await AlbumSyncReadRepository(clean_database).upsert_link(
@@ -264,6 +265,7 @@ async def test_create_album_409_when_already_linked(
         {"album_id": "existing-album"},
         version_hash="v1",
         bump_anchor=True,
+        user_id=USER_ID,
     )
 
     with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):

@@ -97,11 +97,12 @@ class TestSnipeItSyncIntegration:
         # Verify sync_metadata row
         meta_result = await db_session.execute(
             text(
-                "SELECT internal_uuid, version_hash, sync_status FROM sync_metadata WHERE integration_source = 'snipeit' AND external_id = '999'"
+                "SELECT user_id, internal_uuid, version_hash, sync_status FROM sync_metadata WHERE integration_source = 'snipeit' AND external_id = '999'"
             )
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        assert meta_row.user_id == "user-123"
         assert meta_row.internal_uuid == gear_id
         assert meta_row.sync_status == "success"
         assert meta_row.version_hash is not None
@@ -340,3 +341,53 @@ class TestSnipeItArchivedAssetListing:
             text("SELECT count(*) FROM gear_items WHERE user_id = 'user-123'")
         )
         assert gear_count == 1
+
+
+class TestSnipeItLinkOwner:
+    """An asset another user already links is a failed asset, not a takeover."""
+
+    @pytest.mark.asyncio
+    async def test_an_asset_another_user_links_fails_and_the_batch_continues(
+        self,
+        sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: Any,
+    ) -> None:
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata
+                    (user_id, internal_uuid, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status)
+                VALUES ('other-user', gen_random_uuid()::text, 'snipeit', '31',
+                        now(), 'theirs', 'success')
+            """)
+        )
+        mock_transport.add_response(
+            "/hardware/31", json_data=_asset_json(31, "Their rope"), method="GET"
+        )
+        mock_transport.add_response(
+            "/hardware/32", json_data=_asset_json(32, "My rope"), method="GET"
+        )
+
+        result = await sync_service.sync_asset_batch([31, 32], session_factory)
+
+        assert (result["synced"], result["failed"]) == (1, 1)
+        links = (
+            await async_connection.execute(
+                text("""
+                    SELECT external_id, user_id, version_hash FROM sync_metadata
+                    WHERE integration_source = 'snipeit'
+                      AND external_id IN ('31', '32')
+                    ORDER BY external_id
+                """)
+            )
+        ).fetchall()
+        assert [(row.external_id, row.user_id) for row in links] == [
+            ("31", "other-user"),
+            ("32", "user-123"),
+        ]
+        assert links[0].version_hash == "theirs"
+        assert [row.name for row in await _gear_rows_for(async_connection, "32")] == [
+            "My rope"
+        ]

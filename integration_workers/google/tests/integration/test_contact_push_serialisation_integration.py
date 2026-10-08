@@ -124,11 +124,11 @@ class TestCronRereadsTheLinkUnderTheLock:
             text(
                 """
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id,
+                    (user_id, internal_id, integration_source, external_id,
                      version_hash, sync_status, last_synced_at,
                      internal_entity_type, external_entity_type,
                      created_at, updated_at)
-                VALUES (:cid, 'google', 'people/c-already-linked', 'etag-linked',
+                VALUES ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', 'people/c-already-linked', 'etag-linked',
                         'success', NOW(), 'contact', 'person', NOW(), NOW())
                 """
             ),
@@ -143,6 +143,7 @@ class TestCronRereadsTheLinkUnderTheLock:
             contacts=stale,
             google_account_email="race@example.com",
             group_name_to_resource={},
+            user_id=CONTACT_OWNER,
         )
 
         mock_client.create_contact.assert_not_called()
@@ -187,6 +188,7 @@ class TestCronRereadsTheLinkUnderTheLock:
             ],
             google_account_email="race@example.com",
             group_name_to_resource={},
+            user_id=CONTACT_OWNER,
         )
 
         mock_client.create_contact.assert_called_once()

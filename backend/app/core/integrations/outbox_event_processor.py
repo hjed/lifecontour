@@ -40,6 +40,7 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import keep_archived
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    ExternalLinkOwnedByAnotherUserError,
     SyncMetadataRepository,
 )
 from app.core.integrations.utils.version_hash import calculate_contact_version_hash
@@ -226,6 +227,13 @@ class OutboxEventProcessor:
                 message="Outbox event has permanent invalid payload",
             )
             raise
+        except ExternalLinkOwnedByAnotherUserError as e:
+            # Another user already links this external id; retrying cannot
+            # change that, and the link is never re-pointed to this owner.
+            self._log_processing_failure(
+                event, e, message="Outbox event links an id another user holds"
+            )
+            raise PermanentOutboxEventProcessingError(str(e)) from e
         except Exception as e:
             self._log_processing_failure(
                 event, e, message="Failed to process outbox event"
@@ -901,6 +909,7 @@ class OutboxEventProcessor:
         # asyncpg transaction poisoned for the commit anyway).
         try:
             await self.sync_metadata_repo.upsert(
+                user_id=payload.user_id,
                 internal_id=created_contact.id,
                 integration_source=integration_source,
                 external_id=external_id,
@@ -910,6 +919,8 @@ class OutboxEventProcessor:
                 external_entity_type="person",
                 reference_data=json.dumps(initial_ref_data),
             )
+        except ExternalLinkOwnedByAnotherUserError:
+            raise
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to write sync_metadata link for contact "
@@ -1093,6 +1104,7 @@ class OutboxEventProcessor:
             # The failed update_contact savepoint has been rolled back, so the
             # transaction is healthy again and we can safely proceed.
             await self.sync_metadata_repo.upsert(
+                user_id=payload.user_id,
                 internal_id=existing_contact.id,
                 integration_source=integration_source,
                 external_id=external_id,
@@ -1142,6 +1154,7 @@ class OutboxEventProcessor:
 
         try:
             await self.sync_metadata_repo.upsert(
+                user_id=payload.user_id,
                 internal_id=updated_contact.id,
                 integration_source=integration_source,
                 external_id=external_id,

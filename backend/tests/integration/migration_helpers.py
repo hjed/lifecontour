@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 class RunAlembic(Protocol):
     """The ``run_alembic`` fixture: ``alembic [-x k=v ...] <command> <target>``.
 
-    Raises ``RuntimeError`` carrying alembic's output when the command fails.
+    Returns alembic's output (stdout then stderr, where its log lines go);
+    raises ``RuntimeError`` carrying that output when the command fails.
     """
 
     def __call__(
@@ -26,7 +27,7 @@ class RunAlembic(Protocol):
         target: str,
         *,
         x_args: Mapping[str, str] | None = None,
-    ) -> None: ...
+    ) -> str: ...
 
 
 async def table_exists(engine_url: str, table: str) -> bool:

@@ -145,6 +145,7 @@ class TestSyncMetadataRepository:
 
         # Execute
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",
@@ -183,6 +184,7 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",
@@ -301,6 +303,7 @@ class TestSyncMetadataRepository:
 
         # Execute
         result = await repository.upsert(
+            user_id="user-1",
             internal_id=123,
             integration_source="google",
             external_id="people/c123",

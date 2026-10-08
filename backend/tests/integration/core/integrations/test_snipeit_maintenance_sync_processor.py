@@ -101,16 +101,17 @@ async def _record_sent(connection: AsyncConnection, event: OutboxEvent) -> None:
         text(
             """
             INSERT INTO sync_metadata
-                (integration_source, external_id, last_synced_at, version_hash,
-                 sync_status, retry_count, created_at, updated_at)
+                (user_id, integration_source, external_id, last_synced_at,
+                 version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_maintenance', :external_id, now(), :version_hash,
-                 'success', 0, now(), now())
-            ON CONFLICT (integration_source, external_id)
+                (:user_id, 'snipeit_maintenance', :external_id, now(),
+                 :version_hash, 'success', 0, now(), now())
+            ON CONFLICT (user_id, integration_source, external_id)
             DO UPDATE SET version_hash = EXCLUDED.version_hash
             """
         ),
         {
+            "user_id": USER_ID,
             "external_id": event_data["external_event_id"],
             "version_hash": event_data["journal_data"]["version_hash"],
         },

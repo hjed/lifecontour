@@ -92,6 +92,7 @@ class TestFitnessMergeModes:
         self, sync_metadata_repo, journal_id: int, activity_id: str
     ) -> None:
         await sync_metadata_repo.upsert(
+            user_id=USER_ID,
             integration_source="strava",
             external_id=activity_id,
             version_hash=f"hash-{activity_id}",
@@ -252,6 +253,7 @@ class TestFitnessMergeModes:
 
         await self._link_strava_activity(sync_metadata_repo, target_id, "111")
         await sync_metadata_repo.upsert(
+            user_id=USER_ID,
             integration_source="immich",
             external_id="album-abc",
             version_hash="hash-album",
@@ -346,6 +348,16 @@ class TestFitnessMergeModes:
         )
 
         assert await self._strava_links(clean_database, target_id) == ["111", "222"]
+        # The link the merge creates for the hand-typed id is the journal owner's.
+        owner = (
+            await clean_database.execute(
+                text(
+                    "SELECT user_id FROM sync_metadata "
+                    "WHERE integration_source = 'strava' AND external_id = '222'"
+                )
+            )
+        ).scalar_one()
+        assert owner == USER_ID
 
     @pytest.mark.asyncio
     async def test_merge_does_not_treat_the_same_activity_as_a_collision(

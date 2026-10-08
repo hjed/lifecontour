@@ -484,6 +484,16 @@ class TestSyncPeopleFlow:
         assert params["integration_source"] == "immich"
         assert params["internal_entity_type"] == "contact"
         assert params["external_entity_type"] == "person"
+        # The link is the syncing user's, keyed by the per-user conflict target.
+        assert params["user_id"] == service._user_id
+        statements = [
+            str(call[0][0])
+            for call in mock_connection.execute.call_args_list
+            if "INSERT INTO sync_metadata" in str(call[0][0])
+        ]
+        assert (
+            "ON CONFLICT (user_id, integration_source, external_id)" in (statements[0])
+        )
 
     @pytest.mark.asyncio
     async def test_multiple_contact_matches_create_conflict(

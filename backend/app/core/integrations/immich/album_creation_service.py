@@ -222,6 +222,7 @@ class ImmichAlbumCreationService:
                 reference_data,
                 version_hash=version_hash,
                 bump_anchor=True,
+                user_id=user_id,
             )
 
         logger.info(

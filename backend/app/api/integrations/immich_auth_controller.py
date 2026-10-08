@@ -325,6 +325,7 @@ async def resolve_immich_conflict(
     """Resolve a conflict by linking to an existing contact or creating a new one."""
     from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
     from app.core.integrations.adapters.sql.sync_metadata_repository import (
+        ExternalLinkOwnedByAnotherUserError,
         SyncMetadataRepository,
     )
 
@@ -397,12 +398,19 @@ async def resolve_immich_conflict(
             )
 
         # Upsert the canonical integration link (find-or-create/update)
-        await sync_metadata_repo.upsert_contact_link(
-            contact_id=contact_id,
-            external_system="immich",
-            external_entity_type="person",
-            external_entity_id=external_id,
-        )
+        try:
+            await sync_metadata_repo.upsert_contact_link(
+                contact_id=contact_id,
+                user_id=str(user.id),
+                external_system="immich",
+                external_entity_type="person",
+                external_entity_id=external_id,
+            )
+        except ExternalLinkOwnedByAnotherUserError as e:
+            raise HTTPException(
+                status_code=409,
+                detail="This Immich person is already linked by another user",
+            ) from e
 
         data = ImmichConflictData(
             id=str(updated_conflict["id"]),

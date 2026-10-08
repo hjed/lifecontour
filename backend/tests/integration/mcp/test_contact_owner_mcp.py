@@ -1,7 +1,9 @@
 """MCP tools that create a contact make it the acting user's.
 
 ``create_contact`` and ``resolve_immich_conflict(action="create")`` each build
-a new contact; both stamp the MCP request's user as its owner.
+a new contact; both stamp the MCP request's user as its owner, and the Immich
+link the conflict writes is the acting user's too — never a link another user
+already holds.
 """
 
 from collections.abc import Callable
@@ -12,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.contact_seeding import TEST_USER_ID
-from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.mcp.http_helpers import call_mcp_tool, post_mcp_tool
 
 
 async def _owner(conn: AsyncConnection, contact_id: int) -> str | None:
@@ -73,3 +75,84 @@ async def test_resolving_an_immich_conflict_by_creating_owns_the_contact(
         )
     ).scalar_one()
     assert await _owner(async_connection, contact_id) == TEST_USER_ID
+
+
+async def _seed_conflict(conn: AsyncConnection, person_id: str) -> int:
+    conflict_id: int = (
+        await conn.execute(
+            text("""
+                INSERT INTO pending_entity_mappings
+                    (user_id, integration_source, external_entity_id,
+                     external_entity_name, candidate_contact_ids, status)
+                VALUES (:user_id, 'immich', :person_id, 'Ada Lovelace',
+                        '[]'::jsonb, 'unresolved')
+                RETURNING id
+            """),
+            {"user_id": TEST_USER_ID, "person_id": person_id},
+        )
+    ).scalar_one()
+    return conflict_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_resolving_an_immich_conflict_stamps_the_link_owner(
+    authenticated_lifespan_client: Callable[..., Any],
+    async_connection: AsyncConnection,
+) -> None:
+    conflict_id = await _seed_conflict(async_connection, "person-link-owned")
+
+    async with authenticated_lifespan_client() as client:
+        await call_mcp_tool(
+            client,
+            "resolve_immich_conflict",
+            {"conflict_id": conflict_id, "action": "create"},
+        )
+
+    owner = (
+        await async_connection.execute(
+            text(
+                "SELECT user_id FROM sync_metadata "
+                "WHERE external_id = 'person-link-owned'"
+            )
+        )
+    ).scalar_one()
+    assert owner == TEST_USER_ID
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_resolving_a_conflict_for_a_person_another_user_links_errors(
+    authenticated_lifespan_client: Callable[..., Any],
+    async_connection: AsyncConnection,
+) -> None:
+    conflict_id = await _seed_conflict(async_connection, "person-taken")
+    await async_connection.execute(
+        text("""
+            INSERT INTO sync_metadata
+                (user_id, internal_id, integration_source, external_id,
+                 last_synced_at, version_hash, sync_status, internal_entity_type)
+            VALUES ('other-user-456', 999, 'immich', 'person-taken',
+                    now(), 'theirs', 'success', 'contact')
+        """)
+    )
+
+    async with authenticated_lifespan_client() as client:
+        response = await post_mcp_tool(
+            client,
+            "resolve_immich_conflict",
+            {"conflict_id": conflict_id, "action": "create"},
+        )
+
+    # The tool reports a ValueError as its validation-error payload.
+    assert "already linked by another user" in response.text
+    assert "other-user-456" not in response.text
+    links = (
+        await async_connection.execute(
+            text(
+                "SELECT user_id, internal_id FROM sync_metadata "
+                "WHERE external_id = 'person-taken'"
+            )
+        )
+    ).fetchall()
+    assert [tuple(row) for row in links] == [("other-user-456", 999)]

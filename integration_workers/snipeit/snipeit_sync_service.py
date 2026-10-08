@@ -614,7 +614,12 @@ def _raise_if_claim_in_flight(journal_id: int, claim_row: Any) -> None:
 
 
 async def _insert_push_row(
-    session: Any, journal_id: int, external_id: str, version_hash: str
+    session: Any,
+    journal_id: int,
+    external_id: str,
+    version_hash: str,
+    *,
+    user_id: str,
 ) -> Literal["inserted", "taken", "journal_gone"]:
     """Record ``external_id`` as the journal's Snipe-IT maintenance.
 
@@ -625,10 +630,11 @@ async def _insert_push_row(
     journal holds and the inbound sync skipped.
 
     Returns:
-        ``"inserted"`` when the row was written, ``"taken"`` when a sync row
-        already names that record — a record's row is never re-pointed to
-        another journal — and ``"journal_gone"`` when the journal no longer
-        exists. Nothing is written in the latter two cases.
+        ``"inserted"`` when the row was written, ``"taken"`` when the owner's
+        sync row already names that record — a record's row is never
+        re-pointed to another journal — and ``"journal_gone"`` when the journal
+        no longer exists. Nothing is written in the latter two cases. A record
+        another user links raises ``IntegrityError`` (the global unique index).
     """
     if not await _journal_exists(session, journal_id, lock=True):
         return "journal_gone"
@@ -636,16 +642,17 @@ async def _insert_push_row(
     result = await session.execute(
         text("""
             INSERT INTO sync_metadata
-                (internal_uuid, integration_source, external_id,
+                (user_id, internal_uuid, integration_source, external_id,
                  last_synced_at, version_hash, sync_status,
                  error_message, retry_count, created_at, updated_at)
             VALUES
-                (:internal_uuid, 'snipeit_maintenance', :external_id,
+                (:user_id, :internal_uuid, 'snipeit_maintenance', :external_id,
                  now(), :version_hash, 'success', NULL, 0, now(), now())
-            ON CONFLICT (integration_source, external_id) DO NOTHING
+            ON CONFLICT (user_id, integration_source, external_id) DO NOTHING
             RETURNING id
         """),
         {
+            "user_id": user_id,
             "internal_uuid": str(journal_id),
             "external_id": external_id,
             "version_hash": version_hash,
@@ -892,14 +899,14 @@ class SnipeItSyncService:
                         await session.execute(
                             text("""
                                 INSERT INTO sync_metadata
-                                    (internal_uuid, integration_source, external_id, last_synced_at,
-                                     version_hash, sync_status, error_message, retry_count,
-                                     created_at, updated_at)
+                                    (user_id, internal_uuid, integration_source, external_id,
+                                     last_synced_at, version_hash, sync_status, error_message,
+                                     retry_count, created_at, updated_at)
                                 VALUES
-                                    (:internal_uuid, 'snipeit', :external_id, now(),
-                                     :version_hash, 'success', NULL, 0,
+                                    (:user_id, :internal_uuid, 'snipeit', :external_id,
+                                     now(), :version_hash, 'success', NULL, 0,
                                      now(), now())
-                                ON CONFLICT (integration_source, external_id)
+                                ON CONFLICT (user_id, integration_source, external_id)
                                 DO UPDATE SET
                                     internal_uuid = EXCLUDED.internal_uuid,
                                     last_synced_at = EXCLUDED.last_synced_at,
@@ -910,6 +917,7 @@ class SnipeItSyncService:
                                     updated_at = EXCLUDED.updated_at
                             """),
                             {
+                                "user_id": self._user_id,
                                 "external_id": external_id,
                                 "version_hash": transformed.version_hash,
                                 "internal_uuid": gear_id,
@@ -937,14 +945,15 @@ class SnipeItSyncService:
                                 await session.execute(
                                     text("""
                                         INSERT INTO sync_metadata
-                                            (integration_source, external_id, last_synced_at,
-                                             version_hash, sync_status, error_message, retry_count,
+                                            (user_id, integration_source, external_id,
+                                             last_synced_at, version_hash, sync_status,
+                                             error_message, retry_count,
                                              created_at, updated_at)
                                         VALUES
-                                            ('snipeit', :external_id, now(),
+                                            (:user_id, 'snipeit', :external_id, now(),
                                              '', 'failed', :error_message, 0,
                                              now(), now())
-                                        ON CONFLICT (integration_source, external_id)
+                                        ON CONFLICT (user_id, integration_source, external_id)
                                         DO UPDATE SET
                                             last_synced_at = EXCLUDED.last_synced_at,
                                             sync_status = EXCLUDED.sync_status,
@@ -953,6 +962,7 @@ class SnipeItSyncService:
                                             updated_at = EXCLUDED.updated_at
                                     """),
                                     {
+                                        "user_id": self._user_id,
                                         "external_id": external_id,
                                         "error_message": str(exc),
                                     },
@@ -1641,14 +1651,14 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         INSERT INTO sync_metadata
-                            (integration_source, external_id, last_synced_at,
-                             version_hash, sync_status, error_message,
-                             retry_count, created_at, updated_at)
+                            (user_id, integration_source, external_id,
+                             last_synced_at, version_hash, sync_status,
+                             error_message, retry_count, created_at, updated_at)
                         VALUES
-                            ('snipeit_maintenance', :external_id, now(),
+                            (:user_id, 'snipeit_maintenance', :external_id, now(),
                              :version_hash, 'success', NULL, 0,
                              now(), now())
-                        ON CONFLICT (integration_source, external_id)
+                        ON CONFLICT (user_id, integration_source, external_id)
                         DO UPDATE SET
                             last_synced_at = EXCLUDED.last_synced_at,
                             version_hash = EXCLUDED.version_hash,
@@ -1658,6 +1668,7 @@ class SnipeItSyncService:
                             updated_at = EXCLUDED.updated_at
                     """),
                     {
+                        "user_id": self._user_id,
                         "external_id": external_id,
                         "version_hash": transformed.version_hash,
                     },
@@ -2055,6 +2066,7 @@ class SnipeItSyncService:
                         journal_id,
                         external_id,
                         _payload_version_hash(_snipeit_record_payload(maintenance)),
+                        user_id=self._user_id,
                     )
                     != "inserted"
                 ):
@@ -2152,6 +2164,7 @@ class SnipeItSyncService:
                         journal_id,
                         f"snipeit_maint:{free.id}",
                         _payload_version_hash(_snipeit_record_payload(free)),
+                        user_id=self._user_id,
                     )
                     == "inserted"
                 ):
@@ -2166,16 +2179,16 @@ class SnipeItSyncService:
                 await session.execute(
                     text("""
                         INSERT INTO sync_metadata
-                            (internal_uuid, integration_source, external_id,
+                            (user_id, internal_uuid, integration_source, external_id,
                              last_synced_at, version_hash, sync_status,
                              error_message, retry_count, reference_data,
                              created_at, updated_at)
                         VALUES
-                            (:journal_id, :claim_source, :journal_id,
+                            (:user_id, :journal_id, :claim_source, :journal_id,
                              now(), 'PENDING', 'pending',
                              NULL, 0, :reference_data,
                              now(), now())
-                        ON CONFLICT (integration_source, external_id)
+                        ON CONFLICT (user_id, integration_source, external_id)
                         DO UPDATE SET
                             sync_status = 'pending',
                             error_message = NULL,
@@ -2183,6 +2196,7 @@ class SnipeItSyncService:
                             updated_at = now()
                     """),
                     {
+                        "user_id": self._user_id,
                         "claim_source": _MAINTENANCE_CLAIM_SOURCE,
                         "journal_id": str(journal_id),
                         "reference_data": claim.to_reference(),
@@ -2230,7 +2244,11 @@ class SnipeItSyncService:
                         )
                     return False
                 outcome = await _insert_push_row(
-                    session, journal_id, external_id, version_hash
+                    session,
+                    journal_id,
+                    external_id,
+                    version_hash,
+                    user_id=self._user_id,
                 )
                 if outcome == "journal_gone":
                     logger.info(
@@ -2670,16 +2688,18 @@ class SnipeItSyncService:
                     insert_result = await session.execute(
                         text("""
                             INSERT INTO sync_metadata
-                                (internal_uuid, integration_source, external_id,
+                                (user_id, internal_uuid, integration_source, external_id,
                                  last_synced_at, version_hash, sync_status,
                                  error_message, retry_count, created_at, updated_at)
                             VALUES
-                                (:internal_uuid, 'snipeit_checkout', :external_id,
+                                (:user_id, :internal_uuid, 'snipeit_checkout', :external_id,
                                  now(), 'PENDING', 'pending', NULL, 0, now(), now())
-                            ON CONFLICT (integration_source, external_id) DO NOTHING
+                            ON CONFLICT (user_id, integration_source, external_id)
+                            DO NOTHING
                             RETURNING id
                         """),
                         {
+                            "user_id": self._user_id,
                             "internal_uuid": str(journal_id),
                             "external_id": external_id,
                         },
@@ -3354,16 +3374,18 @@ class SnipeItSyncService:
                     insert_result = await session.execute(
                         text("""
                             INSERT INTO sync_metadata
-                                (internal_uuid, integration_source, external_id,
+                                (user_id, internal_uuid, integration_source, external_id,
                                  last_synced_at, version_hash, sync_status,
                                  error_message, retry_count, created_at, updated_at)
                             VALUES
-                                (:internal_uuid, 'snipeit_checkin', :external_id,
+                                (:user_id, :internal_uuid, 'snipeit_checkin', :external_id,
                                  now(), 'PENDING', 'pending', NULL, 0, now(), now())
-                            ON CONFLICT (integration_source, external_id) DO NOTHING
+                            ON CONFLICT (user_id, integration_source, external_id)
+                            DO NOTHING
                             RETURNING id
                         """),
                         {
+                            "user_id": self._user_id,
                             "internal_uuid": str(journal_id),
                             "external_id": external_id,
                         },

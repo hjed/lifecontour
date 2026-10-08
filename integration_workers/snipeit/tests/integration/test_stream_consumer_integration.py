@@ -260,8 +260,8 @@ class TestStreamConsumerIntegration:
 
         await async_connection.execute(
             text("""
-                INSERT INTO sync_metadata (internal_uuid, integration_source, external_id, last_synced_at, version_hash, sync_status, retry_count, created_at, updated_at)
-                VALUES (:id, 'snipeit', :external_id, now(), :version_hash, 'success', 0, now(), now())
+                INSERT INTO sync_metadata (user_id, internal_uuid, integration_source, external_id, last_synced_at, version_hash, sync_status, retry_count, created_at, updated_at)
+                VALUES ('user-123', :id, 'snipeit', :external_id, now(), :version_hash, 'success', 0, now(), now())
             """),
             {
                 "id": gear_item_uuid,
@@ -374,11 +374,11 @@ class TestStreamConsumerIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (internal_uuid, integration_source, external_id,
+                    (user_id, internal_uuid, integration_source, external_id,
                      last_synced_at, version_hash, sync_status, retry_count,
                      reference_data, created_at, updated_at)
                 VALUES
-                    (:journal_id, 'snipeit_maintenance_claim', :journal_id,
+                    ('user-123', :journal_id, 'snipeit_maintenance_claim', :journal_id,
                      now(), 'PENDING', 'failed', 0,
                      '{"asset_id": 51, "title": "Retire Harness",
                        "start_date": "2026-09-11"}', now(), now())
@@ -466,11 +466,11 @@ class TestStreamConsumerIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (internal_uuid, integration_source, external_id,
+                    (user_id, internal_uuid, integration_source, external_id,
                      last_synced_at, version_hash, sync_status, retry_count,
                      created_at, updated_at)
                 VALUES
-                    (:journal_uuid, 'snipeit_checkout', :external_id,
+                    ('user-123', :journal_uuid, 'snipeit_checkout', :external_id,
                      now(), 'hash', 'success', 0, now(), now())
             """),
             {

@@ -85,11 +85,11 @@ async def _seed_sync_metadata(
         text(
             """
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id,
+                (user_id, internal_id, integration_source, external_id,
                  version_hash, sync_status, last_synced_at,
                  created_at, updated_at)
             VALUES
-                (:cid, 'google', :ext, 'etag', 'success', NOW(), NOW(), NOW())
+                ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', :ext, 'etag', 'success', NOW(), NOW(), NOW())
             """
         ),
         {"cid": internal_id, "ext": external_id},

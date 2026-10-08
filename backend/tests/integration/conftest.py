@@ -1098,7 +1098,8 @@ def run_alembic() -> Any:
     """Return a helper that runs ``alembic [-x k=v ...] <command> <target>``.
 
     Shared by migration round-trip tests so each does not re-implement the
-    subprocess invocation; ``x_args`` become alembic ``-x`` arguments. Typed as
+    subprocess invocation; ``x_args`` become alembic ``-x`` arguments. Returns
+    alembic's output (stdout then stderr, where its log lines go). Typed as
     ``tests.integration.migration_helpers.RunAlembic``.
     """
     import sys
@@ -1113,7 +1114,7 @@ def run_alembic() -> Any:
         target: str,
         *,
         x_args: Mapping[str, str] | None = None,
-    ) -> None:
+    ) -> str:
         env = {
             **os.environ,
             "ENVIRONMENT": "test",
@@ -1135,6 +1136,7 @@ def run_alembic() -> Any:
             raise RuntimeError(
                 f"alembic {command} {target} failed:\n{result.stdout}\n{result.stderr}"
             )
+        return f"{result.stdout}\n{result.stderr}"
 
     return _run
 

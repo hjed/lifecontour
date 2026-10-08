@@ -67,11 +67,11 @@ class TestMaintenanceSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '42', :gear_item_id,
+                    ('user-123', 'snipeit', '42', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -152,7 +152,7 @@ class TestMaintenanceSyncIntegration:
         # Step 5: Verify sync_metadata for maintenance
         meta_result = await async_connection.execute(
             text("""
-                SELECT version_hash, sync_status
+                SELECT user_id, version_hash, sync_status
                 FROM sync_metadata
                 WHERE integration_source = 'snipeit_maintenance'
                   AND external_id = :external_id
@@ -161,6 +161,7 @@ class TestMaintenanceSyncIntegration:
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        assert meta_row.user_id == "user-123"
         assert meta_row.sync_status == "success"
         assert meta_row.version_hash is not None
 
@@ -187,11 +188,11 @@ class TestMaintenanceSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '50', :gear_item_id,
+                    ('user-123', 'snipeit', '50', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -342,11 +343,11 @@ class TestOutboundMaintenanceSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '42', :gear_item_id,
+                    ('user-123', 'snipeit', '42', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -417,7 +418,7 @@ class TestOutboundMaintenanceSyncIntegration:
         # Step 5: Verify sync_metadata was created
         meta_result = await async_connection.execute(
             text("""
-                SELECT internal_uuid, sync_status
+                SELECT user_id, internal_uuid, sync_status
                 FROM sync_metadata
                 WHERE integration_source = 'snipeit_maintenance'
                   AND external_id = 'snipeit_maint:501'
@@ -425,6 +426,7 @@ class TestOutboundMaintenanceSyncIntegration:
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        assert meta_row.user_id == "user-123"
         assert meta_row.internal_uuid == str(journal_id)
         assert meta_row.sync_status == "success"
 
@@ -460,11 +462,11 @@ class TestOutboundMaintenanceSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '55', :gear_item_id,
+                    ('user-123', 'snipeit', '55', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -499,11 +501,11 @@ class TestOutboundMaintenanceSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_maintenance', 'snipeit_maint:501', :journal_id,
+                    ('user-123', 'snipeit_maintenance', 'snipeit_maint:501', :journal_id,
                      now(), '', 'success',
                      NULL, 0, now(), now())
             """),
@@ -590,10 +592,10 @@ async def _seed_synced_asset(async_connection: AsyncConnection, asset_id: int) -
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, internal_uuid, last_synced_at,
+                (user_id, integration_source, external_id, internal_uuid, last_synced_at,
                  version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit', :external_id, :gear_item_id, now(),
+                ('user-123', 'snipeit', :external_id, :gear_item_id, now(),
                  'asset-hash', 'success', 0, now(), now())
         """),
         {"external_id": str(asset_id), "gear_item_id": gear_item_id},
@@ -674,10 +676,10 @@ async def _seed_push_record(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (internal_uuid, integration_source, external_id, last_synced_at,
+                (user_id, internal_uuid, integration_source, external_id, last_synced_at,
                  version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                (:journal_id, 'snipeit_maintenance', :external_id, now(),
+                ('user-123', :journal_id, 'snipeit_maintenance', :external_id, now(),
                  'payload-hash', 'success', 0, now(), now())
         """),
         {
@@ -880,10 +882,10 @@ async def _seed_import_record(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (integration_source, external_id, last_synced_at,
+                (user_id, integration_source, external_id, last_synced_at,
                  version_hash, sync_status, retry_count, created_at, updated_at)
             VALUES
-                ('snipeit_maintenance', :external_id,
+                ('user-123', 'snipeit_maintenance', :external_id,
                  now() - CAST(:age_seconds AS integer) * interval '1 second',
                  :version_hash, 'success', 0, now(), now())
         """),
@@ -1136,11 +1138,11 @@ async def _seed_claim(
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
-                (internal_uuid, integration_source, external_id, last_synced_at,
+                (user_id, internal_uuid, integration_source, external_id, last_synced_at,
                  version_hash, sync_status, retry_count, reference_data,
                  created_at, updated_at)
             VALUES
-                (:journal_id, 'snipeit_maintenance_claim', :journal_id, now(),
+                ('user-123', :journal_id, 'snipeit_maintenance_claim', :journal_id, now(),
                  'PENDING', :status, 0, :reference_data, now(),
                  now() - CAST(:age_seconds AS integer) * interval '1 second')
         """),
@@ -1157,7 +1159,7 @@ async def _claim_row(async_connection: AsyncConnection, journal_id: int) -> Any:
     """The journal's maintenance claim, or ``None``."""
     result = await async_connection.execute(
         text("""
-            SELECT sync_status, reference_data
+            SELECT user_id, sync_status, reference_data
             FROM sync_metadata
             WHERE integration_source = 'snipeit_maintenance_claim'
               AND external_id = :journal_id
@@ -1224,6 +1226,7 @@ class TestMaintenanceCreateClaim:
         assert claim_at_post.sync_status == "pending"
         assert json.loads(claim_at_post.reference_data) == _RETIRE_HARNESS_CLAIM
         claim = await _claim_row(async_connection, journal_id)
+        assert claim.user_id == "user-123"
         assert claim.sync_status == "failed"
         assert json.loads(claim.reference_data) == _RETIRE_HARNESS_CLAIM
         assert await _push_rows(async_connection, journal_id) == []

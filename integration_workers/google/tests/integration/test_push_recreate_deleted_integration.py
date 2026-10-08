@@ -78,11 +78,11 @@ async def linked_contact_id(db_session: AsyncSession) -> int:
         text(
             """
             INSERT INTO sync_metadata
-                (internal_id, integration_source, external_id,
+                (user_id, internal_id, integration_source, external_id,
                  version_hash, sync_status, last_synced_at, reference_data,
                  created_at, updated_at)
             VALUES
-                (:cid, 'google', :ext, 'etag_stale', 'success', NOW(), :ref,
+                ((SELECT user_id FROM contacts WHERE id = :cid), :cid, 'google', :ext, 'etag_stale', 'success', NOW(), :ref,
                  NOW(), NOW())
             """
         ),
@@ -191,6 +191,7 @@ class TestRecreateContactDeletedOnGoogle:
             ],
             google_account_email="recreate-it@example.com",
             group_name_to_resource={},
+            user_id=CONTACT_OWNER,
         )
 
         assert metrics["pushed_count"] == 1

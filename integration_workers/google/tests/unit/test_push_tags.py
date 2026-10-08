@@ -781,6 +781,7 @@ class TestPushContactWithTagsEndToEnd:
                 contacts=local_contacts,
                 google_account_email="test@example.com",
                 group_name_to_resource=group_name_to_resource,
+                user_id="1",
             )
 
             assert result["pushed_count"] == 1

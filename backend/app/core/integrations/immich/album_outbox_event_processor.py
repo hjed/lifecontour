@@ -210,6 +210,7 @@ class ImmichAlbumOutboxEventProcessor:
             reference_data,
             version_hash=payload.version_hash,
             bump_anchor=True,
+            user_id=created.user_id,
         )
 
         logger.info(
@@ -306,6 +307,7 @@ class ImmichAlbumOutboxEventProcessor:
             reference_data,
             version_hash=payload.version_hash,
             bump_anchor=not has_local_edits,
+            user_id=existing.user_id,
         )
 
         logger.info(

@@ -10,10 +10,80 @@ This repository implements production-grade resilience patterns:
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
-from sqlalchemy import text
+from sqlalchemy import CursorResult, TextClause, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.infrastructure.unit_of_work import savepoint
+
+# The global ``(integration_source, external_id)`` unique index. Every writer
+# conflicts on the per-user key, so a violation of this one means the external
+# id is held by a different user — or, until ``0127`` requires an owner, by a
+# row no writer has stamped yet.
+_GLOBAL_LINK_INDEX = "idx_sync_metadata_integration_external"
+
+
+class ExternalLinkOwnedByAnotherUserError(Exception):
+    """A link write for an external id that a different user already holds.
+
+    Carries the link's key and never the other owner (a foreign row is not
+    described, as for any other entity).
+    """
+
+    def __init__(self, integration_source: str, external_id: str) -> None:
+        super().__init__(
+            f"{integration_source} id {external_id!r} is linked by another user"
+        )
+        self.integration_source = integration_source
+        self.external_id = external_id
+
+
+async def execute_link_write(
+    connection: AsyncConnection,
+    statement: TextClause,
+    params: Mapping[str, Any],
+    *,
+    integration_source: str,
+    external_id: str,
+) -> CursorResult[Any]:
+    """Run an ``INSERT INTO sync_metadata`` keyed by the per-user conflict target.
+
+    The write runs in a savepoint, so a refusal leaves the caller's unit of work
+    usable. A violation of the global index by a row another user owns is
+    raised as :class:`ExternalLinkOwnedByAnotherUserError`; one by a row with no
+    owner yet is re-raised as it is, since it is not another user's and is
+    assigned (and so writable) once ``0127`` runs.
+    """
+    try:
+        async with savepoint(connection):
+            return await connection.execute(statement, params)
+    except IntegrityError as exc:
+        if _GLOBAL_LINK_INDEX in str(exc.orig) and await _held_by_an_owner(
+            connection, integration_source, external_id
+        ):
+            raise ExternalLinkOwnedByAnotherUserError(
+                integration_source, external_id
+            ) from exc
+        raise
+
+
+async def _held_by_an_owner(
+    connection: AsyncConnection, integration_source: str, external_id: str
+) -> bool:
+    """Whether the row holding ``(integration_source, external_id)`` has an owner."""
+    result = await connection.execute(
+        text("""
+            SELECT 1 FROM sync_metadata
+            WHERE integration_source = :integration_source
+              AND external_id = :external_id
+              AND user_id IS NOT NULL
+        """),
+        {"integration_source": integration_source, "external_id": external_id},
+    )
+    return result.first() is not None
 
 
 @dataclass(frozen=True)
@@ -155,6 +225,8 @@ class SyncMetadataRepository:
         integration_source: str,
         external_id: str,
         version_hash: str,
+        *,
+        user_id: str,
         internal_id: int | None = None,
         internal_uuid: str | None = None,
         sync_status: SyncStatus = SyncStatus.SUCCESS,
@@ -170,6 +242,7 @@ class SyncMetadataRepository:
             integration_source: Integration source
             external_id: External entity ID
             version_hash: Version hash for change detection
+            user_id: Owner of the linked entity; the link is keyed by it
             internal_id: Internal entity ID (integer)
             internal_uuid: Internal entity ID (UUID string)
             sync_status: Sync status
@@ -180,6 +253,10 @@ class SyncMetadataRepository:
 
         Returns:
             Created or updated SyncMetadata
+
+        Raises:
+            ExternalLinkOwnedByAnotherUserError: Another user holds
+                ``(integration_source, external_id)``.
         """
         now = datetime.now(UTC)
 
@@ -188,16 +265,16 @@ class SyncMetadataRepository:
         # never clears values populated by another writer or the backfill.
         query = text("""
             INSERT INTO sync_metadata
-                (internal_id, internal_uuid, integration_source, external_id, last_synced_at,
-                 version_hash, sync_status, error_message, retry_count,
+                (user_id, internal_id, internal_uuid, integration_source, external_id,
+                 last_synced_at, version_hash, sync_status, error_message, retry_count,
                  internal_entity_type, external_entity_type, reference_data,
                  created_at, updated_at)
             VALUES
-                (:internal_id, :internal_uuid, :integration_source, :external_id, :last_synced_at,
-                 :version_hash, :sync_status, :error_message, 0,
+                (:user_id, :internal_id, :internal_uuid, :integration_source, :external_id,
+                 :last_synced_at, :version_hash, :sync_status, :error_message, 0,
                  :internal_entity_type, :external_entity_type, :reference_data,
                  :created_at, :updated_at)
-            ON CONFLICT (integration_source, external_id)
+            ON CONFLICT (user_id, integration_source, external_id)
             DO UPDATE SET
                 internal_id = EXCLUDED.internal_id,
                 internal_uuid = EXCLUDED.internal_uuid,
@@ -225,9 +302,11 @@ class SyncMetadataRepository:
                       external_entity_type, reference_data, created_at, updated_at
         """)
 
-        result = await self.conn.execute(
+        result = await execute_link_write(
+            self.conn,
             query,
             {
+                "user_id": user_id,
                 "internal_id": internal_id,
                 "internal_uuid": internal_uuid,
                 "integration_source": integration_source,
@@ -242,6 +321,8 @@ class SyncMetadataRepository:
                 "created_at": now,
                 "updated_at": now,
             },
+            integration_source=integration_source,
+            external_id=external_id,
         )
         row = result.fetchone()
 
@@ -305,6 +386,8 @@ class SyncMetadataRepository:
     async def upsert_contact_link(
         self,
         contact_id: int,
+        *,
+        user_id: str,
         external_system: str,
         external_entity_type: str,
         external_entity_id: str,
@@ -312,7 +395,7 @@ class SyncMetadataRepository:
         """Link a contact to an external entity in the canonical link store.
 
         Writes the ``(integration_source, external_id) → contact`` link onto
-        ``sync_metadata``, which dedups on ``UNIQUE(integration_source,
+        ``sync_metadata``, which dedups on ``UNIQUE(user_id, integration_source,
         external_id)``. ``version_hash`` is left empty so the next sync
         re-validates the entity's content. The link columns use ``COALESCE`` on
         conflict (see :meth:`upsert`), so re-linking the same external id never
@@ -320,6 +403,7 @@ class SyncMetadataRepository:
 
         Args:
             contact_id: Internal contact ID.
+            user_id: The contact's owner.
             external_system: External system name (e.g. 'immich').
             external_entity_type: External entity type (e.g. 'person').
             external_entity_id: External entity ID to link.
@@ -328,6 +412,7 @@ class SyncMetadataRepository:
             integration_source=external_system,
             external_id=external_entity_id,
             version_hash="",
+            user_id=user_id,
             internal_id=contact_id,
             internal_entity_type="contact",
             external_entity_type=external_entity_type,
@@ -609,6 +694,8 @@ class SyncMetadataRepository:
         self,
         journal_id: int,
         integration_source: str,
+        *,
+        user_id: str,
         external_id: str,
         external_entity_type: str,
         transaction: AsyncConnection,
@@ -621,30 +708,38 @@ class SyncMetadataRepository:
         deleted by the merge and the survivor keeps its own id, so without this
         the hand-entered activity would simply vanish.
 
-        Does nothing when the record is already linked, so a real sync row —
-        with the ``version_hash`` the workers maintain — is never clobbered by
-        the empty hash used here.
+        Does nothing when the owner already links the record, so a real sync
+        row — with the ``version_hash`` the workers maintain — is never
+        clobbered by the empty hash used here.
+
+        Args:
+            user_id: The journal's owner.
 
         Returns:
             True when a link was created.
+
+        Raises:
+            ExternalLinkOwnedByAnotherUserError: Another user holds the record.
         """
         now = datetime.now(UTC)
-        result = await transaction.execute(
+        result = await execute_link_write(
+            transaction,
             text("""
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id, last_synced_at,
-                     version_hash, sync_status, retry_count,
+                    (user_id, internal_id, integration_source, external_id,
+                     last_synced_at, version_hash, sync_status, retry_count,
                      internal_entity_type, external_entity_type,
                      created_at, updated_at)
                 VALUES
-                    (:journal_id, :integration_source, :external_id, :now,
-                     '', :sync_status, 0,
+                    (:user_id, :journal_id, :integration_source, :external_id,
+                     :now, '', :sync_status, 0,
                      'journal', :external_entity_type,
                      :now, :now)
-                ON CONFLICT (integration_source, external_id) DO NOTHING
+                ON CONFLICT (user_id, integration_source, external_id) DO NOTHING
                 RETURNING id
             """),
             {
+                "user_id": user_id,
                 "journal_id": journal_id,
                 "integration_source": integration_source,
                 "external_id": external_id,
@@ -652,6 +747,8 @@ class SyncMetadataRepository:
                 "sync_status": SyncStatus.PENDING.value,
                 "now": now,
             },
+            integration_source=integration_source,
+            external_id=external_id,
         )
         return result.fetchone() is not None
 

@@ -54,11 +54,11 @@ class TestCheckoutSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '42', :gear_item_id,
+                    ('user-123', 'snipeit', '42', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -143,7 +143,7 @@ class TestCheckoutSyncIntegration:
         # Step 5: Verify sync_metadata was created
         meta_result = await async_connection.execute(
             text("""
-                SELECT internal_uuid, sync_status, version_hash
+                SELECT user_id, internal_uuid, sync_status, version_hash
                 FROM sync_metadata
                 WHERE integration_source = 'snipeit_checkout'
                   AND external_id = :external_id
@@ -152,6 +152,7 @@ class TestCheckoutSyncIntegration:
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        assert meta_row.user_id == "user-123"
         assert meta_row.internal_uuid == str(journal_id)
         assert meta_row.sync_status == "success"
         assert meta_row.version_hash is not None
@@ -185,11 +186,11 @@ class TestCheckoutSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '55', :gear_item_id,
+                    ('user-123', 'snipeit', '55', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -229,11 +230,11 @@ class TestCheckoutSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit_checkout', :external_id, :journal_id,
+                    ('user-123', 'snipeit_checkout', :external_id, :journal_id,
                      now(), 'existing-hash', 'success',
                      NULL, 0, now(), now())
             """),
@@ -291,11 +292,11 @@ class TestCheckoutSyncIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (integration_source, external_id, internal_uuid,
+                    (user_id, integration_source, external_id, internal_uuid,
                      last_synced_at, version_hash, sync_status,
                      error_message, retry_count, created_at, updated_at)
                 VALUES
-                    ('snipeit', '99', :gear_item_id,
+                    ('user-123', 'snipeit', '99', :gear_item_id,
                      now(), 'test-hash', 'success',
                      NULL, 0, now(), now())
             """),
