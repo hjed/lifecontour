@@ -9,6 +9,7 @@ from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -28,7 +29,9 @@ class TestGetAllDescendantsBulk:
 
     async def test_delegates_to_repository(self, hierarchy_service, mock_tag_repo):
         parent_id = uuid4()
-        child = JournalTag(id=uuid4(), name="Child", parent_id=parent_id)
+        child = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="Child", parent_id=parent_id
+        )
         mock_tag_repo.get_descendants_for_tags.return_value = [child]
 
         result = await hierarchy_service.get_all_descendants_bulk([parent_id])

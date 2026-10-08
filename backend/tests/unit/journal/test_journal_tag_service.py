@@ -16,6 +16,7 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
 from app.core.journal.services.journal_tag_service import JournalTagService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -69,8 +70,10 @@ class TestCreateTag:
         self, tag_service, mock_tag_repo, mock_transaction
     ):
         """create_tag saves via the repo and returns the saved entity."""
-        tag = JournalTag(name="Work", color="#3B82F6")
-        saved = JournalTag(id=uuid4(), name="Work", color="#3B82F6")
+        tag = JournalTag(user_id=TEST_USER_ID, name="Work", color="#3B82F6")
+        saved = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="Work", color="#3B82F6"
+        )
         mock_tag_repo.save.return_value = saved
 
         result = await tag_service.create_tag(tag, transaction=mock_transaction)
@@ -83,7 +86,7 @@ class TestCreateTag:
         self, tag_service, mock_tag_repo, mock_transaction
     ):
         """A duplicate-name IntegrityError becomes a JournalValidationError."""
-        tag = JournalTag(name="Work", color="#3B82F6")
+        tag = JournalTag(user_id=TEST_USER_ID, name="Work", color="#3B82F6")
         mock_tag_repo.save.side_effect = IntegrityError(
             "uq_journal_tags_name", {}, Exception("dup")
         )
@@ -96,7 +99,7 @@ class TestCreateTag:
         self, tag_service, mock_tag_repo, mock_transaction
     ):
         """A non-duplicate IntegrityError is re-raised unchanged."""
-        tag = JournalTag(name="Work", color="#3B82F6")
+        tag = JournalTag(user_id=TEST_USER_ID, name="Work", color="#3B82F6")
         mock_tag_repo.save.side_effect = IntegrityError(
             "some other constraint", {}, Exception("boom")
         )
@@ -119,7 +122,7 @@ class TestDeleteTag:
         """delete_tag removes the tag when no journals reference it."""
         tag_id = uuid4()
         mock_tag_repo.find_by_id.return_value = JournalTag(
-            id=tag_id, name="Spare", color="#000000"
+            user_id=TEST_USER_ID, id=tag_id, name="Spare", color="#000000"
         )
 
         await tag_service.delete_tag(tag_id, transaction=mock_transaction)
@@ -137,7 +140,7 @@ class TestDeleteTag:
         """
         tag_id = uuid4()
         mock_tag_repo.find_by_id.return_value = JournalTag(
-            id=tag_id, name="Busy", color="#000000"
+            user_id=TEST_USER_ID, id=tag_id, name="Busy", color="#000000"
         )
 
         await tag_service.delete_tag(tag_id, transaction=mock_transaction)
@@ -172,7 +175,9 @@ class TestDeleteTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
 
         await tag_service.delete_tag(
@@ -201,7 +206,9 @@ class TestDeleteTagEvents:
     ):
         """The caller's provenance reaches the event, rather than a hardcoded one."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
 
         await tag_service.delete_tag(
@@ -221,7 +228,9 @@ class TestDeleteTagEvents:
     ):
         """No journal carried the tag, so no journal changed."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Spare")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Spare"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = []
 
         await tag_service.delete_tag(tag_id, transaction=mock_transaction)
@@ -239,7 +248,9 @@ class TestDeleteTagEvents:
         it would find none and publish nothing.
         """
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
 
         async def _cascade(_tag_id):
@@ -282,7 +293,9 @@ class TestUpdateTag:
     ):
         """Updating name and colour persists both via the repo."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         result = await tag_service.update_tag(
             tag_id, transaction=mock_transaction, name="Career", color="#3B82F6"
@@ -299,7 +312,9 @@ class TestUpdateTag:
     ):
         """Description is updatable independently of the other fields."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         result = await tag_service.update_tag(
             tag_id, transaction=mock_transaction, description="Paid work entries"
@@ -317,8 +332,8 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=tag_id, name="Work"),
-                JournalTag(id=uuid4(), name="Personal"),
+                JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work"),
+                JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="Personal"),
             ],
         )
 
@@ -336,7 +351,9 @@ class TestUpdateTag:
     ):
         """Re-casing a tag's own name is not a uniqueness conflict."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         result = await tag_service.update_tag(
             tag_id, transaction=mock_transaction, name="WORK"
@@ -350,7 +367,9 @@ class TestUpdateTag:
     ):
         """A colour that is not a 7-character hex code is rejected."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
@@ -369,8 +388,8 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=child_id, name="Work"),
-                JournalTag(id=new_parent_id, name="Life"),
+                JournalTag(user_id=TEST_USER_ID, id=child_id, name="Work"),
+                JournalTag(user_id=TEST_USER_ID, id=new_parent_id, name="Life"),
             ],
         )
 
@@ -386,7 +405,9 @@ class TestUpdateTag:
     ):
         """A tag cannot be its own parent."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
@@ -405,8 +426,13 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=parent_id, name="Work"),
-                JournalTag(id=child_id, name="Meetings", parent_id=parent_id),
+                JournalTag(user_id=TEST_USER_ID, id=parent_id, name="Work"),
+                JournalTag(
+                    user_id=TEST_USER_ID,
+                    id=child_id,
+                    name="Meetings",
+                    parent_id=parent_id,
+                ),
             ],
         )
 
@@ -425,7 +451,9 @@ class TestUpdateTag:
     ):
         """Re-parenting under a tag that does not exist is rejected."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
 
         with pytest.raises(JournalTagNotFoundError):
             await tag_service.update_tag(
@@ -441,8 +469,13 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=parent_id, name="Work"),
-                JournalTag(id=child_id, name="Meetings", parent_id=parent_id),
+                JournalTag(user_id=TEST_USER_ID, id=parent_id, name="Work"),
+                JournalTag(
+                    user_id=TEST_USER_ID,
+                    id=child_id,
+                    name="Meetings",
+                    parent_id=parent_id,
+                ),
             ],
         )
 
@@ -461,8 +494,13 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=parent_id, name="Work"),
-                JournalTag(id=child_id, name="Meetings", parent_id=parent_id),
+                JournalTag(user_id=TEST_USER_ID, id=parent_id, name="Work"),
+                JournalTag(
+                    user_id=TEST_USER_ID,
+                    id=child_id,
+                    name="Meetings",
+                    parent_id=parent_id,
+                ),
             ],
         )
 
@@ -485,8 +523,8 @@ class TestUpdateTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=child_id, name="Work"),
-                JournalTag(id=new_parent_id, name="Life"),
+                JournalTag(user_id=TEST_USER_ID, id=child_id, name="Work"),
+                JournalTag(user_id=TEST_USER_ID, id=new_parent_id, name="Life"),
             ],
         )
 
@@ -509,7 +547,9 @@ class TestUpdateTag:
         save must map the constraint violation the same way create_tag does.
         """
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Work")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
+        )
         mock_tag_repo.save.side_effect = IntegrityError(
             "uq_journal_tags_name", {}, Exception("dup")
         )
@@ -541,7 +581,9 @@ class TestUpdateTag:
     ):
         """Calling update with nothing to change does not touch the repo."""
         tag_id = uuid4()
-        existing = JournalTag(id=tag_id, name="Work", color="#3B82F6")
+        existing = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Work", color="#3B82F6"
+        )
         self._wire_repo(mock_tag_repo, [existing])
 
         result = await tag_service.update_tag(tag_id, transaction=mock_transaction)
@@ -578,8 +620,8 @@ class TestMergeTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=source_id, name="Hiking"),
-                JournalTag(id=target_id, name="Bushwalking"),
+                JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+                JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
             ],
         )
 
@@ -596,9 +638,14 @@ class TestMergeTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=source_id, name="Hiking"),
-                JournalTag(id=other_id, name="Outdoors"),
-                JournalTag(id=target_id, name="Bushwalking", parent_id=other_id),
+                JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+                JournalTag(user_id=TEST_USER_ID, id=other_id, name="Outdoors"),
+                JournalTag(
+                    user_id=TEST_USER_ID,
+                    id=target_id,
+                    name="Bushwalking",
+                    parent_id=other_id,
+                ),
             ],
         )
 
@@ -612,7 +659,9 @@ class TestMergeTag:
     ):
         """Merging a tag into itself is rejected before any write."""
         tag_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=tag_id, name="Hiking")])
+        self._wire_repo(
+            mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Hiking")]
+        )
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.merge_tag(tag_id, tag_id, transaction=mock_transaction)
@@ -626,7 +675,10 @@ class TestMergeTag:
     ):
         """An unknown source tag raises the journal not-found error (404)."""
         target_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=target_id, name="Bushwalking")])
+        self._wire_repo(
+            mock_tag_repo,
+            [JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking")],
+        )
 
         with pytest.raises(JournalTagNotFoundError) as exc_info:
             await tag_service.merge_tag(
@@ -642,7 +694,10 @@ class TestMergeTag:
     ):
         """An unknown target tag raises the journal not-found error (404)."""
         source_id = uuid4()
-        self._wire_repo(mock_tag_repo, [JournalTag(id=source_id, name="Hiking")])
+        self._wire_repo(
+            mock_tag_repo,
+            [JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking")],
+        )
 
         with pytest.raises(JournalTagNotFoundError):
             await tag_service.merge_tag(
@@ -660,8 +715,13 @@ class TestMergeTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=source_id, name="Outdoors"),
-                JournalTag(id=child_id, name="Hiking", parent_id=source_id),
+                JournalTag(user_id=TEST_USER_ID, id=source_id, name="Outdoors"),
+                JournalTag(
+                    user_id=TEST_USER_ID,
+                    id=child_id,
+                    name="Hiking",
+                    parent_id=source_id,
+                ),
             ],
         )
 
@@ -682,9 +742,13 @@ class TestMergeTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=source_id, name="Outdoors"),
-                JournalTag(id=mid_id, name="Walking", parent_id=source_id),
-                JournalTag(id=leaf_id, name="Day walks", parent_id=mid_id),
+                JournalTag(user_id=TEST_USER_ID, id=source_id, name="Outdoors"),
+                JournalTag(
+                    user_id=TEST_USER_ID, id=mid_id, name="Walking", parent_id=source_id
+                ),
+                JournalTag(
+                    user_id=TEST_USER_ID, id=leaf_id, name="Day walks", parent_id=mid_id
+                ),
             ],
         )
 
@@ -711,9 +775,9 @@ class TestMergeTag:
         self._wire_repo(
             mock_tag_repo,
             [
-                JournalTag(id=source_id, name="Hiking"),
-                JournalTag(id=a_id, name="A", parent_id=b_id),
-                JournalTag(id=b_id, name="B", parent_id=a_id),
+                JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+                JournalTag(user_id=TEST_USER_ID, id=a_id, name="A", parent_id=b_id),
+                JournalTag(user_id=TEST_USER_ID, id=b_id, name="B", parent_id=a_id),
             ],
         )
 
@@ -762,8 +826,8 @@ class TestMergeTagEvents:
         source_id, target_id = uuid4(), uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=target_id, name="Bushwalking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
         )
         self._carriers(
             mock_tag_repo,
@@ -809,8 +873,8 @@ class TestMergeTagEvents:
         source_id, target_id = uuid4(), uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=target_id, name="Bushwalking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
         )
         self._carriers(
             mock_tag_repo,
@@ -836,8 +900,8 @@ class TestMergeTagEvents:
         source_id, target_id = uuid4(), uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=target_id, name="Bushwalking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
         )
         self._carriers(
             mock_tag_repo,
@@ -867,8 +931,8 @@ class TestMergeTagEvents:
         source_id, target_id = uuid4(), uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=target_id, name="Bushwalking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
         )
         self._carriers(
             mock_tag_repo,
@@ -890,8 +954,8 @@ class TestMergeTagEvents:
         source_id = uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
         )
 
         with pytest.raises(JournalValidationError):
@@ -914,8 +978,8 @@ class TestMergeTagEvents:
         source_id, target_id = uuid4(), uuid4()
         self._wire(
             mock_tag_repo,
-            JournalTag(id=source_id, name="Hiking"),
-            JournalTag(id=target_id, name="Bushwalking"),
+            JournalTag(user_id=TEST_USER_ID, id=source_id, name="Hiking"),
+            JournalTag(user_id=TEST_USER_ID, id=target_id, name="Bushwalking"),
         )
         self._carriers(
             mock_tag_repo,
@@ -952,7 +1016,9 @@ class TestAssignAndRemoveTag:
     async def test_assign_tag(self, tag_service, mock_tag_repo, mock_transaction):
         """assign_tag delegates to the repo."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.assign_tag.return_value = True
 
         await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
@@ -963,7 +1029,9 @@ class TestAssignAndRemoveTag:
     async def test_remove_tag(self, tag_service, mock_tag_repo, mock_transaction):
         """remove_tag delegates to the repo."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.remove_tag.return_value = True
 
         await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
@@ -984,7 +1052,9 @@ class TestAssignAndRemoveTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.assign_tag.return_value = True
 
         await tag_service.assign_tag(
@@ -1009,7 +1079,9 @@ class TestAssignAndRemoveTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.remove_tag.return_value = True
 
         await tag_service.remove_tag(
@@ -1031,7 +1103,9 @@ class TestAssignAndRemoveTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.assign_tag.return_value = True
 
         await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
@@ -1050,7 +1124,9 @@ class TestAssignAndRemoveTagEvents:
         that never happened — the activity-history spec forbids exactly that.
         """
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.assign_tag.return_value = False
 
         await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
@@ -1062,7 +1138,9 @@ class TestAssignAndRemoveTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.remove_tag.return_value = False
 
         await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
@@ -1116,7 +1194,9 @@ class TestRenameTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
         mock_tag_repo.save.side_effect = lambda tag: tag
@@ -1148,7 +1228,9 @@ class TestRenameTagEvents:
         self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
     ):
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = lambda tag: tag
@@ -1167,7 +1249,9 @@ class TestRenameTagEvents:
     ):
         """No journal carries the tag, so no journal changed."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = []
         mock_tag_repo.save.side_effect = lambda tag: tag
@@ -1197,7 +1281,9 @@ class TestRenameTagEvents:
     ):
         """Colour and description do not alter any journal, so no history."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = lambda tag: tag
 
@@ -1215,8 +1301,8 @@ class TestRenameTagEvents:
         tag_id = uuid4()
         parent_id = uuid4()
         mock_tag_repo.find_by_id.side_effect = lambda requested: {
-            tag_id: JournalTag(id=tag_id, name="Hiking"),
-            parent_id: JournalTag(id=parent_id, name="Outdoors"),
+            tag_id: JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Hiking"),
+            parent_id: JournalTag(user_id=TEST_USER_ID, id=parent_id, name="Outdoors"),
         }.get(requested)
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = lambda tag: tag
@@ -1233,7 +1319,9 @@ class TestRenameTagEvents:
     ):
         """update_tag returns early with no changes; nothing was renamed."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
 
         await tag_service.update_tag(
@@ -1249,9 +1337,11 @@ class TestRenameTagEvents:
     ):
         """A duplicate name aborts before the write, so nothing is published."""
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.find_by_name.return_value = JournalTag(
-            id=uuid4(), name="Trekking"
+            user_id=TEST_USER_ID, id=uuid4(), name="Trekking"
         )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
 
@@ -1276,7 +1366,9 @@ class TestRenameTagEvents:
         back with it, but the ordering is what makes that a non-question.
         """
         tag_id = uuid4()
-        mock_tag_repo.find_by_id.return_value = JournalTag(id=tag_id, name="Hiking")
+        mock_tag_repo.find_by_id.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=tag_id, name="Hiking"
+        )
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = IntegrityError(
@@ -1296,7 +1388,7 @@ class TestResolveFilterTagIds:
 
     @staticmethod
     def _saved_tag(name: str) -> JournalTag:
-        return JournalTag(id=uuid4(), name=name, color="#FF0000")
+        return JournalTag(user_id=TEST_USER_ID, id=uuid4(), name=name, color="#FF0000")
 
     @pytest.mark.asyncio
     async def test_uuids_pass_through(
