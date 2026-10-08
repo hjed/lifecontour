@@ -19,6 +19,8 @@ class JournalTag:
         parent_id: UUID of parent tag (nullable, for hierarchy)
         color: Hex color code (e.g., #FF0000)
         description: Free-text description of what the tag is for (nullable)
+        user_id: The owner. Tag names are unique per owner. Written on insert
+            only, so saving an existing tag never re-owns it.
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -28,6 +30,7 @@ class JournalTag:
     parent_id: UUID | None = None
     color: str | None = None
     description: str | None = None
+    user_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

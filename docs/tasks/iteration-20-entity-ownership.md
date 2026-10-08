@@ -782,7 +782,7 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 **PR Size:** ~450 lines
 
-> **Migration number:** indicative `0124_add_user_id_to_journal_tags.py`.
+> **Migration numbers:** `0127_add_user_id_to_journal_tags.py`, `0128_require_journal_tags_user_id.py`.
 
 - [ ] Migration `0124`: `journal_tags.user_id`, derivation (`-x journal_tags_owner`), `NOT NULL`,
   `uq_journal_tags_user_id_name` replacing `uq_journal_tags_name`, index.
@@ -807,6 +807,33 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 **Required Documentation Updates:**
 - [ ] `docs/architecture/database-design.md` — journal tags.
+
+**Delivery:** a four-layer stack, each layer deployable on its own (the Phase 3 shape):
+- **10a ✅ DONE** — `0127` (nullable `journal_tags.user_id`, per-tag owner assignment,
+  `idx_journal_tags_user_id`); `JournalTag.user_id` (optional); the repository writes it on
+  INSERT only and maps it; REST `POST /tags` stamps the session user and the find-or-create in
+  `JournalWriteService._process_journal_tags` stamps the journal's owner. Reads still global.
+- **10b** — test-only: every test `JournalTag(...)` and raw `INSERT INTO journal_tags` names an
+  owner, through shared helpers.
+- **10c** — `0128` (`NOT NULL`, per-user unique index), required `JournalTag.user_id`, the scoped
+  repository and services, REST and MCP callers passing the acting user.
+- **10d** — the REST and MCP cross-user isolation suites; documentation.
+
+**Decisions (recorded during implementation):**
+- **Migration numbers:** `0127` (column) and `0128` (contract). `main` had reached `0126`; if
+  Phase 15 lands its contract revision first, these renumber.
+- **Each tag takes its carriers' owner.** Tags are linked to owned journals through
+  `journal_tag_assignments`, so `0127` gives a carried tag the owner of the journals carrying it;
+  only an uncarried tag falls back to the site's one user (`derive_owner`, `-x
+  journal_tags_owner`, evidence = every table holding `user_id` at `0126`, pinned by the test). A
+  tag carried by journals of **more than one** owner refuses, naming it, and the override does
+  not resolve that: either owner would leave the other's journal holding a foreign tag, which the
+  journal-keyed reads (`get_tags_for_journal`, the agenda) would show them.
+- **The live unique index is `uq_journal_tags_name_lower` on `LOWER(name)`** (migration `0048`),
+  not `uq_journal_tags_name`; 10c replaces it with `(user_id, LOWER(name))`, keeping names
+  case-insensitive. The global index stays until then, so the namespace is still global (and
+  `find_by_name` correctly unscoped) while the column is nullable.
+- **The owner is written on INSERT only**, so saving an existing tag never re-owns it.
 
 ---
 

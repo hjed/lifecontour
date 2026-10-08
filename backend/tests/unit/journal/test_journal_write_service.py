@@ -469,6 +469,26 @@ class TestCreateJournalTags:
         assert mock_tag_service.assign_tag.await_args.args[:2] == (42, created_tag.id)
 
     @pytest.mark.asyncio
+    async def test_a_created_tag_belongs_to_the_journals_owner(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        """The tag a journal's tag list creates is owned by that journal's owner."""
+        created = _journal(journal_id=42)
+        created.user_id = "owner-of-42"
+        mock_journal_service.create_journal.return_value = created
+        write_service.tag_repo.find_by_name.return_value = None
+        write_service.tag_repo.save.return_value = JournalTag(
+            id=uuid4(), name="beta", color="#808080"
+        )
+
+        await write_service.create_journal(
+            _journal(), None, None, None, mock_transaction, tags=["beta"]
+        )
+
+        saved = write_service.tag_repo.save.await_args.args[0]
+        assert saved.user_id == "owner-of-42"
+
+    @pytest.mark.asyncio
     async def test_passes_caller_provenance_through_to_the_tag_service(
         self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
@@ -715,6 +735,26 @@ class TestUpdateJournalComposite:
 
         assert mock_tag_service.remove_tag.await_args.args[:2] == (9, existing.id)
         assert mock_tag_service.assign_tag.await_args.args[:2] == (9, new_tag.id)
+
+    @pytest.mark.asyncio
+    async def test_a_tag_created_on_update_belongs_to_the_journals_owner(
+        self, write_service, mock_journal_service, mock_transaction
+    ):
+        updated = _journal(journal_id=9)
+        updated.user_id = "owner-of-9"
+        mock_journal_service.update_journal.return_value = updated
+        write_service.tag_repo.get_tags_for_journal.return_value = []
+        write_service.tag_repo.find_by_name.return_value = None
+        write_service.tag_repo.save.return_value = JournalTag(
+            id=uuid4(), name="new", color="#808080"
+        )
+
+        await write_service.update_journal_composite(
+            _journal(journal_id=9), mock_transaction, tags=["new"]
+        )
+
+        saved = write_service.tag_repo.save.await_args.args[0]
+        assert saved.user_id == "owner-of-9"
 
     @pytest.mark.asyncio
     async def test_unchanged_tag_is_neither_removed_nor_reassigned(
