@@ -249,17 +249,45 @@ class TestSummaryInputAssembler:
         assert result is not None
         assert len(result.relationships) == 1
         rel = result.relationships[0].lower()
-        assert "is the parent of the user" in rel
+        # The row reads "Parent — You" on John's page: the user is John's parent.
+        assert "the user is the parent of john doe" in rel
         assert "not the user" not in rel
         # Third-person only — never "you"/"your" (that is the AI assistant).
         assert "you" not in rel
 
     @pytest.mark.asyncio
+    async def test_relationship_where_contact_is_source_names_other_as_type(self):
+        """A row's type is what the target is to the source, as the UI shows it."""
+        # Row John (id=1) → Mary (id=2) PARENT shows "Parent — Mary Doe" on John's
+        # page: Mary is John's parent, not the other way round.
+        rels = [
+            ContactRelationship(
+                from_contact_id=1,
+                to_contact_id=2,
+                relationship_type=RelationshipType.PARENT,
+                from_contact_name="John Doe",
+                to_contact_name="Mary Doe",
+            ),
+        ]
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            first_name="John",
+            last_name="Doe",
+            id=1,
+            relationships=rels,
+        )
+        assembler = _make_assembler(contact=contact)
+        result = await assembler.assemble(contact_id=1)
+
+        assert result is not None
+        assert len(result.relationships) == 1
+        assert result.relationships[0].startswith("Mary Doe is the parent of John Doe")
+
+    @pytest.mark.asyncio
     async def test_relationship_where_contact_is_target_is_inverted(self):
         """When the contact is the target side, use the other party and invert direction."""
-        # Row: Mary (id=2) is the PARENT of John (id=1). Summarising John, the
-        # rendered relationship must read that John is Mary's CHILD, not that John
-        # is his own parent.
+        # Row Mary (id=2) → John (id=1) PARENT means John is Mary's parent, so
+        # John's page shows "Child — Mary Doe": Mary is John's child.
         rels = [
             ContactRelationship(
                 from_contact_id=2,
@@ -282,8 +310,7 @@ class TestSummaryInputAssembler:
         assert result is not None
         assert len(result.relationships) == 1
         rel = result.relationships[0]
-        assert "Mary Doe" in rel
-        assert "child" in rel.lower()
+        assert rel.startswith("Mary Doe is the child of John Doe")
         assert "parent" not in rel.lower()
         assert "not the user" in rel.lower()
 

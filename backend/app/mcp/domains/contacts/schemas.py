@@ -124,7 +124,11 @@ class ContactResponse(BaseModel):
 
     relationships: list[str] = Field(
         default_factory=list,
-        description="List of relationships associated with the contact (e.g., 'Friend of the User')",
+        description=(
+            "Relationships of the contact as '<role>: <other party>', where the role is "
+            "what the other party is to this contact (e.g., 'Parent: Jane Doe' means "
+            "Jane Doe is this contact's parent; 'Friend: the User')"
+        ),
     )
 
     is_favourite: bool = Field(
@@ -467,7 +471,10 @@ class ContactRelationshipSchema(BaseModel):
         description="Full name of the other contact or 'You' for user-targeted relationships"
     )
     relationship_type: str = Field(
-        description="Type of relationship (e.g., parent, child, friend, colleague)"
+        description=(
+            "What the other party is to this contact (e.g., 'parent' means the "
+            "other contact is this contact's parent)"
+        )
     )
     to_user: bool = Field(
         default=False,
@@ -496,7 +503,10 @@ class AddContactRelationshipRequest(BaseModel):
     contact_id: int = Field(description="ID of the main contact")
     target_contact_id: int = Field(description="ID of the other contact")
     relationship_type: str = Field(
-        description="Type of relationship (e.g., parent, friend)"
+        description=(
+            "What the target contact is to the main contact (e.g., 'parent' "
+            "means the target contact is the main contact's parent)"
+        )
     )
 
 
@@ -505,7 +515,12 @@ class UpdateContactRelationshipRequest(BaseModel):
 
     contact_id: int = Field(description="ID of the main contact")
     relationship_id: int = Field(description="ID of the relationship to update")
-    relationship_type: str = Field(description="New type of relationship")
+    relationship_type: str = Field(
+        description=(
+            "New type: what the other party is to the main contact (e.g., "
+            "'parent' means the other party is the main contact's parent)"
+        )
+    )
 
 
 class ContactActionResponse(BaseModel):

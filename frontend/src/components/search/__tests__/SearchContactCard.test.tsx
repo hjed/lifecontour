@@ -174,7 +174,7 @@ describe('SearchContactCard', () => {
       journalCount30d: 3,
       activityCount30d: 7,
       lastActivityDate: '2024-06-10T00:00:00Z',
-      relationships: ['Parent of Bob'],
+      relationships: ['Parent: Bob'],
     };
 
     render(<SearchContactCard contact={baseContact} signals={signals} />);

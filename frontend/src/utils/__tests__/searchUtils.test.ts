@@ -203,7 +203,7 @@ describe('searchUtils', () => {
             journal_count_30d: 5,
             activity_count_30d: 12,
             last_activity_date: '2024-06-15T10:00:00Z',
-            relationships: ['Parent of Bob', 'Friend of Charlie'],
+            relationships: ['Parent: Bob', 'Friend: Charlie'],
           },
         },
       };
@@ -215,10 +215,7 @@ describe('searchUtils', () => {
       expect(signals.journalCount30d).toBe(5);
       expect(signals.activityCount30d).toBe(12);
       expect(signals.lastActivityDate).toBe('2024-06-15T10:00:00Z');
-      expect(signals.relationships).toEqual([
-        'Parent of Bob',
-        'Friend of Charlie',
-      ]);
+      expect(signals.relationships).toEqual(['Parent: Bob', 'Friend: Charlie']);
     });
 
     it('returns sensible defaults when metadata is missing', () => {

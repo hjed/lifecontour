@@ -10,8 +10,10 @@ from core_shared.models.contacts.entities import (
     Contact,
     ContactAddress,
     ContactMethod,
+    ContactRelationship,
     ContactSummary,
     MethodType,
+    RelationshipType,
     SummaryStatus,
     Tag,
 )
@@ -20,6 +22,7 @@ from core_shared.models.contacts.value_objects import TagName
 from app.mcp.domains.contacts.schemas import ContactResponse, ContactSearchResult
 from app.mcp.shared.converters import (
     ContactConverter,
+    ContactRelationshipConverter,
     SearchResponseConverter,
     SearchResultProcessor,
 )
@@ -451,3 +454,64 @@ class TestContactFields:
             (11, "phone", "+44 20 7946 0000", True),
             (20, "address", "1 Childhood Rd, Bathurst, AU", True),
         ]
+
+
+def _parent_row(from_id: int, to_id: int | None) -> ContactRelationship:
+    """A PARENT row: the to-side (or the user) is the from-side's parent."""
+    return ContactRelationship(
+        id=7,
+        from_contact_id=from_id,
+        to_contact_id=to_id,
+        relationship_type=RelationshipType.PARENT,
+        from_contact_name="John Doe" if from_id == 1 else "Mary Doe",
+        to_contact_name=None
+        if to_id is None
+        else ("Mary Doe" if to_id == 2 else "John Doe"),
+        to_user=to_id is None,
+    )
+
+
+class TestRelationshipDirection:
+    """Relationship text reads the way the UI does: "Parent — Mary" is Mary is the parent."""
+
+    def _summary_for(self, rel: ContactRelationship) -> str:
+        contact = Contact(
+            user_id=TEST_USER_ID,
+            id=1,
+            first_name="John",
+            last_name="Doe",
+            relationships=[rel],
+        )
+        return ContactConverter.to_contact_response(contact).summary
+
+    def test_contact_summary_names_other_party_role_from_source_side(self) -> None:
+        assert "relationships: Parent: Mary Doe" in self._summary_for(_parent_row(1, 2))
+
+    def test_contact_summary_inverts_role_from_target_side(self) -> None:
+        assert "relationships: Child: Mary Doe" in self._summary_for(_parent_row(2, 1))
+
+    def test_contact_summary_user_targeted_names_the_user(self) -> None:
+        assert "relationships: Parent: the User" in self._summary_for(
+            _parent_row(1, None)
+        )
+
+    def test_relationship_summary_from_source_side(self) -> None:
+        response = ContactRelationshipConverter.to_relationship_response(
+            _parent_row(1, 2), main_contact_id=1
+        )
+        assert response.relationship_type == "parent"
+        assert response.summary == "Mary Doe is this contact's parent."
+
+    def test_relationship_summary_from_target_side(self) -> None:
+        response = ContactRelationshipConverter.to_relationship_response(
+            _parent_row(2, 1), main_contact_id=1
+        )
+        assert response.other_contact_id == 2
+        assert response.relationship_type == "child"
+        assert response.summary == "Mary Doe is this contact's child."
+
+    def test_relationship_summary_user_targeted(self) -> None:
+        response = ContactRelationshipConverter.to_relationship_response(
+            _parent_row(1, None), main_contact_id=1
+        )
+        assert response.summary == "The user is this contact's parent."

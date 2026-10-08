@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import structlog
+from core_shared.models.contacts.entities import RelationshipType
 from meilisearch.errors import MeilisearchError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,6 +26,27 @@ from app.infrastructure.search.meilisearch_client import (
 )
 
 logger = structlog.get_logger()
+
+
+def format_relationship(
+    relationship_type: str, *, to_user: bool, other_name: str | None, incoming: bool
+) -> str | None:
+    """Render a relationship row as "<role>: <other party>" for the contact being indexed.
+
+    A row's type is what its to-side is to its from-side, so an incoming row
+    (the indexed contact is the to-side) is inverted. Returns None when the
+    other contact's name is unknown.
+    """
+    rel_type = RelationshipType(relationship_type)
+    if incoming:
+        rel_type = rel_type.get_inverse_type()
+    label = rel_type.value.replace("_", " ").title()
+    if to_user:
+        return f"{label}: the User"
+    if other_name is None:
+        return None
+    return f"{label}: {other_name}"
+
 
 # Contact-scoped events whose type does not start with "Contact". Kept as a
 # named set because ``SearchIndexerConsumer`` subscribes to a list of event
@@ -302,34 +324,21 @@ class SearchIndexer:
             )
             relationships_rows = relationships_result.fetchall()
 
-            # Inverse mapping for incoming relationships
-            inverse_map = {
-                "parent": "child",
-                "child": "parent",
-                "partner": "partner",
-                "sibling": "sibling",
-                "friend": "friend",
-                "colleague": "colleague",
-                "family": "family",
-                "other": "other",
-            }
-
-            # Format relationships
             relationships_list = []
             for row in relationships_rows:
-                if row.to_user:
-                    rel_type = row.relationship_type.replace("_", " ").title()
-                    relationships_list.append(f"{rel_type} of the User")
-                elif row.first_name:
-                    name = f"{row.first_name} {row.last_name or ''}".strip()
-                    if row.direction == "incoming":
-                        inv = inverse_map.get(
-                            row.relationship_type, row.relationship_type
-                        )
-                        rel_type = inv.replace("_", " ").title()
-                    else:
-                        rel_type = row.relationship_type.replace("_", " ").title()
-                    relationships_list.append(f"{rel_type} of {name}")
+                name = (
+                    f"{row.first_name} {row.last_name or ''}".strip()
+                    if row.first_name
+                    else None
+                )
+                formatted = format_relationship(
+                    row.relationship_type,
+                    to_user=row.to_user,
+                    other_name=name,
+                    incoming=row.direction == "incoming",
+                )
+                if formatted is not None:
+                    relationships_list.append(formatted)
 
             # Fetch contact summaries
             summary_query = text("""
