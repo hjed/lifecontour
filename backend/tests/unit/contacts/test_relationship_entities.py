@@ -318,3 +318,35 @@ class TestUserTargetedRelationship:
             relationship_type=RelationshipType.FRIEND,
         )
         assert relationship.to_user is False
+
+
+class TestFromPerspective:
+    """relationship_type is what the to-side is to the from-side."""
+
+    def test_from_side_gets_stored_type_of_other_party(self) -> None:
+        """Row A→B PARENT: seen from A, B is A's parent."""
+        rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.PARENT,
+        )
+        assert rel.from_perspective(1) == (2, RelationshipType.PARENT)
+
+    def test_to_side_gets_inverse_type_of_other_party(self) -> None:
+        """Row A→B PARENT: seen from B, A is B's child."""
+        rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=2,
+            relationship_type=RelationshipType.PARENT,
+        )
+        assert rel.from_perspective(2) == (1, RelationshipType.CHILD)
+
+    def test_user_targeted_other_party_is_the_user(self) -> None:
+        """Row A→user PARENT: the user is A's parent, with no other contact id."""
+        rel = ContactRelationship(
+            from_contact_id=1,
+            to_contact_id=None,
+            relationship_type=RelationshipType.PARENT,
+            to_user=True,
+        )
+        assert rel.from_perspective(1) == (None, RelationshipType.PARENT)

@@ -138,7 +138,7 @@ class TestContactResourceRankingSignals:
             "journal_count_30d": 5,
             "activity_count_30d": 12,
             "last_activity_date": "2024-06-15T10:00:00Z",
-            "relationships": ["Parent of Bob", "Friend of Charlie"],
+            "relationships": ["Parent: Bob", "Friend: Charlie"],
             "tags": ["VIP"],
             "email": "alice@example.com",
             "phone": "+61400000000",
@@ -155,7 +155,7 @@ class TestContactResourceRankingSignals:
         assert metadata["journal_count_30d"] == 5
         assert metadata["activity_count_30d"] == 12
         assert metadata["last_activity_date"] == "2024-06-15T10:00:00Z"
-        assert metadata["relationships"] == ["Parent of Bob", "Friend of Charlie"]
+        assert metadata["relationships"] == ["Parent: Bob", "Friend: Charlie"]
 
     def test_ranking_signals_default_when_absent(self):
         """Test that ranking signals have sensible defaults when not present in hit."""

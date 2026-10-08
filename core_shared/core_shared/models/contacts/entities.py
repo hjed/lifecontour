@@ -466,7 +466,12 @@ class RelationshipType(Enum):
 
 @dataclass
 class ContactRelationship:
-    """Contact relationship entity representing relationships between contacts or to the user."""
+    """Contact relationship entity representing relationships between contacts or to the user.
+
+    ``relationship_type`` is what the to-side (``to_contact`` or the user) is to
+    ``from_contact``: a PARENT row from A to B means B is A's parent, which the UI
+    shows on A's page as "Parent — B".
+    """
 
     from_contact_id: int
     to_contact_id: int | None
@@ -527,6 +532,15 @@ class ContactRelationship:
     def get_inverse_type(self) -> RelationshipType:
         """Get the inverse relationship type for bidirectional relationships."""
         return self.relationship_type.get_inverse_type()
+
+    def from_perspective(self, contact_id: int) -> tuple[int | None, RelationshipType]:
+        """Return the other party's id and what they are to ``contact_id``.
+
+        The other party's id is None when it is the user.
+        """
+        if self.to_user or self.from_contact_id == contact_id:
+            return self.to_contact_id, self.relationship_type
+        return self.from_contact_id, self.get_inverse_type()
 
     def is_bidirectional(self) -> bool:
         """Check if this relationship type should be bidirectional."""

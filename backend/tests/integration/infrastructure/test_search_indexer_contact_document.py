@@ -285,7 +285,7 @@ async def test_contact_document_is_unchanged(
         "phones": ["+61400000000"],
         "notes_content": "Newer note. Older note.",
         "tags": ["analytical", "colleagues"],
-        "relationships": ["Friend of Charles Babbage"],
+        "relationships": ["Friend: Charles Babbage"],
         "entity_type": "contact",
         "is_favourite": True,
         "created_at": created_at.isoformat(),

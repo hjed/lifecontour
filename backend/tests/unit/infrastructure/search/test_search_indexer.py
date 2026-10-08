@@ -11,7 +11,10 @@ import pytest
 from meilisearch.errors import MeilisearchError
 
 from app.infrastructure.events.outbox_repository import OutboxEvent
-from app.infrastructure.search.search_indexer import SearchIndexer
+from app.infrastructure.search.search_indexer import (
+    SearchIndexer,
+    format_relationship,
+)
 from tests.task_event_inventory import task_event_types
 
 
@@ -570,7 +573,7 @@ class TestSearchIndexer:
             "full_name": "John Doe",
             "email": "john@example.com",
             "entity_type": "contact",
-            "relationships": ["Friend of Jane Smith"],
+            "relationships": ["Friend: Jane Smith"],
         }
 
         with (
@@ -589,3 +592,39 @@ class TestSearchIndexer:
 
         # Assert - should be called for both contact_id 42 and 43
         assert mock_index.update_documents.call_count == 2
+
+
+class TestFormatRelationship:
+    """Indexed relationship text reads like the UI: "Parent: Mary" — Mary is the parent."""
+
+    def test_outgoing_row_names_other_party_with_stored_type(self) -> None:
+        # Row John → Mary PARENT, indexed for John: Mary is John's parent.
+        assert (
+            format_relationship(
+                "parent", to_user=False, other_name="Mary Doe", incoming=False
+            )
+            == "Parent: Mary Doe"
+        )
+
+    def test_incoming_row_inverts_type(self) -> None:
+        # Row Mary → John PARENT, indexed for John: Mary is John's child.
+        assert (
+            format_relationship(
+                "parent", to_user=False, other_name="Mary Doe", incoming=True
+            )
+            == "Child: Mary Doe"
+        )
+
+    def test_user_targeted_row_names_the_user(self) -> None:
+        assert (
+            format_relationship("parent", to_user=True, other_name=None, incoming=False)
+            == "Parent: the User"
+        )
+
+    def test_row_without_other_name_is_skipped(self) -> None:
+        assert (
+            format_relationship(
+                "friend", to_user=False, other_name=None, incoming=False
+            )
+            is None
+        )

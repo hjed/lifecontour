@@ -370,14 +370,9 @@ class ContactRelationshipService:
         # Collect unique contact IDs that need resolution
         contact_ids: set[int] = set()
         for rel in relationships:
-            if rel.to_user:
-                # User-targeted: no other contact to resolve
-                continue
-            if rel.from_contact_id == viewing_contact_id:
-                if rel.to_contact_id is not None:
-                    contact_ids.add(rel.to_contact_id)
-            else:
-                contact_ids.add(rel.from_contact_id)
+            other_id, _ = rel.from_perspective(viewing_contact_id)
+            if other_id is not None:
+                contact_ids.add(other_id)
 
         # Batch-fetch contacts
         contact_names: dict[int, str] = {}

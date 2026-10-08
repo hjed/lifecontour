@@ -115,26 +115,18 @@ class ContactConverter:
                 )
             )
 
+        # "Parent: Mary" reads like the UI's "Parent — Mary": Mary is the parent.
         relationships_list = []
         for rel in contact.relationships or []:
+            _, rel_type_enum = rel.from_perspective(contact.id or 0)
+            rel_type = rel_type_enum.value.replace("_", " ").title()
             if rel.to_user:
-                rel_type = str(rel.relationship_type.value).replace("_", " ").title()
-                relationships_list.append(f"{rel_type} of the User")
+                other_name = "the User"
             elif rel.from_contact_id == contact.id:
-                # the other person is to_contact_id
-                rel_type = str(rel.relationship_type.value).replace("_", " ").title()
                 other_name = rel.to_contact_name or "Unknown contact"
-                relationships_list.append(f"{rel_type} of {other_name}")
             else:
-                # the other person is from_contact_id, so the contact is the 'to_contact_id'
-                # we need to invert the relationship
-                inv_type = (
-                    rel.relationship_type.get_inverse_type()
-                    .value.replace("_", " ")
-                    .title()
-                )
                 other_name = rel.from_contact_name or "Unknown contact"
-                relationships_list.append(f"{inv_type} of {other_name}")
+            relationships_list.append(f"{rel_type}: {other_name}")
 
         # Build AI-friendly summary
         summary = ContactConverter._build_contact_summary(
@@ -365,23 +357,18 @@ class ContactRelationshipConverter:
         """
         Convert a ContactRelationship entity to an AI-friendly ContactRelationshipSchema.
         """
+        other_id, rel_type_enum = relationship.from_perspective(main_contact_id)
+        rel_type = rel_type_enum.value
         if relationship.to_user:
-            # User-targeted relationship
-            other_id = None
             other_name_str = relationship.to_contact_name or "You"
-            rel_type = relationship.relationship_type.value
-            summary = f"This contact is a {rel_type} of the user."
-        elif relationship.from_contact_id == main_contact_id:
-            other_id = relationship.to_contact_id
-            other_name_str = relationship.to_contact_name or str(other_id)
-            rel_type = relationship.relationship_type.value
-            summary = f"This contact is a {rel_type} of {other_name_str}."
+            summary = f"The user is this contact's {rel_type}."
         else:
-            other_id = relationship.from_contact_id
-            # In inverse perspective, we might not have from_contact_name cached.
-            other_name_str = str(other_id)
-            rel_type = relationship.relationship_type.get_inverse_type().value
-            summary = f"This contact is a {rel_type} of {other_name_str}."
+            if relationship.from_contact_id == main_contact_id:
+                other_name = relationship.to_contact_name
+            else:
+                other_name = relationship.from_contact_name
+            other_name_str = other_name or str(other_id)
+            summary = f"{other_name_str} is this contact's {rel_type}."
 
         return ContactRelationshipSchema(
             id=relationship.id,  # type: ignore[arg-type]
