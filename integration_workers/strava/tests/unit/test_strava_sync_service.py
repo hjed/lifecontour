@@ -871,7 +871,7 @@ class TestOutboxEventStructure:
         fitness = journal_data["fitness_data"]
         assert fitness["distance"] == 10000
         assert fitness["elevation_gain"] == 150
-        assert fitness["duration"] == 3400
+        assert fitness["duration"] == 3600
         assert fitness["calories"] == 500
         assert fitness["heart_rate_avg"] == 155
         assert fitness["heart_rate_max"] == 180

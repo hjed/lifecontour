@@ -213,7 +213,7 @@ class StravaDataTransformer:
             journal_types=journal_types,
             fitness_data_distance=round(activity.distance),
             fitness_data_elevation_gain=round(activity.total_elevation_gain),
-            fitness_data_duration=activity.moving_time,
+            fitness_data_duration=activity.elapsed_time,
             fitness_data_calories=round(activity.calories)
             if activity.calories is not None
             else None,

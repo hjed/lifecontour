@@ -253,6 +253,16 @@ class TestFieldTransformation:
         assert result.event_date_range.start == expected_start
         assert result.event_date_range.end == expected_end
 
+    def test_fitness_data_duration_is_elapsed_time(self) -> None:
+        """activity.elapsed_time → fitness_data.duration, not moving_time.
+
+        The duration is how long the activity took, stops included — the same
+        span the event date range covers.
+        """
+        activity = _make_activity(elapsed_time=3600, moving_time=3200)
+        result = StravaDataTransformer.transform(activity)
+        assert result.fitness_data_duration == 3600
+
     def test_fitness_data_distance(self) -> None:
         """activity.distance (float metres) → fitness_data.distance (int)."""
         activity = _make_activity(distance=10500.7)
@@ -264,12 +274,6 @@ class TestFieldTransformation:
         activity = _make_activity(total_elevation_gain=250.8)
         result = StravaDataTransformer.transform(activity)
         assert result.fitness_data_elevation_gain == 251
-
-    def test_fitness_data_duration(self) -> None:
-        """activity.moving_time → fitness_data.duration."""
-        activity = _make_activity(moving_time=3200)
-        result = StravaDataTransformer.transform(activity)
-        assert result.fitness_data_duration == 3200
 
     def test_fitness_data_calories(self) -> None:
         """activity.calories → fitness_data.calories (int)."""
