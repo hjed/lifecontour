@@ -20,9 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.infrastructure.unit_of_work import savepoint
 
 # The global ``(integration_source, external_id)`` unique index. Every writer
-# conflicts on the per-user key, so a violation of this one means the external
-# id is held by a different user — or, until ``0127`` requires an owner, by a
-# row no writer has stamped yet.
+# conflicts on the per-user key, so a violation of this one usually means a
+# different user holds the external id — but also, until ``0127`` requires an
+# owner, a row no writer has stamped yet, and a concurrent insert of the same
+# owner's link (``ON CONFLICT`` is race-safe only on its arbiter index).
 _GLOBAL_LINK_INDEX = "idx_sync_metadata_integration_external"
 
 
@@ -46,44 +47,47 @@ async def execute_link_write(
     statement: TextClause,
     params: Mapping[str, Any],
     *,
+    user_id: str,
     integration_source: str,
     external_id: str,
 ) -> CursorResult[Any]:
-    """Run an ``INSERT INTO sync_metadata`` keyed by the per-user conflict target.
+    """Run ``user_id``'s ``INSERT INTO sync_metadata`` keyed by the per-user target.
 
     The write runs in a savepoint, so a refusal leaves the caller's unit of work
-    usable. A violation of the global index by a row another user owns is
-    raised as :class:`ExternalLinkOwnedByAnotherUserError`; one by a row with no
-    owner yet is re-raised as it is, since it is not another user's and is
-    assigned (and so writable) once ``0127`` runs.
+    usable. A violation of the global index by a row a *different* user owns is
+    raised as :class:`ExternalLinkOwnedByAnotherUserError`. Any other violation
+    — the holder has no owner yet (it is assigned, and so writable, once
+    ``0127`` runs), or is ``user_id``'s own row inserted concurrently — is not
+    another user's and is re-raised as it is, for the caller to retry.
     """
     try:
         async with savepoint(connection):
             return await connection.execute(statement, params)
     except IntegrityError as exc:
-        if _GLOBAL_LINK_INDEX in str(exc.orig) and await _held_by_an_owner(
-            connection, integration_source, external_id
-        ):
+        if _GLOBAL_LINK_INDEX not in str(exc.orig):
+            raise
+        holder = await _link_holder(connection, integration_source, external_id)
+        if holder is not None and holder != user_id:
             raise ExternalLinkOwnedByAnotherUserError(
                 integration_source, external_id
             ) from exc
         raise
 
 
-async def _held_by_an_owner(
+async def _link_holder(
     connection: AsyncConnection, integration_source: str, external_id: str
-) -> bool:
-    """Whether the row holding ``(integration_source, external_id)`` has an owner."""
+) -> str | None:
+    """The owner of the row holding ``(integration_source, external_id)``, if any."""
     result = await connection.execute(
         text("""
-            SELECT 1 FROM sync_metadata
+            SELECT user_id FROM sync_metadata
             WHERE integration_source = :integration_source
               AND external_id = :external_id
-              AND user_id IS NOT NULL
         """),
         {"integration_source": integration_source, "external_id": external_id},
     )
-    return result.first() is not None
+    holder: str | None = result.scalar_one_or_none()
+    return holder
 
 
 @dataclass(frozen=True)
@@ -321,6 +325,7 @@ class SyncMetadataRepository:
                 "created_at": now,
                 "updated_at": now,
             },
+            user_id=user_id,
             integration_source=integration_source,
             external_id=external_id,
         )
@@ -747,6 +752,7 @@ class SyncMetadataRepository:
                 "sync_status": SyncStatus.PENDING.value,
                 "now": now,
             },
+            user_id=user_id,
             integration_source=integration_source,
             external_id=external_id,
         )

@@ -974,9 +974,13 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
   insert through `execute_link_write` (`sync_metadata_repository.py`), which wraps it in a
   savepoint and turns a violation of `idx_sync_metadata_integration_external` into
   `ExternalLinkOwnedByAnotherUserError(integration_source, external_id)` — never naming the other
-  owner. It first checks the row holding the key has an owner: one with none (written owner-less
-  by a writer from before this release, during a rolling deploy) is not another user's, so the
-  `IntegrityError` is re-raised as it is and the write is retried until `0127` assigns the row.
+  owner. It first reads who holds the key: only a *different, non-null* owner is another user's.
+  A holder with no owner (written owner-less by a pre-release writer during a rolling deploy) or
+  the same owner (two concurrent inserts of one link: `ON CONFLICT` is race-safe only on its
+  arbiter, so the loser can trip the global index — augment review on #1710) re-raises the
+  `IntegrityError` for the caller to retry. The `contact.updated` processor re-raises both errors
+  from its final link write, which it used to log and swallow: under the savepoint, swallowing
+  would now commit the contact with a stale link instead of failing the event.
   The inbound contact processor fails the event permanently; the REST Immich
   conflict-resolve answers 409 and the MCP tool an error; the Strava and album processors let it
   fail the event through their generic error (retried, then dead-lettered). The workers do not

@@ -158,6 +158,7 @@ class AlbumSyncReadRepository:
                 "insert_anchor": insert_anchor,
                 "bump_anchor": bump_anchor,
             },
+            user_id=user_id,
             integration_source=INTEGRATION_SOURCE,
             external_id=album_id,
         )

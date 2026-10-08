@@ -31,6 +31,7 @@ from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
@@ -1163,6 +1164,12 @@ class OutboxEventProcessor:
                 internal_entity_type="contact",
                 external_entity_type="person",
             )
+        except ExternalLinkOwnedByAnotherUserError, IntegrityError:
+            # The write ran in a savepoint, so swallowing it would commit the
+            # contact with a stale link: a link another user holds fails the
+            # event for good, one with no owner yet (or a concurrent insert of
+            # the owner's own) fails it to be retried.
+            raise
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Failed to update sync metadata",

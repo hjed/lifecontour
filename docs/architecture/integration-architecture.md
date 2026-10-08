@@ -283,8 +283,10 @@ already links (the per-user conflict target finds no row, so the insert trips th
 global index), where the old `DO UPDATE` silently re-pointed the link:
 
 - the backend raises `ExternalLinkOwnedByAnotherUserError` (the write runs in a
-  savepoint, so the caller's unit of work stays usable; a row with no owner yet
-  is not another user's, so its `IntegrityError` is re-raised and retried); an
+  savepoint, so the caller's unit of work stays usable). Only a holder with a
+  *different, non-null* owner is another user's: a row with no owner yet, or the
+  same owner's link inserted concurrently (`ON CONFLICT` is race-safe only on its
+  arbiter index), re-raises the `IntegrityError` to be retried. An
   inbound contact event fails permanently (dead-lettered, not retried), the
   REST Immich conflict-resolve answers 409 and the MCP tool an error;
 - the workers count it as a failed item and carry on (Google's per-contact push,

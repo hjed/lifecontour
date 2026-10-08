@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.outbox_event_processor import (
+    OutboxEventProcessingError,
     OutboxEventProcessor,
     PermanentOutboxEventProcessingError,
 )
@@ -75,7 +76,7 @@ async def _seed_google_link(
     internal_id: int,
     version_hash: str,
     reference_data: str,
-    user_id: str = TEST_USER_ID,
+    user_id: str | None = TEST_USER_ID,
 ) -> None:
     await conn.execute(
         text(
@@ -195,12 +196,13 @@ class TestLinkConsolidationWrites:
         await async_connection.execute(
             text(
                 "INSERT INTO sync_metadata "
-                "(internal_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status, internal_entity_type, external_entity_type) "
-                "VALUES (:iid, 'google', :eid, now(), 'old-etag', 'success', "
+                "(user_id, internal_id, integration_source, external_id, "
+                "last_synced_at, version_hash, sync_status, internal_entity_type, "
+                "external_entity_type) "
+                "VALUES (:uid, :iid, 'google', :eid, now(), 'old-etag', 'success', "
                 "'contact', 'person')"
             ),
-            {"iid": contact_id, "eid": external_id},
+            {"uid": TEST_USER_ID, "iid": contact_id, "eid": external_id},
         )
 
         processor = OutboxEventProcessor(
@@ -268,3 +270,40 @@ class TestInboundLinkOwner:
             None,
             "theirs",
         )
+
+    @pytest.mark.asyncio
+    async def test_an_update_whose_link_has_no_owner_yet_is_retried(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A link written owner-less (a pre-release writer, mid rolling deploy)
+        does not match the owner-keyed upsert. The update fails retryably
+        rather than being acknowledged with the link's version hash stale."""
+        external_id = "people/cUnowned"
+        contact_id = await seed_contact(
+            async_connection, first_name="Old", last_name="Name"
+        )
+        await _seed_google_link(
+            async_connection,
+            external_id=external_id,
+            internal_id=contact_id,
+            version_hash="old-etag",
+            reference_data=json.dumps({"resource_name": external_id}),
+            user_id=None,
+        )
+        processor = OutboxEventProcessor(
+            build_contact_service(async_connection), async_connection
+        )
+
+        with pytest.raises(OutboxEventProcessingError) as failed:
+            await processor.process_event(
+                _contact_event(
+                    "contact.updated",
+                    external_id=external_id,
+                    first_name="New",
+                    last_name="Name",
+                    etag="new-etag",
+                    tag="VIP",
+                )
+            )
+
+        assert not isinstance(failed.value, PermanentOutboxEventProcessingError)

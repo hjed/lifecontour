@@ -76,13 +76,13 @@ async def _seed_contact(conn: AsyncConnection, *, linked: bool) -> dict[str, int
         await conn.execute(
             text(
                 "INSERT INTO sync_metadata "
-                "(internal_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status, internal_entity_type, "
+                "(user_id, internal_id, integration_source, external_id, "
+                "last_synced_at, version_hash, sync_status, internal_entity_type, "
                 "external_entity_type) "
-                "VALUES (:c, 'google', :eid, now(), 'old', 'success', 'contact', "
-                "'person')"
+                "VALUES (:u, :c, 'google', :eid, now(), 'old', 'success', "
+                "'contact', 'person')"
             ),
-            {"c": contact_id, "eid": EXTERNAL_ID},
+            {"u": TEST_USER_ID, "c": contact_id, "eid": EXTERNAL_ID},
         )
     return {
         "contact": contact_id,
