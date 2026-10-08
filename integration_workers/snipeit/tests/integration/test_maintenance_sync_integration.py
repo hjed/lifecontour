@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from snipeit_api_client import SnipeItAPIError
 from snipeit_models import SnipeItMaintenance
 from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS, SnipeItSyncInProgress
+from snipeit_sync_window import ListedRecord
 
 # ``mock_transport``, ``integration_client`` and ``snipeit_sync_service`` are
 # shared fixtures defined in ``conftest.py``.
@@ -2821,3 +2822,140 @@ async def test_rate_limited_maintenance_record_is_raised_for_the_batch_to_retry(
             maintenance_ids=[17],
             session_factory=_joined_session_factory(async_connection),
         )
+
+
+class TestUnsettledMaintenances:
+    """A smart sync fetches only records Snipe-IT changed, plus those on an
+    asset synced here that are not yet settled (#1560): an unchanged record is
+    still fetched when it has no sync row (skipped while its asset was syncing),
+    no live journal holds it (its journal was deleted, or the import's journal
+    never arrived), or its imported journal is on another asset's gear (it was
+    moved to an asset that arrived after it). A record on an asset not synced
+    here, such as another user's, is never fetched."""
+
+    async def _unsettled(
+        self,
+        service: Any,
+        async_connection: AsyncConnection,
+        *listed: tuple[int, int | None],
+    ) -> set[int]:
+        records = [
+            ListedRecord(maintenance_id, None, asset_id=asset_id)
+            for maintenance_id, asset_id in listed
+        ]
+        result: set[int] = await service.unsettled_maintenance_ids(
+            records, _joined_session_factory(async_connection)
+        )
+        return result
+
+    @pytest.mark.asyncio
+    async def test_record_without_a_sync_row_is_unsettled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        await _seed_synced_asset(async_connection, 51)
+
+        assert await self._unsettled(
+            snipeit_sync_service, async_connection, (7, 51)
+        ) == {7}
+
+    @pytest.mark.asyncio
+    async def test_record_on_an_asset_not_synced_here_is_never_unsettled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        """The maintenance listing is not filtered by user: another user's
+        asset is never synced here, so its records would be fetched forever."""
+        assert (
+            await self._unsettled(
+                snipeit_sync_service, async_connection, (7, 99), (8, None)
+            )
+            == set()
+        )
+
+    @pytest.mark.asyncio
+    async def test_import_held_by_its_live_journal_is_settled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="x", imported_from=7
+        )
+        await _seed_import_record(async_connection, maintenance_id=7, version_hash="h")
+
+        assert (
+            await self._unsettled(snipeit_sync_service, async_connection, (7, 51))
+            == set()
+        )
+
+    @pytest.mark.asyncio
+    async def test_import_moved_to_another_synced_asset_is_unsettled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        """Skipped while its new asset was syncing, it is fetched once the
+        asset is here, though Snipe-IT does not date it after the cursor."""
+        old_gear = await _seed_synced_asset(async_connection, 51)
+        await _seed_synced_asset(async_connection, 52)
+        await _seed_maintenance_journal(
+            async_connection, gear_item_id=old_gear, title="x", imported_from=7
+        )
+        await _seed_import_record(async_connection, maintenance_id=7, version_hash="h")
+
+        assert await self._unsettled(
+            snipeit_sync_service, async_connection, (7, 52)
+        ) == {7}
+
+    @pytest.mark.asyncio
+    async def test_push_of_a_live_journal_is_settled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="x"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=7
+        )
+
+        assert (
+            await self._unsettled(snipeit_sync_service, async_connection, (7, 51))
+            == set()
+        )
+
+    @pytest.mark.asyncio
+    async def test_push_whose_journal_was_deleted_is_unsettled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="x"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=7
+        )
+        await _delete_journal(async_connection, journal_id)
+
+        assert await self._unsettled(
+            snipeit_sync_service, async_connection, (7, 51)
+        ) == {7}
+
+    @pytest.mark.asyncio
+    async def test_import_awaiting_its_journal_is_unsettled(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        await _seed_synced_asset(async_connection, 51)
+        await _seed_import_record(async_connection, maintenance_id=7, version_hash="h")
+
+        assert await self._unsettled(
+            snipeit_sync_service, async_connection, (7, 51)
+        ) == {7}
+
+    @pytest.mark.asyncio
+    async def test_only_listed_records_are_returned(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        await _seed_synced_asset(async_connection, 51)
+        await _seed_import_record(async_connection, maintenance_id=7, version_hash="h")
+
+        assert await self._unsettled(
+            snipeit_sync_service, async_connection, (8, 51)
+        ) == {8}
+        assert await self._unsettled(snipeit_sync_service, async_connection) == set()

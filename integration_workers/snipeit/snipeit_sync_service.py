@@ -35,6 +35,7 @@ from snipeit_models import (
     parse_wall_clock,
 )
 from snipeit_rate_limiter import SnipeItRateLimitError
+from snipeit_sync_window import ListedRecord
 
 logger = structlog.get_logger(__name__)
 
@@ -1155,6 +1156,92 @@ class SnipeItSyncService:
             failed=failed,
         )
         return {"synced": synced, "skipped": skipped, "failed": failed}
+
+    async def unsettled_maintenance_ids(
+        self, listed: Collection[ListedRecord], session_factory: Any
+    ) -> set[int]:
+        """The listed maintenance records a sync must fetch though unchanged.
+
+        A smart sync fetches only the records Snipe-IT changed. That is not
+        enough for a record this app has not settled, which the next sync is
+        meant to import whether or not it changed. Such a record is on an
+        asset synced here and:
+
+        - has no sync row, such as a record skipped because its asset was not
+          yet synced;
+        - has a sync row no live journal holds: neither an import link reaches
+          a journal nor does the row name one, because the journal was deleted
+          or the import's journal has not arrived (yet); or
+        - has an imported journal on another asset's gear item, because it was
+          moved to an asset that was not yet synced when it was last fetched.
+
+        A record on an asset not synced here is skipped by every sync, so it
+        is never returned. The maintenance listing is not filtered by user,
+        unlike the asset listing, so most such records are another user's.
+
+        Fetching a record lets ``_sync_single_maintenance`` decide, as a full
+        sync would. Only the database is read.
+
+        Args:
+            listed: Maintenance records the listing returned, with their asset.
+            session_factory: Factory for database sessions.
+
+        Returns:
+            The ids of the unsettled records among ``listed``.
+        """
+        on_an_asset = [record for record in listed if record.asset_id is not None]
+        if not on_an_asset:
+            return set()
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT listed.maintenance_id
+                    FROM unnest(
+                        CAST(:maintenance_ids AS bigint[]),
+                        CAST(:asset_ids AS bigint[])
+                    ) AS listed(maintenance_id, asset_id)
+                    JOIN sync_metadata a
+                      ON a.integration_source = 'snipeit'
+                     AND a.external_id = CAST(listed.asset_id AS text)
+                     AND a.internal_uuid IS NOT NULL
+                    LEFT JOIN sync_metadata m
+                      ON m.integration_source = 'snipeit_maintenance'
+                     AND m.external_id = 'snipeit_maint:' || listed.maintenance_id
+                    WHERE m.id IS NULL
+                       OR NOT (
+                           EXISTS (
+                               SELECT 1
+                               FROM journal_external_event_links l
+                               JOIN journals j ON j.id = l.journal_id
+                               WHERE l.external_event_id = m.external_id
+                                 AND l.calendar_id = :calendar_id
+                           )
+                           OR EXISTS (
+                               SELECT 1
+                               FROM journals j
+                               WHERE j.id = CASE
+                                   WHEN m.internal_uuid ~ '^[0-9]+$'
+                                   THEN CAST(m.internal_uuid AS bigint)
+                               END
+                           )
+                       )
+                       OR EXISTS (
+                           SELECT 1
+                           FROM journal_external_event_links l
+                           JOIN journal_gear_maintenance_data g
+                             ON g.journal_id = l.journal_id
+                           WHERE l.external_event_id = m.external_id
+                             AND l.calendar_id = :calendar_id
+                             AND CAST(g.gear_item_id AS text) <> a.internal_uuid
+                       )
+                """),
+                {
+                    "maintenance_ids": [record.id for record in on_an_asset],
+                    "asset_ids": [record.asset_id for record in on_an_asset],
+                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                },
+            )
+            return {int(row.maintenance_id) for row in result}
 
     async def reconcile_deleted_maintenances(
         self, listed_ids: Collection[int], session_factory: Any
