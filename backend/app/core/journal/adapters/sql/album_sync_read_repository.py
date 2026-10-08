@@ -47,22 +47,23 @@ class AlbumSyncReadRepository:
         self.conn = conn
 
     async def find_link(
-        self, album_id: str, journal_id: int | None = None
+        self, album_id: str, *, user_id: str, journal_id: int | None = None
     ) -> Any | None:
-        """Find the canonical ``sync_metadata`` album link for ``album_id``.
+        """Find ``user_id``'s canonical ``sync_metadata`` link for ``album_id``.
 
         Returns the row carrying ``updated_at`` (the merge-protection anchor) and
         ``reference_data``. ``sync_metadata`` is unique on
-        ``(integration_source, external_id)`` so an album id maps to a single
-        link; ``journal_id`` is accepted as an extra defensive scope so the
-        anchor lookup is tied to the journal being updated.
+        ``(user_id, integration_source, external_id)`` so an album id maps to a
+        single link per owner; ``journal_id`` is accepted as an extra defensive
+        scope so the anchor lookup is tied to the journal being updated.
         """
         result = await self.conn.execute(
             text("""
                 SELECT id, internal_id AS internal_entity_id,
                        updated_at, reference_data
                 FROM sync_metadata
-                WHERE integration_source = :integration_source
+                WHERE user_id = :user_id
+                  AND integration_source = :integration_source
                   AND external_id = :external_entity_id
                   AND (
                       CAST(:journal_id AS INTEGER) IS NULL
@@ -72,6 +73,7 @@ class AlbumSyncReadRepository:
                 LIMIT 1
             """),
             {
+                "user_id": user_id,
                 "integration_source": INTEGRATION_SOURCE,
                 "external_entity_id": album_id,
                 "journal_id": journal_id,
@@ -309,13 +311,16 @@ class AlbumSyncReadRepository:
         """Remove a journal's album ``sync_metadata`` link.
 
         Called when a journal is deleted so album links do not outlive the
-        journal they belonged to.
+        journal they belonged to. Only the journal owner's links are removed:
+        the callers name the journal, not the user, so the owner is read from
+        the journal itself.
         """
         await self.conn.execute(
             text("""
                 DELETE FROM sync_metadata
                 WHERE integration_source = :source
                   AND internal_id = :journal_id
+                  AND user_id = (SELECT user_id FROM journals WHERE id = :journal_id)
             """),
             {"source": INTEGRATION_SOURCE, "journal_id": journal_id},
         )

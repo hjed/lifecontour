@@ -49,21 +49,23 @@ async def _save_contact(
     return saved.id
 
 
-async def _link(connection: AsyncConnection, contact_id: int, external_id: str) -> None:
+async def _link(
+    connection: AsyncConnection, contact_id: int, external_id: str, *, user_id: str
+) -> None:
     await connection.execute(
         text(
             """
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id, last_synced_at,
-                version_hash, sync_status, retry_count,
+                user_id, internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status, retry_count,
                 internal_entity_type, external_entity_type, created_at, updated_at
             ) VALUES (
-                :iid, 'google', :eid, now(), 'h', 'success', 0,
+                :uid, :iid, 'google', :eid, now(), 'h', 'success', 0,
                 'contact', 'person', now(), now()
             )
             """
         ),
-        {"iid": contact_id, "eid": external_id},
+        {"uid": user_id, "iid": contact_id, "eid": external_id},
     )
 
 
@@ -97,7 +99,9 @@ class TestContactRepositoryOwnership:
         contact_id = await _save_contact(
             repo, user_id=OTHER_USER_ID, email=FOREIGN_EMAIL, tag=tag
         )
-        await _link(clean_database, contact_id, FOREIGN_EXTERNAL_ID)
+        await _link(
+            clean_database, contact_id, FOREIGN_EXTERNAL_ID, user_id=OTHER_USER_ID
+        )
         return contact_id
 
     async def test_find_by_id_returns_none_for_a_foreign_contact(
@@ -142,6 +146,20 @@ class TestContactRepositoryOwnership:
         )
         assert found is not None
         assert found.id == foreign_id
+
+    async def test_find_by_external_reference_ignores_another_owners_link(
+        self, repo: SqlContactRepository, own_id: int, clean_database: AsyncConnection
+    ) -> None:
+        """A link is the owner's: another user's link row naming this user's
+        contact id (a mis-owned row) does not resolve to the contact."""
+        await _link(clean_database, own_id, "people/c-misowned", user_id=OTHER_USER_ID)
+
+        assert (
+            await repo.find_by_external_reference(
+                "google", "people/c-misowned", user_id=TEST_USER_ID
+            )
+            is None
+        )
 
     async def test_search_excludes_a_foreign_contact(
         self, repo: SqlContactRepository, own_id: int, foreign_id: int

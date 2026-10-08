@@ -234,7 +234,7 @@ class ContactMergeService:
         #     reconciliation by the integration workers. Local-only re-point — the
         #     remote calls stay in the workers consuming ``ContactMerged``.
         collisions = await self.sync_metadata_repo.repoint_contact_links(
-            source_id, survivor_id, transaction
+            source_id, survivor_id, transaction, user_id=user_id
         )
 
         # 2. Apply scalar identity fields: overrides win, else prefer-non-empty.

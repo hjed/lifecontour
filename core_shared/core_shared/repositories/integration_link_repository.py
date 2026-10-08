@@ -32,13 +32,14 @@ class IntegrationLinkRepository:
         self._conn = connection
 
     async def find_link_by_external(
-        self, integration_source: str, external_id: str
+        self, integration_source: str, external_id: str, *, user_id: str
     ) -> dict[str, Any] | None:
-        """Find a link by ``(integration_source, external_id)``.
+        """Find ``user_id``'s link by ``(integration_source, external_id)``.
 
         Args:
             integration_source: e.g. ``'google'``, ``'immich'``.
             external_id: The external system's id for the entity.
+            user_id: The link's owner; another user's link is never returned.
 
         Returns:
             A dict describing the link, or ``None`` when no link exists.
@@ -48,36 +49,20 @@ class IntegrationLinkRepository:
                    internal_entity_type, external_entity_type, reference_data,
                    version_hash
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """)
         result = await self._conn.execute(
             query,
             {
+                "user_id": user_id,
                 "integration_source": integration_source,
                 "external_id": external_id,
             },
         )
         row = result.fetchone()
         return self._row_to_dict(row) if row else None
-
-    async def find_internal_by_external(
-        self, integration_source: str, external_id: str
-    ) -> tuple[int | None, str | None, str | None] | None:
-        """Resolve the internal identity behind an external link.
-
-        Returns:
-            ``(internal_id, internal_uuid, internal_entity_type)`` when a link
-            exists, otherwise ``None``.
-        """
-        link = await self.find_link_by_external(integration_source, external_id)
-        if link is None:
-            return None
-        return (
-            link["internal_id"],
-            link["internal_uuid"],
-            link["internal_entity_type"],
-        )
 
     async def find_external_by_internal(
         self,
@@ -183,15 +168,16 @@ class IntegrationLinkRepository:
         return row.external_id if row else None
 
     async def get_contact_ids_by_immich_person_ids(
-        self, person_ids: list[str]
+        self, person_ids: list[str], *, user_id: str
     ) -> dict[str, int]:
-        """Resolve Immich person ids to linked local contact ids.
+        """Resolve Immich person ids to ``user_id``'s linked contact ids.
 
-        Person ids without a contact link are omitted from the result, so
-        unresolved people never produce orphan participants.
+        Person ids without a contact link of the owner's are omitted from the
+        result, so unresolved people never produce orphan participants.
 
         Args:
             person_ids: Immich person UUIDs to resolve.
+            user_id: The links' owner; another user's links are never used.
 
         Returns:
             A mapping of ``{person_id: contact_id}`` for the linked people.
@@ -204,13 +190,16 @@ class IntegrationLinkRepository:
         query = text("""
             SELECT external_id, internal_id
             FROM sync_metadata
-            WHERE integration_source = 'immich'
+            WHERE user_id = :user_id
+              AND integration_source = 'immich'
               AND internal_entity_type = 'contact'
               AND external_entity_type = 'person'
               AND internal_id IS NOT NULL
               AND external_id = ANY(:person_ids)
         """)
-        result = await self._conn.execute(query, {"person_ids": person_ids})
+        result = await self._conn.execute(
+            query, {"user_id": user_id, "person_ids": person_ids}
+        )
         return {row.external_id: row.internal_id for row in result.fetchall()}
 
     @staticmethod

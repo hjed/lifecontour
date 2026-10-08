@@ -629,14 +629,15 @@ class OutboxEventProcessor:
         integration_source: str,
         external_id: str,
         *,
+        user_id: str,
         link_exists: bool,
         existing_reference_data: str | None,
         contact_data: dict[str, Any],
     ) -> None:
         """Persist the contact's ``synced_tags`` onto the canonical link.
 
-        Writes ``reference_data`` on the ``sync_metadata`` link keyed by
-        ``(integration_source, external_id)``; ``version_hash`` is untouched so a
+        Writes ``reference_data`` on ``user_id``'s ``sync_metadata`` link keyed
+        by ``(integration_source, external_id)``; ``version_hash`` is untouched so a
         tag-metadata change never registers as a content change for the next sync.
 
         Gated on the link's *existence* — not on whether it already has
@@ -669,6 +670,7 @@ class OutboxEventProcessor:
             integration_source=integration_source,
             external_id=external_id,
             reference_data=json.dumps(new_ref_data),
+            user_id=user_id,
         )
 
     async def _apply_resolved_tags_to_contact_data(
@@ -707,6 +709,7 @@ class OutboxEventProcessor:
             existing_link = await self.sync_metadata_repo.find_by_external_id(
                 integration_source=integration_source,
                 external_id=external_id,
+                user_id=payload.user_id,
             )
             # Only treat it as already-processed when the link resolves to a real
             # contact: ``sync_metadata.internal_id`` is nullable, so a partial row
@@ -966,6 +969,7 @@ class OutboxEventProcessor:
         sync_metadata = await self.sync_metadata_repo.find_and_lock(
             integration_source=integration_source,
             external_id=external_id,
+            user_id=payload.user_id,
         )
 
         if sync_metadata is None:
@@ -1049,6 +1053,7 @@ class OutboxEventProcessor:
             existing_link = await self.link_repo.find_link_by_external(
                 integration_source=integration_source,
                 external_id=external_id,
+                user_id=payload.user_id,
             )
             existing_reference_data = (
                 existing_link["reference_data"] if existing_link else None
@@ -1120,6 +1125,7 @@ class OutboxEventProcessor:
                 await self._update_synced_tags_reference(
                     integration_source,
                     external_id,
+                    user_id=payload.user_id,
                     link_exists=existing_link is not None,
                     existing_reference_data=existing_reference_data,
                     contact_data=contact_data,

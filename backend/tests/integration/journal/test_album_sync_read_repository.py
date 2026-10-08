@@ -256,7 +256,7 @@ class TestAlbumLinkWrite:
             async_connection, album_id=album_id
         )
 
-        link = await repo.find_link(album_id, journal_id=journal_id)
+        link = await repo.find_link(album_id, user_id=USER_ID, journal_id=journal_id)
 
         assert link is not None
         assert link.internal_entity_id == journal_id
@@ -390,3 +390,43 @@ class TestAlbumLinkOwner:
             )
         ).fetchall()
         assert [tuple(row) for row in owners] == [(USER_ID, "h")]
+
+    async def test_find_link_ignores_another_owners_album(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ) -> None:
+        await _make_album_sync_metadata_only(async_connection, album_id="album-theirs")
+
+        assert await repo.find_link("album-theirs", user_id="someone-else-456") is None
+        assert await repo.find_link("album-theirs", user_id=USER_ID) is not None
+
+    async def test_delete_removes_only_the_journal_owners_links(
+        self, repo: AlbumSyncReadRepository, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _make_album_sync_metadata_only(
+            async_connection, album_id="album-mine"
+        )
+        # Another owner's row naming the same journal id (a mis-owned link).
+        await async_connection.execute(
+            text("""
+                INSERT INTO sync_metadata (
+                    user_id, internal_id, integration_source, external_id,
+                    last_synced_at, version_hash, sync_status,
+                    internal_entity_type, external_entity_type
+                ) VALUES (
+                    'someone-else-456', :journal_id, 'immich_album', 'album-stray',
+                    now(), 'h', 'success', 'journal', 'album'
+                )
+            """),
+            {"journal_id": journal_id},
+        )
+
+        await repo.delete(journal_id)
+
+        remaining = await async_connection.execute(
+            text("""
+                SELECT external_id FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND internal_id = :journal_id
+            """),
+            {"journal_id": journal_id},
+        )
+        assert remaining.scalars().all() == ["album-stray"]

@@ -337,14 +337,24 @@ class JournalOutboxEventProcessor:
         if payload.integration_source != _SNIPEIT_MAINTENANCE_SOURCE:
             return False
 
+        # Snipe-IT ids are per instance, so only the owner's row speaks for the
+        # event; one naming no owner cannot be matched to anyone's.
+        owner = payload.journal_data.get("user_id")
+        if not owner:
+            raise JournalOutboxEventProcessingError(
+                f"Snipe-IT maintenance event {payload.external_event_id!r} "
+                "names no owner (user_id)"
+            )
         result = await self.connection.execute(
             text("""
                 SELECT version_hash
                 FROM sync_metadata
-                WHERE integration_source = :integration_source
+                WHERE user_id = :user_id
+                  AND integration_source = :integration_source
                   AND external_id = :external_id
             """),
             {
+                "user_id": str(owner),
                 "integration_source": _SNIPEIT_MAINTENANCE_SOURCE,
                 "external_id": payload.external_event_id,
             },

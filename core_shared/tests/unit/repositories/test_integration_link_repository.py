@@ -61,7 +61,9 @@ class TestFindLinkByExternal:
             return_value=_result_with(_link_row(reference_data='{"k": 1}'))
         )
 
-        link = await repository.find_link_by_external("google", "people/c123")
+        link = await repository.find_link_by_external(
+            "google", "people/c123", user_id="owner-1"
+        )
 
         assert link is not None
         assert link["internal_id"] == 42
@@ -72,6 +74,7 @@ class TestFindLinkByExternal:
         query, params = mock_connection.execute.call_args[0]
         assert "sync_metadata" in str(query)
         assert params == {
+            "user_id": "owner-1",
             "integration_source": "google",
             "external_id": "people/c123",
         }
@@ -84,39 +87,12 @@ class TestFindLinkByExternal:
     ) -> None:
         mock_connection.execute = AsyncMock(return_value=_result_with(None))
 
-        assert await repository.find_link_by_external("google", "missing") is None
-
-
-class TestFindInternalByExternal:
-    """Resolve the internal identity from an external link."""
-
-    @pytest.mark.asyncio
-    async def test_returns_internal_identity_tuple(
-        self,
-        repository: IntegrationLinkRepository,
-        mock_connection: AsyncMock,
-    ) -> None:
-        mock_connection.execute = AsyncMock(
-            return_value=_result_with(
-                _link_row(
-                    internal_id=7, internal_uuid=None, internal_entity_type="contact"
-                )
+        assert (
+            await repository.find_link_by_external(
+                "google", "missing", user_id="owner-1"
             )
+            is None
         )
-
-        result = await repository.find_internal_by_external("google", "people/c123")
-
-        assert result == (7, None, "contact")
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_absent(
-        self,
-        repository: IntegrationLinkRepository,
-        mock_connection: AsyncMock,
-    ) -> None:
-        mock_connection.execute = AsyncMock(return_value=_result_with(None))
-
-        assert await repository.find_internal_by_external("google", "x") is None
 
 
 class TestFindExternalByInternal:
@@ -223,12 +199,15 @@ class TestGetContactIdsByImmichPersonIds:
         mock_connection.execute = AsyncMock(return_value=result)
 
         mapping = await repository.get_contact_ids_by_immich_person_ids(
-            ["p1", "p2", "p_unknown"]
+            ["p1", "p2", "p_unknown"], user_id="owner-1"
         )
 
         assert mapping == {"p1": 11, "p2": 22}
         _, params = mock_connection.execute.call_args[0]
-        assert params["person_ids"] == ["p1", "p2", "p_unknown"]
+        assert params == {
+            "user_id": "owner-1",
+            "person_ids": ["p1", "p2", "p_unknown"],
+        }
 
     @pytest.mark.asyncio
     async def test_empty_input_short_circuits_without_query(
@@ -238,7 +217,9 @@ class TestGetContactIdsByImmichPersonIds:
     ) -> None:
         mock_connection.execute = AsyncMock()
 
-        mapping = await repository.get_contact_ids_by_immich_person_ids([])
+        mapping = await repository.get_contact_ids_by_immich_person_ids(
+            [], user_id="owner-1"
+        )
 
         assert mapping == {}
         mock_connection.execute.assert_not_called()

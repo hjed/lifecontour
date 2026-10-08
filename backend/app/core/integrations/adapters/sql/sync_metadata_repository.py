@@ -123,7 +123,7 @@ class SyncMetadataRepository:
         self.conn = conn
 
     async def find_and_lock(
-        self, integration_source: str, external_id: str
+        self, integration_source: str, external_id: str, *, user_id: str
     ) -> SyncMetadata | None:
         """
         Find sync metadata and acquire an exclusive lock using SELECT FOR UPDATE.
@@ -134,6 +134,7 @@ class SyncMetadataRepository:
         Args:
             integration_source: Integration source (e.g., 'google')
             external_id: External entity ID
+            user_id: The link's owner; another user's link is never returned
 
         Returns:
             SyncMetadata if found, None otherwise
@@ -143,7 +144,8 @@ class SyncMetadataRepository:
                    last_synced_at, version_hash, sync_status,
                    error_message, retry_count, created_at, updated_at
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
             FOR UPDATE
         """)
@@ -151,6 +153,7 @@ class SyncMetadataRepository:
         result = await self.conn.execute(
             query,
             {
+                "user_id": user_id,
                 "integration_source": integration_source,
                 "external_id": external_id,
             },
@@ -176,7 +179,7 @@ class SyncMetadataRepository:
         )
 
     async def find_by_external_id(
-        self, integration_source: str, external_id: str
+        self, integration_source: str, external_id: str, *, user_id: str
     ) -> SyncMetadata | None:
         """
         Find sync metadata without locking (for read-only operations).
@@ -184,6 +187,7 @@ class SyncMetadataRepository:
         Args:
             integration_source: Integration source (e.g., 'google')
             external_id: External entity ID
+            user_id: The link's owner; another user's link is never returned
 
         Returns:
             SyncMetadata if found, None otherwise
@@ -193,13 +197,15 @@ class SyncMetadataRepository:
                    last_synced_at, version_hash, sync_status,
                    error_message, retry_count, created_at, updated_at
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """)
 
         result = await self.conn.execute(
             query,
             {
+                "user_id": user_id,
                 "integration_source": integration_source,
                 "external_id": external_id,
             },
@@ -357,6 +363,8 @@ class SyncMetadataRepository:
         integration_source: str,
         external_id: str,
         reference_data: str,
+        *,
+        user_id: str,
     ) -> None:
         """Update only the ``reference_data`` of an existing link.
 
@@ -365,22 +373,26 @@ class SyncMetadataRepository:
         identity columns are deliberately left untouched so this write never
         looks like a content change to the next sync's ``should_sync`` check.
 
-        A no-op when no row matches ``(integration_source, external_id)``.
+        A no-op when the owner has no link for ``(integration_source,
+        external_id)``.
 
         Args:
             integration_source: Integration source (e.g. 'google').
             external_id: External entity ID.
             reference_data: New reference data as a JSON string.
+            user_id: The link's owner; another user's link is never touched.
         """
         query = text("""
             UPDATE sync_metadata
             SET reference_data = :reference_data, updated_at = :now
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """)
         await self.conn.execute(
             query,
             {
+                "user_id": user_id,
                 "reference_data": reference_data,
                 "now": datetime.now(UTC),
                 "integration_source": integration_source,
@@ -428,6 +440,8 @@ class SyncMetadataRepository:
         source_id: int,
         survivor_id: int,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> list[IntegrationLinkCollision]:
         """Re-point a source contact's external links onto the survivor on merge.
 
@@ -452,10 +466,14 @@ class SyncMetadataRepository:
         touched — a journal sync row that merely shares the source's integer id is
         left alone.
 
+        Only ``user_id``'s links are read and moved: a link row is the
+        owner's, whichever contact id it names.
+
         Args:
             source_id: The contact being absorbed (and then deleted).
             survivor_id: The surviving contact that keeps its id.
             transaction: The merge transaction's connection.
+            user_id: The merging user.
 
         Returns:
             One ``IntegrationLinkCollision`` per same-service collision.
@@ -466,11 +484,12 @@ class SyncMetadataRepository:
                 SELECT integration_source AS external_system,
                        external_id AS external_entity_id
                 FROM sync_metadata
-                WHERE internal_entity_type = 'contact'
+                WHERE user_id = :user_id
+                  AND internal_entity_type = 'contact'
                   AND internal_id = :survivor_id
                 """
             ),
-            {"survivor_id": survivor_id},
+            {"user_id": user_id, "survivor_id": survivor_id},
         )
         survivor_external_id_by_system = {
             row.external_system: row.external_entity_id
@@ -484,11 +503,12 @@ class SyncMetadataRepository:
                        external_entity_type,
                        external_id AS external_entity_id
                 FROM sync_metadata
-                WHERE internal_entity_type = 'contact'
+                WHERE user_id = :user_id
+                  AND internal_entity_type = 'contact'
                   AND internal_id = :source_id
                 """
             ),
-            {"source_id": source_id},
+            {"user_id": user_id, "source_id": source_id},
         )
         source_refs = source_result.fetchall()
 
@@ -498,6 +518,7 @@ class SyncMetadataRepository:
                 ref.external_system
             )
             link_params = {
+                "user_id": user_id,
                 "source_id": source_id,
                 "survivor_id": survivor_id,
                 "integration_source": ref.external_system,
@@ -510,7 +531,8 @@ class SyncMetadataRepository:
                         """
                         UPDATE sync_metadata
                         SET internal_id = :survivor_id, updated_at = now()
-                        WHERE internal_entity_type = 'contact'
+                        WHERE user_id = :user_id
+                          AND internal_entity_type = 'contact'
                           AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id
@@ -537,7 +559,8 @@ class SyncMetadataRepository:
                     text(
                         """
                         DELETE FROM sync_metadata
-                        WHERE internal_entity_type = 'contact'
+                        WHERE user_id = :user_id
+                          AND internal_entity_type = 'contact'
                           AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id
@@ -554,6 +577,7 @@ class SyncMetadataRepository:
         target_id: int,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         keep_colliding_source_links: bool = False,
         extra_target_links: Mapping[str, str] | None = None,
     ) -> list[IntegrationLinkCollision]:
@@ -577,13 +601,16 @@ class SyncMetadataRepository:
           too, so the target ends up linked to **both** remote records. This is
           what an additive fitness merge needs — two Strava activities making up
           one outing both stay linked. ``sync_metadata`` is unique on
-          ``(integration_source, external_id)``, not on ``internal_id``, so
-          several rows may share one journal.
+          ``(user_id, integration_source, external_id)``, not on
+          ``internal_id``, so several rows may share one journal.
+
+        Only ``user_id``'s links are read and moved.
 
         Args:
             source_id: The journal being absorbed (and then deleted).
             target_id: The surviving journal that keeps its id.
             transaction: The merge transaction's connection.
+            user_id: The journals' owner.
             keep_colliding_source_links: Keep both links on a same-service
                 collision instead of dropping the source's.
             extra_target_links: Links the target holds outside ``sync_metadata``,
@@ -604,11 +631,12 @@ class SyncMetadataRepository:
                 SELECT integration_source AS external_system,
                        external_id AS external_entity_id
                 FROM sync_metadata
-                WHERE internal_entity_type = 'journal'
+                WHERE user_id = :user_id
+                  AND internal_entity_type = 'journal'
                   AND internal_id = :target_id
                 """
             ),
-            {"target_id": target_id},
+            {"user_id": user_id, "target_id": target_id},
         )
         target_external_id_by_system = {
             **{
@@ -631,11 +659,12 @@ class SyncMetadataRepository:
                        external_entity_type,
                        external_id AS external_entity_id
                 FROM sync_metadata
-                WHERE internal_entity_type = 'journal'
+                WHERE user_id = :user_id
+                  AND internal_entity_type = 'journal'
                   AND internal_id = :source_id
                 """
             ),
-            {"source_id": source_id},
+            {"user_id": user_id, "source_id": source_id},
         )
         source_links = source_result.fetchall()
 
@@ -649,6 +678,7 @@ class SyncMetadataRepository:
                 and target_external_id != link.external_entity_id
             )
             link_params = {
+                "user_id": user_id,
                 "source_id": source_id,
                 "target_id": target_id,
                 "integration_source": link.external_system,
@@ -671,7 +701,8 @@ class SyncMetadataRepository:
                         """
                         UPDATE sync_metadata
                         SET internal_id = :target_id, updated_at = now()
-                        WHERE internal_entity_type = 'journal'
+                        WHERE user_id = :user_id
+                          AND internal_entity_type = 'journal'
                           AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id
@@ -684,7 +715,8 @@ class SyncMetadataRepository:
                     text(
                         """
                         DELETE FROM sync_metadata
-                        WHERE internal_entity_type = 'journal'
+                        WHERE user_id = :user_id
+                          AND internal_entity_type = 'journal'
                           AND internal_id = :source_id
                           AND integration_source = :integration_source
                           AND external_id = :external_id

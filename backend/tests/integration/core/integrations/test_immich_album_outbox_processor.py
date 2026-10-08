@@ -14,6 +14,9 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.sync_metadata_repository import (
+    ExternalLinkOwnedByAnotherUserError,
+)
 from app.core.integrations.immich.album_outbox_event_processor import (
     EVENT_TYPE_IMMICH_ALBUM_CREATED,
     EVENT_TYPE_IMMICH_ALBUM_UPDATED,
@@ -31,6 +34,7 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from tests.integration.contact_seeding import seed_contact
 
 USER_ID = "album-test-user"
+OTHER_USER_ID = "other-user-456"
 START = datetime(2026, 1, 15, 0, 0, 0, 0, tzinfo=UTC)
 END = datetime(2026, 1, 17, 23, 59, 59, 999999, tzinfo=UTC)
 
@@ -97,27 +101,67 @@ def _event(
 
 
 async def _seed_contact_linked_to_person(
-    connection: AsyncConnection, first_name: str, person_id: str
+    connection: AsyncConnection,
+    first_name: str,
+    person_id: str,
+    *,
+    user_id: str = USER_ID,
 ) -> int:
-    """Create a contact and an Immich person→contact link in sync_metadata.
+    """Create ``user_id``'s contact and an Immich person→contact link.
 
     Participant detection resolves people via the canonical sync_metadata link
     store (``get_contact_ids_by_immich_person_ids``), so the link is seeded there.
     """
-    contact_id = await seed_contact(connection, first_name=first_name)
+    contact_id = await seed_contact(connection, user_id=user_id, first_name=first_name)
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id, last_synced_at,
-                version_hash, sync_status, internal_entity_type,
+                user_id, internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status, internal_entity_type,
                 external_entity_type
             ) VALUES (
-                :cid, 'immich', :pid, now(), 'h', 'success', 'contact', 'person'
+                :uid, :cid, 'immich', :pid, now(), 'h', 'success', 'contact',
+                'person'
             )
         """),
-        {"cid": contact_id, "pid": person_id},
+        {"uid": user_id, "cid": contact_id, "pid": person_id},
     )
     return contact_id
+
+
+async def _seed_other_users_album_journal(
+    connection: AsyncConnection, album_id: str
+) -> int:
+    """Another user's journal, linked to ``album_id`` in their own link row."""
+    journal_id = (
+        await connection.execute(
+            text("""
+                INSERT INTO journals
+                    (user_id, title, content,
+                     event_date_range_start, event_date_range_end,
+                     created_at, updated_at)
+                VALUES (:u, 'Theirs', '',
+                        '2026-01-15T00:00:00+00:00', '2026-01-15T23:59:59+00:00',
+                        now(), now())
+                RETURNING id
+            """),
+            {"u": OTHER_USER_ID},
+        )
+    ).scalar_one()
+    await connection.execute(
+        text("""
+            INSERT INTO sync_metadata (
+                user_id, internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status, internal_entity_type,
+                external_entity_type
+            ) VALUES (
+                :uid, :jid, 'immich_album', :aid, now(), 'theirs', 'success',
+                'journal', 'album'
+            )
+        """),
+        {"uid": OTHER_USER_ID, "jid": journal_id, "aid": album_id},
+    )
+    return int(journal_id)
 
 
 async def _participant_ids(connection: AsyncConnection, journal_id: int) -> set[int]:
@@ -798,3 +842,55 @@ async def test_resync_tolerates_malformed_participant_contact_ids(
 
     assert result["status"] == "updated"
     assert await _participant_ids(async_connection, journal_id) == {alice}
+
+
+@pytest.mark.asyncio
+async def test_another_users_person_link_creates_no_participant(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """A person linked only by another user never makes their contact a
+    participant of this user's album journal."""
+    album_id = str(uuid.uuid4())
+    await _seed_contact_linked_to_person(
+        async_connection, "Theirs", "p-theirs", user_id=OTHER_USER_ID
+    )
+    processor = _processor(async_connection)
+
+    created = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_CREATED,
+            album_id=album_id,
+            version_hash="v1",
+            people=[{"id": "p-theirs", "name": "Theirs"}],
+        )
+    )
+
+    assert await _participant_ids(async_connection, created["journal_id"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_another_users_album_link_is_not_this_users_journal(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """An album another user has imported is not "already linked" for this
+    user: their journal is never resolved, updated or re-pointed."""
+    album_id = str(uuid.uuid4())
+    their_journal = await _seed_other_users_album_journal(async_connection, album_id)
+    processor = _processor(async_connection)
+
+    # Until the global key goes the link write is refused; what matters is
+    # that the event never resolved to the other user's journal.
+    with pytest.raises(ExternalLinkOwnedByAnotherUserError):
+        await processor.process_event(
+            _event(
+                EVENT_TYPE_IMMICH_ALBUM_CREATED,
+                album_id=album_id,
+                version_hash="v1",
+                title="Mine",
+            )
+        )
+
+    row = await _journal_row(async_connection, their_journal)
+    assert row.title == "Theirs"

@@ -57,7 +57,9 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_and_lock("google", "people/c123")
+        result = await repository.find_and_lock(
+            "google", "people/c123", user_id="owner-1"
+        )
 
         # Verify
         assert result is not None
@@ -71,6 +73,8 @@ class TestSyncMetadataRepository:
         call_args = mock_connection.execute.call_args
         query_text = str(call_args[0][0])
         assert "FOR UPDATE" in query_text
+        assert "user_id = :user_id" in query_text
+        assert call_args[0][1]["user_id"] == "owner-1"
 
     @pytest.mark.asyncio
     async def test_find_and_lock_not_found(
@@ -83,7 +87,9 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_and_lock("google", "people/c123")
+        result = await repository.find_and_lock(
+            "google", "people/c123", user_id="owner-1"
+        )
 
         # Verify
         assert result is None
@@ -112,7 +118,9 @@ class TestSyncMetadataRepository:
         mock_connection.execute = AsyncMock(return_value=mock_result)
 
         # Execute
-        result = await repository.find_by_external_id("google", "people/c123")
+        result = await repository.find_by_external_id(
+            "google", "people/c123", user_id="owner-1"
+        )
 
         # Verify
         assert result is not None
@@ -226,6 +234,7 @@ class TestSyncMetadataRepository:
             integration_source="google",
             external_id="people/c123",
             reference_data='{"synced_tags": ["VIP"]}',
+            user_id="owner-1",
         )
 
         call_args = mock_connection.execute.call_args
@@ -240,6 +249,8 @@ class TestSyncMetadataRepository:
         assert params["reference_data"] == '{"synced_tags": ["VIP"]}'
         assert params["integration_source"] == "google"
         assert params["external_id"] == "people/c123"
+        assert "user_id = :user_id" in query_text
+        assert params["user_id"] == "owner-1"
 
     def test_should_sync_no_existing_metadata(
         self, repository: SyncMetadataRepository
