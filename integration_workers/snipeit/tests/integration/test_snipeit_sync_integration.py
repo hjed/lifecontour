@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from snipeit_api_client import SnipeItAPIClient
 from snipeit_sync_service import SnipeItSyncService
+from snipeit_sync_window import ListedRecord
 
 # ``MockTransport``, ``mock_transport`` and ``integration_client`` are shared
 # fixtures defined in ``conftest.py``.
@@ -146,8 +148,16 @@ def _queue_listings(
     )
 
 
+async def _collect_records(
+    sync_service: SnipeItSyncService,
+) -> list[list[ListedRecord]]:
+    return [page async for page in sync_service.list_asset_batches()]
+
+
 async def _collect(sync_service: SnipeItSyncService) -> list[list[int]]:
-    return [batch async for batch in sync_service.list_asset_batches()]
+    return [
+        [record.id for record in page] for page in await _collect_records(sync_service)
+    ]
 
 
 @pytest.fixture
@@ -178,6 +188,66 @@ async def _gear_rows_for(conn: AsyncConnection, external_id: str) -> list[Any]:
         {"external_id": external_id},
     )
     return list(result.fetchall())
+
+
+class TestSnipeItListingTimestamps:
+    """Listings carry each record's ``updated_at``, so a smart sync can fetch
+    only the records changed since its last run (#1560)."""
+
+    @pytest.mark.asyncio
+    async def test_asset_listing_carries_updated_at(
+        self, sync_service: SnipeItSyncService, mock_transport: Any
+    ) -> None:
+        changed = {
+            **_asset_json(1, "Rope"),
+            "updated_at": {"datetime": "2026-10-07 09:30:05", "formatted": "x"},
+        }
+        _queue_listings(
+            mock_transport,
+            default=_listing(changed, _asset_json(2, "Harness")),
+            archived=_listing(),
+        )
+
+        pages = await _collect_records(sync_service)
+
+        assert pages == [
+            [
+                ListedRecord(1, datetime(2026, 10, 7, 9, 30, 5)),
+                ListedRecord(2, None),
+            ]
+        ]
+
+    @pytest.mark.asyncio
+    async def test_maintenance_listing_carries_updated_at_and_asset(
+        self, sync_service: SnipeItSyncService, mock_transport: Any
+    ) -> None:
+        mock_transport.add_response(
+            "/maintenances?",
+            json_data={
+                "total": 2,
+                "rows": [
+                    {
+                        "id": 7,
+                        "asset": {"id": 51, "name": "Rope"},
+                        "updated_at": {
+                            "datetime": "2026-10-07 09:30:05",
+                            "formatted": "x",
+                        },
+                    },
+                    {"id": 8, "updated_at": None},
+                ],
+            },
+            method="GET",
+        )
+
+        pages = [page async for page in sync_service.list_maintenance_batches()]
+
+        assert pages == [
+            [
+                ListedRecord(7, datetime(2026, 10, 7, 9, 30, 5), asset_id=51),
+                ListedRecord(8, None),
+            ]
+        ]
 
 
 class TestSnipeItArchivedAssetListing:

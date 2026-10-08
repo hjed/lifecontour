@@ -35,13 +35,21 @@ from core_shared.fanout import (
 )
 from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
 from core_shared.logging import configure_logging, get_logger
-from core_shared.models.sync_job import SyncJobStatus
+from core_shared.models.sync_job import SyncJobStatus, SyncType
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from core_shared.worker_arq import DEFAULT_MAX_TRIES
 
+from snipeit_models import SNIPEIT_DATETIME_FORMAT
 from snipeit_rate_limiter import SnipeItRateLimitError
 from snipeit_settings import SnipeItWorkerSettings
+from snipeit_sync_window import (
+    ListedRecord,
+    ListingTracker,
+    SyncResource,
+    SyncWindow,
+    resolve_sync_window,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -231,24 +239,75 @@ def _rate_limit_defer(ctx: dict[str, Any], retry_after: float | None) -> float:
     return min(retry_after or default_retry_delay(retry_count), cap)
 
 
+def _format_cursor(cursor: datetime | None) -> str | None:
+    """A cursor as ``sync_jobs`` stores it, Snipe-IT's ``Y-m-d H:i:s``."""
+    return cursor.strftime(SNIPEIT_DATETIME_FORMAT) if cursor else None
+
+
+# Batch size for the unchanged records a smart sync fetches anyway, matching
+# the listing's page size that bounds every other batch.
+_EXTRA_BATCH_SIZE = 50
+
+
+async def _resolve_window(
+    session_factory: Any, user_id: str, resource: SyncResource, sync_type: str
+) -> SyncWindow:
+    """Work out what this run fetches from the user's earlier completed runs."""
+    from sqlalchemy import text
+
+    async with session_factory() as session:
+        repo = SyncJobRepository(await session.connection())
+        last_completed = await repo.get_latest_completed_parent(
+            user_id, "snipeit", resource
+        )
+        last_full = await repo.get_latest_completed_parent(
+            user_id, "snipeit", resource, sync_type=SyncType.FULL.value
+        )
+        # Saving the settings (URL, user mapping) or the API key bumps these.
+        settings_changed_at = (
+            await session.execute(
+                text("""
+                    SELECT GREATEST(s.updated_at, a.updated_at)
+                    FROM snipeit_settings s
+                    LEFT JOIN user_snipe_it_auth a ON a.user_id = s.user_id
+                    WHERE s.user_id = :user_id
+                """),
+                {"user_id": user_id},
+            )
+        ).scalar_one_or_none()
+    return resolve_sync_window(
+        SyncType(sync_type),
+        last_completed=last_completed,
+        last_full=last_full,
+        now=datetime.now(UTC),
+        settings_changed_at=settings_changed_at,
+    )
+
+
 async def _run_snipeit_fanout(
     ctx: dict[str, Any],
     user_id: str,
     sync_type: str,
     *,
-    label: str,
-    list_batches: Callable[[Any], AsyncIterator[list[int]]],
+    resource: SyncResource,
+    list_batches: Callable[[Any], AsyncIterator[list[ListedRecord]]],
     batch_task: str,
     child_id_prefix: str,
-    after_listing: Callable[[Any, list[list[int]]], Awaitable[object]] | None = None,
+    after_listing: Callable[[Any, list[int]], Awaitable[object]] | None = None,
+    also_fetch: Callable[[Any, list[ListedRecord]], Awaitable[set[int]]] | None = None,
 ) -> dict[str, Any]:
     """Non-blocking fan-out shared by the asset and maintenance orchestrators.
 
-    Marks the parent ``running``, lists every batch, runs ``after_listing`` on
-    the complete listing, then persists a child row per batch (the parent goes
-    ``in_progress``, or ``completed`` when there is nothing to sync) and commits
-    before dispatching them. Each batch finalises its own row; the reconciler
-    finalises the parent. A listing that fails part-way dispatches nothing.
+    Marks the parent ``running`` and works out which records this run fetches:
+    every one for a full sync, those changed since the last completed run for a
+    smart one (see ``snipeit_sync_window``). It lists every page, runs
+    ``after_listing`` on every listed id, then records the listing's cursor on
+    the parent and persists a child row per page with records to fetch (the
+    parent goes ``in_progress``, or ``completed`` when there is nothing to
+    sync), committing before dispatching them. A smart run also fetches the
+    ids ``also_fetch`` returns from every listed record, in batches of their own.
+    Each batch finalises its own row; the reconciler finalises the parent. A
+    listing that fails part-way dispatches nothing.
 
     Child ids are scoped to this run: arq keeps a finished job's result for
     ``keep_result`` seconds and refuses to enqueue an id it still holds, so ids
@@ -268,32 +327,72 @@ async def _run_snipeit_fanout(
     try:
         sync_service = await _open_sync_service(session_factory, user_id)
     except _NotConfiguredError as exc:
-        logger.error(str(exc), task=label, user_id=user_id)
+        logger.error(str(exc), task=resource, user_id=user_id)
         await _fail_parent(session_factory, job_id, str(exc))
         return {"status": "error", "message": str(exc), "user_id": user_id}
     except Exception as exc:
-        logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
+        logger.exception("Snipe-IT fan-out failed", task=resource, user_id=user_id)
         await _fail_parent(session_factory, job_id, str(exc))
         raise
 
     try:
-        batches = [ids async for ids in list_batches(sync_service) if ids]
+        window = await _resolve_window(session_factory, user_id, resource, sync_type)
+        if window.escalation is not None:
+            logger.warning(
+                "Smart Snipe-IT sync is running as a full sync",
+                task=resource,
+                user_id=user_id,
+                reason=window.escalation,
+            )
+        tracker = ListingTracker(window)
+        batches = [
+            ids
+            async for page in list_batches(sync_service)
+            if (ids := tracker.select(page))
+        ]
         if after_listing is not None:
-            await after_listing(sync_service, batches)
+            await after_listing(sync_service, tracker.listed_ids)
+        if also_fetch is not None and window.since is not None:
+            selected = {record_id for ids in batches for record_id in ids}
+            extra = sorted(await also_fetch(sync_service, tracker.listed) - selected)
+            batches += [
+                extra[start : start + _EXTRA_BATCH_SIZE]
+                for start in range(0, len(extra), _EXTRA_BATCH_SIZE)
+            ]
+
+        # A retried attempt's earlier one may have queued batches, which arq
+        # keeps with their original records under the same child ids, so this
+        # listing is not what will be fetched: keep the cursor it started from.
+        if coerce_int(ctx.get("job_try"), 1) > 1:
+            cursor = _format_cursor(window.previous_cursor)
+        else:
+            cursor = tracker.cursor
 
         async with session_factory() as session:
+            repo = SyncJobRepository(await session.connection())
+            if not await repo.record_listing(
+                job_id,
+                resource=resource,
+                cursor=cursor,
+                sync_type=window.sync_type.value,
+            ):
+                logger.warning(
+                    "Snipe-IT sync job row not found; its cursor is lost",
+                    task=resource,
+                    job_id=job_id,
+                )
             child_ids = await persist_fanout_children(
-                SyncJobRepository(await session.connection()),
+                repo,
                 parent_job_id=job_id,
                 user_id=user_id,
                 integration_source="snipeit",
-                sync_type=sync_type,
+                sync_type=window.sync_type.value,
                 child_id_prefix=f"{child_id_prefix}:{user_id}:{job_id}:",
                 count=len(batches),
             )
             await session.commit()
     except Exception as exc:
-        logger.exception("Snipe-IT fan-out failed", task=label, user_id=user_id)
+        logger.exception("Snipe-IT fan-out failed", task=resource, user_id=user_id)
         await _fail_parent(session_factory, job_id, str(exc))
         raise
     finally:
@@ -314,7 +413,7 @@ async def _run_snipeit_fanout(
         except Exception as exc:
             # A batch never queued never finalises its own row: fail it and the
             # rest here so the parent does not wait out the staleness window.
-            logger.exception("Snipe-IT batch dispatch failed", task=label)
+            logger.exception("Snipe-IT batch dispatch failed", task=resource)
             for unsent_id in child_ids[position:]:
                 await _record_child(
                     session_factory,
@@ -329,7 +428,7 @@ async def _run_snipeit_fanout(
             # it, so it still runs and finalises its own row.
             logger.warning(
                 "Snipe-IT batch already enqueued; skipping",
-                task=label,
+                task=resource,
                 child_job_id=child_id,
             )
         else:
@@ -337,7 +436,7 @@ async def _run_snipeit_fanout(
 
     logger.info(
         "Enqueued Snipe-IT sync batches",
-        task=label,
+        task=resource,
         user_id=user_id,
         batch_count=len(batches),
         enqueued=enqueued,
@@ -420,13 +519,16 @@ async def sync_snipeit_assets(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """Orchestrator job for full sync of Snipe-IT assets."""
-    # TODO: Implement smart sync behavior using sync_type parameter
+    """Orchestrator job syncing Snipe-IT assets.
+
+    A ``full`` sync fetches every asset; a ``smart`` one only those changed
+    since the last completed sync, unless it has to run as a full one.
+    """
     return await _run_snipeit_fanout(
         ctx,
         user_id,
         sync_type,
-        label="assets",
+        resource="assets",
         list_batches=lambda service: service.list_asset_batches(),
         batch_task="sync_snipeit_asset_batch",
         child_id_prefix="snipeit_sync_batch",
@@ -460,25 +562,32 @@ async def sync_snipeit_maintenances(
     user_id: str,
     sync_type: str = "full",
 ) -> dict[str, Any]:
-    """Orchestrator job for full sync of Snipe-IT maintenance records."""
-    # TODO: Implement smart sync behavior using sync_type parameter
+    """Orchestrator job syncing Snipe-IT maintenance records.
+
+    A ``full`` sync fetches every record; a ``smart`` one only those changed
+    since the last completed sync and those not yet settled here (see
+    ``unsettled_maintenance_ids``), unless it has to run as a full one. Both
+    list every record, so deletions are reconciled on every run.
+    """
     session_factory = ctx["session_factory"]
 
-    async def _reconcile_deleted(service: Any, batches: list[list[int]]) -> None:
+    async def _reconcile_deleted(service: Any, listed_ids: list[int]) -> None:
         # Only a listing that ran to the end says which records are gone: one
         # that raised part-way never gets here.
-        listed_ids = {maintenance_id for batch in batches for maintenance_id in batch}
-        await service.reconcile_deleted_maintenances(listed_ids, session_factory)
+        await service.reconcile_deleted_maintenances(set(listed_ids), session_factory)
 
     return await _run_snipeit_fanout(
         ctx,
         user_id,
         sync_type,
-        label="maintenances",
+        resource="maintenances",
         list_batches=lambda service: service.list_maintenance_batches(),
         batch_task="sync_snipeit_maintenance_batch",
         child_id_prefix="snipeit_maint_batch",
         after_listing=_reconcile_deleted,
+        also_fetch=lambda service, listed: service.unsettled_maintenance_ids(
+            listed, session_factory
+        ),
     )
 
 

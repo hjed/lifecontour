@@ -73,6 +73,57 @@ sites read the raw value via `.get_secret_value()`.
 | `QUEUE_NAME` | `arq:snipeit` | ARQ queue name (overrides base default) |
 | `OTEL_SERVICE_NAME` | `snipeit-worker` | OpenTelemetry service name (overrides base default) |
 
+### Smart and full syncs
+
+`sync_snipeit_assets` and `sync_snipeit_maintenances` both list every record,
+one Snipe-IT call per page of 50. They differ in which records they then fetch,
+one call each (`snipeit_sync_window.py`):
+
+- **`full`** fetches every listed record. Unchanged records are skipped by
+  version hash.
+- **`smart`** fetches only the records whose listing `updated_at` is at or after
+  the cursor of the user's newest *completed* run of that resource, less an
+  hour's overlap. A record without a readable `updated_at` is always fetched.
+  A smart maintenance sync also fetches every listed record that is on an asset
+  synced here but not yet settled (`unsettled_maintenance_ids`): one with no
+  sync row, such as a record skipped because its asset was not yet synced; one
+  whose sync row no live journal holds, because its journal was deleted or an
+  import's journal has not arrived; and an imported one whose journal is on
+  another asset's gear, because it was moved to an asset that was not yet
+  synced when it was last fetched. Those are imported on the next sync whether
+  or not they changed, exactly as a full sync would; the check reads only the
+  database, using the asset each listing row names. Records on assets not synced
+  here are never fetched just for being unsettled (changed ones still are, as
+  is every record in a full sync): the maintenance listing, unlike the asset
+  listing, is not filtered by the mapped Snipe-IT user, so most of them are
+  other users'.
+
+Each orchestrator records on its parent `sync_jobs` row the resource it listed
+(`sync_resource`) and the newest `updated_at` it saw (`sync_cursor`). The cursor
+is Snipe-IT's naive wall-clock time, compared only with other Snipe-IT
+timestamps, so neither the instance's timezone (which its API does not expose)
+nor clock skew matters. Only a completed parent's cursor is read: a run with a
+failed batch never moves it. A retried orchestrator keeps the cursor it started
+from, since batches an earlier attempt queued keep their original records. The overlap covers records edited while a listing
+runs and the hour that repeats when daylight saving ends.
+
+A smart sync runs as a full one, and records itself and its batches as `full`,
+when there is no cursor to resume from, when the Snipe-IT settings or API key
+were saved after the last completed run started (another URL is another clock,
+and another user mapping or key can bring in records older than the cursor), or
+when no full sync of that resource has completed in the last 7 days. Each such
+escalation is logged as a warning with its reason. `updated_at` misses some changes, such as renaming
+an asset's model or manufacturer, a record skipped by offset paging while
+another is deleted, and migrations or transformer changes that reset
+`version_hash`. Such changes reach existing rows on the next full sync, or on a
+manual sync with `force_full_sync`, not necessarily on the next periodic one.
+
+A record that fails on every run fails its parent each time, so neither the
+cursor nor the last full sync moves. Smart syncs keep resuming from the last
+completed run's cursor, refetching everything changed since it, until the last
+full sync is over 7 days old; from then on every smart sync runs as a full one. At
+worst that costs what every sync cost before smart syncs existed.
+
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default**. The worker inherits
@@ -86,17 +137,15 @@ their Snipe-IT traffic does not compete for the rate limit:
   `sync_snipeit_maintenances` with sync type `smart`, writing a `sync_jobs` row
   for each before queueing it (a job arq refuses has its row failed). Snipe-IT sends no webhooks for asset creation, asset edits or
   maintenance records, so this is the only way those changes arrive without a
-  manual sync. Neither orchestrator honours `smart` yet (#1560), so each run is a
-  full re-import; unchanged assets and maintenance records are skipped by
-  version hash. The asset and maintenance syncs run concurrently, so a
+  manual sync. See [Smart and full syncs](#smart-and-full-syncs) for what each
+  run fetches. The asset and maintenance syncs run concurrently, so a
   maintenance record on an asset new in this run can be skipped as "gear item
   not yet synced"; it is imported by the next run (#1563).
   Once the maintenance listing has run to the end, the sync rows of records it
   did not return are reconciled (`reconcile_deleted_maintenances`): each record
   is looked up, and the row of one Snipe-IT no longer has is deleted, except the
   push row of a live journal a user wrote. A listing that fails part-way
-  reconciles nothing, and a smart sync that stops listing everything (#1560)
-  must skip this step too.
+  reconciles nothing. Smart syncs list everything too, so they reconcile.
 - `periodic_checkin_all_snipeit_accounts` (at `:00`) — finishes the gear usage pushes left
   unfinished. `fetch_unsynced_gear_usage` selects each (journal, asset) pair
   whose checkout failed (unless terminal, `error_message` starting `Terminal:`),

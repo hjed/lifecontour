@@ -262,7 +262,7 @@ async def test_orchestrator_accepts_sync_type_and_otel_carrier(
     assert result == {"status": "completed"}
     assert run.await_args is not None
     assert run.await_args.args == (mock_ctx, "user-123", "smart")
-    assert run.await_args.kwargs["label"] == label
+    assert run.await_args.kwargs["resource"] == label
 
 
 @pytest.mark.asyncio
