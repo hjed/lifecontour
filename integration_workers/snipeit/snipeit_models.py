@@ -13,6 +13,7 @@ Snipe-IT returns nested ``{id, name}`` objects for related entities
 
 from __future__ import annotations
 
+import datetime as dt
 from enum import StrEnum
 from typing import Any
 
@@ -27,6 +28,21 @@ class SnipeItAssetStatusFilter(StrEnum):
     """
 
     ARCHIVED = "Archived"
+
+
+# Snipe-IT's naive ``Y-m-d H:i:s`` datetime format.
+SNIPEIT_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def parse_wall_clock(value: object) -> dt.datetime | None:
+    """Parse a Snipe-IT ``Y-m-d H:i:s`` string, or ``None`` when it is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        # Naive on purpose: Snipe-IT's wall-clock times carry no zone.
+        return dt.datetime.strptime(value, SNIPEIT_DATETIME_FORMAT)  # noqa: DTZ007
+    except ValueError:
+        return None
 
 
 class SnipeItNestedObject(BaseModel):
@@ -63,6 +79,10 @@ class SnipeItDateObject(BaseModel):
         if isinstance(data, str):
             return {"date": data}
         return data
+
+    def wall_clock(self) -> dt.datetime | None:
+        """The ``datetime`` sub-key as a naive Snipe-IT wall-clock time."""
+        return parse_wall_clock(self.datetime)
 
 
 class SnipeItAssignedTo(BaseModel):

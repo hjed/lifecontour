@@ -27,10 +27,12 @@ from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
 from snipeit_models import (
+    SNIPEIT_DATETIME_FORMAT,
     SnipeItActivity,
     SnipeItAsset,
     SnipeItAssetStatusFilter,
     SnipeItMaintenance,
+    parse_wall_clock,
 )
 from snipeit_rate_limiter import SnipeItRateLimitError
 
@@ -91,9 +93,6 @@ def _format_date_for_snipeit(
     return local.isoformat() if local else None
 
 
-# Snipe-IT's naive ``Y-m-d H:i:s`` datetime format.
-_SNIPEIT_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 # ``reference_data`` key of the asset dates read before a checkout.
 _ASSET_DATES_BEFORE = "asset_dates_before"
 
@@ -133,18 +132,7 @@ def _snipeit_wall_clock(
 
 def _format_wall_clock(value: datetime | None) -> str | None:
     """Format a naive wall-clock datetime the way Snipe-IT stores it."""
-    return value.strftime(_SNIPEIT_DATETIME_FORMAT) if value else None
-
-
-def _parse_wall_clock(value: object) -> datetime | None:
-    """Parse a Snipe-IT ``Y-m-d H:i:s`` string, or ``None`` when it is not one."""
-    if not isinstance(value, str):
-        return None
-    try:
-        # Naive on purpose: Snipe-IT's wall-clock times carry no zone.
-        return datetime.strptime(value, _SNIPEIT_DATETIME_FORMAT)  # noqa: DTZ007
-    except ValueError:
-        return None
+    return value.strftime(SNIPEIT_DATETIME_FORMAT) if value else None
 
 
 def _snipeit_datetime(value: date | datetime | None, zone: str | None) -> str | None:
@@ -3916,10 +3904,10 @@ class AssetUsageDates:
     def from_asset(cls, asset: SnipeItAsset) -> AssetUsageDates:
         """Read the dates of a ``GET /hardware/{id}`` response."""
         return cls(
-            last_checkout=_parse_wall_clock(
+            last_checkout=parse_wall_clock(
                 asset.last_checkout.datetime if asset.last_checkout else None
             ),
-            last_checkin=_parse_wall_clock(
+            last_checkin=parse_wall_clock(
                 asset.last_checkin.datetime if asset.last_checkin else None
             ),
         )
@@ -3946,8 +3934,8 @@ class AssetUsageDates:
         if not isinstance(kept, dict):
             return None
         return cls(
-            last_checkout=_parse_wall_clock(kept.get("last_checkout")),
-            last_checkin=_parse_wall_clock(kept.get("last_checkin")),
+            last_checkout=parse_wall_clock(kept.get("last_checkout")),
+            last_checkin=parse_wall_clock(kept.get("last_checkin")),
         )
 
     def to_reference(self) -> dict[str, str | None]:
@@ -3970,7 +3958,7 @@ class AssetUsageDates:
         if include_checkout:
             fields["last_checkout"] = self.last_checkout
         return {
-            name: value.strftime(_SNIPEIT_DATETIME_FORMAT)
+            name: value.strftime(SNIPEIT_DATETIME_FORMAT)
             for name, value in fields.items()
             if value is not None
         }
