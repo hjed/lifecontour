@@ -294,10 +294,12 @@ class ContactProvider(Provider):
         self,
         summary_repo: ContactSummaryRepository,
         event_publisher: ContactEventPublisher,
+        contact_repo: ContactRepository,
     ) -> ContactSummaryService:
         return ContactSummaryService(
             summary_repo=summary_repo,
             event_publisher=event_publisher,
+            contact_repo=contact_repo,
         )
 
     # Search service (stateless, can be singleton)

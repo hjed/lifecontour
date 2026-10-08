@@ -39,6 +39,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 from tests.integration.contacts.upcoming_date_seeding import (
     seed_contact,
     seed_custom_date_type,
@@ -48,7 +49,7 @@ from tests.integration.statement_recorder import recorded_statements
 
 pytestmark = pytest.mark.asyncio
 
-USER_ID = "user1"
+USER_ID = TEST_USER_ID
 NOW = datetime(2026, 8, 11, 9, 30, tzinfo=UTC)
 TODAY = NOW.date()
 
@@ -76,6 +77,7 @@ async def _contact(
     middle_name: str | None = None,
     nick_name: str | None = None,
     photo_url: str | None = None,
+    user_id: str = USER_ID,
 ) -> None:
     """A bare contact with the display fields a dashboard row shows.
 
@@ -91,6 +93,7 @@ async def _contact(
         middle_name=middle_name,
         nick_name=nick_name,
         photo_url=photo_url,
+        user_id=user_id,
     )
 
 
@@ -164,6 +167,21 @@ async def _custom_date_type(
 class TestWhichRowsTheQueryFetches:
     """Addressed to the SQL, because the pure rule filters the window again."""
 
+    async def test_it_leaves_out_another_users_contacts(
+        self,
+        async_connection: AsyncConnection,
+        repository: SqlUpcomingImportantDateRepository,
+    ) -> None:
+        """Same day, same pair: only the owner tells the two dates apart."""
+        await _contact(async_connection, 1)
+        await _contact(async_connection, 2, user_id=OTHER_USER_ID)
+        await _important_date(async_connection, 10, 1, month=8, day=14)
+        await _important_date(async_connection, 20, 2, month=8, day=14)
+
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
+
+        assert [row.important_date.id for row in rows] == [10]
+
     async def test_it_fetches_a_date_whose_pair_is_in_the_window(
         self,
         async_connection: AsyncConnection,
@@ -172,7 +190,7 @@ class TestWhichRowsTheQueryFetches:
         await _contact(async_connection, 1)
         await _important_date(async_connection, 10, 1, month=8, day=14)
 
-        rows = await repository.candidates_for(AUGUST_WEEK)
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert [row.important_date.id for row in rows] == [10]
 
@@ -198,7 +216,7 @@ class TestWhichRowsTheQueryFetches:
             date_type=ImportantDateType.WORK_ANNIVERSARY,
         )
 
-        rows = await repository.candidates_for(AUGUST_WEEK)
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert rows == []
 
@@ -222,7 +240,7 @@ class TestWhichRowsTheQueryFetches:
             date_type=ImportantDateType.FIRST_MET,
         )
 
-        rows = await repository.candidates_for(AUGUST_WEEK)
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert rows == []
 
@@ -235,7 +253,9 @@ class TestWhichRowsTheQueryFetches:
         await _contact(async_connection, 1)
         await _important_date(async_connection, 10, 1, month=2, day=29)
 
-        rows = await repository.candidates_for(((2, 27), (2, 28), (2, 29)))
+        rows = await repository.candidates_for(
+            ((2, 27), (2, 28), (2, 29)), user_id=USER_ID
+        )
 
         assert [row.important_date.id for row in rows] == [10]
 
@@ -256,7 +276,7 @@ class TestWhichRowsTheQueryFetches:
             date_type=ImportantDateType.MARRIAGE_ANNIVERSARY,
         )
 
-        rows = await repository.candidates_for(AUGUST_WEEK)
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert rows == []
 
@@ -266,7 +286,7 @@ class TestWhichRowsTheQueryFetches:
         repository: SqlUpcomingImportantDateRepository,
     ) -> None:
         with recorded_statements(async_connection) as statements:
-            rows = await repository.candidates_for(())
+            rows = await repository.candidates_for((), user_id=USER_ID)
 
         assert rows == []
         assert statements == []
@@ -292,7 +312,7 @@ class TestWhatTravelsWithARow:
             date_type=ImportantDateType.MARRIAGE_ANNIVERSARY,
         )
 
-        [row] = await repository.candidates_for(AUGUST_WEEK)
+        [row] = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert row.important_date.contact_id == 1
         assert row.important_date.date_type is ImportantDateType.MARRIAGE_ANNIVERSARY
@@ -318,7 +338,7 @@ class TestWhatTravelsWithARow:
             custom_date_type_id=5,
         )
 
-        [row] = await repository.candidates_for(AUGUST_WEEK)
+        [row] = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert row.important_date.custom_date_type_name == "Sobriety"
 
@@ -337,7 +357,7 @@ class TestWhatTravelsWithARow:
         )
         await _important_date(async_connection, 10, 1, month=8, day=14)
 
-        [row] = await repository.candidates_for(AUGUST_WEEK)
+        [row] = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert row.contact.id == 1
         assert row.contact.display_name == "Augusta Ada King"
@@ -352,7 +372,7 @@ class TestWhatTravelsWithARow:
         await _contact(async_connection, 1, nick_name="Ada")
         await _important_date(async_connection, 10, 1, month=8, day=14)
 
-        [row] = await repository.candidates_for(AUGUST_WEEK)
+        [row] = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert row.contact.display_name == "Ada"
 
@@ -372,7 +392,7 @@ class TestTheBatchShape:
             )
 
         with recorded_statements(async_connection) as statements:
-            rows = await repository.candidates_for(AUGUST_WEEK)
+            rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert len(rows) == 6
         assert len(statements) == 1
@@ -395,7 +415,7 @@ class TestTheBatchShape:
             date_type=ImportantDateType.WORK_ANNIVERSARY,
         )
 
-        rows = await repository.candidates_for(AUGUST_WEEK)
+        rows = await repository.candidates_for(AUGUST_WEEK, user_id=USER_ID)
 
         assert [row.important_date.id for row in rows] == [11, 12]
 

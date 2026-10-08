@@ -449,13 +449,12 @@ class DailySummaryInvalidationService:
     async def _targets_for_important_date_event(
         self, event_type: str, event_data: Mapping[str, Any]
     ) -> frozenset[InvalidationTarget]:
-        """The current day of every user who has a summary to make stale.
+        """The current day of the contact's owner, when the date makes it stale.
 
-        **Whose day?** ``contacts`` carries no owner column, so none of these
-        events names a user. Invalidation only ever touches rows that exist, so
-        the set that can possibly be affected *is* the users who already have a
-        summary row — which is a bound rather than a scan, and where the users
-        come from.
+        **Whose day?** The owner's: every contact event names it, and only the
+        owner's summary can mention their contact. An event that names no owner
+        marks nothing - whose day it is cannot be guessed, and marking every
+        user's would be a guess.
 
         **Which of them?** Only those whose week the date falls in, when there
         is a row left to ask - so adding a birthday six months away costs no AI
@@ -466,6 +465,14 @@ class DailySummaryInvalidationService:
         save's only announcement of one - there is nothing to test and today is
         marked unconditionally.
         """
+        user_id = event_data.get("user_id")
+        if not user_id:
+            logger.warning(
+                "Contact event names no owner; nothing to invalidate",
+                event_type=event_type,
+                contact_id=event_data.get("contact_id"),
+            )
+            return frozenset()
         if event_type == CONTACT_UPDATED_EVENT and not self._touched_important_dates(
             event_data
         ):
@@ -481,22 +488,18 @@ class DailySummaryInvalidationService:
                     before = self._before_edit(stored, event_data)
                     readings = None if before is None else [stored, before]
 
-        now = _utc_now()
-        targets: set[InvalidationTarget] = set()
-        for user_id in await self.summary_repo.user_ids_with_summaries():
-            tz: ZoneInfo = await self.date_resolver.timezone_for(user_id)
-            today = today_in(tz, now)
-            window = upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD)
-            if readings is not None and all(
-                resolve_occurrence(
-                    reading, first_day=window.first_day, last_day=window.last_day
-                )
-                is None
-                for reading in readings
-            ):
-                continue
-            targets.add(InvalidationTarget.for_day(user_id, today))
-        return frozenset(targets)
+        tz: ZoneInfo = await self.date_resolver.timezone_for(str(user_id))
+        today = today_in(tz, _utc_now())
+        window = upcoming_window(today, DEFAULT_UPCOMING_DAYS_AHEAD)
+        if readings is not None and all(
+            resolve_occurrence(
+                reading, first_day=window.first_day, last_day=window.last_day
+            )
+            is None
+            for reading in readings
+        ):
+            return frozenset()
+        return frozenset({InvalidationTarget.for_day(str(user_id), today)})
 
     @staticmethod
     def _touched_important_dates(event_data: Mapping[str, Any]) -> bool:

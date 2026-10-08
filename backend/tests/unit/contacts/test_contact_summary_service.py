@@ -11,10 +11,12 @@ from core_shared.models.contacts.entities import (
 from core_shared.models.contacts.exceptions import ContactValidationError
 
 from app.core.contacts.models.events import ContactSummaryRefreshDue
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.services.contact_summary_service import (
     ContactSummaryService,
     ContactSummaryUpdate,
 )
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -39,12 +41,57 @@ def mock_transaction():
 
 
 @pytest.fixture
-def summary_service(mock_summary_repo, mock_event_publisher):
+def mock_contact_repo():
+    """A contact repository that finds the acting user's contact."""
+    repo = AsyncMock()
+    repo.contact_exists.return_value = True
+    return repo
+
+
+@pytest.fixture
+def summary_service(mock_summary_repo, mock_event_publisher, mock_contact_repo):
     """Create a ContactSummaryService instance."""
     return ContactSummaryService(
         summary_repo=mock_summary_repo,
         event_publisher=mock_event_publisher,
+        contact_repo=mock_contact_repo,
     )
+
+
+class TestAnotherUsersContact:
+    """The summary rows carry no owner, so the contact is proved first."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("operation", ["refresh", "update"])
+    async def test_is_not_found_and_nothing_is_written(
+        self,
+        summary_service,
+        mock_contact_repo,
+        mock_summary_repo,
+        mock_event_publisher,
+        mock_transaction,
+        operation: str,
+    ) -> None:
+        mock_contact_repo.contact_exists.return_value = False
+
+        with pytest.raises(ContactNotFoundError):
+            if operation == "refresh":
+                await summary_service.request_refresh(
+                    42, transaction=mock_transaction, user_id=TEST_USER_ID
+                )
+            else:
+                await summary_service.update_summary(
+                    42,
+                    ContactSummaryUpdate(is_disabled=True),
+                    transaction=mock_transaction,
+                    user_id=TEST_USER_ID,
+                )
+
+        mock_contact_repo.contact_exists.assert_awaited_once_with(
+            42, user_id=TEST_USER_ID
+        )
+        assert mock_summary_repo.method_calls == []
+        mock_event_publisher.publish.assert_not_awaited()
 
 
 class TestRequestRefresh:
@@ -57,7 +104,9 @@ class TestRequestRefresh:
         """With no existing summary, a pending one is upserted and Due fires."""
         mock_summary_repo.find_by_contact_id.return_value = None
 
-        await summary_service.request_refresh(42, transaction=mock_transaction)
+        await summary_service.request_refresh(
+            42, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_summary_repo.upsert.assert_awaited_once()
         upserted = mock_summary_repo.upsert.call_args.args[0]
@@ -82,7 +131,9 @@ class TestRequestRefresh:
             contact_id=42, status=SummaryStatus.GENERATED
         )
 
-        await summary_service.request_refresh(42, transaction=mock_transaction)
+        await summary_service.request_refresh(
+            42, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_summary_repo.update_status.assert_awaited_once_with(
             42, SummaryStatus.PENDING.value
@@ -102,7 +153,9 @@ class TestRequestRefresh:
             contact_id=42, status=SummaryStatus.GENERATED
         )
 
-        await summary_service.request_refresh(42, transaction=mock_transaction)
+        await summary_service.request_refresh(
+            42, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_summary_repo.clear_refresh_request.assert_awaited_once_with(42)
 
@@ -119,7 +172,9 @@ class TestRequestRefresh:
         )
 
         with pytest.raises(ContactValidationError):
-            await summary_service.request_refresh(42, transaction=mock_transaction)
+            await summary_service.request_refresh(
+                42, transaction=mock_transaction, user_id=TEST_USER_ID
+            )
 
         mock_summary_repo.update_status.assert_not_awaited()
         mock_summary_repo.upsert.assert_not_awaited()
@@ -138,7 +193,9 @@ class TestRequestRefresh:
             disabled_reason=SummaryDisabledReason.LOW_ACTIVITY,
         )
 
-        await summary_service.request_refresh(42, transaction=mock_transaction)
+        await summary_service.request_refresh(
+            42, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_summary_repo.update_status.assert_not_awaited()
         mock_summary_repo.upsert.assert_not_awaited()
@@ -154,7 +211,9 @@ class TestRequestRefresh:
         """The user-disabled check and the status reset see the same row state."""
         mock_summary_repo.find_by_contact_id.return_value = None
 
-        await summary_service.request_refresh(42, transaction=mock_transaction)
+        await summary_service.request_refresh(
+            42, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_summary_repo.find_by_contact_id.assert_awaited_once_with(
             42, for_update=True
@@ -175,7 +234,10 @@ class TestUpdateSummary:
         )
 
         await summary_service.update_summary(
-            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+            7,
+            ContactSummaryUpdate(is_disabled=True),
+            transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         mock_summary_repo.find_by_contact_id.assert_awaited_once_with(
@@ -193,7 +255,7 @@ class TestUpdateSummary:
         update_data = ContactSummaryUpdate(is_disabled=True)
 
         result = await summary_service.update_summary(
-            7, update_data, transaction=mock_transaction
+            7, update_data, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         assert result.is_disabled is True
@@ -211,7 +273,10 @@ class TestUpdateSummary:
         )
 
         await summary_service.update_summary(
-            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+            7,
+            ContactSummaryUpdate(is_disabled=True),
+            transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -229,7 +294,10 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, ContactSummaryUpdate(is_disabled=True), transaction=mock_transaction
+            7,
+            ContactSummaryUpdate(is_disabled=True),
+            transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert result.disabled_reason == SummaryDisabledReason.USER
@@ -248,7 +316,10 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, ContactSummaryUpdate(is_disabled=False), transaction=mock_transaction
+            7,
+            ContactSummaryUpdate(is_disabled=False),
+            transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert result.is_disabled is False
@@ -269,7 +340,10 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, ContactSummaryUpdate(is_disabled=False), transaction=mock_transaction
+            7,
+            ContactSummaryUpdate(is_disabled=False),
+            transaction=mock_transaction,
+            user_id=TEST_USER_ID,
         )
 
         assert result.status == SummaryStatus.GENERATED
@@ -292,7 +366,7 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, update_data, transaction=mock_transaction
+            7, update_data, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         assert result.is_user_override is True
@@ -313,7 +387,7 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, update_data, transaction=mock_transaction
+            7, update_data, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         assert result.is_user_override is True
@@ -337,7 +411,7 @@ class TestUpdateSummary:
         )
 
         result = await summary_service.update_summary(
-            7, update_data, transaction=mock_transaction
+            7, update_data, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         assert result.is_user_override is False
@@ -353,7 +427,7 @@ class TestUpdateSummary:
         update_data = ContactSummaryUpdate(is_disabled=True)
 
         result = await summary_service.update_summary(
-            99, update_data, transaction=mock_transaction
+            99, update_data, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
         assert result.contact_id == 99

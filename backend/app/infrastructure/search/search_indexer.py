@@ -234,7 +234,7 @@ class SearchIndexer:
             # shared read below rather than from here, so that the home
             # dashboard ranks contacts by exactly what the index ranks them by.
             contact_query = text("""
-                SELECT id, first_name, last_name, middle_name, nick_name,
+                SELECT id, user_id, first_name, last_name, middle_name, nick_name,
                        company, job_title, created_at, updated_at
                 FROM contacts
                 WHERE id = :contact_id
@@ -410,11 +410,14 @@ class SearchIndexer:
             ]
 
             # The importance signals, from the read the home dashboard also uses
-            # so that both surfaces rank a contact by the same numbers.
+            # so that both surfaces rank a contact by the same numbers. The
+            # indexer acts for no user, so it reads as the contact's owner.
             importance_repository = SqlContactImportanceRepository(self.db_connection)
-            importance = (await importance_repository.for_contacts([contact_id]))[
-                contact_id
-            ]
+            importance = (
+                await importance_repository.for_contacts(
+                    [contact_id], user_id=contact_row.user_id
+                )
+            )[contact_id]
             last_activity_date = importance.last_activity_at
 
             return {

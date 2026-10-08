@@ -733,17 +733,18 @@ class ContactImportanceRepository(ABC):
     — to order upcoming important dates — and could not depend on MeiliSearch
     being up to get them. One read, two callers, one definition of the window.
 
-    Unlike the dashboard's own ports, the methods here take no ``user_id``:
-    ``contacts`` carries no owner column in this schema and every other contacts
-    repository is likewise unscoped. See the iteration document for why that was
-    not changed here.
+    Like every dashboard port, it takes the user's id and filters on it in SQL.
     """
 
     @abstractmethod
     async def for_contacts(
-        self, contact_ids: Sequence[int], *, now: datetime | None = None
+        self,
+        contact_ids: Sequence[int],
+        *,
+        user_id: str,
+        now: datetime | None = None,
     ) -> dict[int, ContactImportance]:
-        """The importance signals for each of ``contact_ids`` that exists.
+        """The importance signals for each of ``user_id``'s ``contact_ids``.
 
         Args:
             contact_ids: The contacts to report on. An empty sequence is
@@ -755,9 +756,9 @@ class ContactImportanceRepository(ABC):
 
         Returns:
             A mapping from contact id to its signals. Ids with no ``contacts``
-            row are **absent** rather than present with zeros: a contact that
-            does not exist has no signals, which is not the same claim as a
-            contact nobody has touched.
+            row, or another user's, are **absent** rather than present with
+            zeros: a contact that does not exist has no signals, which is not
+            the same claim as a contact nobody has touched.
         """
         pass
 
@@ -775,17 +776,15 @@ class UpcomingImportantDateRepository(ABC):
     Keeping the split there is what stops a second copy of the recurrence
     appearing in SQL, where no unit test could reach it.
 
-    Like ``ContactImportanceRepository``, this takes no ``user_id``: ``contacts``
-    carries no owner column in this schema and every other contacts repository is
-    likewise unscoped. When contacts gain an owner, this port and its callers are
-    part of the same change.
+    Like every dashboard port, it takes the user's id and filters on it in SQL:
+    only the dates of the user's own contacts are candidates.
     """
 
     @abstractmethod
     async def candidates_for(
-        self, month_days: Sequence[tuple[int, int]]
+        self, month_days: Sequence[tuple[int, int]], *, user_id: str
     ) -> list[ContactImportantDate]:
-        """Every stored important date carrying one of ``month_days``.
+        """Every important date of ``user_id``'s contacts carrying one of ``month_days``.
 
         Args:
             month_days: The ``(month, day)`` pairs to match, as

@@ -1282,7 +1282,6 @@ async def get_contact_journals(
 @inject
 async def refresh_contact_summary(
     contact_id: int,
-    contact_service: FromDishka[ContactService],
     summary_service: FromDishka[ContactSummaryService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
@@ -1296,11 +1295,9 @@ async def refresh_contact_summary(
     bypassing the rolling-debounce buffer used by automated triggers.
     Returns 202 Accepted since the actual generation is asynchronous.
     """
-    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
-    if not contact:
-        raise ContactNotFoundError(contact_id)
-
-    await summary_service.request_refresh(contact_id, transaction=connection)
+    await summary_service.request_refresh(
+        contact_id, transaction=connection, user_id=user.id
+    )
 
     return {"status": "accepted"}
 
@@ -1324,10 +1321,6 @@ async def update_contact_summary(
     """
     base_url = get_request_base_url(request)
 
-    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
-    if not contact:
-        raise ContactNotFoundError(contact_id)
-
     await summary_service.update_summary(
         contact_id,
         ContactSummaryUpdate(
@@ -1338,6 +1331,7 @@ async def update_contact_summary(
             ),
         ),
         transaction=connection,
+        user_id=user.id,
     )
 
     # Re-fetch the contact with updated summary

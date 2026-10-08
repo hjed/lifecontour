@@ -270,17 +270,6 @@ class SqlJournalDailySummaryRepository(JournalDailySummaryRepository):
         )
         return result.fetchone() is not None
 
-    async def user_ids_with_summaries(self) -> list[str]:
-        """Every user with at least one summary row, each once.
-
-        ``DISTINCT`` over the leading column of the ``(user_id, summary_date)``
-        unique index, so this is an index scan rather than a table one.
-        """
-        result = await self.conn.execute(
-            text("SELECT DISTINCT user_id FROM journal_daily_summaries")
-        )
-        return [row.user_id for row in result.fetchall()]
-
     async def invalidate_for_range(
         self, user_id: str, first_day: date, last_day: date
     ) -> None:

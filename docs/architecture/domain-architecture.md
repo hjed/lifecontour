@@ -1090,10 +1090,11 @@ listing: `today` **is** the resolved answer, so nothing is left for a zone to de
 `None` and an empty answer stay distinct all the way into the prompt: not gathered versus gathered and
 quiet, and only the second is a fact about the user's week.
 
-**Not scoped by user.** `contacts` has no owner column in this schema and every other contacts
-repository is likewise unscoped, so this port diverges from the dashboard ports' rule that every method
-takes a `user_id` — recorded rather than left silent. When contacts gain an owner, this read, the
-importance read and their callers are one change.
+**Scoped by user, like every dashboard port.** `UpcomingImportantDateRepository.candidates_for` and
+`ContactImportanceRepository.for_contacts` both take the user's id and filter `contacts.user_id` in
+SQL, so only the user's own contacts' dates are candidates and another user's contact has no
+importance signals (it is absent, as an unknown id is). The search indexer, which acts for no user,
+reads a contact's signals as that contact's owner.
 
 **Uncapped, like the tasks window.** The whole window travels with its total and the card applies the
 cap (three), so a show-more costs no second request. `days_ahead` is bounded at 90 by the shared
@@ -1303,10 +1304,10 @@ The first four rows are the four defects ITER18-004 Phase 4f recorded against th
 to do this inside `SearchIndexerConsumer`; the fifth is the one it predicted and which, checked,
 is not a defect.
 
-**Whose today?** `contacts` carries no owner column, so an important-date event names no user. The
-users are read from `journal_daily_summaries` itself — invalidation only ever touches rows that
-exist, so the users who *can* be affected are exactly the users who already have a summary — and
-each one's today is resolved in their own timezone from a single clock reading.
+**Whose today?** The contact's owner's. Every contact and important-date event names the owner in
+`event_data.user_id`, and only the owner's summary can mention their contact, so that one user's
+today is resolved in their timezone and marked. An event naming no owner marks nothing and logs a
+warning: whose day it is cannot be guessed, and marking every user's would be a guess.
 
 ### The journal delete guard
 

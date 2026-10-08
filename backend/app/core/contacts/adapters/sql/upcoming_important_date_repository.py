@@ -73,7 +73,7 @@ _CANDIDATES_QUERY = text("""
     JOIN unnest(CAST(:months AS integer[]), CAST(:days AS integer[]))
         AS window_day(month, day)
         ON window_day.month = d.month AND window_day.day = d.day
-    JOIN contacts c ON c.id = d.contact_id
+    JOIN contacts c ON c.id = d.contact_id AND c.user_id = :user_id
     LEFT JOIN custom_date_types cdt ON cdt.id = d.custom_date_type_id
     ORDER BY d.contact_id, d.id
 """)
@@ -92,9 +92,9 @@ class SqlUpcomingImportantDateRepository(UpcomingImportantDateRepository):
         self.conn = connection
 
     async def candidates_for(
-        self, month_days: Sequence[tuple[int, int]]
+        self, month_days: Sequence[tuple[int, int]], *, user_id: str
     ) -> list[ContactImportantDate]:
-        """Every stored important date carrying one of ``month_days``.
+        """Every important date of ``user_id``'s contacts carrying one of ``month_days``.
 
         Args:
             month_days: The ``(month, day)`` pairs to match. An empty sequence
@@ -113,6 +113,7 @@ class SqlUpcomingImportantDateRepository(UpcomingImportantDateRepository):
             {
                 "months": [month for month, _ in month_days],
                 "days": [day for _, day in month_days],
+                "user_id": user_id,
             },
         )
         return [

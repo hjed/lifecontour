@@ -20,8 +20,10 @@ from core_shared.models.contacts.exceptions import ContactValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.events import ContactSummaryRefreshDue
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
+    ContactRepository,
     ContactSummaryRepository,
 )
 from app.infrastructure.unit_of_work import transactional
@@ -43,21 +45,35 @@ class ContactSummaryUpdate:
 
 
 class ContactSummaryService:
-    """Service for persisting contact-summary configuration changes."""
+    """Service for persisting contact-summary configuration changes.
+
+    A summary row carries no owner of its own: it is the user's when its
+    contact is, so every operation proves that first and answers
+    ``ContactNotFoundError`` for another user's contact, exactly as for a
+    missing one.
+    """
 
     def __init__(
         self,
         summary_repo: ContactSummaryRepository,
         event_publisher: ContactEventPublisher,
+        contact_repo: ContactRepository,
     ) -> None:
         self.summary_repo = summary_repo
         self.event_publisher = event_publisher
+        self.contact_repo = contact_repo
+
+    async def _require_owned(self, contact_id: int, *, user_id: str) -> None:
+        if not await self.contact_repo.contact_exists(contact_id, user_id=user_id):
+            raise ContactNotFoundError(contact_id)
 
     @transactional
     async def request_refresh(
         self,
         contact_id: int,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """Request an immediate refresh of the AI-generated summary for a contact.
 
@@ -74,6 +90,7 @@ class ContactSummaryService:
         activity and resumes it if there is now enough. Committed as a single
         unit before the response is sent.
         """
+        await self._require_owned(contact_id, user_id=user_id)
         existing = await self.summary_repo.find_by_contact_id(
             contact_id, for_update=True
         )
@@ -109,6 +126,8 @@ class ContactSummaryService:
         contact_id: int,
         update: ContactSummaryUpdate,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> ContactSummary:
         """Update a contact summary configuration (disable/override).
 
@@ -119,6 +138,7 @@ class ContactSummaryService:
         Returns the persisted summary. Committed as a single unit before the
         response is sent.
         """
+        await self._require_owned(contact_id, user_id=user_id)
         # Locked read: the change is computed from the row it overwrites, so an
         # in-flight generation is waited for rather than clobbered or lost.
         existing = await self.summary_repo.find_by_contact_id(
