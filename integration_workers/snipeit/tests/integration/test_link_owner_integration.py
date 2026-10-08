@@ -94,9 +94,14 @@ class TestMaintenanceClaimsAreTheOwners:
         )
         before = await _rows(async_connection)
 
+        # Committed, as the worker's callers do: a delete left in an
+        # uncommitted session would be rolled back and prove nothing.
         async with _session_factory(async_connection) as session:
-            claim = await _fetch_maintenance_claim(session, JOURNAL_ID, user_id=OWNER)
-            await _delete_maintenance_claim(session, JOURNAL_ID, user_id=OWNER)
+            async with session.begin():
+                claim = await _fetch_maintenance_claim(
+                    session, JOURNAL_ID, user_id=OWNER
+                )
+                await _delete_maintenance_claim(session, JOURNAL_ID, user_id=OWNER)
 
         assert claim is None
         assert await _rows(async_connection) == before
