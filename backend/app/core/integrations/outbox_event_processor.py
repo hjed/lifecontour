@@ -133,22 +133,6 @@ def _deserialize_owned_contact(contact_data: dict[str, Any], owner: str) -> Cont
         raise PermanentOutboxEventProcessingError(str(e)) from e
 
 
-def _keep_stored_owner(incoming: Contact, stored: Contact) -> None:
-    """An inbound sync never re-owns a stored contact; it keeps ``stored``'s owner.
-
-    A mismatch means the global link store matched another user's contact. It
-    is logged, not refused: per-owner links are the link store's job.
-    """
-    if incoming.user_id != stored.user_id:
-        logger.warning(
-            "Inbound contact sync names a different owner than the stored contact",
-            contact_id=stored.id,
-            event_owner=incoming.user_id,
-            stored_owner=stored.user_id,
-        )
-    incoming.user_id = stored.user_id
-
-
 def _keep_archived_values(incoming: Contact, stored: Contact) -> None:
     """Keep ``stored``'s archived values through an integration's whole-list save.
 
@@ -828,7 +812,6 @@ class OutboxEventProcessor:
                     )
             else:
                 contact.id = matched_contact.id
-                _keep_stored_owner(contact, matched_contact)
                 if matched_contact.id is not None:
                     stored = await self.contact_service.get_contact_by_id(
                         matched_contact.id, user_id=payload.user_id
@@ -1034,9 +1017,10 @@ class OutboxEventProcessor:
             if existing_contact.id is None:
                 raise OutboxEventProcessingError("Existing contact has no ID")
 
-            # Preserve the existing contact ID and owner
+            # Preserve the existing contact ID. Its owner is the event's: the
+            # lookup above is scoped to it, so another user's contact is never
+            # found here.
             updated_contact_data.id = existing_contact.id
-            _keep_stored_owner(updated_contact_data, existing_contact)
 
             # Refetch full contact to ensure we have current tags
             full_existing_contact = await self.contact_service.get_contact_by_id(

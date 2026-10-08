@@ -37,6 +37,7 @@ from app.core.contacts.models.events import (
     TagRemoved,
 )
 from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
     DuplicateEmailError,
     PrimaryAddressConflictError,
     PrimaryMethodConflictError,
@@ -1031,9 +1032,7 @@ class ContactService:
             contact_id, user_id=user_id
         )
         if current_contact is None:
-            raise ContactValidationError(
-                "id", f"Contact with ID {contact_id} not found"
-            )
+            raise ContactNotFoundError(contact_id)
         return current_contact
 
     async def _save_all_related_entities(
@@ -2442,6 +2441,15 @@ class ContactService:
         )
 
     # Read operations (no transaction management needed)
+    async def _require_owned(self, contact_id: int, *, user_id: str) -> None:
+        """Raise ``ContactNotFoundError`` unless ``user_id`` owns the contact.
+
+        For reads keyed by the contact id alone (its links, its history): the
+        child rows carry no owner, so the parent is proved first.
+        """
+        if not await self.contact_repo.contact_exists(contact_id, user_id=user_id):
+            raise ContactNotFoundError(contact_id)
+
     async def get_contact_by_id(
         self, contact_id: int, *, user_id: str
     ) -> Contact | None:
@@ -2484,7 +2492,11 @@ class ContactService:
 
         Each entry has ``external_system`` / ``external_entity_id`` /
         ``external_entity_type``, suitable for ``build_contact_external_links``.
+
+        Raises:
+            ContactNotFoundError: The contact is missing or another user's.
         """
+        await self._require_owned(contact_id, user_id=user_id)
         return await self.contact_repo.get_external_references(contact_id)
 
     async def get_all_contacts(
@@ -2598,9 +2610,14 @@ class ContactService:
     ) -> list[Any]:
         """Get contact history.
 
-        ``user_id`` is the reader: it scopes the linked-task rows this feed
-        carries; see ``ContactHistoryService.get_contact_history``.
+        ``user_id`` is the reader: the contact must be theirs, and it scopes the
+        linked-task rows this feed carries; see
+        ``ContactHistoryService.get_contact_history``.
+
+        Raises:
+            ContactNotFoundError: The contact is missing or another user's.
         """
+        await self._require_owned(contact_id, user_id=user_id)
         return await self.history_service.get_contact_history(
             contact_id, limit, reader_user_id=user_id
         )
@@ -2632,7 +2649,7 @@ class ContactService:
             # Find the contact
             contact = await self.contact_repo.find_by_id(contact_id, user_id=user_id)
             if not contact:
-                raise ContactValidationError("id", "Contact not found")
+                raise ContactNotFoundError(contact_id)
 
             # Toggle favourite status
             old_favourite = contact.is_favourite

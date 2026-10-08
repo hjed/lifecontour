@@ -367,3 +367,137 @@ class TestContactRelationshipService:
 
         assert "Relationship with ID 999 not found" in str(exc_info.value)
         mock_relationship_repo.delete.assert_not_called()
+
+
+class TestForeignRelationshipsAreNotFound:
+    """A relationship of another user's contact is as unreachable as a missing one.
+
+    The repository is owner-scoped, so for a foreign contact ``contact_exists``
+    is false and ``find_by_id`` is ``None``; these stand in that answer.
+    """
+
+    @pytest.fixture
+    def contact_repo(self) -> AsyncMock:
+        repo = AsyncMock()
+        repo.contact_exists.return_value = False
+        repo.find_by_id.return_value = None
+        return repo
+
+    @pytest.fixture
+    def relationship_repo(self) -> AsyncMock:
+        repo = AsyncMock()
+        repo.get_by_id.return_value = ContactRelationship(
+            id=9,
+            from_contact_id=7,
+            to_contact_id=8,
+            relationship_type=RelationshipType.FRIEND,
+        )
+        return repo
+
+    @pytest.fixture
+    def event_publisher(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(
+        self,
+        contact_repo: AsyncMock,
+        relationship_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> ContactRelationshipService:
+        return ContactRelationshipService(
+            contact_repo, relationship_repo, event_publisher
+        )
+
+    @pytest.mark.asyncio
+    async def test_listing_a_foreign_contacts_relationships_is_not_found(
+        self,
+        service: ContactRelationshipService,
+        contact_repo: AsyncMock,
+        relationship_repo: AsyncMock,
+    ) -> None:
+        with pytest.raises(ContactNotFoundError):
+            await service.get_relationships_for_contact(7, user_id=TEST_USER_ID)
+
+        contact_repo.contact_exists.assert_awaited_once_with(7, user_id=TEST_USER_ID)
+        relationship_repo.get_relationships_for_contact.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_relationship_reads_as_missing(
+        self, service: ContactRelationshipService, contact_repo: AsyncMock
+    ) -> None:
+        assert await service.get_relationship_by_id(9, user_id=TEST_USER_ID) is None
+        contact_repo.contact_exists.assert_awaited_once_with(7, user_id=TEST_USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_relationship_is_not_updated(
+        self,
+        service: ContactRelationshipService,
+        relationship_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        with pytest.raises(ContactValidationError, match="not found"):
+            await service.update_relationship(
+                9,
+                RelationshipType.SIBLING,
+                transaction=AsyncMock(),
+                user_id=TEST_USER_ID,
+            )
+
+        relationship_repo.update.assert_not_awaited()
+        event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_relationship_is_not_deleted(
+        self,
+        service: ContactRelationshipService,
+        relationship_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        with pytest.raises(ContactValidationError, match="not found"):
+            await service.delete_relationship(
+                9, transaction=AsyncMock(), user_id=TEST_USER_ID
+            )
+
+        relationship_repo.delete.assert_not_awaited()
+        event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_relationship_to_a_foreign_contact_is_not_created(
+        self,
+        service: ContactRelationshipService,
+        contact_repo: AsyncMock,
+        relationship_repo: AsyncMock,
+    ) -> None:
+        own = Contact(user_id=TEST_USER_ID, id=1, first_name="John")
+        contact_repo.find_by_id.side_effect = lambda cid, *, user_id: (
+            own if cid == 1 else None
+        )
+
+        with pytest.raises(ContactNotFoundError):
+            await service.create_relationship(
+                1,
+                8,
+                RelationshipType.FRIEND,
+                transaction=AsyncMock(),
+                user_id=TEST_USER_ID,
+            )
+
+        relationship_repo.create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_contact_is_not_named(
+        self, service: ContactRelationshipService
+    ) -> None:
+        relationship = ContactRelationship(
+            id=3,
+            from_contact_id=1,
+            to_contact_id=8,
+            relationship_type=RelationshipType.FRIEND,
+        )
+
+        [resolved] = await service.resolve_relationship_contact_names(
+            [relationship], 1, user_id=TEST_USER_ID
+        )
+
+        assert resolved.to_contact_name is None

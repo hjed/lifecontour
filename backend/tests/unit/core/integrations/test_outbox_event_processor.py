@@ -373,39 +373,74 @@ class TestOutboxEventProcessor:
         mock_contact_service.update_contact.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_an_updated_contact_keeps_its_stored_owner(
+    async def test_email_reconciliation_looks_only_at_the_event_owners_contacts(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ) -> None:
+        """Another user's contact holding the address is never a match."""
+        mock_contact_service.get_contact_by_email.return_value = None
+        mock_contact_service.create_contact.return_value = Contact(
+            id=123, first_name="John", user_id=SYNC_OWNER
+        )
+
+        await processor.process_event(contact_created_event)
+
+        lookups = mock_contact_service.get_contact_by_email.await_args_list
+        assert lookups
+        assert {call.kwargs["user_id"] for call in lookups} == {SYNC_OWNER}
+
+    @pytest.mark.asyncio
+    async def test_an_update_acts_as_the_event_owner(
         self,
         processor: OutboxEventProcessor,
         contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
     ) -> None:
-        """A sync never re-owns a contact; the stored owner is the aggregate's."""
-        existing = Contact(id=123, first_name="John", user_id="stored-owner")
+        existing = Contact(id=123, first_name="John", user_id=SYNC_OWNER)
         mock_contact_service.find_contact_by_external_reference.return_value = existing
         mock_contact_service.get_contact_by_id.return_value = existing
         mock_contact_service.update_contact.return_value = existing
 
         await processor.process_event(contact_updated_event)
 
-        updated = mock_contact_service.update_contact.call_args[0][0]
-        assert updated.user_id == "stored-owner"
+        assert mock_contact_service.update_contact.await_args.kwargs["user_id"] == (
+            SYNC_OWNER
+        )
+        assert mock_contact_service.get_contact_by_id.await_args.kwargs["user_id"] == (
+            SYNC_OWNER
+        )
 
     @pytest.mark.asyncio
-    async def test_an_email_reconciled_contact_keeps_its_stored_owner(
+    async def test_an_update_linked_to_another_users_contact_writes_nothing(
         self,
         processor: OutboxEventProcessor,
-        contact_created_event: OutboxEvent,
+        contact_updated_event: OutboxEvent,
         mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
     ) -> None:
-        existing = Contact(id=55, first_name="John", user_id="stored-owner")
-        mock_contact_service.get_contact_by_email.return_value = existing
-        mock_contact_service.get_contact_by_id.return_value = existing
-        mock_contact_service.update_contact.return_value = existing
+        """The link resolves to a contact the event's owner cannot see.
 
-        await processor.process_event(contact_created_event)
+        The scoped reference lookup misses, so the update falls through to the
+        create path, whose (still global) link-store check finds the link and
+        skips: neither user's contact is written, and the link is not re-pointed.
+        """
+        from core_shared.models.sync_metadata import SyncMetadata
 
-        reconciled = mock_contact_service.update_contact.call_args[0][0]
-        assert (reconciled.id, reconciled.user_id) == (55, "stored-owner")
+        mock_contact_service.find_contact_by_external_reference.return_value = None
+        mock_sync_metadata_repo.find_by_external_id.return_value = SyncMetadata(
+            internal_id=999,
+            integration_source="google",
+            external_id="people/c123456789",
+        )
+
+        result = await processor.process_event(contact_updated_event)
+
+        assert (result["status"], result["reason"]) == ("skipped", "already_processed")
+        mock_contact_service.create_contact.assert_not_called()
+        mock_contact_service.update_contact.assert_not_called()
+        mock_sync_metadata_repo.upsert.assert_not_called()
 
     def _setup_contact_and_reference_mocks(
         self,

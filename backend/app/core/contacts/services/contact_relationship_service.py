@@ -207,7 +207,12 @@ class ContactRelationshipService:
 
         Returns:
             List of relationships (both from and to the contact)
+
+        Raises:
+            ContactNotFoundError: The contact is missing or another user's.
         """
+        if not await self.contact_repo.contact_exists(contact_id, user_id=user_id):
+            raise ContactNotFoundError(contact_id)
         return await self.relationship_repo.get_relationships_for_contact(contact_id)
 
     @transactional
@@ -236,8 +241,10 @@ class ContactRelationshipService:
         Raises:
             ContactValidationError: If relationship doesn't exist
         """
-        # Validate relationship exists
-        existing_relationship = await self.relationship_repo.get_by_id(relationship_id)
+        # Validate relationship exists and is the user's
+        existing_relationship = await self.get_relationship_by_id(
+            relationship_id, user_id=user_id
+        )
         if not existing_relationship:
             raise ContactValidationError(
                 "relationship", f"Relationship with ID {relationship_id} not found"
@@ -307,8 +314,10 @@ class ContactRelationshipService:
         Raises:
             ContactValidationError: If relationship doesn't exist
         """
-        # Validate relationship exists
-        existing_relationship = await self.relationship_repo.get_by_id(relationship_id)
+        # Validate relationship exists and is the user's
+        existing_relationship = await self.get_relationship_by_id(
+            relationship_id, user_id=user_id
+        )
         if not existing_relationship:
             raise ContactValidationError(
                 "relationship", f"Relationship with ID {relationship_id} not found"
@@ -343,9 +352,18 @@ class ContactRelationshipService:
             relationship_id: ID of the relationship
 
         Returns:
-            Relationship or None if not found
+            Relationship, or None if it is missing or not ``user_id``'s
+
+        A relationship carries no owner of its own: it is the user's when the
+        contact it starts from is. Both ends of one belong to the same owner, as
+        creation proves.
         """
-        return await self.relationship_repo.get_by_id(relationship_id)
+        relationship = await self.relationship_repo.get_by_id(relationship_id)
+        if relationship is None or not await self.contact_repo.contact_exists(
+            relationship.from_contact_id, user_id=user_id
+        ):
+            return None
+        return relationship
 
     async def resolve_relationship_contact_names(
         self,
