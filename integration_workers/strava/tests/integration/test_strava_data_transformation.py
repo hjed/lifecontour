@@ -212,7 +212,7 @@ class TestStravaDataTransformationRoundTrip:
         # Fitness data
         assert result.fitness_data_distance == 10235  # rounded from 10234.7
         assert result.fitness_data_elevation_gain == 45  # rounded from 45.2
-        assert result.fitness_data_duration == 3200
+        assert result.fitness_data_duration == 3600  # elapsed, not moving
         assert result.fitness_data_calories == 520
         assert result.fitness_data_heart_rate_avg == 142
         assert result.fitness_data_heart_rate_max == 168
@@ -257,7 +257,7 @@ class TestStravaDataTransformationRoundTrip:
         ]
         assert result.title == "Harbour Paddle"
         assert result.fitness_data_distance == 12000
-        assert result.fitness_data_duration == 6000
+        assert result.fitness_data_duration == 7200
         assert result.fitness_data_calories == 800
 
     def test_transform_unmapped_activity(self) -> None:

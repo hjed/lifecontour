@@ -216,7 +216,7 @@ class TestFitnessUnitsMatchTheColumns:
 
     These are the raw column units: the migration comments read "Distance in
     meters" and "Duration in seconds", the Strava worker stores
-    ``round(activity.distance)`` and ``activity.moving_time`` — both already
+    ``round(activity.distance)`` and ``activity.elapsed_time`` — both already
     metres and seconds — and the frontend divides by 1000 to display km. The
     discovery metadata said kilometres and minutes, which would have had a
     client store a 10 km ride as 10 m.
