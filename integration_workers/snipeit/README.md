@@ -29,6 +29,7 @@ the single source of truth for the worker's consumed-event set:
 |---|---|---|
 | `GearItemUpdated` | `_handle_gear_item_updated` | pushes local gear changes to Snipe-IT |
 | `JournalCreated`, `JournalUpdated` | `_handle_journal_maintenance_event` | syncs gear-maintenance / gear-usage journals; an edit to a maintenance journal imported from Snipe-IT updates the record it came from, and an update the inbound sync applied (`changed_by` `snipeit_maintenance`) is skipped |
+| `JournalDeleted` | `_handle_journal_deleted` | undoes what the journal put in Snipe-IT, read from its sync rows (the journal is gone): each checked-out asset is checked in; a failed or abandoned checkout's asset is returned if it is out to the mapped user and no other pair may hold it, and its rows are deleted either way (`release_deleted_journal`) — the sweep joins `journals` and would never reach them; pushed maintenance records, and records the journal was imported from, are deleted |
 | `snipeit.webhook_received` | `_handle_webhook_received` | syncs the webhook's asset (`item.id`). The backend translates Snipe-IT's Slack-format notifications into `{action, item: {id}}` and publishes only those that link an asset |
 
 A handler that raises leaves its event unacknowledged so the base class retries

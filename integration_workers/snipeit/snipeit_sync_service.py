@@ -320,6 +320,24 @@ class SnipeItSyncInProgress(Exception):
     """
 
 
+_JOURNAL_DELETED_NOTE = "Gear usage journal deleted"
+
+
+def _raise_if_checkout_in_flight(pair: GearUsagePair, checkout_row: Any) -> None:
+    """Raise while a pair's pending checkout is still within its in-flight lock.
+
+    Its post may yet succeed, so the pair must not be released under it.
+    """
+    if (
+        checkout_row.sync_status == "pending"
+        and checkout_row.age_seconds is not None
+        and checkout_row.age_seconds < IN_FLIGHT_LOCK_SECONDS
+    ):
+        raise SnipeItSyncInProgress(
+            f"Checkout of {pair.checkout_external_id} is in flight"
+        )
+
+
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TimeoutError,
     httpx.TimeoutException,
@@ -2938,7 +2956,11 @@ class SnipeItSyncService:
             )
 
     async def _return_abandoned_asset(
-        self, pair: GearUsagePair, *, session_factory: Any
+        self,
+        pair: GearUsagePair,
+        *,
+        session_factory: Any,
+        note: str = "Gear item removed from its gear usage journal",
     ) -> bool:
         """Check in the asset of a failed checkout attempt whose item was removed.
 
@@ -2952,7 +2974,8 @@ class SnipeItSyncService:
         asset still in use is not.
 
         Returns whether the asset is dealt with (returned, not out to the mapped
-        user, or gone), so the pair can be forgotten. ``False`` while another
+        user, gone, or not ours to return — a 403/404 on either call), so the
+        pair can be forgotten. ``False`` while another
         pair may hold it: the pair is kept, so a later sync retries the return
         rather than lose the only record that the asset may be out.
         """
@@ -2995,10 +3018,14 @@ class SnipeItSyncService:
             if held_elsewhere.fetchone():
                 return False
 
-        await self._api_client.checkin_asset(
-            asset_id=asset_id,
-            payload={"note": "Gear item removed from its gear usage journal"},
-        )
+        try:
+            await self._api_client.checkin_asset(
+                asset_id=asset_id, payload={"note": note}
+            )
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                return True
+            raise
         logger.info(
             "Returned the asset of an abandoned checkout attempt",
             journal_id=pair.journal_id,
@@ -3756,10 +3783,11 @@ class SnipeItSyncService:
                            ci.error_message AS checkin_error
                     FROM sync_metadata co
                     LEFT JOIN sync_metadata ci ON {_CHECKIN_OF_CHECKOUT}
-                    WHERE co.integration_source = 'snipeit_checkout'
+                    WHERE co.user_id = :user_id
+                      AND co.integration_source = 'snipeit_checkout'
                       AND co.internal_uuid = :journal_id
                 """),
-                {"journal_id": str(journal_id)},
+                {"user_id": self._user_id, "journal_id": str(journal_id)},
             )
             rows = result.fetchall()
         recorded: dict[int, Any] = {}
@@ -3907,15 +3935,49 @@ class SnipeItSyncService:
             ):
                 await self._forget_pair(pair, session_factory)
             return
-        if (
-            checkout_row.sync_status == "pending"
-            and checkout_row.age_seconds is not None
-            and checkout_row.age_seconds < IN_FLIGHT_LOCK_SECONDS
-        ):
-            raise SnipeItSyncInProgress(
-                f"Checkout of {pair.checkout_external_id} is in flight"
-            )
+        _raise_if_checkout_in_flight(pair, checkout_row)
         if await self._return_abandoned_asset(pair, session_factory=session_factory):
+            await self._forget_pair(pair, session_factory)
+
+    async def release_deleted_journal(
+        self, journal_id: int, session_factory: Any
+    ) -> None:
+        """Release every (journal, asset) pair a deleted gear-usage journal recorded.
+
+        The journal's gear items are gone with it, so its pairs are read from
+        the checkout sync rows. A successful checkout is checked in. A failed or
+        abandoned attempt may still have checked the asset out (a lost
+        response), so the asset is returned if nothing else may hold it, and the
+        pair is then forgotten either way: unlike a removed gear item, no later
+        sync reaches a deleted journal's rows, so a kept row would never be
+        retried. While another pair may hold the asset it is left out — the
+        recoverable choice — to be returned by that pair's own check-in.
+
+        Raises:
+            SnipeItSyncInProgress: A pair's checkout is being posted now; the
+                event is redelivered, and checks the asset in once it lands. A
+                post that outlives the lock lands after its rows are forgotten,
+                which every abandoned lock already accepts.
+        """
+        recorded = await self._recorded_checkouts(journal_id, session_factory)
+        for asset_id, checkout_row in sorted(recorded.items()):
+            pair = GearUsagePair(journal_id, asset_id)
+            if checkout_row.sync_status == "success":
+                await self.push_checkin_create(
+                    pair,
+                    session_factory=session_factory,
+                    note=_JOURNAL_DELETED_NOTE,
+                )
+                continue
+            _raise_if_checkout_in_flight(pair, checkout_row)
+            if not await self._return_abandoned_asset(
+                pair, session_factory=session_factory, note=_JOURNAL_DELETED_NOTE
+            ):
+                logger.warning(
+                    "Leaving a deleted journal's asset out: another pair may hold it",
+                    journal_id=journal_id,
+                    snipeit_asset_id=asset_id,
+                )
             await self._forget_pair(pair, session_factory)
 
     async def _forget_pair(self, pair: GearUsagePair, session_factory: Any) -> None:
@@ -3938,7 +4000,7 @@ class SnipeItSyncService:
                     },
                 )
         logger.info(
-            "Released the Snipe-IT pair of a removed gear item",
+            "Released a Snipe-IT pair",
             journal_id=pair.journal_id,
             snipeit_asset_id=pair.asset_id,
         )
