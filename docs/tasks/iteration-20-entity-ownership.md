@@ -1069,7 +1069,7 @@ measured, shipped as one PR (see *Decisions*)
   keep inserting owner-less rows after the backfill), the album `upsert_link`, and the Google,
   Immich, Snipe-IT and Strava upserts (the job's user). No writer may still name the global key
   when Phase 15 drops it.
-- [x] **The still-present global index is the cross-owner guard.** With writers conflicting on the
+- [x] **The still-present global index is the cross-owner guard** *(until Phase 15 dropped it)*. With writers conflicting on the
   per-user key, a same-owner re-sync updates as before, and a write for the same
   `(integration_source, external_id)` by a *different* owner finds no per-user conflict, attempts
   the insert, and trips `idx_sync_metadata_integration_external` — an `IntegrityError` the backend
@@ -1149,7 +1149,7 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
   user's row. Today: `SyncMetadataRepository.update_reference_data`, the repoint UPDATE/DELETE
   pairs in `repoint_contact_links` / `repoint_journal_links`, `AlbumSyncReadRepository.delete`,
   the Snipe-IT pair UPDATE in `journal_merge_service.py`, Google `worker.py` (2), Immich
-  `worker.py` (1) and 19 statements in `snipeit_sync_service.py`.
+  `worker.py` (1) and 19 statements in `snipeit_sync_service.py` (18 on recount in Phase 15).
 
 ---
 
@@ -1168,7 +1168,8 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
 - [x] Every UPDATE / DELETE on `sync_metadata` keyed by `(integration_source, external_id)` or
   the internal id is scoped by the owner (list in Phase 14's *Follow-ups*).
 - [x] `SyncMetadataRepository.find_by_external_id(user_id, source, external_id)`, `find_and_lock`,
-  `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`;
+  `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`
+  (implemented with `user_id` keyword-only, last, so mypy names every caller);
   the inbound consumer's idempotency check uses the event's owner; MCP
   `get_contact_by_external_id` / `get_journal_by_external_id` pass the current user; worker lookups
   (Google etag check, Immich, Snipe-IT, Strava `find_by_external_id`) pass the job's user.
@@ -1217,7 +1218,9 @@ in the backend and the four workers takes the owner.
 - **What is scoped.** Every statement matching on an external id (`=`, `= ANY`, `LIKE`, joins,
   `NOT EXISTS` subqueries) and every UPDATE / DELETE takes `user_id = :user_id`. A SELECT keyed only
   by an internal id, or joined through an owner-scoped entity, stays as it is: the link is a child
-  row of an aggregate already proven to be the user's (Delivery Rule 4).
+  row of an aggregate already proven to be the user's (Delivery Rule 4). The "Google etag check"
+  above is two such reads: `find_contacts_to_push` joins through `contacts.user_id`, and
+  `_read_sync_link` reads the event's contact by its id, so neither takes an owner.
 - **Where the owner comes from (15a).** Inbound contact events: `payload.user_id`. Immich album and
   Snipe-IT maintenance events: `journal_data["user_id"]`; an event naming none fails rather than
   being matched to anyone's link. Contact merge: the acting user. Journal merge: the journals'

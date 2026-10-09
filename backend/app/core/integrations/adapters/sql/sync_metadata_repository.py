@@ -55,6 +55,42 @@ class IntegrationLinkCollision:
         return asdict(self)
 
 
+_LINK_COLUMNS = (
+    "id, user_id, internal_id, internal_uuid, integration_source, external_id, "
+    "last_synced_at, version_hash, sync_status, error_message, retry_count, "
+    "internal_entity_type, external_entity_type, reference_data, "
+    "created_at, updated_at"
+)
+
+_SELECT_LINK = (
+    f"SELECT {_LINK_COLUMNS} FROM sync_metadata "  # noqa: S608 - a literal column list
+    "WHERE user_id = :user_id AND integration_source = :integration_source "
+    "AND external_id = :external_id"
+)
+
+
+def _to_sync_metadata(row: Any) -> SyncMetadata:
+    """Map a ``sync_metadata`` row selected with ``_LINK_COLUMNS``."""
+    return SyncMetadata(
+        id=row.id,
+        user_id=row.user_id,
+        internal_id=row.internal_id,
+        internal_uuid=row.internal_uuid,
+        integration_source=row.integration_source,
+        external_id=row.external_id,
+        last_synced_at=row.last_synced_at,
+        version_hash=row.version_hash,
+        sync_status=row.sync_status,
+        error_message=row.error_message,
+        retry_count=row.retry_count,
+        internal_entity_type=row.internal_entity_type,
+        external_entity_type=row.external_entity_type,
+        reference_data=row.reference_data,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 class SyncMetadataRepository:
     """Repository for managing sync metadata with concurrency control."""
 
@@ -84,45 +120,7 @@ class SyncMetadataRepository:
         Returns:
             SyncMetadata if found, None otherwise
         """
-        query = text("""
-            SELECT id, user_id, internal_id, internal_uuid, integration_source,
-                   external_id, last_synced_at, version_hash, sync_status,
-                   error_message, retry_count, created_at, updated_at
-            FROM sync_metadata
-            WHERE user_id = :user_id
-              AND integration_source = :integration_source
-              AND external_id = :external_id
-            FOR UPDATE
-        """)
-
-        result = await self.conn.execute(
-            query,
-            {
-                "user_id": user_id,
-                "integration_source": integration_source,
-                "external_id": external_id,
-            },
-        )
-        row = result.fetchone()
-
-        if not row:
-            return None
-
-        return SyncMetadata(
-            id=row.id,
-            user_id=row.user_id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return await self._find(integration_source, external_id, user_id, lock=True)
 
     async def find_by_external_id(
         self, integration_source: str, external_id: str, *, user_id: str
@@ -138,18 +136,14 @@ class SyncMetadataRepository:
         Returns:
             SyncMetadata if found, None otherwise
         """
-        query = text("""
-            SELECT id, user_id, internal_id, internal_uuid, integration_source,
-                   external_id, last_synced_at, version_hash, sync_status,
-                   error_message, retry_count, created_at, updated_at
-            FROM sync_metadata
-            WHERE user_id = :user_id
-              AND integration_source = :integration_source
-              AND external_id = :external_id
-        """)
+        return await self._find(integration_source, external_id, user_id, lock=False)
 
+    async def _find(
+        self, integration_source: str, external_id: str, user_id: str, *, lock: bool
+    ) -> SyncMetadata | None:
+        """``user_id``'s link for ``(integration_source, external_id)``, if any."""
         result = await self.conn.execute(
-            query,
+            text(_SELECT_LINK + (" FOR UPDATE" if lock else "")),
             {
                 "user_id": user_id,
                 "integration_source": integration_source,
@@ -157,25 +151,7 @@ class SyncMetadataRepository:
             },
         )
         row = result.fetchone()
-
-        if not row:
-            return None
-
-        return SyncMetadata(
-            id=row.id,
-            user_id=row.user_id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _to_sync_metadata(row) if row else None
 
     async def upsert(
         self,
@@ -216,7 +192,8 @@ class SyncMetadataRepository:
         # The link columns use COALESCE on conflict so a writer that does not
         # supply them (e.g. an integration worker still on the old code path)
         # never clears values populated by another writer or the backfill.
-        query = text("""
+        query = text(  # noqa: S608 - a literal column list
+            f"""
             INSERT INTO sync_metadata
                 (user_id, internal_id, internal_uuid, integration_source, external_id,
                  last_synced_at, version_hash, sync_status, error_message, retry_count,
@@ -249,11 +226,9 @@ class SyncMetadataRepository:
                     EXCLUDED.reference_data, sync_metadata.reference_data
                 ),
                 updated_at = EXCLUDED.updated_at
-            RETURNING id, user_id, internal_id, internal_uuid, integration_source,
-                      external_id, last_synced_at, version_hash, sync_status,
-                      error_message, retry_count, internal_entity_type,
-                      external_entity_type, reference_data, created_at, updated_at
-        """)
+            RETURNING {_LINK_COLUMNS}
+        """
+        )
 
         result = await execute_link_write(
             self.conn,
@@ -280,24 +255,7 @@ class SyncMetadataRepository:
         if not row:
             raise RuntimeError("Failed to upsert sync metadata")
 
-        return SyncMetadata(
-            id=row.id,
-            user_id=row.user_id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            internal_entity_type=row.internal_entity_type,
-            external_entity_type=row.external_entity_type,
-            reference_data=row.reference_data,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _to_sync_metadata(row)
 
     async def update_reference_data(
         self,

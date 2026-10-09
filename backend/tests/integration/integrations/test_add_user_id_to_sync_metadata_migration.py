@@ -17,43 +17,23 @@ then creates the per-user unique index beside the global one.
 Rows are inserted raw: the revision under test predates every writer helper.
 """
 
-import importlib.util
 import uuid
-from pathlib import Path
-from types import ModuleType
-from typing import Any
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.integration.migration_helpers import (
     RunAlembic,
     columns,
+    execute,
     index_exists,
+    link_owners,
+    load_revision,
     tables_with_column,
 )
 
-
-def _load_migration() -> ModuleType:
-    """Load 0126 by path — revision files are not importable by module name."""
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "app"
-        / "migrations"
-        / "versions"
-        / "0126_add_user_id_to_sync_metadata.py"
-    )
-    spec = importlib.util.spec_from_file_location("migration_0126", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-migration = _load_migration()
+migration = load_revision("0126_add_user_id_to_sync_metadata.py")
 
 OWNER = "9f1c1f0e-0000-4000-8000-abcdefabcdef"
 OTHER_OWNER = "1b2c3d4e-0000-4000-8000-fedcbafedcba"
@@ -63,19 +43,8 @@ _REVISION = "0126"
 _PER_USER_INDEX = "uq_sync_metadata_user_source_external"
 
 
-async def _execute(url: str, sql: str, params: dict[str, Any] | None = None) -> Any:
-    """Run ``sql`` in its own transaction; return its scalar when it returns rows."""
-    engine = create_async_engine(url)
-    try:
-        async with engine.begin() as conn:
-            result = await conn.execute(text(sql), params or {})
-            return result.scalar() if result.returns_rows else None
-    finally:
-        await engine.dispose()
-
-
 async def _seed_contact(url: str, owner: str) -> int:
-    contact_id: int = await _execute(
+    contact_id: int = await execute(
         url,
         "INSERT INTO contacts (first_name, user_id) VALUES ('Ada', :o) RETURNING id",
         {"o": owner},
@@ -84,7 +53,7 @@ async def _seed_contact(url: str, owner: str) -> int:
 
 
 async def _seed_journal(url: str, owner: str) -> int:
-    journal_id: int = await _execute(
+    journal_id: int = await execute(
         url,
         """
         INSERT INTO journals (user_id, title, content,
@@ -99,7 +68,7 @@ async def _seed_journal(url: str, owner: str) -> int:
 
 async def _seed_gear_item(url: str, owner: str) -> str:
     gear_id = str(uuid.uuid4())
-    await _execute(
+    await execute(
         url,
         "INSERT INTO gear_items (id, user_id, name) VALUES (:id, :o, 'Rope')",
         {"id": gear_id, "o": owner},
@@ -116,7 +85,7 @@ async def _seed_link(
     internal_uuid: str | None = None,
     internal_entity_type: str | None = None,
 ) -> None:
-    await _execute(
+    await execute(
         url,
         """
         INSERT INTO sync_metadata (
@@ -135,20 +104,6 @@ async def _seed_link(
             "internal_entity_type": internal_entity_type,
         },
     )
-
-
-async def _link_owners(url: str) -> dict[str, str | None]:
-    engine = create_async_engine(url)
-    try:
-        async with engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text("SELECT external_id, user_id FROM sync_metadata")
-                )
-            ).fetchall()
-            return {str(row.external_id): row.user_id for row in rows}
-    finally:
-        await engine.dispose()
 
 
 @pytest.mark.integration
@@ -200,7 +155,7 @@ class TestAddUserIdToSyncMetadata:
 
         run_alembic(url, "upgrade", _REVISION)
 
-        assert await _link_owners(url) == {
+        assert await link_owners(url) == {
             "people/1": OWNER,
             "act-1": OTHER_OWNER,
             "album-1": OTHER_OWNER,
@@ -228,7 +183,7 @@ class TestAddUserIdToSyncMetadata:
 
         output = run_alembic(url, "upgrade", _REVISION)
 
-        assert await _link_owners(url) == {
+        assert await link_owners(url) == {
             "maint-unlinked": OWNER,
             "people/deleted": OWNER,
         }
@@ -257,7 +212,7 @@ class TestAddUserIdToSyncMetadata:
 
         run_alembic(url, "upgrade", _REVISION, x_args={"sync_metadata_owner": OWNER})
 
-        assert await _link_owners(url) == {"maint-unlinked": OWNER}
+        assert await link_owners(url) == {"maint-unlinked": OWNER}
 
     async def test_the_per_user_key_is_unique(
         self, throwaway_database: URL, run_alembic: RunAlembic
@@ -275,9 +230,9 @@ class TestAddUserIdToSyncMetadata:
                 last_synced_at, version_hash, sync_status
             ) VALUES (:o, 'google', 'people/1', now(), 'h', 'success')
         """
-        await _execute(url, insert, {"o": OWNER})
+        await execute(url, insert, {"o": OWNER})
         with pytest.raises(IntegrityError):
-            await _execute(url, insert, {"o": OWNER})
+            await execute(url, insert, {"o": OWNER})
 
     async def test_the_revision_reverses_and_reapplies(
         self, throwaway_database: URL, run_alembic: RunAlembic
@@ -300,4 +255,4 @@ class TestAddUserIdToSyncMetadata:
         assert not await index_exists(url, _PER_USER_INDEX)
 
         run_alembic(url, "upgrade", _REVISION)
-        assert await _link_owners(url) == {"people/1": OWNER}
+        assert await link_owners(url) == {"people/1": OWNER}

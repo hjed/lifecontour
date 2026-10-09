@@ -235,8 +235,8 @@ dual-write has been removed: every writer now persists the canonical link (plus
   Links for a service the target lacks always carry over; on a same-service
   collision the mode decides. An **additive fitness merge** re-points the
   source's row too, so one journal ends up linked to **several** Strava
-  activities — the unique key is `(integration_source, external_id)`, not
-  `internal_id`, so many rows may share one journal. Any other merge keeps the
+  activities — the unique key is `(user_id, integration_source, external_id)`,
+  not `internal_id`, so many rows may share one journal. Any other merge keeps the
   target's link and deletes the source's, as contact merge does. This is why
   the Strava worker resolves journals through `sync_metadata` rather than
   `journal_fitness_data.strava_activity_id`, which holds only one id: see

@@ -12,40 +12,19 @@ deployed could still insert an owner-less row. 0127:
 Its downgrade restores both, refusing while two owners hold one external id.
 """
 
-import importlib.util
-from pathlib import Path
-from types import ModuleType
-from typing import Any
-
 import pytest
-from sqlalchemy import text
 from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.integration.migration_helpers import (
     RunAlembic,
+    execute,
     index_exists,
+    link_owners,
+    load_revision,
     tables_with_column,
 )
 
-
-def _load_migration() -> ModuleType:
-    """Load 0127 by path — revision files are not importable by module name."""
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "app"
-        / "migrations"
-        / "versions"
-        / "0127_sync_metadata_user_scoped_unique_key.py"
-    )
-    spec = importlib.util.spec_from_file_location("migration_0127", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-migration = _load_migration()
+migration = load_revision("0127_sync_metadata_user_scoped_unique_key.py")
 
 OWNER = "9f1c1f0e-0000-4000-8000-abcdefabcdef"
 OTHER_OWNER = "1b2c3d4e-0000-4000-8000-fedcbafedcba"
@@ -56,19 +35,8 @@ _GLOBAL_INDEX = "idx_sync_metadata_integration_external"
 _PER_USER_INDEX = "uq_sync_metadata_user_source_external"
 
 
-async def _execute(url: str, sql: str, params: dict[str, Any] | None = None) -> Any:
-    """Run ``sql`` in its own transaction; return its scalar when it returns rows."""
-    engine = create_async_engine(url)
-    try:
-        async with engine.begin() as conn:
-            result = await conn.execute(text(sql), params or {})
-            return result.scalar() if result.returns_rows else None
-    finally:
-        await engine.dispose()
-
-
 async def _seed_contact(url: str, owner: str) -> int:
-    contact_id: int = await _execute(
+    contact_id: int = await execute(
         url,
         "INSERT INTO contacts (first_name, user_id) VALUES ('Ada', :o) RETURNING id",
         {"o": owner},
@@ -84,7 +52,7 @@ async def _seed_link(
     internal_id: int | None = None,
     source: str = "google",
 ) -> None:
-    await _execute(
+    await execute(
         url,
         """
         INSERT INTO sync_metadata (
@@ -104,22 +72,8 @@ async def _seed_link(
     )
 
 
-async def _link_owners(url: str) -> dict[str, str | None]:
-    engine = create_async_engine(url)
-    try:
-        async with engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text("SELECT external_id, user_id FROM sync_metadata")
-                )
-            ).fetchall()
-            return {str(row.external_id): row.user_id for row in rows}
-    finally:
-        await engine.dispose()
-
-
 async def _owner_is_required(url: str) -> bool:
-    nullable = await _execute(
+    nullable = await execute(
         url,
         """
         SELECT is_nullable FROM information_schema.columns
@@ -165,7 +119,7 @@ class TestSyncMetadataUserScopedKey:
             url, "upgrade", _REVISION, x_args={"sync_metadata_owner": OWNER}
         )
 
-        assert await _link_owners(url) == {
+        assert await link_owners(url) == {
             "people/theirs": OTHER_OWNER,
             "people/owned": OWNER,
             "people/orphan": OWNER,
@@ -197,7 +151,7 @@ class TestSyncMetadataUserScopedKey:
 
         assert not await index_exists(url, _GLOBAL_INDEX)
         assert await index_exists(url, _PER_USER_INDEX)
-        count = await _execute(
+        count = await execute(
             url, "SELECT count(*) FROM sync_metadata WHERE external_id = 'asset-7'"
         )
         assert count == 2
