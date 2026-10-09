@@ -38,8 +38,8 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
-# Tag names are unique case-insensitively (migration 0048).
-_NAME_INDEX = "uq_journal_tags_name_lower"
+# Tag names are unique per owner, case-insensitively (migration 0129).
+_NAME_INDEX = "uq_journal_tags_user_id_name_lower"
 
 
 def _is_duplicate_name(error: IntegrityError) -> bool:
@@ -89,6 +89,8 @@ class JournalTagService:
         self,
         tag_id: UUID,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
         name: str | None = None,
         color: str | None = None,
         description: str | None = None,
@@ -113,6 +115,7 @@ class JournalTagService:
         Args:
             tag_id: The tag to update.
             transaction: Request connection; the write commits before the response.
+            user_id: The acting user, who must own the tag and any new parent.
             name: New name, if changing.
             color: New hex colour (``#RRGGBB``), if changing.
             description: New description, if changing.
@@ -122,17 +125,18 @@ class JournalTagService:
             changed_by: Actor recorded against a rename.
 
         Raises:
-            JournalTagNotFoundError: The tag, or a supplied parent, does not exist.
-            JournalValidationError: The name is taken, the colour is malformed,
-                or the parent would create a cycle.
+            JournalTagNotFoundError: The tag, or a supplied parent, does not exist
+                for the user.
+            JournalValidationError: The name is taken among the user's tags, the
+                colour is malformed, or the parent would create a cycle.
         """
-        existing = await self._require_tag(tag_id)
+        existing = await self._require_tag(tag_id, user_id)
 
         changes: dict[str, object] = {}
 
         if name is not None and name != existing.name:
             await self.hierarchy_service.validate_tag_name_uniqueness(
-                name, exclude_tag_id=tag_id
+                name, user_id=user_id, exclude_tag_id=tag_id
             )
             changes["name"] = name
 
@@ -146,7 +150,9 @@ class JournalTagService:
         # matching the contact TagService precedence.
         if parent_id is not None:
             if parent_id != existing.parent_id:
-                await self.hierarchy_service.validate_parent(parent_id, tag_id)
+                await self.hierarchy_service.validate_parent(
+                    parent_id, tag_id, user_id=user_id
+                )
                 changes["parent_id"] = parent_id
         elif set_parent_null and existing.parent_id is not None:
             changes["parent_id"] = None
@@ -226,10 +232,11 @@ class JournalTagService:
         tag_id: UUID,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> None:
-        """Delete a journal tag, un-assigning it from every journal.
+        """Delete one of the user's journal tags, un-assigning it from every journal.
 
         Mirrors the contact ``TagService.delete_tag`` contract: an in-use tag is
         deleted rather than blocked. The ``journal_tag_assignments`` rows are
@@ -244,13 +251,14 @@ class JournalTagService:
         Args:
             tag_id: The tag to delete.
             transaction: Request connection; the write commits before the response.
+            user_id: The acting user, who must own the tag.
             source: Provenance recorded against each journal's history entry.
             changed_by: Actor recorded against each journal's history entry.
 
         Raises:
-            JournalTagNotFoundError: No tag exists with this id.
+            JournalTagNotFoundError: The user has no tag with this id.
         """
-        tag = await self._require_tag(tag_id)
+        tag = await self._require_tag(tag_id, user_id)
 
         # Read the carriers *before* the delete: the assignment rows go with the
         # tag through the cascade, so afterwards there is nothing left to read.
@@ -280,6 +288,7 @@ class JournalTagService:
         target_id: UUID,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> None:
@@ -300,16 +309,17 @@ class JournalTagService:
             source_id: The tag to merge away and delete.
             target_id: The surviving tag.
             transaction: Request connection; the write commits before the response.
+            user_id: The acting user, who must own both tags.
             source: Provenance recorded against each journal's history entry.
             changed_by: Actor recorded against each journal's history entry.
 
         Raises:
-            JournalTagNotFoundError: Either tag does not exist.
+            JournalTagNotFoundError: Either tag does not exist for the user.
             JournalValidationError: The target is the source itself or one of
                 its descendants.
         """
         source_tag, target_tag = await self.hierarchy_service.validate_merge_target(
-            source_id, target_id
+            source_id, target_id, user_id=user_id
         )
 
         # Read both carrier sets *before* the merge: it re-points the source's
@@ -344,10 +354,13 @@ class JournalTagService:
         tag_id: UUID,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> None:
-        """Assign an existing tag to a journal as a committed unit of work.
+        """Assign one of the user's tags to a journal as a committed unit of work.
+
+        The caller proves the journal is the user's; the tag is checked here.
 
         Publishes ``JournalTagAssigned`` in the same unit of work, but only if the
         assignment did not already exist: the insert is ``ON CONFLICT DO NOTHING``,
@@ -355,9 +368,9 @@ class JournalTagService:
         feed for a change that never happened.
 
         Raises:
-            JournalTagNotFoundError: No tag exists with this id.
+            JournalTagNotFoundError: The user has no tag with this id.
         """
-        tag = await self._require_tag(tag_id)
+        tag = await self._require_tag(tag_id, user_id)
 
         if not await self.tag_repo.assign_tag(journal_id, tag_id):
             return
@@ -380,6 +393,7 @@ class JournalTagService:
         tag_id: UUID,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> None:
@@ -388,11 +402,12 @@ class JournalTagService:
         Publishes ``JournalTagRemoved`` only if an assignment was actually deleted,
         for the same reason :meth:`assign_tag` guards its event.
 
-        A tag that does not exist is a no-op rather than an error: to the caller it
-        is indistinguishable from a tag that exists but was not assigned, which the
-        endpoint has always answered with a successful no-op.
+        A tag that does not exist (another user's included) is a no-op rather
+        than an error: to the caller it is indistinguishable from a tag that
+        exists but was not assigned, which the endpoint has always answered with
+        a successful no-op.
         """
-        tag = await self.tag_repo.find_by_id(tag_id)
+        tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if tag is None:
             return
 
@@ -410,7 +425,9 @@ class JournalTagService:
             )
         )
 
-    async def resolve_filter_tag_ids(self, values: list[str]) -> list[str] | None:
+    async def resolve_filter_tag_ids(
+        self, values: list[str], *, user_id: str
+    ) -> list[str] | None:
         """Resolve a journal tag filter to the ids of every tag it covers.
 
         Each value is either a tag UUID or a tag name, because a name is what an
@@ -421,6 +438,11 @@ class JournalTagService:
         Every id is then expanded to its whole subtree, so filtering by a parent
         tag returns journals tagged with a descendant — the behaviour the REST
         journal list gets from ``JournalService._expand_tag_ids_with_descendants``.
+
+        Names and descendants resolve among ``user_id``'s tags only. A UUID is
+        kept as given even when it is another user's: it then matches none of
+        this user's journals, whereas dropping it could empty the filter and
+        widen the search to everything.
 
         Returns ``None`` (no filter) when no value is given.
 
@@ -437,7 +459,7 @@ class JournalTagService:
                 continue
             except ValueError:
                 pass
-            tag = await self.tag_repo.find_by_name(value)
+            tag = await self.tag_repo.find_by_name(value, user_id=user_id)
             if tag is None or tag.id is None:
                 raise ValueError(
                     f"Unknown journal tag '{value}'. Pass a tag name or id from "
@@ -449,7 +471,7 @@ class JournalTagService:
             return None
 
         descendants = await self.hierarchy_service.get_all_descendants_bulk(
-            [UUID(tag_id) for tag_id in resolved]
+            [UUID(tag_id) for tag_id in resolved], user_id=user_id
         )
         for descendant in descendants:
             if descendant.id is not None:
@@ -457,14 +479,16 @@ class JournalTagService:
 
         return list(resolved)
 
-    async def _require_tag(self, tag_id: UUID) -> JournalTag:
-        """Load the tag or raise, so the service owns the existence rule.
+    async def _require_tag(self, tag_id: UUID, user_id: str) -> JournalTag:
+        """Load the user's tag or raise, so the service owns the existence rule.
+
+        Another user's tag raises exactly as a missing one does.
 
         Assignment also needs the loaded tag's ``name`` for the history event:
         reading it here rather than trusting the caller keeps the event consistent
         with the row the assignment actually points at.
         """
-        tag = await self.tag_repo.find_by_id(tag_id)
+        tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if tag is None:
             raise JournalTagNotFoundError(str(tag_id))
         return tag

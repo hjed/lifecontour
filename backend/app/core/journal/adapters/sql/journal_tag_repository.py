@@ -58,16 +58,16 @@ class SqlJournalTagRepository(JournalTagRepository):
         """Initialize with database connection."""
         self.conn = conn
 
-    async def find_by_id(self, tag_id: UUID) -> JournalTag | None:
-        """Find a tag by ID."""
+    async def find_by_id(self, tag_id: UUID, *, user_id: str) -> JournalTag | None:
+        """Find one of the user's tags by ID."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE id = :tag_id
+            WHERE id = :tag_id AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"tag_id": tag_id})
+        result = await self.conn.execute(query, {"tag_id": tag_id, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -75,16 +75,16 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return _row_to_tag(row)
 
-    async def find_by_name(self, name: str) -> JournalTag | None:
-        """Find a tag by name."""
+    async def find_by_name(self, name: str, *, user_id: str) -> JournalTag | None:
+        """Find one of the user's tags by name, case-insensitively."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE LOWER(name) = LOWER(:name)
+            WHERE user_id = :user_id AND LOWER(name) = LOWER(:name)
         """
         )
-        result = await self.conn.execute(query, {"name": name})
+        result = await self.conn.execute(query, {"name": name, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -231,22 +231,29 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         await self.delete(source_id)
 
-    async def get_all(self) -> list[JournalTag]:
-        """Get all tags."""
+    async def get_all(self, *, user_id: str) -> list[JournalTag]:
+        """Get every tag the user owns."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
+            WHERE user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
-        """Get all descendant tags (recursively) for a list of tag IDs."""
+    async def get_descendants_for_tags(
+        self, tag_ids: list[UUID], *, user_id: str
+    ) -> list[JournalTag]:
+        """Get the user's descendant tags (recursively) for a list of tag IDs.
+
+        Every level is filtered by owner, so the walk never steps into another
+        user's tags even if a row's parent pointed across owners.
+        """
         if not tag_ids:
             return []
 
@@ -255,50 +262,55 @@ class SqlJournalTagRepository(JournalTagRepository):
             WITH RECURSIVE descendants AS (
                 SELECT {_TAG_COLUMNS}
                 FROM journal_tags
-                WHERE parent_id = ANY(:tag_ids)
+                WHERE parent_id = ANY(:tag_ids) AND user_id = :user_id
 
                 UNION ALL
 
                 SELECT {_tag_columns("t")}
                 FROM journal_tags t
                 INNER JOIN descendants d ON t.parent_id = d.id
+                WHERE t.user_id = :user_id
             )
             SELECT DISTINCT {_TAG_COLUMNS}
             FROM descendants
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query, {"tag_ids": tag_ids})
+        result = await self.conn.execute(
+            query, {"tag_ids": tag_ids, "user_id": user_id}
+        )
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_children(self, parent_id: UUID) -> list[JournalTag]:
-        """Get child tags of a parent tag."""
+    async def get_children(self, parent_id: UUID, *, user_id: str) -> list[JournalTag]:
+        """Get the user's child tags of a parent tag."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE parent_id = :parent_id
+            WHERE parent_id = :parent_id AND user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query, {"parent_id": parent_id})
+        result = await self.conn.execute(
+            query, {"parent_id": parent_id, "user_id": user_id}
+        )
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_root_tags(self) -> list[JournalTag]:
-        """Get all root tags (no parent)."""
+    async def get_root_tags(self, *, user_id: str) -> list[JournalTag]:
+        """Get the user's root tags (no parent)."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE parent_id IS NULL
+            WHERE parent_id IS NULL AND user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]

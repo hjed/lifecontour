@@ -313,17 +313,16 @@ def _journal_tag_resource(tag: JournalTag, base_url: str) -> JournalTagResource:
 async def list_journal_tags(
     request: Request,
     tag_repo: FromDishka[JournalTagRepository],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> JournalTagListResponse:
     """
-    List all available journal tags.
+    List the session user's journal tags.
 
-    Returns a list of all journal tags that can be used to categorize journals.
+    Returns every tag the user owns, which they can use to categorize journals.
     """
     base_url = get_request_base_url(request)
 
-    # Get all tags from repository
-    all_tags = await tag_repo.get_all()
+    all_tags = await tag_repo.get_all(user_id=user.id)
 
     # Convert to resources
     tag_resources = [_journal_tag_resource(tag, base_url) for tag in all_tags]
@@ -447,6 +446,7 @@ async def update_journal_tag(
     updated_tag = await journal_tag_service.update_tag(
         tag_id=tag_uuid,
         transaction=connection,
+        user_id=user.id,
         name=attrs.name,
         color=attrs.color,
         description=attrs.description,
@@ -473,10 +473,8 @@ async def delete_journal_tag(
     Matches contact tag delete: an in-use tag is deleted rather than blocked.
     Assignments cascade away and child tags are re-parented to the root.
 
-    IMPORTANT SECURITY NOTES:
-    - Journal tags are global (not user-scoped) - any authenticated user can delete any tag
-    - In production, this endpoint should be restricted to admin users only
-    - Future improvement: Add role-based access control (admin-only deletion)
+    Only the session user's own tags can be deleted; another user's tag is
+    not found.
 
     Args:
         tag_id: UUID of the tag to delete
@@ -508,6 +506,7 @@ async def delete_journal_tag(
     await journal_tag_service.delete_tag(
         tag_uuid,
         connection,
+        user_id=user.id,
         source=Provenance.UI,
         changed_by="ui",
     )
@@ -575,6 +574,7 @@ async def merge_journal_tag(
         source_uuid,
         target_uuid,
         connection,
+        user_id=user.id,
         source=Provenance.UI,
         changed_by="ui",
     )
@@ -2304,12 +2304,13 @@ async def add_tag_to_journal(
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
     journal_tag_service: FromDishka[JournalTagService],
-    tag_repo: FromDishka[JournalTagRepository],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> JournalResponse:
     """
-    Add a tag to a journal.
+    Add one of the session user's tags to one of their journals.
+
+    Another user's journal or tag answers 404, exactly as a missing one does.
     """
     from uuid import UUID
 
@@ -2327,15 +2328,16 @@ async def add_tag_to_journal(
     except ValueError as e:
         raise JournalValidationError("tag_id", INVALID_UUID_FORMAT_MSG) from e
 
-    # Verify tag exists
-    tag = await tag_repo.find_by_id(tag_uuid)
-    if not tag:
-        raise JournalValidationError("tag_id", f"Tag not found: {tag_uuid}")
-
-    # Assign tag to journal as a committed unit of work; the service publishes the
+    # Assign tag to journal as a committed unit of work. The service raises
+    # JournalTagNotFoundError (404) unless the tag is the user's, and publishes the
     # JournalTagAssigned history event with this provenance in the same transaction.
     await journal_tag_service.assign_tag(
-        journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
+        journal_id,
+        tag_uuid,
+        connection,
+        user_id=user.id,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     return await _enriched_journal_response(
@@ -2377,7 +2379,12 @@ async def remove_tag_from_journal(
     # Remove tag from journal as a committed unit of work; the service publishes the
     # JournalTagRemoved history event with this provenance in the same transaction.
     await journal_tag_service.remove_tag(
-        journal_id, tag_uuid, connection, changed_by="ui", source=Provenance.UI
+        journal_id,
+        tag_uuid,
+        connection,
+        user_id=user.id,
+        changed_by="ui",
+        source=Provenance.UI,
     )
 
     return await _enriched_journal_response(

@@ -1541,6 +1541,9 @@ class JournalWriteService:
     ) -> None:
         """Find-or-create each tag by name and assign it to the journal.
 
+        Names resolve among the tags of ``user_id`` (the journal's owner), so
+        another user's tag of the same name is never attached.
+
         Each tag is wrapped in a SAVEPOINT so a failure (e.g. a duplicate-name
         race on insert) rolls back just that statement and leaves the surrounding
         transaction usable — the error then propagates cleanly rather than
@@ -1556,7 +1559,7 @@ class JournalWriteService:
         """
         for tag_name in tags:
             async with savepoint(transaction):
-                tag = await self.tag_repo.find_by_name(tag_name)
+                tag = await self.tag_repo.find_by_name(tag_name, user_id=user_id)
                 if tag is None:
                     tag = await self.tag_repo.save(
                         JournalTag(
@@ -1568,6 +1571,7 @@ class JournalWriteService:
                         journal_id,
                         tag.id,
                         transaction,
+                        user_id=user_id,
                         source=source,
                         changed_by=changed_by,
                     )
@@ -1797,6 +1801,7 @@ class JournalWriteService:
                     journal_id,
                     tag.id,
                     transaction,
+                    user_id=user_id,
                     source=source,
                     changed_by=changed_by,
                 )

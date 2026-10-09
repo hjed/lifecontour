@@ -145,7 +145,7 @@ class TestUpdateJournalTagMCPTool:
         assert payload["color"] == "#123456"
         assert payload["description"] == "Structured conditioning work"
 
-        persisted = await journal_tag_repo.find_by_id(tag.id)
+        persisted = await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "conditioning"
         assert persisted.description == "Structured conditioning work"
@@ -170,7 +170,7 @@ class TestUpdateJournalTagMCPTool:
             authenticated_lifespan_client, {"tag_id": str(tag.id), "name": "cardio"}
         )
 
-        persisted = await journal_tag_repo.find_by_id(tag.id)
+        persisted = await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "cardio"
         assert persisted.color == "#00FF00"
@@ -195,7 +195,7 @@ class TestUpdateJournalTagMCPTool:
             {"tag_id": str(child.id), "move_to_root": True},
         )
 
-        persisted = await journal_tag_repo.find_by_id(child.id)
+        persisted = await journal_tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id is None
 
@@ -218,7 +218,7 @@ class TestUpdateJournalTagMCPTool:
             {"tag_id": str(child.id), "parent_id": str(parent.id)},
         )
 
-        persisted = await journal_tag_repo.find_by_id(child.id)
+        persisted = await journal_tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id == parent.id
 
@@ -240,7 +240,7 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "already exists" in raw.lower()
-        persisted = await journal_tag_repo.find_by_id(other.id)
+        persisted = await journal_tag_repo.find_by_id(other.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "reflection"
 
@@ -264,7 +264,7 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "circular" in raw.lower()
-        persisted = await journal_tag_repo.find_by_id(parent.id)
+        persisted = await journal_tag_repo.find_by_id(parent.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id is None
 
@@ -379,7 +379,7 @@ class TestDeleteJournalTagMCPTool:
         payload = extract_mcp_json_payload(raw)
 
         assert payload["status"] == "success"
-        assert await journal_tag_repo.find_by_id(tag.id) is None
+        assert await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is None
 
     @pytest.mark.asyncio
     async def test_delete_journal_tag_in_use_unassigns_it(
@@ -415,7 +415,7 @@ class TestDeleteJournalTagMCPTool:
         )
 
         assert extract_mcp_json_payload(raw)["status"] == "success"
-        assert await journal_tag_repo.find_by_id(tag.id) is None
+        assert await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is None
         assert await journal_tag_repo.get_tags_for_journal(journal.id) == []
 
     @pytest.mark.asyncio
@@ -545,10 +545,14 @@ class TestMergeJournalTagMCPTool:
         assert str(target.id) in payload["summary"]
         assert "deleted" in payload["summary"].lower()
 
-        assert await journal_tag_repo.find_by_id(source.id) is None
+        assert (
+            await journal_tag_repo.find_by_id(source.id, user_id=TEST_USER_ID) is None
+        )
         assigned = await journal_tag_repo.get_tags_for_journal(journal.id)
         assert [tag.id for tag in assigned] == [target.id]
-        surviving_child = await journal_tag_repo.find_by_id(child.id)
+        surviving_child = await journal_tag_repo.find_by_id(
+            child.id, user_id=TEST_USER_ID
+        )
         assert surviving_child is not None
         assert surviving_child.parent_id == target.id
 
@@ -572,7 +576,9 @@ class TestMergeJournalTagMCPTool:
         assert payload["error"] == "Journal error"
         assert "itself" in payload["message"].lower()
         # The tag must survive a rejected merge.
-        assert await journal_tag_repo.find_by_id(tag.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_into_descendant_errors(
@@ -596,7 +602,10 @@ class TestMergeJournalTagMCPTool:
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Journal error"
         assert "descendant" in payload["message"].lower()
-        assert await journal_tag_repo.find_by_id(parent.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(parent.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_unknown_target_errors(
@@ -619,7 +628,10 @@ class TestMergeJournalTagMCPTool:
 
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Not found"
-        assert await journal_tag_repo.find_by_id(source.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(source.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_unknown_source_errors(
@@ -642,7 +654,10 @@ class TestMergeJournalTagMCPTool:
 
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Not found"
-        assert await journal_tag_repo.find_by_id(target.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(target.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_publishes_a_merge_event_with_mcp_provenance(

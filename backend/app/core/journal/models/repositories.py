@@ -1176,15 +1176,22 @@ class JournalTagRepository(ABC):
     Repository interface for journal tag operations.
 
     Tags are hierarchical (parent-child relationships) and can be assigned to journals.
+
+    Every tag has one owner and names are unique per owner. Every read of the
+    tag namespace takes the acting user's id and filters on it, so another
+    user's tag reads as a missing one. Reads keyed by a journal
+    (:meth:`get_tags_for_journal`) or by a tag the caller has already loaded
+    for the user (:meth:`get_journal_ids_for_tag`) stay unscoped.
     """
 
     @abstractmethod
-    async def find_by_id(self, tag_id: UUID) -> JournalTag | None:
+    async def find_by_id(self, tag_id: UUID, *, user_id: str) -> JournalTag | None:
         """
-        Find a tag by ID.
+        Find one of the user's tags by ID.
 
         Args:
             tag_id: The tag UUID to look up
+            user_id: The acting user; another user's tag is not found
 
         Returns:
             The JournalTag if found, None otherwise
@@ -1192,12 +1199,13 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_by_name(self, name: str) -> JournalTag | None:
+    async def find_by_name(self, name: str, *, user_id: str) -> JournalTag | None:
         """
-        Find a tag by name.
+        Find one of the user's tags by name, case-insensitively.
 
         Args:
             name: The tag name to look up
+            user_id: The acting user; another user's tag is not found
 
         Returns:
             The JournalTag if found, None otherwise
@@ -1270,25 +1278,28 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self) -> list[JournalTag]:
+    async def get_all(self, *, user_id: str) -> list[JournalTag]:
         """
-        Get all tags.
+        Get every tag the user owns.
 
         Returns:
-            List of all tags
+            The user's tags, by name
         """
         pass
 
     @abstractmethod
-    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
+    async def get_descendants_for_tags(
+        self, tag_ids: list[UUID], *, user_id: str
+    ) -> list[JournalTag]:
         """
-        Get all descendant tags (recursively) for a list of tag UUIDs.
+        Get all of the user's descendant tags (recursively) for a list of tag UUIDs.
 
         Backs hierarchical tag filtering: a journal tagged only with a child
         tag is returned when filtering by any of its ancestors.
 
         Args:
             tag_ids: The tag UUIDs to expand
+            user_id: The acting user; only their tags are walked
 
         Returns:
             Descendant tags, excluding the requested tags themselves
@@ -1296,12 +1307,13 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_children(self, parent_id: UUID) -> list[JournalTag]:
+    async def get_children(self, parent_id: UUID, *, user_id: str) -> list[JournalTag]:
         """
-        Get child tags of a parent tag.
+        Get the user's child tags of a parent tag.
 
         Args:
             parent_id: The parent tag UUID
+            user_id: The acting user
 
         Returns:
             List of child tags
@@ -1309,12 +1321,12 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_root_tags(self) -> list[JournalTag]:
+    async def get_root_tags(self, *, user_id: str) -> list[JournalTag]:
         """
-        Get all root tags (no parent).
+        Get the user's root tags (no parent).
 
         Returns:
-            List of root tags
+            The user's root tags, by name
         """
         pass
 

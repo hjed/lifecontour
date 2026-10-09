@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
-from tests.integration.contact_seeding import TEST_USER_ID
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 
 
 @pytest_asyncio.fixture
@@ -66,7 +66,7 @@ class TestJournalTagRepositoryIntegration:
     async def test_save_persists_the_owner_and_find_returns_it(self, tag_repo):
         saved_tag = await tag_repo.save(JournalTag(name="owned", user_id="owner-1"))
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id="owner-1")
         assert found_tag is not None
         assert found_tag.user_id == "owner-1"
 
@@ -77,7 +77,7 @@ class TestJournalTagRepositoryIntegration:
         saved_tag.color = "#123456"
         await tag_repo.save(saved_tag)
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id="owner-1")
         assert found_tag is not None
         assert found_tag.color == "#123456"
         assert found_tag.user_id == "owner-1"
@@ -87,7 +87,7 @@ class TestJournalTagRepositoryIntegration:
         tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.name == "work"
         assert found_tag.id == saved_tag.id
@@ -97,13 +97,13 @@ class TestJournalTagRepositoryIntegration:
         tag = JournalTag(user_id=TEST_USER_ID, name="work")
         await tag_repo.save(tag)
 
-        found_tag = await tag_repo.find_by_name("work")
+        found_tag = await tag_repo.find_by_name("work", user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.name == "work"
 
     async def test_find_nonexistent_tag_returns_none(self, tag_repo):
         """Test finding nonexistent tag returns None."""
-        found_tag = await tag_repo.find_by_id(uuid4())
+        found_tag = await tag_repo.find_by_id(uuid4(), user_id=TEST_USER_ID)
         assert found_tag is None
 
     async def test_update_tag(self, tag_repo):
@@ -134,7 +134,7 @@ class TestJournalTagRepositoryIntegration:
 
         assert saved_tag.description == "Work-related journal entries"
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.description == "Work-related journal entries"
 
@@ -142,7 +142,7 @@ class TestJournalTagRepositoryIntegration:
         """Test description is nullable, so tags may omit it."""
         saved_tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="work"))
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.description is None
 
@@ -155,7 +155,7 @@ class TestJournalTagRepositoryIntegration:
         saved_tag.description = "Revised text"
         await tag_repo.save(saved_tag)
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.description == "Revised text"
 
@@ -166,13 +166,13 @@ class TestJournalTagRepositoryIntegration:
 
         child.parent_id = parent.id
         await tag_repo.save(child)
-        reparented = await tag_repo.find_by_id(child.id)
+        reparented = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert reparented is not None
         assert reparented.parent_id == parent.id
 
         reparented.parent_id = None
         await tag_repo.save(reparented)
-        cleared = await tag_repo.find_by_id(child.id)
+        cleared = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert cleared is not None
         assert cleared.parent_id is None
 
@@ -180,8 +180,8 @@ class TestJournalTagRepositoryIntegration:
         """Test the uniqueness lookup matches regardless of case."""
         await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="Training"))
 
-        assert await tag_repo.find_by_name("training") is not None
-        assert await tag_repo.find_by_name("TRAINING") is not None
+        assert await tag_repo.find_by_name("training", user_id=TEST_USER_ID) is not None
+        assert await tag_repo.find_by_name("TRAINING", user_id=TEST_USER_ID) is not None
 
     async def test_find_by_name_returns_description(self, tag_repo):
         """Test find_by_name selects the description column."""
@@ -189,7 +189,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
         )
 
-        found_tag = await tag_repo.find_by_name("work")
+        found_tag = await tag_repo.find_by_name("work", user_id=TEST_USER_ID)
         assert found_tag is not None
         assert found_tag.description == "Work entries"
 
@@ -199,7 +199,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
         )
 
-        tags = await tag_repo.get_all()
+        tags = await tag_repo.get_all(user_id=TEST_USER_ID)
         assert [t.description for t in tags] == ["Work entries"]
 
     async def test_get_root_tags_returns_description(self, tag_repo):
@@ -208,7 +208,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
         )
 
-        tags = await tag_repo.get_root_tags()
+        tags = await tag_repo.get_root_tags(user_id=TEST_USER_ID)
         assert [t.description for t in tags] == ["Work entries"]
 
     async def test_get_children_returns_description(self, tag_repo):
@@ -223,7 +223,7 @@ class TestJournalTagRepositoryIntegration:
             )
         )
 
-        children = await tag_repo.get_children(parent.id)
+        children = await tag_repo.get_children(parent.id, user_id=TEST_USER_ID)
         assert [t.description for t in children] == ["Standups"]
 
     async def test_delete_tag(self, tag_repo):
@@ -233,7 +233,7 @@ class TestJournalTagRepositoryIntegration:
 
         await tag_repo.delete(saved_tag.id)
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is None
 
     async def test_get_all_tags(self, tag_repo):
@@ -243,7 +243,7 @@ class TestJournalTagRepositoryIntegration:
         await tag_repo.save(tag1)
         await tag_repo.save(tag2)
 
-        all_tags = await tag_repo.get_all()
+        all_tags = await tag_repo.get_all(user_id=TEST_USER_ID)
         assert len(all_tags) >= 2
         names = [tag.name for tag in all_tags]
         assert "work" in names
@@ -259,7 +259,7 @@ class TestJournalTagRepositoryIntegration:
         )
         await tag_repo.save(child_tag)
 
-        root_tags = await tag_repo.get_root_tags()
+        root_tags = await tag_repo.get_root_tags(user_id=TEST_USER_ID)
         root_names = [tag.name for tag in root_tags]
         assert "root" in root_names
         assert "child" not in root_names
@@ -278,7 +278,7 @@ class TestJournalTagRepositoryIntegration:
         await tag_repo.save(child1)
         await tag_repo.save(child2)
 
-        children = await tag_repo.get_children(saved_parent.id)
+        children = await tag_repo.get_children(saved_parent.id, user_id=TEST_USER_ID)
         assert len(children) == 2
         child_names = [tag.name for tag in children]
         assert "child1" in child_names
@@ -300,11 +300,13 @@ class TestJournalTagRepositoryIntegration:
         await tag_repo.save(level2)
 
         # Check root has one child
-        root_children = await tag_repo.get_children(saved_root.id)
+        root_children = await tag_repo.get_children(saved_root.id, user_id=TEST_USER_ID)
         assert len(root_children) == 1
 
         # Check level1 has one child
-        level1_children = await tag_repo.get_children(saved_level1.id)
+        level1_children = await tag_repo.get_children(
+            saved_level1.id, user_id=TEST_USER_ID
+        )
         assert len(level1_children) == 1
 
     async def test_tag_with_color(self, tag_repo):
@@ -312,7 +314,7 @@ class TestJournalTagRepositoryIntegration:
         tag = JournalTag(user_id=TEST_USER_ID, name="important", color="#FF0000")
         saved_tag = await tag_repo.save(tag)
 
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag.color == "#FF0000"
 
     async def test_delete_cascades_assignments(self, tag_repo, async_connection):
@@ -360,7 +362,7 @@ class TestJournalTagRepositoryIntegration:
 
         await tag_repo.delete(parent.id)
 
-        surviving_child = await tag_repo.find_by_id(child.id)
+        surviving_child = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert surviving_child is not None
         assert surviving_child.parent_id is None
 
@@ -443,7 +445,7 @@ class TestJournalTagRepositoryIntegration:
 
         await tag_repo.merge_into(source.id, target.id)
 
-        surviving_child = await tag_repo.find_by_id(child.id)
+        surviving_child = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert surviving_child is not None
         assert surviving_child.parent_id == target.id
 
@@ -464,13 +466,13 @@ class TestJournalTagRepositoryIntegration:
 
         await tag_repo.merge_into(source.id, target.id)
 
-        surviving_target = await tag_repo.find_by_id(target.id)
+        surviving_target = await tag_repo.find_by_id(target.id, user_id=TEST_USER_ID)
         assert surviving_target is not None
         assert surviving_target.parent_id is None, (
             "the target must not become its own parent"
         )
         # The genuine sibling is still adopted by the target.
-        surviving_sibling = await tag_repo.find_by_id(sibling.id)
+        surviving_sibling = await tag_repo.find_by_id(sibling.id, user_id=TEST_USER_ID)
         assert surviving_sibling is not None
         assert surviving_sibling.parent_id == target.id
 
@@ -489,7 +491,7 @@ class TestJournalTagRepositoryIntegration:
         with pytest.raises(ValueError, match="distinct source and target"):
             await tag_repo.merge_into(tag.id, tag.id)
 
-        assert await tag_repo.find_by_id(tag.id) is not None
+        assert await tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is not None
         assert [t.id for t in await tag_repo.get_tags_for_journal(journal.id)] == [
             tag.id
         ]
@@ -503,8 +505,8 @@ class TestJournalTagRepositoryIntegration:
 
         await tag_repo.merge_into(source.id, target.id)
 
-        assert await tag_repo.find_by_id(source.id) is None
-        assert await tag_repo.find_by_id(target.id) is not None
+        assert await tag_repo.find_by_id(source.id, user_id=TEST_USER_ID) is None
+        assert await tag_repo.find_by_id(target.id, user_id=TEST_USER_ID) is not None
 
     async def test_get_tags_for_journal(self, tag_repo, async_connection):
         """Test getting tags assigned to a journal."""
@@ -788,7 +790,9 @@ class TestGetDescendantsForTags:
             JournalTag(user_id=TEST_USER_ID, name="sport-climbing", parent_id=child.id)
         )
 
-        descendants = await tag_repo.get_descendants_for_tags([parent.id])
+        descendants = await tag_repo.get_descendants_for_tags(
+            [parent.id], user_id=TEST_USER_ID
+        )
 
         assert {tag.id for tag in descendants} == {child.id, grandchild.id}
 
@@ -809,7 +813,7 @@ class TestGetDescendantsForTags:
         )
 
         descendants = await tag_repo.get_descendants_for_tags(
-            [first_root.id, second_root.id]
+            [first_root.id, second_root.id], user_id=TEST_USER_ID
         )
 
         assert {tag.id for tag in descendants} == {first_child.id, second_child.id}
@@ -820,12 +824,15 @@ class TestGetDescendantsForTags:
             JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
-        assert await tag_repo.get_descendants_for_tags([leaf.id]) == []
+        assert (
+            await tag_repo.get_descendants_for_tags([leaf.id], user_id=TEST_USER_ID)
+            == []
+        )
 
     async def test_empty_input_returns_empty_list(self, tag_repo):
         await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
 
-        assert await tag_repo.get_descendants_for_tags([]) == []
+        assert await tag_repo.get_descendants_for_tags([], user_id=TEST_USER_ID) == []
 
     async def test_excludes_ancestors_and_unrelated_tags(self, tag_repo):
         parent = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
@@ -834,7 +841,9 @@ class TestGetDescendantsForTags:
         )
         await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="unrelated"))
 
-        descendants = await tag_repo.get_descendants_for_tags([child.id])
+        descendants = await tag_repo.get_descendants_for_tags(
+            [child.id], user_id=TEST_USER_ID
+        )
 
         assert descendants == []
 
@@ -850,7 +859,9 @@ class TestGetDescendantsForTags:
             )
         )
 
-        descendants = await tag_repo.get_descendants_for_tags([parent.id])
+        descendants = await tag_repo.get_descendants_for_tags(
+            [parent.id], user_id=TEST_USER_ID
+        )
 
         assert len(descendants) == 1
         assert descendants[0].id == child.id
@@ -859,3 +870,46 @@ class TestGetDescendantsForTags:
         assert descendants[0].color == "#FF0000"
         assert descendants[0].description == "Rock climbing entries"
         assert descendants[0].created_at is not None
+
+
+@pytest.mark.integration
+class TestJournalTagReadsAreScopedToTheOwner:
+    """Another user's tag is invisible to every owner-scoped read."""
+
+    async def test_a_foreign_tag_is_not_found_by_id_or_name(self, tag_repo):
+        theirs = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="theirs"))
+
+        assert await tag_repo.find_by_id(theirs.id, user_id=TEST_USER_ID) is None
+        assert await tag_repo.find_by_name("theirs", user_id=TEST_USER_ID) is None
+        assert await tag_repo.find_by_id(theirs.id, user_id=OTHER_USER_ID) == theirs
+
+    async def test_two_owners_each_hold_the_same_name(self, tag_repo):
+        mine = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="Family"))
+        theirs = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="family"))
+
+        found_mine = await tag_repo.find_by_name("FAMILY", user_id=TEST_USER_ID)
+        found_theirs = await tag_repo.find_by_name("FAMILY", user_id=OTHER_USER_ID)
+
+        assert found_mine is not None and found_mine.id == mine.id
+        assert found_theirs is not None and found_theirs.id == theirs.id
+
+    async def test_listings_hold_only_the_owners_tags(self, tag_repo):
+        mine = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="mine"))
+        await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="theirs"))
+
+        assert await tag_repo.get_all(user_id=TEST_USER_ID) == [mine]
+        assert await tag_repo.get_root_tags(user_id=TEST_USER_ID) == [mine]
+
+    async def test_the_hierarchy_never_crosses_owners(self, tag_repo):
+        """Even a child row pointing at a foreign parent stays the child owner's."""
+        mine = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="outdoors"))
+        theirs = await tag_repo.save(
+            JournalTag(user_id=OTHER_USER_ID, name="climbing", parent_id=mine.id)
+        )
+
+        assert await tag_repo.get_children(mine.id, user_id=TEST_USER_ID) == []
+        assert (
+            await tag_repo.get_descendants_for_tags([mine.id], user_id=TEST_USER_ID)
+            == []
+        )
+        assert await tag_repo.get_children(mine.id, user_id=OTHER_USER_ID) == [theirs]

@@ -39,9 +39,14 @@ class JournalTagHierarchyService:
     async def validate_tag_name_uniqueness(
         self,
         name: str,
+        *,
+        user_id: str,
         exclude_tag_id: UUID | None = None,
     ) -> None:
-        """Ensure no other tag already holds ``name``.
+        """Ensure no other tag of ``user_id`` already holds ``name``.
+
+        Names are unique per owner: another user's tag of the same name is not
+        a conflict.
 
         The repository lookup is case-insensitive (``LOWER(name)``), matching
         the unique index, so re-casing a tag's own name is not a conflict.
@@ -49,7 +54,7 @@ class JournalTagHierarchyService:
         Raises:
             JournalValidationError: Another tag already uses this name.
         """
-        existing_tag = await self.tag_repo.find_by_name(name)
+        existing_tag = await self.tag_repo.find_by_name(name, user_id=user_id)
 
         if existing_tag and existing_tag.id != exclude_tag_id:
             raise JournalValidationError(
@@ -58,24 +63,29 @@ class JournalTagHierarchyService:
                 "Tag names must be unique.",
             )
 
-    async def validate_parent(self, parent_id: UUID, child_id: UUID) -> None:
+    async def validate_parent(
+        self, parent_id: UUID, child_id: UUID, *, user_id: str
+    ) -> None:
         """Ensure ``parent_id`` is a legal parent for ``child_id``.
+
+        The parent must be one of ``user_id``'s tags: a hierarchy never links
+        two owners, so another user's tag is a parent that does not exist.
 
         Raises:
             JournalValidationError: The parent is the tag itself, or assigning
                 it would make the tag its own ancestor.
-            JournalTagNotFoundError: The proposed parent does not exist.
+            JournalTagNotFoundError: The proposed parent does not exist for the user.
         """
         if parent_id == child_id:
             raise JournalValidationError("parent_id", "A tag cannot be its own parent")
 
-        if await self.tag_repo.find_by_id(parent_id) is None:
+        if await self.tag_repo.find_by_id(parent_id, user_id=user_id) is None:
             raise JournalTagNotFoundError(str(parent_id))
 
-        await self._check_circular_reference(parent_id, child_id)
+        await self._check_circular_reference(parent_id, child_id, user_id)
 
     async def validate_merge_target(
-        self, source_id: UUID, target_id: UUID
+        self, source_id: UUID, target_id: UUID, *, user_id: str
     ) -> tuple[JournalTag, JournalTag]:
         """Ensure ``source_id`` may legally be merged into ``target_id``.
 
@@ -94,23 +104,23 @@ class JournalTagHierarchyService:
         Raises:
             JournalValidationError: The target is the source itself or one of
                 its descendants.
-            JournalTagNotFoundError: Either tag does not exist.
+            JournalTagNotFoundError: Either tag does not exist for ``user_id``.
         """
         if source_id == target_id:
             raise JournalValidationError(
                 "target_tag_id", "A tag cannot be merged into itself"
             )
 
-        source = await self.tag_repo.find_by_id(source_id)
+        source = await self.tag_repo.find_by_id(source_id, user_id=user_id)
         if source is None:
             raise JournalTagNotFoundError(str(source_id))
-        target = await self.tag_repo.find_by_id(target_id)
+        target = await self.tag_repo.find_by_id(target_id, user_id=user_id)
         if target is None:
             raise JournalTagNotFoundError(str(target_id))
 
         # The target is a descendant of the source exactly when the source
         # appears in the target's ancestry — the same walk re-parenting makes.
-        outcome = await self._walk_ancestry(target_id, source_id)
+        outcome = await self._walk_ancestry(target_id, source_id, user_id)
 
         if outcome == _AncestryWalk.FOUND:
             raise JournalValidationError(
@@ -124,19 +134,23 @@ class JournalTagHierarchyService:
 
         return source, target
 
-    async def get_all_descendants_bulk(self, tag_ids: list[UUID]) -> list[JournalTag]:
-        """Get all descendant tags for multiple tags in a single query.
+    async def get_all_descendants_bulk(
+        self, tag_ids: list[UUID], *, user_id: str
+    ) -> list[JournalTag]:
+        """Get all of the user's descendant tags for multiple tags in one query.
 
         Mirrors the contact ``TagHierarchyService.get_all_descendants_bulk`` so
         journal list filtering can expand a parent tag to its whole subtree.
         """
         if not tag_ids:
             return []
-        return await self.tag_repo.get_descendants_for_tags(tag_ids)
+        return await self.tag_repo.get_descendants_for_tags(tag_ids, user_id=user_id)
 
-    async def _check_circular_reference(self, parent_id: UUID, child_id: UUID) -> None:
+    async def _check_circular_reference(
+        self, parent_id: UUID, child_id: UUID, user_id: str
+    ) -> None:
         """Walk the proposed parent's ancestry looking for ``child_id``."""
-        outcome = await self._walk_ancestry(parent_id, child_id)
+        outcome = await self._walk_ancestry(parent_id, child_id, user_id)
 
         if outcome == _AncestryWalk.FOUND:
             raise JournalValidationError(
@@ -149,7 +163,9 @@ class JournalTagHierarchyService:
                 "parent_id", "Circular reference detected in tag hierarchy"
             )
 
-    async def _walk_ancestry(self, start_id: UUID, looking_for: UUID) -> _AncestryWalk:
+    async def _walk_ancestry(
+        self, start_id: UUID, looking_for: UUID, user_id: str
+    ) -> _AncestryWalk:
         """Walk ``start_id``'s ancestry looking for ``looking_for``.
 
         Returns which of the three outcomes the walk reached, leaving the
@@ -170,7 +186,7 @@ class JournalTagHierarchyService:
 
             visited.add(current_id)
 
-            current_tag = await self.tag_repo.find_by_id(current_id)
+            current_tag = await self.tag_repo.find_by_id(current_id, user_id=user_id)
             if current_tag is None:
                 break
             current_id = current_tag.parent_id

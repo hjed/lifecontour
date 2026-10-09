@@ -16,7 +16,7 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
 from app.core.journal.services.journal_tag_service import JournalTagService
-from tests.integration.contact_seeding import TEST_USER_ID
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 
 
 @pytest.fixture
@@ -57,6 +57,11 @@ def tag_service(mock_tag_repo, hierarchy_service, mock_event_publisher):
     return JournalTagService(mock_tag_repo, hierarchy_service, mock_event_publisher)
 
 
+def _owned_by(tag: JournalTag | None, user_id: str) -> JournalTag | None:
+    """What an owner-scoped repository read returns: the tag only for its owner."""
+    return tag if tag is not None and tag.user_id == user_id else None
+
+
 def _published(mock_event_publisher):
     """The events passed to ``publish``, in order."""
     return [call.args[0] for call in mock_event_publisher.publish.await_args_list]
@@ -88,7 +93,7 @@ class TestCreateTag:
         """A duplicate-name IntegrityError becomes a JournalValidationError."""
         tag = JournalTag(user_id=TEST_USER_ID, name="Work", color="#3B82F6")
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name_lower", {}, Exception("dup")
+            "uq_journal_tags_user_id_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError):
@@ -125,7 +130,9 @@ class TestDeleteTag:
             user_id=TEST_USER_ID, id=tag_id, name="Spare", color="#000000"
         )
 
-        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+        await tag_service.delete_tag(
+            tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.delete.assert_awaited_once_with(tag_id)
 
@@ -143,7 +150,9 @@ class TestDeleteTag:
             user_id=TEST_USER_ID, id=tag_id, name="Busy", color="#000000"
         )
 
-        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+        await tag_service.delete_tag(
+            tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.delete.assert_awaited_once_with(tag_id)
         mock_transaction.execute.assert_not_awaited()
@@ -157,7 +166,9 @@ class TestDeleteTag:
         mock_tag_repo.find_by_id.return_value = None
 
         with pytest.raises(JournalTagNotFoundError):
-            await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+            await tag_service.delete_tag(
+                tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+            )
 
         mock_tag_repo.delete.assert_not_awaited()
 
@@ -185,6 +196,7 @@ class TestDeleteTagEvents:
             transaction=mock_transaction,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         first, second = _published(mock_event_publisher)
@@ -216,6 +228,7 @@ class TestDeleteTagEvents:
             transaction=mock_transaction,
             source=Provenance.MCP,
             changed_by="mcp",
+            user_id=TEST_USER_ID,
         )
 
         (event,) = _published(mock_event_publisher)
@@ -233,7 +246,9 @@ class TestDeleteTagEvents:
         )
         mock_tag_repo.get_journal_ids_for_tag.return_value = []
 
-        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+        await tag_service.delete_tag(
+            tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_event_publisher.publish.assert_not_awaited()
 
@@ -258,7 +273,9 @@ class TestDeleteTagEvents:
 
         mock_tag_repo.delete.side_effect = _cascade
 
-        await tag_service.delete_tag(tag_id, transaction=mock_transaction)
+        await tag_service.delete_tag(
+            tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         assert [e.aggregate_id for e in _published(mock_event_publisher)] == [7, 9]
 
@@ -277,11 +294,11 @@ class TestUpdateTag:
         by_id = {tag.id: tag for tag in tags}
         by_name = {tag.name.lower(): tag for tag in tags}
 
-        async def find_by_id(tag_id):
-            return by_id.get(tag_id)
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(by_id.get(tag_id), user_id)
 
-        async def find_by_name(name):
-            return by_name.get(name.lower())
+        async def find_by_name(name, *, user_id):
+            return _owned_by(by_name.get(name.lower()), user_id)
 
         mock_tag_repo.find_by_id.side_effect = find_by_id
         mock_tag_repo.find_by_name.side_effect = find_by_name
@@ -298,7 +315,11 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, name="Career", color="#3B82F6"
+            tag_id,
+            transaction=mock_transaction,
+            name="Career",
+            color="#3B82F6",
+            user_id=TEST_USER_ID,
         )
 
         assert result.name == "Career"
@@ -317,7 +338,10 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, description="Paid work entries"
+            tag_id,
+            transaction=mock_transaction,
+            description="Paid work entries",
+            user_id=TEST_USER_ID,
         )
 
         assert result.description == "Paid work entries"
@@ -339,7 +363,10 @@ class TestUpdateTag:
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, name="personal"
+                tag_id,
+                transaction=mock_transaction,
+                name="personal",
+                user_id=TEST_USER_ID,
             )
 
         assert exc_info.value.field == "name"
@@ -356,7 +383,7 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, name="WORK"
+            tag_id, transaction=mock_transaction, name="WORK", user_id=TEST_USER_ID
         )
 
         assert result.name == "WORK"
@@ -373,7 +400,7 @@ class TestUpdateTag:
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, color="red"
+                tag_id, transaction=mock_transaction, color="red", user_id=TEST_USER_ID
             )
 
         assert exc_info.value.field == "color"
@@ -394,7 +421,10 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            child_id, transaction=mock_transaction, parent_id=new_parent_id
+            child_id,
+            transaction=mock_transaction,
+            parent_id=new_parent_id,
+            user_id=TEST_USER_ID,
         )
 
         assert result.parent_id == new_parent_id
@@ -411,7 +441,10 @@ class TestUpdateTag:
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, parent_id=tag_id
+                tag_id,
+                transaction=mock_transaction,
+                parent_id=tag_id,
+                user_id=TEST_USER_ID,
             )
 
         assert exc_info.value.field == "parent_id"
@@ -439,7 +472,10 @@ class TestUpdateTag:
         # Making the parent a child of its own descendant would close a loop.
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
-                parent_id, transaction=mock_transaction, parent_id=child_id
+                parent_id,
+                transaction=mock_transaction,
+                parent_id=child_id,
+                user_id=TEST_USER_ID,
             )
 
         assert exc_info.value.field == "parent_id"
@@ -457,7 +493,10 @@ class TestUpdateTag:
 
         with pytest.raises(JournalTagNotFoundError):
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, parent_id=uuid4()
+                tag_id,
+                transaction=mock_transaction,
+                parent_id=uuid4(),
+                user_id=TEST_USER_ID,
             )
 
     @pytest.mark.asyncio
@@ -480,7 +519,10 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            child_id, transaction=mock_transaction, set_parent_null=True
+            child_id,
+            transaction=mock_transaction,
+            set_parent_null=True,
+            user_id=TEST_USER_ID,
         )
 
         assert result.parent_id is None
@@ -505,7 +547,10 @@ class TestUpdateTag:
         )
 
         result = await tag_service.update_tag(
-            child_id, transaction=mock_transaction, name="Standups"
+            child_id,
+            transaction=mock_transaction,
+            name="Standups",
+            user_id=TEST_USER_ID,
         )
 
         assert result.parent_id == parent_id
@@ -533,6 +578,7 @@ class TestUpdateTag:
             transaction=mock_transaction,
             parent_id=new_parent_id,
             set_parent_null=True,
+            user_id=TEST_USER_ID,
         )
 
         assert result.parent_id == new_parent_id
@@ -551,12 +597,15 @@ class TestUpdateTag:
             mock_tag_repo, [JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Work")]
         )
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name_lower", {}, Exception("dup")
+            "uq_journal_tags_user_id_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, name="Career"
+                tag_id,
+                transaction=mock_transaction,
+                name="Career",
+                user_id=TEST_USER_ID,
             )
 
         assert exc_info.value.field == "name"
@@ -570,7 +619,7 @@ class TestUpdateTag:
 
         with pytest.raises(JournalTagNotFoundError) as exc_info:
             await tag_service.update_tag(
-                uuid4(), transaction=mock_transaction, name="Nope"
+                uuid4(), transaction=mock_transaction, name="Nope", user_id=TEST_USER_ID
             )
 
         assert exc_info.value.status_code == 404
@@ -586,7 +635,9 @@ class TestUpdateTag:
         )
         self._wire_repo(mock_tag_repo, [existing])
 
-        result = await tag_service.update_tag(tag_id, transaction=mock_transaction)
+        result = await tag_service.update_tag(
+            tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         assert result == existing
         mock_tag_repo.save.assert_not_awaited()
@@ -606,8 +657,8 @@ class TestMergeTag:
         """Make the mock repo resolve ``find_by_id`` over ``tags``."""
         by_id = {tag.id: tag for tag in tags}
 
-        async def find_by_id(tag_id):
-            return by_id.get(tag_id)
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(by_id.get(tag_id), user_id)
 
         mock_tag_repo.find_by_id.side_effect = find_by_id
 
@@ -625,7 +676,9 @@ class TestMergeTag:
             ],
         )
 
-        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+        await tag_service.merge_tag(
+            source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
 
@@ -649,7 +702,9 @@ class TestMergeTag:
             ],
         )
 
-        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+        await tag_service.merge_tag(
+            source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
 
@@ -664,7 +719,9 @@ class TestMergeTag:
         )
 
         with pytest.raises(JournalValidationError) as exc_info:
-            await tag_service.merge_tag(tag_id, tag_id, transaction=mock_transaction)
+            await tag_service.merge_tag(
+                tag_id, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+            )
 
         assert exc_info.value.field == "target_tag_id"
         mock_tag_repo.merge_into.assert_not_awaited()
@@ -682,7 +739,7 @@ class TestMergeTag:
 
         with pytest.raises(JournalTagNotFoundError) as exc_info:
             await tag_service.merge_tag(
-                uuid4(), target_id, transaction=mock_transaction
+                uuid4(), target_id, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
         assert exc_info.value.status_code == 404
@@ -701,7 +758,7 @@ class TestMergeTag:
 
         with pytest.raises(JournalTagNotFoundError):
             await tag_service.merge_tag(
-                source_id, uuid4(), transaction=mock_transaction
+                source_id, uuid4(), transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
         mock_tag_repo.merge_into.assert_not_awaited()
@@ -727,7 +784,7 @@ class TestMergeTag:
 
         with pytest.raises(JournalValidationError) as exc_info:
             await tag_service.merge_tag(
-                source_id, child_id, transaction=mock_transaction
+                source_id, child_id, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
         assert exc_info.value.field == "target_tag_id"
@@ -754,7 +811,7 @@ class TestMergeTag:
 
         with pytest.raises(JournalValidationError):
             await tag_service.merge_tag(
-                source_id, leaf_id, transaction=mock_transaction
+                source_id, leaf_id, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
         mock_tag_repo.merge_into.assert_not_awaited()
@@ -782,7 +839,9 @@ class TestMergeTag:
         )
 
         with pytest.raises(JournalValidationError) as exc_info:
-            await tag_service.merge_tag(source_id, a_id, transaction=mock_transaction)
+            await tag_service.merge_tag(
+                source_id, a_id, transaction=mock_transaction, user_id=TEST_USER_ID
+            )
 
         assert "circular reference" in exc_info.value.message.lower()
         assert "descendant" not in exc_info.value.message.lower()
@@ -801,8 +860,8 @@ class TestMergeTagEvents:
     def _wire(mock_tag_repo, source: JournalTag, target: JournalTag) -> None:
         by_id = {source.id: source, target.id: target}
 
-        async def find_by_id(tag_id):
-            return by_id.get(tag_id)
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(by_id.get(tag_id), user_id)
 
         mock_tag_repo.find_by_id.side_effect = find_by_id
 
@@ -843,6 +902,7 @@ class TestMergeTagEvents:
             transaction=mock_transaction,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         first, second = _published(mock_event_publisher)
@@ -884,7 +944,9 @@ class TestMergeTagEvents:
             target_on=[9],
         )
 
-        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+        await tag_service.merge_tag(
+            source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         flags = {
             event.aggregate_id: event.event_data["already_had_target"]
@@ -917,6 +979,7 @@ class TestMergeTagEvents:
             transaction=mock_transaction,
             source=Provenance.MCP,
             changed_by="mcp",
+            user_id=TEST_USER_ID,
         )
 
         (event,) = _published(mock_event_publisher)
@@ -942,7 +1005,9 @@ class TestMergeTagEvents:
             target_on=[7],
         )
 
-        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+        await tag_service.merge_tag(
+            source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_event_publisher.publish.assert_not_awaited()
 
@@ -960,7 +1025,7 @@ class TestMergeTagEvents:
 
         with pytest.raises(JournalValidationError):
             await tag_service.merge_tag(
-                source_id, source_id, transaction=mock_transaction
+                source_id, source_id, transaction=mock_transaction, user_id=TEST_USER_ID
             )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -1000,7 +1065,9 @@ class TestMergeTagEvents:
 
         mock_tag_repo.merge_into.side_effect = _merged
 
-        await tag_service.merge_tag(source_id, target_id, transaction=mock_transaction)
+        await tag_service.merge_tag(
+            source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         flags = {
             event.aggregate_id: event.event_data["already_had_target"]
@@ -1021,7 +1088,9 @@ class TestAssignAndRemoveTag:
         )
         mock_tag_repo.assign_tag.return_value = True
 
-        await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.assign_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.assign_tag.assert_awaited_once_with(7, tag_id)
 
@@ -1034,7 +1103,9 @@ class TestAssignAndRemoveTag:
         )
         mock_tag_repo.remove_tag.return_value = True
 
-        await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.remove_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.remove_tag.assert_awaited_once_with(7, tag_id)
 
@@ -1063,6 +1134,7 @@ class TestAssignAndRemoveTagEvents:
             transaction=mock_transaction,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         (event,) = _published(mock_event_publisher)
@@ -1090,6 +1162,7 @@ class TestAssignAndRemoveTagEvents:
             transaction=mock_transaction,
             source=Provenance.MCP,
             changed_by="mcp",
+            user_id=TEST_USER_ID,
         )
 
         (event,) = _published(mock_event_publisher)
@@ -1108,7 +1181,9 @@ class TestAssignAndRemoveTagEvents:
         )
         mock_tag_repo.assign_tag.return_value = True
 
-        await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.assign_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         (event,) = _published(mock_event_publisher)
         assert event.event_data["source"] == Provenance.SYSTEM.value
@@ -1129,7 +1204,9 @@ class TestAssignAndRemoveTagEvents:
         )
         mock_tag_repo.assign_tag.return_value = False
 
-        await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.assign_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_event_publisher.publish.assert_not_awaited()
 
@@ -1143,7 +1220,9 @@ class TestAssignAndRemoveTagEvents:
         )
         mock_tag_repo.remove_tag.return_value = False
 
-        await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.remove_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_event_publisher.publish.assert_not_awaited()
 
@@ -1155,7 +1234,9 @@ class TestAssignAndRemoveTagEvents:
         mock_tag_repo.find_by_id.return_value = None
 
         with pytest.raises(JournalTagNotFoundError):
-            await tag_service.assign_tag(7, tag_id, transaction=mock_transaction)
+            await tag_service.assign_tag(
+                7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+            )
 
         mock_tag_repo.assign_tag.assert_not_awaited()
         mock_event_publisher.publish.assert_not_awaited()
@@ -1173,7 +1254,9 @@ class TestAssignAndRemoveTagEvents:
         tag_id = uuid4()
         mock_tag_repo.find_by_id.return_value = None
 
-        await tag_service.remove_tag(7, tag_id, transaction=mock_transaction)
+        await tag_service.remove_tag(
+            7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
         mock_tag_repo.remove_tag.assert_not_awaited()
         mock_event_publisher.publish.assert_not_awaited()
@@ -1207,6 +1290,7 @@ class TestRenameTagEvents:
             name="Trekking",
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         first, second = _published(mock_event_publisher)
@@ -1236,7 +1320,7 @@ class TestRenameTagEvents:
         mock_tag_repo.save.side_effect = lambda tag: tag
 
         await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, name="Trekking"
+            tag_id, transaction=mock_transaction, name="Trekking", user_id=TEST_USER_ID
         )
 
         (event,) = _published(mock_event_publisher)
@@ -1257,7 +1341,7 @@ class TestRenameTagEvents:
         mock_tag_repo.save.side_effect = lambda tag: tag
 
         await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, name="Trekking"
+            tag_id, transaction=mock_transaction, name="Trekking", user_id=TEST_USER_ID
         )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -1288,7 +1372,7 @@ class TestRenameTagEvents:
         mock_tag_repo.save.side_effect = lambda tag: tag
 
         await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, **{field: value}
+            tag_id, transaction=mock_transaction, **{field: value}, user_id=TEST_USER_ID
         )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -1300,7 +1384,7 @@ class TestRenameTagEvents:
         """A tag's position in the hierarchy is invisible on a journal."""
         tag_id = uuid4()
         parent_id = uuid4()
-        mock_tag_repo.find_by_id.side_effect = lambda requested: {
+        mock_tag_repo.find_by_id.side_effect = lambda requested, *, user_id: {
             tag_id: JournalTag(user_id=TEST_USER_ID, id=tag_id, name="Hiking"),
             parent_id: JournalTag(user_id=TEST_USER_ID, id=parent_id, name="Outdoors"),
         }.get(requested)
@@ -1308,7 +1392,10 @@ class TestRenameTagEvents:
         mock_tag_repo.save.side_effect = lambda tag: tag
 
         await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, parent_id=parent_id
+            tag_id,
+            transaction=mock_transaction,
+            parent_id=parent_id,
+            user_id=TEST_USER_ID,
         )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -1325,7 +1412,7 @@ class TestRenameTagEvents:
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
 
         await tag_service.update_tag(
-            tag_id, transaction=mock_transaction, name="Hiking"
+            tag_id, transaction=mock_transaction, name="Hiking", user_id=TEST_USER_ID
         )
 
         mock_tag_repo.save.assert_not_awaited()
@@ -1347,7 +1434,10 @@ class TestRenameTagEvents:
 
         with pytest.raises(JournalValidationError):
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, name="Trekking"
+                tag_id,
+                transaction=mock_transaction,
+                name="Trekking",
+                user_id=TEST_USER_ID,
             )
 
         mock_tag_repo.save.assert_not_awaited()
@@ -1372,12 +1462,15 @@ class TestRenameTagEvents:
         mock_tag_repo.find_by_name.return_value = None
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
         mock_tag_repo.save.side_effect = IntegrityError(
-            "uq_journal_tags_name_lower", {}, Exception("dup")
+            "uq_journal_tags_user_id_name_lower", {}, Exception("dup")
         )
 
         with pytest.raises(JournalValidationError):
             await tag_service.update_tag(
-                tag_id, transaction=mock_transaction, name="Trekking"
+                tag_id,
+                transaction=mock_transaction,
+                name="Trekking",
+                user_id=TEST_USER_ID,
             )
 
         mock_event_publisher.publish.assert_not_awaited()
@@ -1397,7 +1490,9 @@ class TestResolveFilterTagIds:
         tag_id = uuid4()
         mock_tag_repo.get_descendants_for_tags.return_value = []
 
-        assert await tag_service.resolve_filter_tag_ids([str(tag_id)]) == [str(tag_id)]
+        assert await tag_service.resolve_filter_tag_ids(
+            [str(tag_id)], user_id=TEST_USER_ID
+        ) == [str(tag_id)]
         mock_tag_repo.find_by_name.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1405,14 +1500,14 @@ class TestResolveFilterTagIds:
         self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
     ) -> None:
         hiking = self._saved_tag("hiking")
-        mock_tag_repo.find_by_name.side_effect = lambda name: (
+        mock_tag_repo.find_by_name.side_effect = lambda name, *, user_id: (
             hiking if name.lower() == "hiking" else None
         )
         mock_tag_repo.get_descendants_for_tags.return_value = []
 
-        assert await tag_service.resolve_filter_tag_ids([" Hiking "]) == [
-            str(hiking.id)
-        ]
+        assert await tag_service.resolve_filter_tag_ids(
+            [" Hiking "], user_id=TEST_USER_ID
+        ) == [str(hiking.id)]
 
     @pytest.mark.asyncio
     async def test_descendant_tags_are_included(
@@ -1423,11 +1518,15 @@ class TestResolveFilterTagIds:
         mock_tag_repo.find_by_name.return_value = outdoors
         mock_tag_repo.get_descendants_for_tags.return_value = [climbing]
 
-        resolved = await tag_service.resolve_filter_tag_ids(["outdoors"])
+        resolved = await tag_service.resolve_filter_tag_ids(
+            ["outdoors"], user_id=TEST_USER_ID
+        )
 
         assert resolved is not None
         assert set(resolved) == {str(outdoors.id), str(climbing.id)}
-        mock_tag_repo.get_descendants_for_tags.assert_awaited_once_with([outdoors.id])
+        mock_tag_repo.get_descendants_for_tags.assert_awaited_once_with(
+            [outdoors.id], user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_unknown_name_is_an_error_not_a_silent_empty_filter(
@@ -1443,12 +1542,134 @@ class TestResolveFilterTagIds:
                 r"from list_journal_tags\.$"
             ),
         ):
-            await tag_service.resolve_filter_tag_ids(["nonexistent-tag"])
+            await tag_service.resolve_filter_tag_ids(
+                ["nonexistent-tag"], user_id=TEST_USER_ID
+            )
 
     @pytest.mark.asyncio
     async def test_blank_input_means_no_filter(
         self, tag_service: JournalTagService, mock_tag_repo: AsyncMock
     ) -> None:
-        assert await tag_service.resolve_filter_tag_ids([]) is None
-        assert await tag_service.resolve_filter_tag_ids(["  ", ""]) is None
+        assert (
+            await tag_service.resolve_filter_tag_ids([], user_id=TEST_USER_ID) is None
+        )
+        assert (
+            await tag_service.resolve_filter_tag_ids(["  ", ""], user_id=TEST_USER_ID)
+            is None
+        )
         mock_tag_repo.get_descendants_for_tags.assert_not_called()
+
+
+class TestEveryOperationIsScopedToTheActingUser:
+    """Another user's tag reads as a missing one; lookups carry the owner."""
+
+    @staticmethod
+    def _foreign_tag(mock_tag_repo) -> JournalTag:
+        theirs = JournalTag(user_id=OTHER_USER_ID, id=uuid4(), name="theirs")
+
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(theirs if tag_id == theirs.id else None, user_id)
+
+        mock_tag_repo.find_by_id.side_effect = find_by_id
+        return theirs
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_tag_cannot_be_updated(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        theirs = self._foreign_tag(mock_tag_repo)
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.update_tag(
+                theirs.id, mock_transaction, user_id=TEST_USER_ID, name="mine now"
+            )
+
+        mock_tag_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_tag_cannot_be_deleted(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        theirs = self._foreign_tag(mock_tag_repo)
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.delete_tag(
+                theirs.id, mock_transaction, user_id=TEST_USER_ID
+            )
+
+        mock_tag_repo.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_tag_cannot_be_assigned(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        theirs = self._foreign_tag(mock_tag_repo)
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.assign_tag(
+                7, theirs.id, mock_transaction, user_id=TEST_USER_ID
+            )
+
+        mock_tag_repo.assign_tag.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_removing_a_foreign_tag_is_a_no_op(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        theirs = self._foreign_tag(mock_tag_repo)
+
+        await tag_service.remove_tag(
+            7, theirs.id, mock_transaction, user_id=TEST_USER_ID
+        )
+
+        mock_tag_repo.remove_tag.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_merge_target_is_not_found(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        mine = JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="mine")
+        theirs = JournalTag(user_id=OTHER_USER_ID, id=uuid4(), name="theirs")
+        by_id = {mine.id: mine, theirs.id: theirs}
+
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(by_id.get(tag_id), user_id)
+
+        mock_tag_repo.find_by_id.side_effect = find_by_id
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.merge_tag(
+                mine.id, theirs.id, mock_transaction, user_id=TEST_USER_ID
+            )
+
+        mock_tag_repo.merge_into.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_filter_names_and_descendants_resolve_within_the_owner(
+        self, tag_service, mock_tag_repo
+    ):
+        mock_tag_repo.find_by_name.return_value = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="family"
+        )
+        mock_tag_repo.get_descendants_for_tags.return_value = []
+
+        await tag_service.resolve_filter_tag_ids(["family"], user_id=TEST_USER_ID)
+
+        mock_tag_repo.find_by_name.assert_awaited_once_with(
+            "family", user_id=TEST_USER_ID
+        )
+        assert mock_tag_repo.get_descendants_for_tags.await_args.kwargs == {
+            "user_id": TEST_USER_ID
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_id_in_the_filter_is_kept_so_it_matches_nothing(
+        self, tag_service, mock_tag_repo
+    ):
+        """Dropping it would leave no filter at all, and widen the search."""
+        foreign_id = str(uuid4())
+        mock_tag_repo.get_descendants_for_tags.return_value = []
+
+        assert await tag_service.resolve_filter_tag_ids(
+            [foreign_id], user_id=TEST_USER_ID
+        ) == [foreign_id]

@@ -729,6 +729,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await tag_service.remove_tag(
             journal_id,
@@ -736,6 +737,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         await relay_and_project(
@@ -770,10 +772,20 @@ class TestJournalTagHistoryProjectionE2E:
         assert tag.id is not None
 
         await tag_service.assign_tag(
-            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await tag_service.remove_tag(
-            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await relay_and_project(
             stream_client,
@@ -890,6 +902,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
+                user_id=TEST_USER_ID,
             )
 
         new_name = f"Trekking-{uuid4()}"
@@ -899,6 +912,7 @@ class TestJournalTagHistoryProjectionE2E:
             name=new_name,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         await relay_and_project(
@@ -934,7 +948,12 @@ class TestJournalTagHistoryProjectionE2E:
         )
         assert tag.id is not None
         await tag_service.assign_tag(
-            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await tag_service.update_tag(
             tag.id,
@@ -942,6 +961,7 @@ class TestJournalTagHistoryProjectionE2E:
             name=f"ReplayRenamed-{uuid4()}",
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await relay_and_project(
             stream_client,
@@ -990,6 +1010,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
+                user_id=TEST_USER_ID,
             )
 
         await tag_service.delete_tag(
@@ -997,6 +1018,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         await relay_and_project(
@@ -1027,10 +1049,19 @@ class TestJournalTagHistoryProjectionE2E:
         )
         assert tag.id is not None
         await tag_service.assign_tag(
-            journal_id, tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+            journal_id,
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await tag_service.delete_tag(
-            tag.id, async_connection, source=Provenance.UI, changed_by="ui"
+            tag.id,
+            async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await relay_and_project(
             stream_client,
@@ -1078,6 +1109,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
+                user_id=TEST_USER_ID,
             )
         await tag_service.assign_tag(
             both_id,
@@ -1085,6 +1117,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         await tag_service.merge_tag(
@@ -1093,6 +1126,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
 
         await relay_and_project(
@@ -1136,6 +1170,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await tag_service.merge_tag(
             source_tag.id,
@@ -1143,6 +1178,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
+            user_id=TEST_USER_ID,
         )
         await relay_and_project(
             stream_client,
