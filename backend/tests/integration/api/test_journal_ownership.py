@@ -47,6 +47,7 @@ from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRe
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.models.journal_tag import JournalTag
 from app.main import create_app
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     create_contact,
@@ -57,6 +58,11 @@ from tests.integration.tasks.task_seeding import (
 # response body: a 404 that still echoed the title would leak what it refused.
 OTHER_TITLE = "Somebody Else's Expedition"
 OTHER_CONTENT = "The hut is booked under my name."
+# Their tag names, likewise asserted absent: a tag's name is its content.
+OTHER_TAG = "their-assigned-tag"
+OTHER_UNASSIGNED_TAG = "their-other-tag"
+# The caller's own tag, the legitimate other half of a cross-owner merge.
+OWN_TAG = "my-own-tag"
 
 # Everything a refused request must leave identical: the journal row, and every
 # association a write could have reached. Written out as whole statements rather
@@ -71,6 +77,12 @@ UNCHANGED_ROWS = {
     ),
     "tags": text(
         "SELECT to_jsonb(t) FROM journal_tag_assignments t WHERE journal_id = :id"
+    ),
+    # Every tag the journal's owner holds: a refused tag write must leave their
+    # whole namespace — names, colours, hierarchy — as it was.
+    "tag_namespace": text(
+        "SELECT to_jsonb(t) FROM journal_tags t "
+        "WHERE user_id = (SELECT user_id FROM journals WHERE id = :id)"
     ),
 }
 
@@ -114,6 +126,7 @@ class ForeignJournal:
     assigned_tag_id: str
     unassigned_tag_id: str
     attacker_journal_id: int
+    attacker_tag_id: str
 
     def placeholders(self) -> dict[str, str]:
         return {
@@ -122,6 +135,7 @@ class ForeignJournal:
             "tag_id": self.assigned_tag_id,
             "unassigned_tag_id": self.unassigned_tag_id,
             "source_journal_id": str(self.attacker_journal_id),
+            "own_tag_id": self.attacker_tag_id,
         }
 
 
@@ -365,15 +379,15 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
     )
 
     tag_repo = SqlJournalTagRepository(async_connection)
-    assigned = await tag_repo.save(
-        JournalTag(user_id=OTHER_USER_ID, name="their-assigned-tag")
-    )
+    assigned = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name=OTHER_TAG))
     unassigned = await tag_repo.save(
-        JournalTag(user_id=OTHER_USER_ID, name="their-other-tag")
+        JournalTag(user_id=OTHER_USER_ID, name=OTHER_UNASSIGNED_TAG)
     )
     assert assigned.id is not None
     assert unassigned.id is not None
     await tag_repo.assign_tag(journal_id, assigned.id, user_id=OTHER_USER_ID)
+    own_tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name=OWN_TAG))
+    assert own_tag.id is not None
 
     return ForeignJournal(
         journal_id=journal_id,
@@ -381,6 +395,7 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
         assigned_tag_id=str(assigned.id),
         unassigned_tag_id=str(unassigned.id),
         attacker_journal_id=await create_journal(journal_repo, title="My Own Journal"),
+        attacker_tag_id=str(own_tag.id),
     )
 
 
@@ -500,3 +515,225 @@ class TestOwnershipCoverageIsComplete:
 
         assert not stale_requests, f"no longer served: {sorted(stale_requests)}"
         assert not stale_exemptions, f"no longer served: {sorted(stale_exemptions)}"
+
+
+# --------------------------------------------------------------------------- #
+# Journal tags                                                                #
+# --------------------------------------------------------------------------- #
+#
+# Tags are owned too, and their management routes are keyed by the tag rather
+# than by a journal, so the guard above never sees them. Each request below
+# names the foreign journal's owner's tag; a refusal must answer 404 and leave
+# their tag namespace and the journal's assignments exactly as they were.
+JOURNAL_TAG_ROUTE = "/api/journals/tags/{tag_id}"
+
+CROSS_USER_TAG_REQUESTS: tuple[CrossUserRequest, ...] = (
+    CrossUserRequest(
+        "PATCH",
+        JOURNAL_TAG_ROUTE,
+        body={
+            "data": {
+                "type": "journal-tags",
+                "id": "{tag_id}",
+                "attributes": {"name": "Renamed By A Stranger", "color": "#000000"},
+            }
+        },
+    ),
+    CrossUserRequest("DELETE", JOURNAL_TAG_ROUTE),
+    CrossUserRequest(
+        "POST",
+        JOURNAL_TAG_ROUTE + "/merge",
+        body={
+            "data": {
+                "type": "journal-tags",
+                "attributes": {"target_tag_id": "{own_tag_id}"},
+            }
+        },
+    ),
+)
+
+
+def _mounted_journal_tag_id_routes(app: Any) -> set[tuple[str, str]]:
+    """Every ``(method, path)`` under ``/api/journals`` that carries a tag id."""
+    return {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        if path.startswith("/api/journals/") and "{tag_id}" in path
+        for method in operations
+        if method.upper() not in {"HEAD", "OPTIONS"}
+    }
+
+
+async def _assignment_exists(
+    connection: AsyncConnection, journal_id: int, tag_id: str
+) -> bool:
+    row = await connection.execute(
+        text(
+            "SELECT 1 FROM journal_tag_assignments "
+            "WHERE journal_id = :journal_id AND tag_id = CAST(:tag_id AS uuid)"
+        ),
+        {"journal_id": journal_id, "tag_id": tag_id},
+    )
+    return row.fetchone() is not None
+
+
+async def _tag_exists(connection: AsyncConnection, tag_id: str) -> bool:
+    row = await connection.execute(
+        text("SELECT 1 FROM journal_tags WHERE id = CAST(:tag_id AS uuid)"),
+        {"tag_id": tag_id},
+    )
+    return row.fetchone() is not None
+
+
+@pytest.mark.integration
+class TestJournalTagOwnershipIsEnforced:
+    """Another user's journal tag reads, and refuses writes, as a missing one."""
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_TAG_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_another_users_tag_reads_as_an_absent_one(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client,
+        async_connection: AsyncConnection,
+        foreign_journal: ForeignJournal,
+    ) -> None:
+        before = await _snapshot(async_connection, foreign_journal.journal_id)
+
+        response = await integration_api_client.request(
+            request_spec.method,
+            request_spec.path(foreign_journal),
+            json=request_spec.filled_body(foreign_journal),
+        )
+
+        assert response.status_code == 404, (
+            f"{request_spec.method} {request_spec.route} answered "
+            f"{response.status_code} for another user's tag: {response.text[:400]}"
+        )
+        assert OTHER_TAG not in response.text
+        assert await _snapshot(async_connection, foreign_journal.journal_id) == before
+
+    async def test_merging_your_tag_into_theirs_is_refused(
+        self,
+        integration_api_client,
+        async_connection: AsyncConnection,
+        foreign_journal: ForeignJournal,
+    ) -> None:
+        """The merge *target* is owner-checked too, and the source survives."""
+        before = await _snapshot(async_connection, foreign_journal.journal_id)
+
+        response = await integration_api_client.post(
+            f"/api/journals/tags/{foreign_journal.attacker_tag_id}/merge",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "attributes": {"target_tag_id": foreign_journal.assigned_tag_id},
+                }
+            },
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert OTHER_TAG not in response.text
+        assert await _tag_exists(async_connection, foreign_journal.attacker_tag_id)
+        assert await _snapshot(async_connection, foreign_journal.journal_id) == before
+
+    async def test_their_tag_cannot_be_assigned_to_your_journal(
+        self,
+        integration_api_client,
+        async_connection: AsyncConnection,
+        foreign_journal: ForeignJournal,
+    ) -> None:
+        """The journal is the caller's, so only the tag's owner can refuse it."""
+        response = await integration_api_client.post(
+            f"/api/journals/{foreign_journal.attacker_journal_id}/relationships/tags",
+            json={
+                "data": {
+                    "type": "journal-tag-assignment",
+                    "attributes": {"tag_id": foreign_journal.unassigned_tag_id},
+                }
+            },
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert OTHER_UNASSIGNED_TAG not in response.text
+        assert not await _assignment_exists(
+            async_connection,
+            foreign_journal.attacker_journal_id,
+            foreign_journal.unassigned_tag_id,
+        )
+
+    async def test_their_tag_cannot_parent_a_new_tag(
+        self, integration_api_client, foreign_journal: ForeignJournal
+    ) -> None:
+        response = await integration_api_client.post(
+            "/api/journals/tags",
+            json={
+                "data": {
+                    "type": "journal-tags",
+                    "attributes": {
+                        "name": "child-of-a-stranger",
+                        "parent_id": foreign_journal.assigned_tag_id,
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert OTHER_TAG not in response.text
+
+    async def test_the_tag_list_holds_only_your_tags(
+        self, integration_api_client, foreign_journal: ForeignJournal
+    ) -> None:
+        response = await integration_api_client.get("/api/journals/tags")
+
+        assert response.status_code == 200
+        assert [tag["attributes"]["name"] for tag in response.json()["data"]] == [
+            OWN_TAG
+        ]
+
+    async def test_a_name_another_user_holds_is_yours_to_create(
+        self, integration_api_client, foreign_journal: ForeignJournal
+    ) -> None:
+        """Names are unique per owner: their tag does not block yours."""
+        response = await integration_api_client.post(
+            "/api/journals/tags",
+            json={"data": {"type": "journal-tags", "attributes": {"name": OTHER_TAG}}},
+        )
+
+        assert response.status_code == 201, response.text[:400]
+        assert response.json()["data"]["id"] != foreign_journal.assigned_tag_id
+
+    async def test_filtering_by_their_tag_returns_nothing(
+        self, integration_api_client, foreign_journal: ForeignJournal
+    ) -> None:
+        """Their journal carries the tag; the caller still sees no journal."""
+        response = await integration_api_client.get(
+            "/api/journals", params={"tag_ids": foreign_journal.assigned_tag_id}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+        assert OTHER_TITLE not in response.text
+
+
+@pytest.mark.integration
+class TestJournalTagOwnershipCoverageIsComplete:
+    """Every journal route keyed by a tag id has a cross-user test."""
+
+    def test_every_journal_tag_id_route_is_covered(self, test_settings) -> None:
+        mounted = _mounted_journal_tag_id_routes(create_app(settings=test_settings))
+        tested = {
+            (spec.method, spec.route)
+            for spec in (*CROSS_USER_REQUESTS, *CROSS_USER_TAG_REQUESTS)
+        }
+
+        uncovered = mounted - tested
+        assert not uncovered, (
+            "these journal tag-by-id operations have no ownership test: "
+            f"{sorted(uncovered)}. Add each to CROSS_USER_TAG_REQUESTS."
+        )
+        stale = {(s.method, s.route) for s in CROSS_USER_TAG_REQUESTS} - mounted
+        assert not stale, f"no longer served: {sorted(stale)}"
