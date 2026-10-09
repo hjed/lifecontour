@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
+import itertools
 import json
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -1294,8 +1295,13 @@ class TestPushCheckoutCreate:
         mock_begin_3.__aexit__ = AsyncMock(return_value=False)
         third_session.begin = MagicMock(return_value=mock_begin_3)
         third_session.execute = AsyncMock()
+        # The third session serves every later write: marking the post,
+        # clearing the mark once Snipe-IT refuses it, and unlocking the row.
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=itertools.chain(
+                [first_session_ctx, second_session_ctx],
+                itertools.repeat(third_session_ctx),
+            )
         )
 
         service = SnipeItSyncService(

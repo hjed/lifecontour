@@ -2707,6 +2707,7 @@ class SnipeItSyncService:
         snipeit_asset_id = pair.asset_id
         external_id = pair.checkout_external_id
         asset_dates_before: AssetUsageDates | None = None
+        previously_posted = False
 
         # Check if already synced and acquire a distributed lock by marking as pending
         async with session_factory() as session:
@@ -2747,6 +2748,7 @@ class SnipeItSyncService:
                     asset_dates_before = AssetUsageDates.from_reference(
                         row.reference_data
                     )
+                    previously_posted = self._recorded_posting(row.reference_data)
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
@@ -2854,10 +2856,24 @@ class SnipeItSyncService:
                 await self._mark_checkout_posting(
                     journal_id, external_id, asset_dates_before, session_factory
                 )
-                await self._api_client.checkout_asset(
-                    asset_id=snipeit_asset_id,
-                    payload=payload,
-                )
+                try:
+                    await self._api_client.checkout_asset(
+                        asset_id=snipeit_asset_id,
+                        payload=payload,
+                    )
+                except SnipeItAPIError as exc:
+                    # Snipe-IT answered and refused, so this post took nothing.
+                    # An earlier post whose answer was lost may hold the asset
+                    # (the likely cause of the refusal), so its marker stays.
+                    if exc.status_code < 500 and not previously_posted:
+                        await self._mark_checkout_posting(
+                            journal_id,
+                            external_id,
+                            asset_dates_before,
+                            session_factory,
+                            posting=False,
+                        )
+                    raise
                 # Keep the posted entry's id too, so another usage of the asset
                 # that day cannot link it as its own.
                 snipeit_log_id = await self._find_unlinked_activity(
@@ -3048,12 +3064,17 @@ class SnipeItSyncService:
         external_id: str,
         asset_dates: AssetUsageDates,
         session_factory: Any,
+        *,
+        posting: bool = True,
     ) -> None:
         """Mark the in-progress checkout row as posting, with the asset's dates before.
 
         Until the posted entry is claimed, another journal's link waits for it
         (see :meth:`_claim_activity_log`): that entry cannot be told apart from
-        one made by hand.
+        one made by hand. The marker also tells an abandoned attempt that may
+        have taken the asset (see :meth:`_return_abandoned_asset`) from one that
+        cannot have. ``posting=False`` clears it, keeping the dates, once
+        Snipe-IT has refused the post.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -3071,10 +3092,8 @@ class SnipeItSyncService:
                         "internal_uuid": str(journal_id),
                         "external_id": external_id,
                         "reference_data": json.dumps(
-                            {
-                                _ASSET_DATES_BEFORE: asset_dates.to_reference(),
-                                _POSTING: True,
-                            }
+                            {_ASSET_DATES_BEFORE: asset_dates.to_reference()}
+                            | ({_POSTING: True} if posting else {})
                         ),
                     },
                 )
