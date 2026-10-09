@@ -56,8 +56,11 @@ class StravaWorkerSettings(SharedARQWorkerSettings, WorkerSettingsBase):
         sync_strava_activity_batch,
         periodic_sync_all_strava_accounts,
         reconcile_in_progress_parents,  # shared fan-out reconciler (ITER14-003)
+        func(backfill_strava_elapsed_durations, timeout=3600),  # one-off
     ]
-    on_startup = _on_startup  # build_worker_lifecycle(log_consumer_errors=True)
+    # build_worker_lifecycle(log_consumer_errors=True), then enqueue the
+    # duration backfill (see below)
+    on_startup = _on_startup_with_backfill
     on_shutdown = _on_shutdown
     redis_settings = redis_settings_from_url(settings.redis_url)
     queue_name = STRAVA_ARQ_QUEUE_NAME
@@ -140,6 +143,42 @@ arq retries a job only on `Retry` or cancellation. Only a rate limit raises
 passes to `is_final_attempt` because arq does not put `max_tries` in the job
 context); on that attempt it records the failure instead, because arq drops a
 `Retry` raised then without running the job again.
+
+## Activity Duration
+
+An activity's fitness `duration` is Strava's `elapsed_time` in seconds — how long
+the activity took, stops included, the same span as the journal's event date
+range. It used to be `moving_time`.
+
+### One-off elapsed-time backfill
+
+Durations synced before that change are corrected by
+`backfill_strava_elapsed_durations` (in [`duration_backfill.py`](duration_backfill.py)).
+Worker startup enqueues it for every user in `user_strava_auth` whose Redis
+marker `strava:backfill:elapsed_duration:v1:{user_id}` is unset; the job sets
+the marker when it succeeds.
+
+The job lists all of the athlete's activities (200 per page), waiting out the
+15-minute rate limit in place. A daily limit defers the whole job; nothing is
+written until every page is listed. It then emits
+`journal_event.fitness_duration_corrected` outbox events, each carrying the
+duration the sync wrote (`expected_durations`) and the one to store instead
+(`corrected_duration`):
+
+- a journal's total moving time across its linked activities → their total
+  elapsed time (a journal holds several after an additive merge);
+- for a merged journal, also each activity's moving time → its elapsed time,
+  as a webhook update of one merged activity re-saved that activity alone.
+
+The backend applies each as a compare-and-set, so a duration the user has
+edited (it matches no expected value) is left alone. A journal with an activity
+no longer on Strava, or merged with a manual or non-Strava journal, matches
+nothing and is left as it is.
+
+To run it again, delete the user's marker key and restart the worker (startup
+clears arq's retained result for the job so it can be enqueued again). An
+already-corrected duration matches no expected value, so a rerun changes
+nothing.
 
 ## Stream Consumer
 
