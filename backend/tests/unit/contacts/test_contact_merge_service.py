@@ -653,7 +653,7 @@ class TestContactMergeExternalReferences:
         )
 
         mock_sync_metadata_repo.repoint_contact_links.assert_awaited_once_with(
-            SOURCE_ID, SURVIVOR_ID, mock_transaction
+            SOURCE_ID, SURVIVOR_ID, mock_transaction, user_id=TEST_USER_ID
         )
         ordered = [call[0] for call in manager.mock_calls]
         assert ordered.index("repoint_refs") < ordered.index("delete")

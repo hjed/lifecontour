@@ -302,14 +302,15 @@ class TestMergeGearUsage:
                 text(
                     """
                     INSERT INTO sync_metadata
-                        (internal_uuid, integration_source, external_id,
+                        (user_id, internal_uuid, integration_source, external_id,
                          last_synced_at, version_hash, sync_status, retry_count,
                          created_at, updated_at)
-                    VALUES (:journal, :source, :external_id, now(), 'hash',
-                            'success', 0, now(), now())
+                    VALUES (:user_id, :journal, :source, :external_id, now(),
+                            'hash', 'success', 0, now(), now())
                     """
                 ),
                 {
+                    "user_id": USER_ID,
                     "journal": str(journal_id),
                     "source": source,
                     "external_id": f"{source}:{asset}:{journal_id}",
@@ -336,5 +337,57 @@ class TestMergeGearUsage:
                 (str(source_id), f"snipeit_checkin:41:{source_id}"),
                 (str(target_id), f"snipeit_checkout:42:{target_id}"),
                 (str(target_id), f"snipeit_checkin:42:{target_id}"),
+            ]
+        )
+
+    async def test_only_the_owners_snipeit_pairs_move(
+        self,
+        merge_service: JournalMergeService,
+        journal_repo: SqlJournalRepository,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """A pair another user's instance keyed to the source's id is not the
+        owner's to move."""
+        target_id = await self._journal(journal_repo, "Trip")
+        source_id = await self._journal(journal_repo, "Gear for the trip")
+        for owner, journal_id, asset in (
+            (USER_ID, source_id, 41),
+            # Another user's pair keyed to the source id stays where it is.
+            ("other-user-456", source_id, 43),
+        ):
+            await clean_database.execute(
+                text(
+                    """
+                    INSERT INTO sync_metadata
+                        (user_id, internal_uuid, integration_source, external_id,
+                         last_synced_at, version_hash, sync_status, retry_count,
+                         created_at, updated_at)
+                    VALUES (:user_id, :journal, 'snipeit_checkout', :external_id,
+                            now(), 'hash', 'success', 0, now(), now())
+                    """
+                ),
+                {
+                    "user_id": owner,
+                    "journal": str(journal_id),
+                    "external_id": f"snipeit_checkout:{asset}:{journal_id}",
+                },
+            )
+
+        await merge_service.merge_journals(target_id, source_id, clean_database)
+
+        rows = await clean_database.execute(
+            text(
+                """
+                SELECT user_id, internal_uuid, external_id FROM sync_metadata
+                WHERE integration_source = 'snipeit_checkout'
+                """
+            )
+        )
+        assert sorted(
+            (r.user_id, r.internal_uuid, r.external_id) for r in rows
+        ) == sorted(
+            [
+                (USER_ID, str(target_id), f"snipeit_checkout:41:{target_id}"),
+                ("other-user-456", str(source_id), f"snipeit_checkout:43:{source_id}"),
             ]
         )

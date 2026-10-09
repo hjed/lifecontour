@@ -283,7 +283,9 @@ class JournalMergeService:
         await self._repoint_integration_links(
             target_id, source_id, target.user_id, fitness_merge_mode, transaction
         )
-        await self._repoint_gear_usage_pairs(target_id, source_id, transaction)
+        await self._repoint_gear_usage_pairs(
+            target_id, source_id, target.user_id, transaction
+        )
 
         # 8. Type Data Scalable merge
         await self._merge_type_data(
@@ -643,6 +645,7 @@ class JournalMergeService:
             source_id,
             target_id,
             transaction,
+            user_id=owner_id,
             keep_colliding_source_links=is_additive,
             extra_target_links=(
                 {STRAVA_SOURCE: target_activity_id} if target_activity_id else None
@@ -754,7 +757,7 @@ class JournalMergeService:
 
     @staticmethod
     async def _repoint_gear_usage_pairs(
-        target_id: int, source_id: int, transaction: AsyncConnection
+        target_id: int, source_id: int, owner_id: str, transaction: AsyncConnection
     ) -> None:
         """Move the source's Snipe-IT checkout/check-in pairs onto the target.
 
@@ -764,6 +767,7 @@ class JournalMergeService:
         deletion while the merged journal still lists the gear. A pair the
         target already has for that asset stays with the source: the target's
         own is the one that stands, and the source's check-in stays with it.
+        Only the owner's pairs move or count as the target's.
         """
         # The pair's asset is the middle of its ``{source}:{asset}:{journal}``
         # key; a check-in moves only with its checkout, never without it.
@@ -776,18 +780,24 @@ class JournalMergeService:
                         s.external_id, ':' || :source_uuid || '$', ':' || :target_uuid
                     ),
                     updated_at = now()
-                WHERE s.integration_source IN ('snipeit_checkout', 'snipeit_checkin')
+                WHERE s.user_id = :owner_id
+                  AND s.integration_source IN ('snipeit_checkout', 'snipeit_checkin')
                   AND s.internal_uuid = :source_uuid
                   AND NOT EXISTS (
                       SELECT 1 FROM sync_metadata t
-                      WHERE t.integration_source = 'snipeit_checkout'
+                      WHERE t.user_id = :owner_id
+                        AND t.integration_source = 'snipeit_checkout'
                         AND t.external_id = 'snipeit_checkout:'
                             || split_part(s.external_id, ':', 2)
                             || ':' || :target_uuid
                   )
                 """
             ),
-            {"source_uuid": str(source_id), "target_uuid": str(target_id)},
+            {
+                "owner_id": owner_id,
+                "source_uuid": str(source_id),
+                "target_uuid": str(target_id),
+            },
         )
 
     @staticmethod

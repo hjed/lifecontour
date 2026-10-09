@@ -272,6 +272,43 @@ class TestInboundLinkOwner:
         )
 
     @pytest.mark.asyncio
+    async def test_another_users_link_is_not_this_users_processed_event(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The idempotency check reads the event owner's links only: another
+        user's contact for the same external id never answers this user's
+        ``contact.created`` as already processed."""
+        external_id = "people/cTheirs"
+        their_contact = await seed_contact(
+            async_connection, user_id="other-user-456", first_name="Theirs"
+        )
+        await _seed_google_link(
+            async_connection,
+            external_id=external_id,
+            internal_id=their_contact,
+            version_hash="theirs",
+            reference_data=json.dumps({"resource_name": external_id}),
+            user_id="other-user-456",
+        )
+        processor = OutboxEventProcessor(
+            build_contact_service(async_connection), async_connection
+        )
+
+        # Until the global key goes the link write is refused; what matters is
+        # that the event was not resolved to the other user's contact.
+        with pytest.raises(PermanentOutboxEventProcessingError):
+            await processor.process_event(
+                _contact_event(
+                    "contact.created",
+                    external_id=external_id,
+                    first_name="Mine",
+                    last_name="Too",
+                    etag="etag-mine",
+                    tag="VIP",
+                )
+            )
+
+    @pytest.mark.asyncio
     async def test_an_update_whose_link_has_no_owner_yet_is_retried(
         self, async_connection: AsyncConnection
     ) -> None:

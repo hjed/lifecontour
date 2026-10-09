@@ -46,16 +46,19 @@ async def _link_sync_metadata(
     internal_id: int | None = None,
     internal_uuid: str | None = None,
     entity_type: str = "journal",
+    user_id: str = USER_ID,
 ) -> None:
     await conn.execute(
         text("""
             INSERT INTO sync_metadata
-                (internal_id, internal_uuid, integration_source, external_id,
-                 last_synced_at, version_hash, sync_status, internal_entity_type)
-            VALUES (:internal_id, :internal_uuid, :source, :external_id, now(), 'h',
-                    'success', :entity_type)
+                (user_id, internal_id, internal_uuid, integration_source,
+                 external_id, last_synced_at, version_hash, sync_status,
+                 internal_entity_type)
+            VALUES (:user_id, :internal_id, :internal_uuid, :source, :external_id,
+                    now(), 'h', 'success', :entity_type)
         """),
         {
+            "user_id": user_id,
             "internal_id": internal_id,
             "internal_uuid": internal_uuid,
             "source": source,
@@ -160,6 +163,7 @@ class TestGetJournalByExternalId:
             source="snipeit_checkout",
             external_id=f"snipeit_checkout:42:{other_journal}",
             internal_uuid=str(other_journal),
+            user_id="someone",
         )
 
         async with authenticated_lifespan_client() as client:
@@ -206,6 +210,29 @@ class TestGetJournalByExternalId:
         assert payload["message"] == "No journal is linked to strava id '999'"
         assert payload["source"] == "strava"
         assert payload["external_id"] == "999"
+
+    @pytest.mark.asyncio
+    async def test_an_album_another_user_links_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await _insert_journal(clean_database, "Theirs", user_id="someone")
+        album_id = str(uuid4())
+        await _link_sync_metadata(
+            clean_database,
+            source="immich_album",
+            external_id=album_id,
+            internal_id=journal_id,
+            user_id="someone",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool(
+                client,
+                "get_journal_by_external_id",
+                {"source": "immich_album", "external_id": album_id},
+            )
+
+        assert payload["error"] == "Not found"
 
     @pytest.mark.asyncio
     async def test_invalid_source_is_rejected_with_allowed_values(
@@ -279,6 +306,31 @@ class TestGetContactByExternalId:
 
         assert link["source"] == "google_contacts"
         assert payload["id"] == str(contact_id)
+
+    @pytest.mark.asyncio
+    async def test_a_contact_another_user_links_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        contact_id = await seed_contact(
+            clean_database, user_id="someone", first_name="Theirs"
+        )
+        await _link_sync_metadata(
+            clean_database,
+            source="google",
+            external_id="people/c-theirs",
+            internal_id=contact_id,
+            entity_type="contact",
+            user_id="someone",
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool(
+                client,
+                "get_contact_by_external_id",
+                {"source": "google", "external_id": "people/c-theirs"},
+            )
+
+        assert payload["error"] == "Not found"
 
     @pytest.mark.asyncio
     async def test_unknown_id_is_not_found(self, authenticated_lifespan_client) -> None:

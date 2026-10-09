@@ -400,6 +400,7 @@ class SqlContactRepository(ContactRepository):
             WHERE sm.internal_entity_type = 'contact'
             AND sm.integration_source = :external_system
             AND sm.external_id = :external_entity_id
+            AND sm.user_id = :user_id
             AND c.user_id = :user_id
         """
         )

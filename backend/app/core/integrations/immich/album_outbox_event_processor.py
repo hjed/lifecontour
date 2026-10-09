@@ -61,6 +61,20 @@ class ImmichAlbumOutboxEventProcessingError(Exception):
     """Raised when Immich album outbox event processing fails."""
 
 
+def _album_owner(payload: ImmichAlbumSyncEventData) -> str:
+    """The user whose album the event describes.
+
+    The album's links are that user's, so every link lookup is keyed by it; an
+    event that names no owner cannot be matched to anyone's links.
+    """
+    owner = payload.journal_data.get("user_id")
+    if not owner:
+        raise ImmichAlbumOutboxEventProcessingError(
+            f"Immich album event for {payload.external_id!r} names no owner (user_id)"
+        )
+    return str(owner)
+
+
 class ImmichAlbumOutboxEventProcessor:
     """Creates/updates PHOTO_ALBUM journals from Immich album sync events."""
 
@@ -158,8 +172,9 @@ class ImmichAlbumOutboxEventProcessor:
         that still exists. Preferring sync_metadata prevents a stray/duplicate
         external_reference from repointing the album at the wrong journal.
         """
+        owner = _album_owner(payload)
         metadata = await self.sync_metadata_repo.find_by_external_id(
-            INTEGRATION_SOURCE, payload.external_id
+            INTEGRATION_SOURCE, payload.external_id, user_id=owner
         )
         if (
             metadata is not None
@@ -168,7 +183,7 @@ class ImmichAlbumOutboxEventProcessor:
         ):
             return int(metadata.internal_id)
 
-        link = await self.album_link_repo.find_link(payload.external_id)
+        link = await self.album_link_repo.find_link(payload.external_id, user_id=owner)
         if link is not None and await self._journal_exists(link.internal_entity_id):
             return int(link.internal_entity_id)
 
@@ -235,7 +250,7 @@ class ImmichAlbumOutboxEventProcessor:
             return await self._apply_create(payload)
 
         metadata = await self.sync_metadata_repo.find_by_external_id(
-            INTEGRATION_SOURCE, payload.external_id
+            INTEGRATION_SOURCE, payload.external_id, user_id=_album_owner(payload)
         )
         if not self.sync_metadata_repo.should_sync(metadata, payload.version_hash):
             logger.info("Skipping unchanged Immich album", album_id=payload.external_id)
@@ -250,7 +265,7 @@ class ImmichAlbumOutboxEventProcessor:
         # references somehow exist, we must compare against the one pointing at
         # the journal we are updating, not just the newest.
         link = await self.album_link_repo.find_link(
-            payload.external_id, journal_id=journal_id
+            payload.external_id, user_id=_album_owner(payload), journal_id=journal_id
         )
         # Without a link anchor we cannot tell whether the journal was edited
         # locally, so treat it as protected to avoid overwriting user data (the
@@ -459,7 +474,7 @@ class ImmichAlbumOutboxEventProcessor:
         people = payload.album_metadata.get("people") or []
         person_ids = [p["id"] for p in people if isinstance(p, dict) and p.get("id")]
         resolved = await self.ext_ref_repo.get_contact_ids_by_immich_person_ids(
-            person_ids
+            person_ids, user_id=_album_owner(payload)
         )
         desired = set(resolved.values())
 

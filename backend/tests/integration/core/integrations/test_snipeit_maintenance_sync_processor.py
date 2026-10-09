@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.journal_outbox_event_processor import (
+    JournalOutboxEventProcessingError,
     JournalOutboxEventProcessor,
 )
 from tests.integration.core.integrations.journal_sync_seeding import (
@@ -397,4 +398,48 @@ class TestOnlyTheLatestSnipeItEventApplies:
         result = await processor.process_event(event)
 
         assert result["status"] == "skipped"
+        assert await _journal_titles(async_connection) == []
+
+    async def test_another_owners_sync_row_does_not_vouch_for_this_event(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Snipe-IT ids are per instance: the same maintenance id recorded by
+        another user's instance says nothing about this owner's record."""
+        gear_item_id = await _create_gear_item(async_connection)
+        processor = build_processor(async_connection)
+        event = _maintenance_event(gear_item_id, maintenance_id=17)
+        event_data: dict[str, Any] = event.event_data  # type: ignore[assignment]
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO sync_metadata
+                    (user_id, integration_source, external_id, last_synced_at,
+                     version_hash, sync_status, retry_count, created_at, updated_at)
+                VALUES
+                    ('other-user-456', 'snipeit_maintenance', 'snipeit_maint:17',
+                     now(), :version_hash, 'success', 0, now(), now())
+                """
+            ),
+            {"version_hash": event_data["journal_data"]["version_hash"]},
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "skipped"
+        assert await _journal_titles(async_connection) == []
+
+    async def test_an_event_naming_no_owner_fails(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Whose sync row vouches for the event cannot be guessed."""
+        gear_item_id = await _create_gear_item(async_connection)
+        processor = build_processor(async_connection)
+        event = _maintenance_event(gear_item_id, maintenance_id=18)
+        await _record_sent(async_connection, event)
+        event_data: dict[str, Any] = event.event_data  # type: ignore[assignment]
+        del event_data["journal_data"]["user_id"]
+
+        with pytest.raises(JournalOutboxEventProcessingError, match="no owner"):
+            await processor.process_event(event)
+
         assert await _journal_titles(async_connection) == []

@@ -1156,6 +1156,37 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
 - [ ] `docs/architecture/integration-architecture.md` — the canonical link key is
   `(user_id, integration_source, external_id)`.
 
+**Delivery:** a four-layer stack in deploy order. Scoping a statement by its owner changes nothing
+while the global index exists (every row for an external id has one owner), so the readers ship
+first and the contract last:
+- **15a** — backend and `core_shared`: `SyncMetadataRepository.find_by_external_id` /
+  `find_and_lock` / `update_reference_data` / `repoint_contact_links` / `repoint_journal_links`,
+  `IntegrationLinkRepository.find_link_by_external` / `get_contact_ids_by_immich_person_ids`,
+  `AlbumSyncReadRepository.find_link` / `delete`, the `find_by_external_reference` join, the
+  inbound contact processor, the Immich album processor, the Snipe-IT superseded check and the
+  journal-merge gear pairs. ✅
+- **15b** — Google, Immich and Strava worker lookups, updates and deletes.
+- **15c** — Snipe-IT worker (sync service and stream consumer).
+- **15d** — migration `0127`, removal of the cross-owner refusal, documentation.
+
+**Decisions (recorded during implementation):**
+- **What is scoped.** Every statement matching on an external id (`=`, `= ANY`, `LIKE`, joins,
+  `NOT EXISTS` subqueries) and every UPDATE / DELETE takes `user_id = :user_id`. A SELECT keyed only
+  by an internal id, or joined through an owner-scoped entity, stays as it is: the link is a child
+  row of an aggregate already proven to be the user's (Delivery Rule 4).
+- **Where the owner comes from (15a).** Inbound contact events: `payload.user_id`. Immich album and
+  Snipe-IT maintenance events: `journal_data["user_id"]`; an event naming none fails rather than
+  being matched to anyone's link. Contact merge: the acting user. Journal merge: the journals'
+  owner. The photo-album link delete runs from four type-removal paths that carry no user, so it is
+  scoped in SQL to the journal's own owner rather than threading one through.
+- **`find_internal_by_external` deleted** (no caller). `find_by_external_reference` already took
+  `user_id` (Phase 4, through `contacts.user_id`); its join now also requires the link's owner.
+  Both MCP external-id tools were already owner-scoped through their join; their foreign-link
+  tests pin it.
+- **Album participants were a live leak.** An album tagging an Immich person another user had
+  linked made that user's contact a participant of this user's journal; the person lookup is now
+  the album owner's.
+
 ---
 
 #### Phase 16: Remove the single-user timezone fallback

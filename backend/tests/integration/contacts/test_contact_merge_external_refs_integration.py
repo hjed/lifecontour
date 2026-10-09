@@ -117,16 +117,17 @@ async def _add_sync_metadata(
         text(
             """
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id, last_synced_at,
-                version_hash, sync_status, retry_count,
+                user_id, internal_id, integration_source, external_id,
+                last_synced_at, version_hash, sync_status, retry_count,
                 internal_entity_type, external_entity_type, created_at, updated_at
             ) VALUES (
-                :iid, :source, :eid, now(), 'h', 'success', 0,
+                :uid, :iid, :source, :eid, now(), 'h', 'success', 0,
                 :internal_entity_type, :external_entity_type, now(), now()
             )
             """
         ),
         {
+            "uid": TEST_USER_ID,
             "iid": internal_id,
             "source": integration_source,
             "eid": external_id,
@@ -314,7 +315,7 @@ class TestSyncMetadataRepoint:
 
         repo = SyncMetadataRepository(async_connection)
         collisions = await repo.repoint_contact_links(
-            source_id, survivor_id, async_connection
+            source_id, survivor_id, async_connection, user_id=TEST_USER_ID
         )
 
         assert len(collisions) == 1
