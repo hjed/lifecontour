@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from core_shared.models.sync_job import SyncJob
+from core_shared.models.sync_job import SyncJob, SyncJobStatus
 
 # Full sync_jobs column list (static identifiers) reused across SELECT/RETURNING
 # clauses so every query stays in sync as the schema grows.
@@ -180,6 +180,32 @@ class SyncJobRepository:
             return None
 
         return self._row_to_sync_job(row)
+
+    async def fail_if_queued(
+        self, job_id: str, completed_at: datetime, error_message: str
+    ) -> bool:
+        """Fail a job that never left ``queued``; return whether it did.
+
+        For a job whose enqueue outcome is unknown: a worker that already picked
+        it up has moved the row on, and that progress must not be overwritten.
+        """
+        result = await self.conn.execute(
+            text(
+                "UPDATE sync_jobs "
+                "SET status = :failed, completed_at = :completed_at, "
+                "error_message = :error_message, updated_at = :updated_at "
+                "WHERE job_id = :job_id AND status = :queued"
+            ),
+            {
+                "job_id": job_id,
+                "failed": SyncJobStatus.FAILED.value,
+                "queued": SyncJobStatus.QUEUED.value,
+                "completed_at": completed_at,
+                "error_message": error_message,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+        return bool(result.rowcount)
 
     async def record_listing(
         self,

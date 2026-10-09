@@ -17,6 +17,8 @@ from core_shared.integration_constants import (
 from core_shared.logging import get_logger
 from core_shared.metrics import queue_depth
 from core_shared.repositories import SyncJobRepository
+from core_shared.tracked_enqueue import JobNotEnqueuedError, enqueue_tracked_job
+from opentelemetry.propagate import inject
 
 from app.core.integrations.database import IntegrationDatabaseManager
 from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundException
@@ -73,6 +75,64 @@ class TaskQueueService:
             await self._arq_pool.close()
             self._arq_pool = None
 
+    async def _enqueue_tracked_job(
+        self,
+        function: str,
+        *args: Any,
+        queue_name: str,
+        user_id: str | int,
+        integration_source: str,
+        sync_type: str,
+    ) -> str:
+        """Queue a sync job whose ``sync_jobs`` row is committed first.
+
+        The row is written before the job is queued, so a worker that runs it at
+        once always finds the row; a job that is not queued fails its row. The
+        user-job association is stored only once the job is queued.
+
+        Raises:
+            JobEnqueueError: ARQ returned no job.
+        """
+        pool = await self._get_arq_pool()
+
+        carrier: dict[str, str] = {}
+        try:
+            inject(carrier)
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            async with self.db_manager.get_session() as session:
+                job_id = await enqueue_tracked_job(
+                    session,
+                    pool,
+                    function,
+                    *args,
+                    queue_name=queue_name,
+                    user_id=str(user_id),
+                    integration_source=integration_source,
+                    sync_type=sync_type,
+                    otel_carrier=carrier,
+                    _defer_until=None,
+                )
+        except JobNotEnqueuedError as e:
+            raise JobEnqueueError(
+                message=f"Failed to enqueue {function} - no job returned",
+                integration_source=integration_source,
+                reason="ARQ pool returned None",
+            ) from e
+
+        logger.info(
+            "Successfully enqueued sync job",
+            job_id=job_id,
+            function=function,
+            user_id=user_id,
+            integration_source=integration_source,
+            sync_type=sync_type,
+        )
+        await self._store_user_job_association(user_id, job_id)
+        return job_id
+
     async def enqueue_google_sync(
         self, google_account_email: str, user_id: str | int, sync_type: str = "smart"
     ) -> str:
@@ -99,62 +159,16 @@ class TaskQueueService:
         )
 
         try:
-            # Get reusable ARQ pool for job enqueueing
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            # Enqueue the sync job
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 "sync_google_contacts",
                 google_account_email,
                 user_id,
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,  # Run immediately
-                _queue_name=ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue job - no job returned",
-                    integration_source="google",
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Google Contacts sync job",
-                job_id=job_id,
-                google_account_email=google_account_email,
+                queue_name=ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source="google",
                 sync_type=sync_type,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source="google",
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Google Contacts sync job",
@@ -191,60 +205,16 @@ class TaskQueueService:
         )
 
         try:
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 "sync_calendar_events",
                 google_account_email,
                 user_id,
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,
-                _queue_name=ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue calendar sync job - no job returned",
-                    integration_source="google",
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Google Calendar sync job",
-                job_id=job_id,
-                google_account_email=google_account_email,
+                queue_name=ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source="google",
                 sync_type=sync_type,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source="google",
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Google Calendar sync job",
@@ -281,58 +251,15 @@ class TaskQueueService:
         )
 
         try:
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 "sync_strava_activities",
                 str(user_id),
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,
-                _queue_name=STRAVA_ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue Strava sync job - no job returned",
-                    integration_source="strava",
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Strava activity sync job",
-                job_id=job_id,
+                queue_name=STRAVA_ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source="strava",
                 sync_type=sync_type,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source="strava",
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Strava activity sync job",
@@ -368,58 +295,15 @@ class TaskQueueService:
         )
 
         try:
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 "sync_snipeit_assets",
                 str(user_id),
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,
-                _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue Snipe-IT sync job - no job returned",
-                    integration_source="snipeit",
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Snipe-IT sync job",
-                job_id=job_id,
+                queue_name=SNIPEIT_ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source="snipeit",
                 sync_type=sync_type,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source="snipeit",
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Snipe-IT sync job",
@@ -455,58 +339,15 @@ class TaskQueueService:
         )
 
         try:
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 "sync_snipeit_maintenances",
                 str(user_id),
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,
-                _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue Snipe-IT maintenance sync job - no job returned",
-                    integration_source="snipeit",
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Snipe-IT maintenance sync job",
-                job_id=job_id,
+                queue_name=SNIPEIT_ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source="snipeit",
                 sync_type=sync_type,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source="snipeit",
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Snipe-IT maintenance sync job",
@@ -1031,59 +872,15 @@ class TaskQueueService:
         )
 
         try:
-            pool = await self._get_arq_pool()
-
-            from opentelemetry.propagate import inject
-
-            carrier: dict[str, str] = {}
-            try:
-                inject(carrier)
-            except Exception:  # noqa: BLE001
-                pass
-
-            job = await pool.enqueue_job(
+            return await self._enqueue_tracked_job(
                 task_name,
                 str(user_id),
                 sync_type,
-                otel_carrier=carrier,
-                _defer_until=None,
-                _queue_name=IMMICH_ARQ_QUEUE_NAME,
-            )
-
-            if not job:
-                raise JobEnqueueError(
-                    message="Failed to enqueue Immich sync job - no job returned",
-                    integration_source=integration_source,
-                    reason="ARQ pool returned None",
-                )
-
-            job_id = job.job_id
-            logger.info(
-                "Successfully enqueued Immich sync job",
-                job_id=job_id,
+                queue_name=IMMICH_ARQ_QUEUE_NAME,
                 user_id=user_id,
+                integration_source=integration_source,
                 sync_type=sync_type,
-                task_name=task_name,
             )
-
-            # Store user-job association for security
-            await self._store_user_job_association(user_id, job_id)
-
-            # Persist job to database for history tracking
-            async with self.db_manager.get_session() as session:
-                async with session.begin():
-                    conn = await session.connection()
-                    repo = SyncJobRepository(conn)
-                    await repo.create(
-                        job_id=job_id,
-                        user_id=str(user_id),
-                        integration_source=integration_source,
-                        sync_type=sync_type,
-                        status="queued",
-                    )
-
-            return job_id
-
         except Exception as e:
             logger.error(
                 "Failed to enqueue Immich sync job",
