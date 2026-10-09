@@ -272,15 +272,15 @@ class TestAlbumOutboxEmission:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata
-                    (internal_id, integration_source, external_id,
+                    (user_id, internal_id, integration_source, external_id,
                      last_synced_at, version_hash, sync_status,
                      retry_count, created_at, updated_at)
                 VALUES
-                    (0, 'immich_album', :external_id,
+                    (:user_id, 0, 'immich_album', :external_id,
                      NOW(), 'stale-album-hash', 'success',
                      0, NOW(), NOW())
             """),
-            {"external_id": album_id},
+            {"user_id": USER_ID, "external_id": album_id},
         )
 
         service = _album_sync_service(

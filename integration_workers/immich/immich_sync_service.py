@@ -275,16 +275,18 @@ class ImmichSyncService:
             result.unchanged += 1
 
     async def _find_album_sync_metadata(self, album_id: str) -> Any | None:
-        """Look up album SyncMetadata by Immich album ID."""
+        """Look up the syncing user's album SyncMetadata by Immich album ID."""
         query = text("""
             SELECT id, version_hash, sync_status
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """)
         result = await self._conn.execute(
             query,
             {
+                "user_id": self._user_id,
                 "integration_source": self._ALBUM_INTEGRATION_SOURCE,
                 "external_id": album_id,
             },
@@ -793,7 +795,7 @@ class ImmichSyncService:
     # -- Database operations (integration-specific) -----------------------
 
     async def _find_external_reference(self, person_id: str) -> Any | None:
-        """Look up the person→contact link from the canonical store.
+        """Look up the syncing user's person→contact link from the canonical store.
 
         Reads ``sync_metadata`` (the consolidated link store, ITER15-001) and
         aliases ``internal_id`` to ``internal_entity_id`` so callers that read
@@ -804,7 +806,8 @@ class ImmichSyncService:
         query = text("""
             SELECT id, internal_id AS internal_entity_id
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND internal_entity_type = :internal_entity_type
               AND external_entity_type = :external_entity_type
               AND external_id = :external_id
@@ -815,6 +818,7 @@ class ImmichSyncService:
         result = await self._conn.execute(
             query,
             {
+                "user_id": self._user_id,
                 "integration_source": self._integration_source,
                 "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
                 "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
@@ -824,16 +828,18 @@ class ImmichSyncService:
         return result.fetchone()
 
     async def _find_sync_metadata(self, external_id: str) -> Any | None:
-        """Look up SyncMetadata by external ID."""
+        """Look up the syncing user's SyncMetadata by external ID."""
         query = text("""
             SELECT id, version_hash, sync_status
             FROM sync_metadata
-            WHERE integration_source = :integration_source
+            WHERE user_id = :user_id
+              AND integration_source = :integration_source
               AND external_id = :external_id
         """)
         result = await self._conn.execute(
             query,
             {
+                "user_id": self._user_id,
                 "integration_source": self._integration_source,
                 "external_id": external_id,
             },
