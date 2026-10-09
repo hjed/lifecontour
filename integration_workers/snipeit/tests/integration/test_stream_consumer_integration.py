@@ -261,9 +261,10 @@ class TestStreamConsumerIntegration:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata (user_id, internal_uuid, integration_source, external_id, last_synced_at, version_hash, sync_status, retry_count, created_at, updated_at)
-                VALUES ('user-123', :id, 'snipeit', :external_id, now(), :version_hash, 'success', 0, now(), now())
+                VALUES (:user_id, :id, 'snipeit', :external_id, now(), :version_hash, 'success', 0, now(), now())
             """),
             {
+                "user_id": user_id,
                 "id": gear_item_uuid,
                 "external_id": str(asset_id),
                 "version_hash": version_hash,
@@ -378,12 +379,12 @@ class TestStreamConsumerIntegration:
                      last_synced_at, version_hash, sync_status, retry_count,
                      reference_data, created_at, updated_at)
                 VALUES
-                    ('user-123', :journal_id, 'snipeit_maintenance_claim', :journal_id,
+                    (:user_id, :journal_id, 'snipeit_maintenance_claim', :journal_id,
                      now(), 'PENDING', 'failed', 0,
                      '{"asset_id": 51, "title": "Retire Harness",
                        "start_date": "2026-09-11"}', now(), now())
             """),
-            {"journal_id": str(journal_id)},
+            {"user_id": user_id, "journal_id": str(journal_id)},
         )
 
         @asynccontextmanager

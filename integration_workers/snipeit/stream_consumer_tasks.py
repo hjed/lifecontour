@@ -498,21 +498,22 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         from snipeit_sync_service import _delete_maintenance_claim
         from worker import _create_sync_service, _get_auth_data
 
-        # Fast path: only proceed if this journal put something in Snipe-IT. A
-        # claim is keyed by journal id on ``external_id``, the others on
-        # ``internal_uuid``.
+        # Fast path: only proceed if this journal put something in the owner's
+        # Snipe-IT. A claim is keyed by journal id on ``external_id``, the
+        # others on ``internal_uuid``.
         async with self._session_factory() as session:
             rows_result = await session.execute(
                 text("""
                     SELECT integration_source
                     FROM sync_metadata
-                    WHERE (integration_source IN
-                               ('snipeit_checkout', 'snipeit_maintenance')
-                           AND internal_uuid = :journal_id)
-                       OR (integration_source = 'snipeit_maintenance_claim'
-                           AND external_id = :journal_id)
+                    WHERE user_id = :user_id
+                      AND ((integration_source IN
+                                ('snipeit_checkout', 'snipeit_maintenance')
+                            AND internal_uuid = :journal_id)
+                           OR (integration_source = 'snipeit_maintenance_claim'
+                               AND external_id = :journal_id))
                 """),
-                {"journal_id": str(journal_id)},
+                {"user_id": str(user_id), "journal_id": str(journal_id)},
             )
             sources = {row.integration_source for row in rows_result.fetchall()}
 
@@ -536,7 +537,9 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         if sources == {"snipeit_maintenance_claim"} and not imported_records:
             async with self._session_factory() as session:
                 async with session.begin():
-                    await _delete_maintenance_claim(session, journal_id)
+                    await _delete_maintenance_claim(
+                        session, journal_id, user_id=str(user_id)
+                    )
             logger.info(
                 "Cleared the maintenance claim of a deleted journal",
                 journal_id=journal_id,
