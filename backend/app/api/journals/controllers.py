@@ -338,10 +338,10 @@ async def create_journal_tag(
     tag_request: JournalTagCreateRequest,
     journal_tag_service: FromDishka[JournalTagService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> JournalTagResponse:
     """
-    Create a new journal tag.
+    Create a new journal tag, owned by the session user.
 
     Creates a new journal tag with the provided data and returns the created resource.
     """
@@ -363,6 +363,7 @@ async def create_journal_tag(
         color=tag_request.data.attributes.color,
         description=tag_request.data.attributes.description,
         parent_id=parent_id,
+        user_id=user.id,
     )
 
     # Save tag as a committed unit of work (duplicate names map to a 400)

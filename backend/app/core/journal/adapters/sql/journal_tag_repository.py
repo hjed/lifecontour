@@ -22,6 +22,7 @@ _TAG_COLUMN_NAMES = (
     "parent_id",
     "color",
     "description",
+    "user_id",
     "created_at",
     "updated_at",
 )
@@ -44,6 +45,7 @@ def _row_to_tag(row: Any) -> JournalTag:
         parent_id=row.parent_id,
         color=row.color,
         description=row.description,
+        user_id=row.user_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -96,8 +98,9 @@ class SqlJournalTagRepository(JournalTagRepository):
             # Insert
             query = text(
                 """
-                INSERT INTO journal_tags (name, parent_id, color, description)
-                VALUES (:name, :parent_id, :color, :description)
+                INSERT INTO journal_tags
+                    (name, parent_id, color, description, user_id)
+                VALUES (:name, :parent_id, :color, :description, :user_id)
                 RETURNING id, created_at, updated_at
             """
             )
@@ -108,6 +111,7 @@ class SqlJournalTagRepository(JournalTagRepository):
                     "parent_id": tag.parent_id,
                     "color": tag.color,
                     "description": tag.description,
+                    "user_id": tag.user_id,
                 },
             )
             row = result.fetchone()

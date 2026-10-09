@@ -460,7 +460,12 @@ class JournalWriteService:
 
         if tags:
             await self._process_journal_tags(
-                journal_id, tags, transaction, changed_by=changed_by, source=source
+                journal_id,
+                tags,
+                transaction,
+                user_id=created_journal.user_id,
+                changed_by=changed_by,
+                source=source,
             )
 
         return created_journal
@@ -567,7 +572,12 @@ class JournalWriteService:
 
         if tags is not None:
             await self._replace_journal_tags(
-                journal_id, tags, transaction, changed_by=changed_by, source=source
+                journal_id,
+                tags,
+                transaction,
+                user_id=updated.user_id,
+                changed_by=changed_by,
+                source=source,
             )
 
         return CompositeUpdateResult(
@@ -1525,6 +1535,7 @@ class JournalWriteService:
         tags: list[str],
         transaction: AsyncConnection,
         *,
+        user_id: str,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
@@ -1536,7 +1547,8 @@ class JournalWriteService:
         poisoning the whole composite unit of work. The error is NOT swallowed:
         a failing tag still aborts the composite write. Tag lookup is
         case-insensitive (``tag_repo.find_by_name``); a missing tag is created
-        with the default grey colour, mirroring the previous MCP tool behaviour.
+        with the default grey colour, mirroring the previous MCP tool behaviour,
+        and is owned by ``user_id`` — the journal's owner.
 
         The assignment itself goes through :class:`JournalTagService` so the
         ``JournalTagAssigned`` history event is published from one place, whichever
@@ -1547,7 +1559,9 @@ class JournalWriteService:
                 tag = await self.tag_repo.find_by_name(tag_name)
                 if tag is None:
                     tag = await self.tag_repo.save(
-                        JournalTag(id=None, name=tag_name, color="#808080")
+                        JournalTag(
+                            id=None, name=tag_name, color="#808080", user_id=user_id
+                        )
                     )
                 if tag.id is not None:
                     await self.tag_service.assign_tag(
@@ -1753,6 +1767,7 @@ class JournalWriteService:
         tags: list[str],
         transaction: AsyncConnection,
         *,
+        user_id: str,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
     ) -> None:
@@ -1788,7 +1803,12 @@ class JournalWriteService:
 
         arriving = [name for name in tags if name.lower() not in existing]
         await self._process_journal_tags(
-            journal_id, arriving, transaction, changed_by=changed_by, source=source
+            journal_id,
+            arriving,
+            transaction,
+            user_id=user_id,
+            changed_by=changed_by,
+            source=source,
         )
 
     async def _create_type_specific_data(

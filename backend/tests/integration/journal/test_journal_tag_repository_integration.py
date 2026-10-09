@@ -62,6 +62,25 @@ class TestJournalTagRepositoryIntegration:
         assert saved_tag.created_at is not None
         assert saved_tag.updated_at is not None
 
+    async def test_save_persists_the_owner_and_find_returns_it(self, tag_repo):
+        saved_tag = await tag_repo.save(JournalTag(name="owned", user_id="owner-1"))
+
+        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        assert found_tag is not None
+        assert found_tag.user_id == "owner-1"
+
+    async def test_an_update_never_re_owns_a_tag(self, tag_repo):
+        """The owner is written on INSERT only."""
+        saved_tag = await tag_repo.save(JournalTag(name="owned", user_id="owner-1"))
+        saved_tag.user_id = "someone-else"
+        saved_tag.color = "#123456"
+        await tag_repo.save(saved_tag)
+
+        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        assert found_tag is not None
+        assert found_tag.color == "#123456"
+        assert found_tag.user_id == "owner-1"
+
     async def test_find_tag_by_id(self, tag_repo):
         """Test finding a tag by ID."""
         tag = JournalTag(name="work")

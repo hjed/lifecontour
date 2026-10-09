@@ -14,6 +14,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
+from tests.integration.contact_seeding import TEST_USER_ID
+
 
 def create_journal_request_data(
     title: str,
@@ -75,6 +77,23 @@ class TestJournalTagEndpoints:
         assert tag_json["data"]["attributes"]["name"] == "work"
         assert tag_json["data"]["id"] is not None
         assert tag_json["data"]["links"]["self"] is not None
+
+    async def test_created_tag_belongs_to_the_session_user(
+        self, integration_api_client, async_connection
+    ):
+        response = await integration_api_client.post(
+            "/api/journals/tags",
+            json={"data": {"type": "journal-tags", "attributes": {"name": "mine"}}},
+        )
+        assert response.status_code == 201
+
+        owner = (
+            await async_connection.execute(
+                text("SELECT user_id FROM journal_tags WHERE id = :id"),
+                {"id": response.json()["data"]["id"]},
+            )
+        ).scalar_one()
+        assert owner == TEST_USER_ID
 
     async def test_create_journal_tag_with_all_fields(self, integration_api_client):
         """Test creating a journal tag with all fields."""
