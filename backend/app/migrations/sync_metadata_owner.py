@@ -12,7 +12,7 @@ user, derived by :mod:`app.migrations.owner_derivation`. That refuses when the
 data cannot choose, unless the operator names the owner:
 ``alembic -x sync_metadata_owner=<user_id> upgrade head``.
 
-Shared by ``0126`` (which added the column) and ``0127`` (which assigns what a
+Shared by ``0126`` (which added the column) and ``0128`` (which assigns what a
 not-yet-deployed writer left unowned, then requires the owner). Treat its
 behaviour as frozen once a revision depends on it: change it only by adding,
 never by redefining.

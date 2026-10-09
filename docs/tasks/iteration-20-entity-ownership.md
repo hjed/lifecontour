@@ -1157,9 +1157,10 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
 
 **PR Size:** ~300 lines
 
-> **Migration number:** `0127_sync_metadata_user_scoped_unique_key.py`.
+> **Migration number:** `0128_sync_metadata_user_scoped_unique_key.py` (Phase 10a took `0127` first;
+> Phase 10b's planned `0128` must take the next free number).
 
-- [x] Migration `0127`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
+- [x] Migration `0128`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
   not-yet-deployed writer during the Phase 14 rollout); `SET NOT NULL`; drop
   `idx_sync_metadata_integration_external`. The per-user unique index already exists and every
   writer already conflicts on it (Phase 14), so dropping the global index invalidates no conflict
@@ -1206,7 +1207,7 @@ first and the contract last:
   the `_delete_maintenance_claim` / `_fetch_maintenance_claim` helpers (now `user_id`-keyed), the
   check-in-of-checkout join (`ci.user_id = co.user_id`), and the stream consumer's `JournalDeleted`
   fast path. ✅
-- **15d** — migration `0127` (the Phase 14 assignment re-run over unowned rows, `NOT NULL`, the
+- **15d** — migration `0128` (the Phase 14 assignment re-run over unowned rows, `NOT NULL`, the
   global index dropped; the downgrade refuses while two owners hold one external id), removal of
   the cross-owner refusal, both-owners tests, documentation. ✅
 
@@ -1248,8 +1249,8 @@ in the backend and the four workers takes the owner.
   `execute_link_write` keeps its savepoint and re-raises the `IntegrityError` a concurrent insert of
   the same owner's link can raise.
 - **The owner backfill is shared.** `0126`'s entity backfill and orphan assignment moved to
-  `app/migrations/sync_metadata_owner.py` (frozen, like `owner_derivation.py`); `0126` and `0127` call
-  it with their own label and evidence tuple, so `0126` behaves as before. `0127`'s evidence adds
+  `app/migrations/sync_metadata_owner.py` (frozen, like `owner_derivation.py`); `0126` and `0128` call
+  it with their own label and evidence tuple, so `0126` behaves as before. `0128`'s evidence adds
   `sync_metadata` itself. As for `0124`, unowned orphans with no derivable owner refuse the upgrade
   before `SET NOT NULL`; `-x sync_metadata_owner=<id>` resolves it.
 - **No `user_id` on the backend `SyncMetadata` dataclass** (`integrations/models/entities.py`), as

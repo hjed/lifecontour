@@ -9,14 +9,14 @@ users, so one user's link can block, or be re-pointed by, another's. This
 revision is the expand half of moving that key to the owner: it adds a nullable
 ``sync_metadata.user_id``, gives every existing link the owner of the entity it
 points at, and creates the per-user unique index that every writer conflicts on
-from this release. The global index stays until ``0127``; while both exist, a
+from this release. The global index stays until ``0128``; while both exist, a
 write for an external id another owner already holds is refused by it.
 
 The owner comes from the linked entity, by its type; a link no entity owns is
 logged and given the site's one user (``app.migrations.sync_metadata_owner``
 describes both, and the ``-x sync_metadata_owner=<user_id>`` override).
 
-The column stays nullable here: ``0127`` assigns anything a not-yet-deployed
+The column stays nullable here: ``0128`` assigns anything a not-yet-deployed
 writer inserted without an owner, then requires it.
 """
 

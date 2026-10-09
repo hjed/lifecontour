@@ -1,7 +1,7 @@
-"""Migration round-trip test for 0127 (the per-user link key becomes the only one).
+"""Migration round-trip test for 0128 (the per-user link key becomes the only one).
 
 0126 gave every link an owner but left the column nullable, so a writer not yet
-deployed could still insert an owner-less row. 0127:
+deployed could still insert an owner-less row. 0128:
 
 - gives every row still unowned its entity's owner, or the site's one owner
   (logged; ``-x sync_metadata_owner`` names it when the data cannot);
@@ -24,13 +24,13 @@ from tests.integration.migration_helpers import (
     tables_with_column,
 )
 
-migration = load_revision("0127_sync_metadata_user_scoped_unique_key.py")
+migration = load_revision("0128_sync_metadata_user_scoped_unique_key.py")
 
 OWNER = "9f1c1f0e-0000-4000-8000-abcdefabcdef"
 OTHER_OWNER = "1b2c3d4e-0000-4000-8000-fedcbafedcba"
 
-_PREVIOUS_REVISION = "0126"
-_REVISION = "0127"
+_PREVIOUS_REVISION = "0127"
+_REVISION = "0128"
 _GLOBAL_INDEX = "idx_sync_metadata_integration_external"
 _PER_USER_INDEX = "uq_sync_metadata_user_source_external"
 
@@ -86,12 +86,12 @@ async def _owner_is_required(url: str) -> bool:
 @pytest.mark.integration
 @pytest.mark.slow
 class TestSyncMetadataUserScopedKey:
-    """0127 requires an owner on every link and keys links by it alone."""
+    """0128 requires an owner on every link and keys links by it alone."""
 
     async def test_every_table_recording_a_user_is_evidence(
         self, throwaway_database: URL, run_alembic: RunAlembic
     ) -> None:
-        """The orphan evidence is exactly the tables holding a ``user_id`` at 0126."""
+        """The orphan evidence is exactly the tables holding a ``user_id`` at 0127."""
         url = throwaway_database.render_as_string(hide_password=False)
         run_alembic(url, "upgrade", _PREVIOUS_REVISION)
 
