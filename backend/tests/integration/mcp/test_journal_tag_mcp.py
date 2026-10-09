@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
+from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     extract_mcp_json_payload,
@@ -121,7 +122,12 @@ class TestUpdateJournalTagMCPTool:
     ):
         """The tool updates a tag and the write is committed."""
         tag = await journal_tag_repo.save(
-            JournalTag(name="training", color="#00FF00", description="Old")
+            JournalTag(
+                user_id=TEST_USER_ID,
+                name="training",
+                color="#00FF00",
+                description="Old",
+            )
         )
 
         raw = await call_update_journal_tag(
@@ -139,7 +145,7 @@ class TestUpdateJournalTagMCPTool:
         assert payload["color"] == "#123456"
         assert payload["description"] == "Structured conditioning work"
 
-        persisted = await journal_tag_repo.find_by_id(tag.id)
+        persisted = await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "conditioning"
         assert persisted.description == "Structured conditioning work"
@@ -152,14 +158,19 @@ class TestUpdateJournalTagMCPTool:
     ):
         """Omitted arguments leave the corresponding fields untouched."""
         tag = await journal_tag_repo.save(
-            JournalTag(name="training", color="#00FF00", description="Keep me")
+            JournalTag(
+                user_id=TEST_USER_ID,
+                name="training",
+                color="#00FF00",
+                description="Keep me",
+            )
         )
 
         await call_update_journal_tag(
             authenticated_lifespan_client, {"tag_id": str(tag.id), "name": "cardio"}
         )
 
-        persisted = await journal_tag_repo.find_by_id(tag.id)
+        persisted = await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "cardio"
         assert persisted.color == "#00FF00"
@@ -172,9 +183,11 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """move_to_root clears the parent, since an omitted parent_id means no change."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         await call_update_journal_tag(
@@ -182,7 +195,7 @@ class TestUpdateJournalTagMCPTool:
             {"tag_id": str(child.id), "move_to_root": True},
         )
 
-        persisted = await journal_tag_repo.find_by_id(child.id)
+        persisted = await journal_tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id is None
 
@@ -193,15 +206,19 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A tag can be re-parented under another tag."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
-        child = await journal_tag_repo.save(JournalTag(name="climbing"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
+        child = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="climbing")
+        )
 
         await call_update_journal_tag(
             authenticated_lifespan_client,
             {"tag_id": str(child.id), "parent_id": str(parent.id)},
         )
 
-        persisted = await journal_tag_repo.find_by_id(child.id)
+        persisted = await journal_tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id == parent.id
 
@@ -212,8 +229,10 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A name held by another tag is rejected and nothing is written."""
-        await journal_tag_repo.save(JournalTag(name="training"))
-        other = await journal_tag_repo.save(JournalTag(name="reflection"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
+        other = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="reflection")
+        )
 
         raw = await call_update_journal_tag(
             authenticated_lifespan_client,
@@ -221,7 +240,7 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "already exists" in raw.lower()
-        persisted = await journal_tag_repo.find_by_id(other.id)
+        persisted = await journal_tag_repo.find_by_id(other.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.name == "reflection"
 
@@ -232,9 +251,11 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """A tag cannot become its own ancestor."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         raw = await call_update_journal_tag(
@@ -243,7 +264,7 @@ class TestUpdateJournalTagMCPTool:
         )
 
         assert "circular" in raw.lower()
-        persisted = await journal_tag_repo.find_by_id(parent.id)
+        persisted = await journal_tag_repo.find_by_id(parent.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id is None
 
@@ -271,7 +292,9 @@ class TestUpdateJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An empty-string parent_id is rejected, not silently ignored."""
-        tag = await journal_tag_repo.save(JournalTag(name="training"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="training")
+        )
 
         raw = await call_update_journal_tag(
             authenticated_lifespan_client,
@@ -306,9 +329,11 @@ class TestUpdateJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        tag = await journal_tag_repo.save(JournalTag(name="mcp-rename-source"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-rename-source")
+        )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await journal_tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_update_journal_tag(
@@ -344,7 +369,9 @@ class TestDeleteJournalTagMCPTool:
         journal_tag_repo,
     ):
         """The tool deletes an unused tag and the write is committed."""
-        tag = await journal_tag_repo.save(JournalTag(name="obsolete"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="obsolete")
+        )
 
         raw = await call_delete_journal_tag(
             authenticated_lifespan_client, {"tag_id": str(tag.id)}
@@ -352,7 +379,7 @@ class TestDeleteJournalTagMCPTool:
         payload = extract_mcp_json_payload(raw)
 
         assert payload["status"] == "success"
-        assert await journal_tag_repo.find_by_id(tag.id) is None
+        assert await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is None
 
     @pytest.mark.asyncio
     async def test_delete_journal_tag_in_use_unassigns_it(
@@ -370,7 +397,7 @@ class TestDeleteJournalTagMCPTool:
 
         journal = await SqlJournalRepository(async_connection).save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Tagged Journal",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -378,15 +405,17 @@ class TestDeleteJournalTagMCPTool:
                 ),
             )
         )
-        tag = await journal_tag_repo.save(JournalTag(name="in-use"))
-        await journal_tag_repo.assign_tag(journal.id, tag.id)
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="in-use")
+        )
+        await journal_tag_repo.assign_tag(journal.id, tag.id, user_id=TEST_USER_ID)
 
         raw = await call_delete_journal_tag(
             authenticated_lifespan_client, {"tag_id": str(tag.id)}
         )
 
         assert extract_mcp_json_payload(raw)["status"] == "success"
-        assert await journal_tag_repo.find_by_id(tag.id) is None
+        assert await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is None
         assert await journal_tag_repo.get_tags_for_journal(journal.id) == []
 
     @pytest.mark.asyncio
@@ -422,9 +451,11 @@ class TestDeleteJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        tag = await journal_tag_repo.save(JournalTag(name="mcp-delete-subject"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-delete-subject")
+        )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await journal_tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_delete_journal_tag(
@@ -482,7 +513,7 @@ class TestMergeJournalTagMCPTool:
 
         journal = await SqlJournalRepository(async_connection).save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Blue Mountains",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -490,12 +521,16 @@ class TestMergeJournalTagMCPTool:
                 ),
             )
         )
-        source = await journal_tag_repo.save(JournalTag(name="hiking"))
-        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
-        child = await journal_tag_repo.save(
-            JournalTag(name="day walks", parent_id=source.id)
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
         )
-        await journal_tag_repo.assign_tag(journal.id, source.id)
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
+        child = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="day walks", parent_id=source.id)
+        )
+        await journal_tag_repo.assign_tag(journal.id, source.id, user_id=TEST_USER_ID)
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -510,10 +545,14 @@ class TestMergeJournalTagMCPTool:
         assert str(target.id) in payload["summary"]
         assert "deleted" in payload["summary"].lower()
 
-        assert await journal_tag_repo.find_by_id(source.id) is None
+        assert (
+            await journal_tag_repo.find_by_id(source.id, user_id=TEST_USER_ID) is None
+        )
         assigned = await journal_tag_repo.get_tags_for_journal(journal.id)
         assert [tag.id for tag in assigned] == [target.id]
-        surviving_child = await journal_tag_repo.find_by_id(child.id)
+        surviving_child = await journal_tag_repo.find_by_id(
+            child.id, user_id=TEST_USER_ID
+        )
         assert surviving_child is not None
         assert surviving_child.parent_id == target.id
 
@@ -524,7 +563,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """Merging a tag into itself is reported rather than silently deleting it."""
-        tag = await journal_tag_repo.save(JournalTag(name="hiking"))
+        tag = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -535,7 +576,9 @@ class TestMergeJournalTagMCPTool:
         assert payload["error"] == "Journal error"
         assert "itself" in payload["message"].lower()
         # The tag must survive a rejected merge.
-        assert await journal_tag_repo.find_by_id(tag.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_into_descendant_errors(
@@ -544,9 +587,11 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """Merging a tag into its own child is reported and changes nothing."""
-        parent = await journal_tag_repo.save(JournalTag(name="outdoors"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="outdoors")
+        )
         child = await journal_tag_repo.save(
-            JournalTag(name="climbing", parent_id=parent.id)
+            JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
         raw = await call_merge_journal_tag(
@@ -557,7 +602,10 @@ class TestMergeJournalTagMCPTool:
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Journal error"
         assert "descendant" in payload["message"].lower()
-        assert await journal_tag_repo.find_by_id(parent.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(parent.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_unknown_target_errors(
@@ -566,7 +614,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An unknown target reports not-found and leaves the source in place."""
-        source = await journal_tag_repo.save(JournalTag(name="hiking"))
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="hiking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -578,7 +628,10 @@ class TestMergeJournalTagMCPTool:
 
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Not found"
-        assert await journal_tag_repo.find_by_id(source.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(source.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_journal_tag_unknown_source_errors(
@@ -587,7 +640,9 @@ class TestMergeJournalTagMCPTool:
         journal_tag_repo,
     ):
         """An unknown source reports not-found and leaves the target in place."""
-        target = await journal_tag_repo.save(JournalTag(name="bushwalking"))
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="bushwalking")
+        )
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -599,7 +654,10 @@ class TestMergeJournalTagMCPTool:
 
         payload = extract_mcp_json_payload(raw)
         assert payload["error"] == "Not found"
-        assert await journal_tag_repo.find_by_id(target.id) is not None
+        assert (
+            await journal_tag_repo.find_by_id(target.id, user_id=TEST_USER_ID)
+            is not None
+        )
 
     @pytest.mark.asyncio
     async def test_merge_publishes_a_merge_event_with_mcp_provenance(
@@ -614,10 +672,14 @@ class TestMergeJournalTagMCPTool:
         pins that the MCP tool carries its own provenance rather than falling
         back to the service's ``system`` default.
         """
-        source = await journal_tag_repo.save(JournalTag(name="mcp-merge-source"))
-        target = await journal_tag_repo.save(JournalTag(name="mcp-merge-target"))
+        source = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-merge-source")
+        )
+        target = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="mcp-merge-target")
+        )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, source.id)
+        await journal_tag_repo.assign_tag(journal_id, source.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_merge_journal_tag(
@@ -671,8 +733,8 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """Mounted MCP HTTP calls should resolve request-scoped dependencies."""
-        await journal_tag_repo.save(JournalTag(name="training"))
-        await journal_tag_repo.save(JournalTag(name="reflection"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="reflection"))
 
         payload = await call_list_journal_tags(
             authenticated_lifespan_client, {"limit": 10}
@@ -691,6 +753,7 @@ class TestListJournalTagsMCPTool:
         """The tool exposes colour and description for each tag."""
         await journal_tag_repo.save(
             JournalTag(
+                user_id=TEST_USER_ID,
                 name="training",
                 color="#00FF00",
                 description="Structured training sessions",
@@ -710,9 +773,13 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """The tool exposes parent_id so AI callers can reconstruct the tree."""
-        parent = await journal_tag_repo.save(JournalTag(name="activities"))
+        parent = await journal_tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="activities")
+        )
         await journal_tag_repo.save(
-            JournalTag(name="activities-climbing", parent_id=parent.id)
+            JournalTag(
+                user_id=TEST_USER_ID, name="activities-climbing", parent_id=parent.id
+            )
         )
 
         payload = await call_list_journal_tags(authenticated_lifespan_client)
@@ -728,7 +795,7 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """Tags created without a description serialise it as null."""
-        await journal_tag_repo.save(JournalTag(name="training"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="training"))
 
         payload = await call_list_journal_tags(authenticated_lifespan_client)
 
@@ -741,9 +808,9 @@ class TestListJournalTagsMCPTool:
         journal_tag_repo,
     ):
         """The limit argument bounds how many tags are returned."""
-        await journal_tag_repo.save(JournalTag(name="alpha"))
-        await journal_tag_repo.save(JournalTag(name="beta"))
-        await journal_tag_repo.save(JournalTag(name="gamma"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="alpha"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="beta"))
+        await journal_tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="gamma"))
 
         payload = await call_list_journal_tags(
             authenticated_lifespan_client, {"limit": 2}

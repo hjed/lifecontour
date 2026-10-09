@@ -19,6 +19,10 @@ from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.meilisearch_client import get_index_name
 
+# Owns the journals and the tags of the tag-reindex tests: a tag is only ever
+# assigned to a journal of the same owner.
+JOURNAL_OWNER = "user-tag-reindex"
+
 
 @pytest.mark.integration
 @pytest.mark.meilisearch
@@ -191,7 +195,7 @@ class TestJournalTagReindexing:
         saved = await SqlJournalRepository(conn).save(
             Journal(
                 id=None,
-                user_id="user-tag-reindex",
+                user_id=JOURNAL_OWNER,
                 title=f"Tag reindex subject {uuid4()}",
                 content="Body",
                 event_date_range=EventDateRange(
@@ -204,10 +208,10 @@ class TestJournalTagReindexing:
         return saved.id
 
     async def _tag_id(self, conn: AsyncConnection, prefix: str) -> UUID:
-        # The journal tag namespace is global and its names are unique, so a
-        # fixed name would collide with a concurrently running test.
+        # Tag names are unique per owner, so a fixed name would collide with a
+        # concurrently running test.
         saved = await SqlJournalTagRepository(conn).save(
-            JournalTag(name=f"{prefix}-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"{prefix}-{uuid4()}")
         )
         assert saved.id is not None
         return saved.id
@@ -268,7 +272,7 @@ class TestJournalTagReindexing:
         journal_id = await self._journal_id(async_connection)
         tag_id = await self._tag_id(async_connection, "Assign")
         repo = SqlJournalTagRepository(async_connection)
-        await repo.assign_tag(journal_id, tag_id)
+        await repo.assign_tag(journal_id, tag_id, user_id=JOURNAL_OWNER)
 
         await indexing_service.process_event(
             self._assignment_event("JournalTagAssigned", journal_id, tag_id)
@@ -287,8 +291,8 @@ class TestJournalTagReindexing:
         kept_id = await self._tag_id(async_connection, "Kept")
         dropped_id = await self._tag_id(async_connection, "Dropped")
         repo = SqlJournalTagRepository(async_connection)
-        await repo.assign_tag(journal_id, kept_id)
-        await repo.assign_tag(journal_id, dropped_id)
+        await repo.assign_tag(journal_id, kept_id, user_id=JOURNAL_OWNER)
+        await repo.assign_tag(journal_id, dropped_id, user_id=JOURNAL_OWNER)
         await indexing_service.process_event(
             self._assignment_event("JournalTagAssigned", journal_id, kept_id)
         )
@@ -315,13 +319,13 @@ class TestJournalTagReindexing:
         kept_id = await self._tag_id(async_connection, "Kept")
         doomed_id = await self._tag_id(async_connection, "Doomed")
         repo = SqlJournalTagRepository(async_connection)
-        await repo.assign_tag(journal_id, kept_id)
-        await repo.assign_tag(journal_id, doomed_id)
+        await repo.assign_tag(journal_id, kept_id, user_id=JOURNAL_OWNER)
+        await repo.assign_tag(journal_id, doomed_id, user_id=JOURNAL_OWNER)
         await indexing_service.process_event(
             self._assignment_event("JournalTagAssigned", journal_id, kept_id)
         )
 
-        await repo.delete(doomed_id)
+        await repo.delete(doomed_id, user_id=JOURNAL_OWNER)
         await indexing_service.process_event(
             self._assignment_event("JournalTagDeleted", journal_id, doomed_id)
         )
@@ -344,13 +348,13 @@ class TestJournalTagReindexing:
         source_id = await self._tag_id(async_connection, "MergeSource")
         target_id = await self._tag_id(async_connection, "MergeTarget")
         repo = SqlJournalTagRepository(async_connection)
-        await repo.assign_tag(journal_id, source_id)
+        await repo.assign_tag(journal_id, source_id, user_id=JOURNAL_OWNER)
         await indexing_service.process_event(
             self._assignment_event("JournalTagAssigned", journal_id, source_id)
         )
         assert self._indexed_tag_ids(indexing_service, journal_id) == [str(source_id)]
 
-        await repo.merge_into(source_id, target_id)
+        await repo.merge_into(source_id, target_id, user_id=JOURNAL_OWNER)
         await indexing_service.process_event(
             self._event(
                 "JournalTagMerged",

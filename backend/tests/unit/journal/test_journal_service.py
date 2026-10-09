@@ -669,6 +669,28 @@ class TestTagFilterExpansion:
         )
         assert len(passed_tag_ids) == len(set(passed_tag_ids))
 
+    async def test_descendants_are_expanded_within_the_acting_user(
+        self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
+    ):
+        """A foreign id has no descendants for this user, but stays in the filter.
+
+        Dropping it would leave an empty filter, which reads as no filter at all.
+        """
+        foreign_id = uuid4()
+        mock_tag_hierarchy.get_all_descendants_bulk.return_value = []
+        mock_journal_repo.get_all.return_value = []
+
+        await service_with_hierarchy.get_journals_paginated(
+            user_id="user123", tag_ids=[str(foreign_id)]
+        )
+
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with(
+            [foreign_id], user_id="user123"
+        )
+        assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == [
+            str(foreign_id)
+        ]
+
     async def test_leaf_tag_passes_through_unchanged(
         self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
     ):
@@ -706,7 +728,9 @@ class TestTagFilterExpansion:
             user_id="user123", tag_ids=["not-a-uuid"]
         )
 
-        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with([])
+        mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with(
+            [], user_id="user123"
+        )
         assert mock_journal_repo.get_all.call_args.kwargs["tag_ids"] == ["not-a-uuid"]
 
     async def test_uuid_objects_are_expanded_not_skipped(
@@ -724,7 +748,7 @@ class TestTagFilterExpansion:
         )
 
         mock_tag_hierarchy.get_all_descendants_bulk.assert_awaited_once_with(
-            [parent_id]
+            [parent_id], user_id="user123"
         )
         assert str(child_id) in mock_journal_repo.get_all.call_args.kwargs["tag_ids"]
 

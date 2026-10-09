@@ -381,6 +381,19 @@ See [Journal System Specification](../journal-system-specification.md) for compl
   - Base types: `journal_calendar_info`, `journal_mood_data`, `journal_plan_data`, `journal_travel_data`, `journal_photo_album_data`
   - Activity types: `journal_fitness_data`, `journal_outdoor_activity_data`, `journal_bushwalking_data`, `journal_abseiling_data`, `journal_canyoning_data`, `journal_climbing_data`, `journal_kayaking_data`, `journal_skiing_data`, `journal_jogging_data`
 - Supporting tables: `routes`, `journal_tags`, `journal_contacts`, `journal_events`
+- Journal tags: `journal_tags` (UUID pk, `user_id VARCHAR(50) NOT NULL`, `name`, `parent_id`
+  self-FK `ON DELETE SET NULL`, `color`, `description`), indexed by `idx_journal_tags_user_id`;
+  names are unique per owner and case-insensitive through
+  `uq_journal_tags_user_id_name_lower (user_id, LOWER(name))`. `journal_tag_assignments`
+  (`journal_id`, `tag_id` pk, both FKs cascade) only ever pairs a journal and a tag of one owner:
+  the repository's insert selects its row only when the acting user owns both. Migration `0127`
+  added the owner: a tag carried by journals takes their owner; an uncarried tag takes the
+  site's one user (`owner_derivation`, `alembic -x journal_tags_owner=<user_id>` when the data
+  cannot choose); a tag carried by journals of more than one owner refuses, naming it. `0128`
+  owned any straggler the same way, refused while a journal carried another owner's tag or a
+  tag sat under another owner's tag (a hierarchy never links two owners), and made
+  the column `NOT NULL`. `0129`, landing with the owner-scoped reads, replaced the global
+  `uq_journal_tags_name_lower`; its downgrade refuses while two owners share a name
 - Proper foreign key constraints and indexes for search/filtering
 - Template system: `activity_templates` (UUID pk, user-owned, `template_type` ∈ {`abseiling`, `canyoning`, `caving`, `climbing`} enforced by `ck_activity_templates_type`, type-specific columns for canyoning/caving/climbing; an `abseiling` template uses only the common fields — name, region, description, standard pitches), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
 - Gear item tracking: `gear_items` (UUID pk, user-owned, name required, model/serial_number/purchase_date/manufacturer optional, timestamps, indexed by user_id and name)

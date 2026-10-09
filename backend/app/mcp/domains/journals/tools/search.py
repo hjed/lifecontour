@@ -234,7 +234,9 @@ async def search_journals(
     start_filter = parse_optional_datetime_filter(start_date, "start_date")
     end_filter = parse_optional_datetime_filter(end_date, "end_date", is_end=True)
     tag_filters = (
-        await tag_service.resolve_filter_tag_ids(tags.split(",")) if tags else None
+        await tag_service.resolve_filter_tag_ids(tags.split(","), user_id=user_id)
+        if tags
+        else None
     )
 
     # The filters as the agent spelled them, for the diagnostics.

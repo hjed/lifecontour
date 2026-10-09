@@ -134,6 +134,14 @@ See [Journal System Specification](../journal-system-specification.md) for compr
   - Contact relationship management (4 types)
   - Integration conflict resolution
   - Route tracking and reuse
+  - **Journal tags are owned.** A tag (`JournalTag.user_id`) belongs to one user and names are
+    unique per owner, case-insensitively. Every `JournalTagRepository` read of the tag namespace
+    takes the acting user and filters in SQL; another user's tag is `JournalTagNotFoundError`
+    (404) on update, delete, merge, assignment and as a parent, exactly as a missing one is.
+    `assign_tag` writes only when the user owns both the journal and the tag, and a tag hierarchy
+    never links two owners. Reads keyed by an owned journal (`get_tags_for_journal`, the agenda
+    join) stay unscoped. A journal's tag-name list (MCP create/update) resolves among the journal
+    owner's tags; a foreign tag id in a list filter is kept, so it matches nothing
 
 #### Tasks Domain
 See [Home Dashboard & Tasks Specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks)

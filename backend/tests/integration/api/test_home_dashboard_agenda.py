@@ -263,7 +263,7 @@ class EventSeeder:
         result = await self.connection.execute(
             text(
                 """
-                INSERT INTO journal_tags (name, color) VALUES (:name, :colour)
+                INSERT INTO journal_tags (user_id, name, color) VALUES ('test-user-123', :name, :colour)
                 RETURNING id
                 """
             ),

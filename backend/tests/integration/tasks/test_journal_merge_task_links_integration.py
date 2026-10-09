@@ -1004,7 +1004,9 @@ class TestMergeBehaviourAroundTasks:
         )
         tag_id = (
             await async_connection.execute(
-                text("INSERT INTO journal_tags (name) VALUES ('trip') RETURNING id")
+                text(
+                    "INSERT INTO journal_tags (user_id, name) VALUES ('test-user-123', 'trip') RETURNING id"
+                )
             )
         ).scalar_one()
         await async_connection.execute(

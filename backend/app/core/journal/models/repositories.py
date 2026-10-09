@@ -1176,15 +1176,22 @@ class JournalTagRepository(ABC):
     Repository interface for journal tag operations.
 
     Tags are hierarchical (parent-child relationships) and can be assigned to journals.
+
+    Every tag has one owner and names are unique per owner. Every read of the
+    tag namespace takes the acting user's id and filters on it, so another
+    user's tag reads as a missing one. Reads keyed by a journal
+    (:meth:`get_tags_for_journal`) or by a tag the caller has already loaded
+    for the user (:meth:`get_journal_ids_for_tag`) stay unscoped.
     """
 
     @abstractmethod
-    async def find_by_id(self, tag_id: UUID) -> JournalTag | None:
+    async def find_by_id(self, tag_id: UUID, *, user_id: str) -> JournalTag | None:
         """
-        Find a tag by ID.
+        Find one of the user's tags by ID.
 
         Args:
             tag_id: The tag UUID to look up
+            user_id: The acting user; another user's tag is not found
 
         Returns:
             The JournalTag if found, None otherwise
@@ -1192,12 +1199,13 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_by_name(self, name: str) -> JournalTag | None:
+    async def find_by_name(self, name: str, *, user_id: str) -> JournalTag | None:
         """
-        Find a tag by name.
+        Find one of the user's tags by name, case-insensitively.
 
         Args:
             name: The tag name to look up
+            user_id: The acting user; another user's tag is not found
 
         Returns:
             The JournalTag if found, None otherwise
@@ -1209,6 +1217,9 @@ class JournalTagRepository(ABC):
         """
         Save a tag (insert or update).
 
+        An insert writes ``tag.user_id`` as the owner; an update touches the
+        row only when ``tag.user_id`` already owns it, and never re-owns it.
+
         Args:
             tag: The tag to save
 
@@ -1218,17 +1229,23 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, tag_id: UUID) -> None:
+    async def delete(self, tag_id: UUID, *, user_id: str) -> bool:
         """
-        Delete a tag by ID.
+        Delete one of the user's tags by ID; another user's tag is left alone.
 
         Args:
             tag_id: The tag UUID to delete
+            user_id: The acting user
+
+        Returns:
+            Whether a tag was deleted: False when it is missing or not the user's.
         """
         pass
 
     @abstractmethod
-    async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+    async def merge_into(
+        self, source_id: UUID, target_id: UUID, *, user_id: str
+    ) -> bool:
         """
         Fold the source tag into the target tag and delete the source.
 
@@ -1237,11 +1254,17 @@ class JournalTagRepository(ABC):
         tags of the source are re-parented to the target.
 
         Callers are responsible for validating that both tags exist and that
-        the target is not a descendant of the source.
+        the target is not a descendant of the source. Nothing changes unless
+        ``user_id`` owns both tags.
 
         Args:
             source_id: The tag being merged away and deleted
             target_id: The surviving tag
+            user_id: The acting user
+
+        Returns:
+            Whether the merge happened: False when either tag is missing or not
+            the user's, in which case nothing changed.
 
         Raises:
             ValueError: ``source_id`` and ``target_id`` are the same tag.
@@ -1270,25 +1293,28 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self) -> list[JournalTag]:
+    async def get_all(self, *, user_id: str) -> list[JournalTag]:
         """
-        Get all tags.
+        Get every tag the user owns.
 
         Returns:
-            List of all tags
+            The user's tags, by name
         """
         pass
 
     @abstractmethod
-    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
+    async def get_descendants_for_tags(
+        self, tag_ids: list[UUID], *, user_id: str
+    ) -> list[JournalTag]:
         """
-        Get all descendant tags (recursively) for a list of tag UUIDs.
+        Get all of the user's descendant tags (recursively) for a list of tag UUIDs.
 
         Backs hierarchical tag filtering: a journal tagged only with a child
         tag is returned when filtering by any of its ancestors.
 
         Args:
             tag_ids: The tag UUIDs to expand
+            user_id: The acting user; only their tags are walked
 
         Returns:
             Descendant tags, excluding the requested tags themselves
@@ -1296,12 +1322,13 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_children(self, parent_id: UUID) -> list[JournalTag]:
+    async def get_children(self, parent_id: UUID, *, user_id: str) -> list[JournalTag]:
         """
-        Get child tags of a parent tag.
+        Get the user's child tags of a parent tag.
 
         Args:
             parent_id: The parent tag UUID
+            user_id: The acting user
 
         Returns:
             List of child tags
@@ -1309,12 +1336,12 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_root_tags(self) -> list[JournalTag]:
+    async def get_root_tags(self, *, user_id: str) -> list[JournalTag]:
         """
-        Get all root tags (no parent).
+        Get the user's root tags (no parent).
 
         Returns:
-            List of root tags
+            The user's root tags, by name
         """
         pass
 
@@ -1332,20 +1359,23 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
+    async def assign_tag(self, journal_id: int, tag_id: UUID, *, user_id: str) -> bool:
         """
-        Assign a tag to a journal.
+        Assign one of the user's tags to one of their journals.
 
         Assignment is idempotent, so the return value is how the caller learns
         whether anything actually changed — the service publishes a history event
-        only when it did.
+        only when it did. A journal and a tag must share an owner: unless
+        ``user_id`` owns both, nothing is written.
 
         Args:
             journal_id: The journal ID
             tag_id: The tag UUID to assign
+            user_id: The acting user
 
         Returns:
-            True if a new assignment was created, False if it already existed.
+            True if a new assignment was created; False if it already existed or
+            the journal or tag is not the user's.
         """
         pass
 

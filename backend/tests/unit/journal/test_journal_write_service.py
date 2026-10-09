@@ -447,8 +447,12 @@ class TestCreateJournalTags:
             42,
             existing_tag.id,
             mock_transaction,
+            user_id="user-1",
             source=Provenance.SYSTEM,
             changed_by="system",
+        )
+        write_service.tag_repo.find_by_name.assert_awaited_once_with(
+            "alpha", user_id="user-1"
         )
 
     @pytest.mark.asyncio
@@ -516,6 +520,7 @@ class TestCreateJournalTags:
         )
 
         assert mock_tag_service.assign_tag.await_args.kwargs == {
+            "user_id": "user-1",
             "source": Provenance.MCP,
             "changed_by": "mcp",
         }
@@ -855,7 +860,7 @@ class TestUpdateJournalComposite:
             source=Provenance.MCP,
         )
 
-        expected = {"source": Provenance.MCP, "changed_by": "mcp"}
+        expected = {"user_id": "user-1", "source": Provenance.MCP, "changed_by": "mcp"}
         assert mock_tag_service.remove_tag.await_args.kwargs == expected
         assert mock_tag_service.assign_tag.await_args.kwargs == expected
 

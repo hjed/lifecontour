@@ -546,16 +546,16 @@ class JournalService:
             start_date=start_date,
             end_date=end_date,
             contact_id=contact_id,
-            tag_ids=await self._expand_tag_ids_with_descendants(tag_ids),
+            tag_ids=await self._expand_tag_ids_with_descendants(tag_ids, user_id),
             calendar_id=calendar_id,
             parent_id=parent_id,
             search=search,
         )
 
     async def _expand_tag_ids_with_descendants(
-        self, tag_ids: list[str] | None
+        self, tag_ids: list[str] | None, user_id: str
     ) -> list[str] | None:
-        """Expand tag IDs to include all descendant tag IDs.
+        """Expand tag IDs to include all of the user's descendant tag IDs.
 
         Filtering by a parent tag therefore also returns journals tagged with any
         descendant, matching ``ContactService._expand_tag_ids_with_descendants``.
@@ -566,7 +566,10 @@ class JournalService:
         both ways collapses to one entry. An id that is not a well-formed UUID is
         left out of the hierarchy lookup but kept in the returned filter, so it
         narrows the result set instead of widening it; the REST layer rejects
-        such ids with a 400 before reaching here.
+        such ids with a 400 before reaching here. Another user's tag id is kept
+        the same way: it has no descendants among this user's tags and matches
+        none of their journals, so the filter answers nothing rather than
+        disappearing.
         """
         if not tag_ids:
             return tag_ids
@@ -581,7 +584,9 @@ class JournalService:
             except ValueError:
                 continue
 
-        descendants = await self.tag_hierarchy.get_all_descendants_bulk(parsed_ids)
+        descendants = await self.tag_hierarchy.get_all_descendants_bulk(
+            parsed_ids, user_id=user_id
+        )
         for descendant in descendants:
             if descendant.id is not None:
                 expanded[str(descendant.id)] = None
@@ -636,7 +641,7 @@ class JournalService:
                 start_date=start_date,
                 end_date=end_date,
                 contact_id=contact_id,
-                tag_ids=await self._expand_tag_ids_with_descendants(tag_ids),
+                tag_ids=await self._expand_tag_ids_with_descendants(tag_ids, user_id),
                 calendar_id=calendar_id,
                 parent_id=parent_id,
                 search=search,

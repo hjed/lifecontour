@@ -58,16 +58,16 @@ class SqlJournalTagRepository(JournalTagRepository):
         """Initialize with database connection."""
         self.conn = conn
 
-    async def find_by_id(self, tag_id: UUID) -> JournalTag | None:
-        """Find a tag by ID."""
+    async def find_by_id(self, tag_id: UUID, *, user_id: str) -> JournalTag | None:
+        """Find one of the user's tags by ID."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE id = :tag_id
+            WHERE id = :tag_id AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"tag_id": tag_id})
+        result = await self.conn.execute(query, {"tag_id": tag_id, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -75,16 +75,16 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return _row_to_tag(row)
 
-    async def find_by_name(self, name: str) -> JournalTag | None:
-        """Find a tag by name."""
+    async def find_by_name(self, name: str, *, user_id: str) -> JournalTag | None:
+        """Find one of the user's tags by name, case-insensitively."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE LOWER(name) = LOWER(:name)
+            WHERE user_id = :user_id AND LOWER(name) = LOWER(:name)
         """
         )
-        result = await self.conn.execute(query, {"name": name})
+        result = await self.conn.execute(query, {"name": name, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -129,7 +129,7 @@ class SqlJournalTagRepository(JournalTagRepository):
                     color = :color,
                     description = :description,
                     updated_at = now()
-                WHERE id = :id
+                WHERE id = :id AND user_id = :user_id
                 RETURNING updated_at
             """
             )
@@ -137,6 +137,7 @@ class SqlJournalTagRepository(JournalTagRepository):
                 query,
                 {
                     "id": tag.id,
+                    "user_id": tag.user_id,
                     "name": tag.name,
                     "parent_id": tag.parent_id,
                     "color": tag.color,
@@ -149,20 +150,39 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return tag
 
-    async def delete(self, tag_id: UUID) -> None:
-        """Delete a tag by ID.
+    async def delete(self, tag_id: UUID, *, user_id: str) -> bool:
+        """Delete one of the user's tags by ID.
 
         The assignment rows go with it via ``ON DELETE CASCADE``, which no
         application code sees — so the journals losing the tag are marked as
         changed here, before the cascade removes the rows naming them.
         """
+        if not await self._owns(user_id, tag_id):
+            return False
+
         await touch_journals_holding_tag(self.conn, tag_id)
 
-        query = text("DELETE FROM journal_tags WHERE id = :tag_id")
-        await self.conn.execute(query, {"tag_id": tag_id})
+        query = text(
+            "DELETE FROM journal_tags WHERE id = :tag_id AND user_id = :user_id"
+        )
+        result = await self.conn.execute(query, {"tag_id": tag_id, "user_id": user_id})
+        return bool(result.rowcount)
 
-    async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
-        """Fold the source tag into the target tag and delete the source."""
+    async def _owns(self, user_id: str, *tag_ids: UUID) -> bool:
+        """Whether ``user_id`` owns every one of ``tag_ids``."""
+        owned = await self.conn.execute(
+            text(
+                "SELECT count(*) FROM journal_tags "
+                "WHERE id = ANY(:tag_ids) AND user_id = :user_id"
+            ),
+            {"tag_ids": list(tag_ids), "user_id": user_id},
+        )
+        return int(owned.scalar_one()) == len(set(tag_ids))
+
+    async def merge_into(
+        self, source_id: UUID, target_id: UUID, *, user_id: str
+    ) -> bool:
+        """Fold the user's source tag into their target tag and delete the source."""
         # Merging a tag into itself would delete every one of its assignments
         # (step 1's EXISTS matches the row against itself) and then delete the
         # tag — silent data loss from what reads like a no-op. The service
@@ -173,6 +193,11 @@ class SqlJournalTagRepository(JournalTagRepository):
                 "merge_into requires distinct source and target tags; "
                 f"both were {source_id}"
             )
+
+        # Both tags must be the user's; otherwise nothing moves, so another
+        # user's assignments and hierarchy are never rewritten.
+        if not await self._owns(user_id, source_id, target_id):
+            return False
 
         params = {"source_id": source_id, "target_id": target_id}
 
@@ -216,6 +241,8 @@ class SqlJournalTagRepository(JournalTagRepository):
         #    its own parent, and a self-cycle would poison every later
         #    ancestry walk. Its parent is cleared instead, promoting it to the
         #    root — the position the source it replaces would have vacated.
+        #    Only the user's own children move: a hierarchy never links two
+        #    owners, and this keeps it so even if a row ever did.
         await self.conn.execute(
             text(
                 """
@@ -223,30 +250,37 @@ class SqlJournalTagRepository(JournalTagRepository):
                 SET parent_id = CASE WHEN id = :target_id THEN NULL
                                      ELSE :target_id END,
                     updated_at = now()
-                WHERE parent_id = :source_id
+                WHERE parent_id = :source_id AND user_id = :user_id
                 """
             ),
-            params,
+            {**params, "user_id": user_id},
         )
 
-        await self.delete(source_id)
+        return await self.delete(source_id, user_id=user_id)
 
-    async def get_all(self) -> list[JournalTag]:
-        """Get all tags."""
+    async def get_all(self, *, user_id: str) -> list[JournalTag]:
+        """Get every tag the user owns."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
+            WHERE user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_descendants_for_tags(self, tag_ids: list[UUID]) -> list[JournalTag]:
-        """Get all descendant tags (recursively) for a list of tag IDs."""
+    async def get_descendants_for_tags(
+        self, tag_ids: list[UUID], *, user_id: str
+    ) -> list[JournalTag]:
+        """Get the user's descendant tags (recursively) for a list of tag IDs.
+
+        Every level is filtered by owner, so the walk never steps into another
+        user's tags even if a row's parent pointed across owners.
+        """
         if not tag_ids:
             return []
 
@@ -255,50 +289,55 @@ class SqlJournalTagRepository(JournalTagRepository):
             WITH RECURSIVE descendants AS (
                 SELECT {_TAG_COLUMNS}
                 FROM journal_tags
-                WHERE parent_id = ANY(:tag_ids)
+                WHERE parent_id = ANY(:tag_ids) AND user_id = :user_id
 
                 UNION ALL
 
                 SELECT {_tag_columns("t")}
                 FROM journal_tags t
                 INNER JOIN descendants d ON t.parent_id = d.id
+                WHERE t.user_id = :user_id
             )
             SELECT DISTINCT {_TAG_COLUMNS}
             FROM descendants
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query, {"tag_ids": tag_ids})
+        result = await self.conn.execute(
+            query, {"tag_ids": tag_ids, "user_id": user_id}
+        )
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_children(self, parent_id: UUID) -> list[JournalTag]:
-        """Get child tags of a parent tag."""
+    async def get_children(self, parent_id: UUID, *, user_id: str) -> list[JournalTag]:
+        """Get the user's child tags of a parent tag."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE parent_id = :parent_id
+            WHERE parent_id = :parent_id AND user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query, {"parent_id": parent_id})
+        result = await self.conn.execute(
+            query, {"parent_id": parent_id, "user_id": user_id}
+        )
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
 
-    async def get_root_tags(self) -> list[JournalTag]:
-        """Get all root tags (no parent)."""
+    async def get_root_tags(self, *, user_id: str) -> list[JournalTag]:
+        """Get the user's root tags (no parent)."""
         query = text(
             f"""
             SELECT {_TAG_COLUMNS}
             FROM journal_tags
-            WHERE parent_id IS NULL
+            WHERE parent_id IS NULL AND user_id = :user_id
             ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
         rows = result.fetchall()
 
         return [_row_to_tag(row) for row in rows]
@@ -338,11 +377,13 @@ class SqlJournalTagRepository(JournalTagRepository):
 
         return [row.journal_id for row in result.fetchall()]
 
-    async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
-        """Assign a tag to a journal, reporting whether the row is new.
+    async def assign_tag(self, journal_id: int, tag_id: UUID, *, user_id: str) -> bool:
+        """Assign the user's tag to their journal, reporting whether the row is new.
 
         ``RETURNING`` yields no row when ``DO NOTHING`` suppresses the insert,
-        which is what makes the "did anything change" answer race-free.
+        which is what makes the "did anything change" answer race-free. The
+        insert selects its row only when the user owns both the journal and the
+        tag, so a cross-owner assignment is never written.
         """
         # Parent lock before the child write, so this cannot deadlock against a
         # conditional update that locks the journal first; see ``lock_journal``.
@@ -351,13 +392,16 @@ class SqlJournalTagRepository(JournalTagRepository):
         query = text(
             """
             INSERT INTO journal_tag_assignments (journal_id, tag_id)
-            VALUES (:journal_id, :tag_id)
+            SELECT j.id, t.id
+            FROM journals j
+            JOIN journal_tags t ON t.id = :tag_id AND t.user_id = :user_id
+            WHERE j.id = :journal_id AND j.user_id = :user_id
             ON CONFLICT (journal_id, tag_id) DO NOTHING
             RETURNING journal_id
         """
         )
         result = await self.conn.execute(
-            query, {"journal_id": journal_id, "tag_id": tag_id}
+            query, {"journal_id": journal_id, "tag_id": tag_id, "user_id": user_id}
         )
         if result.fetchone() is None:
             return False

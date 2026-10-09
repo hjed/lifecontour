@@ -430,7 +430,9 @@ class TestRecurringInstanceCancellation:
         # A tag is a local addition — deletion would lose user data.
         tag_id = (
             await async_connection.execute(
-                text("INSERT INTO journal_tags (name) VALUES (:name) RETURNING id"),
+                text(
+                    "INSERT INTO journal_tags (user_id, name) VALUES ('test-user-123', :name) RETURNING id"
+                ),
                 {"name": f"tag-{uuid.uuid4().hex[:8]}"},
             )
         ).scalar()

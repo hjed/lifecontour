@@ -346,8 +346,8 @@ class TestNoteFilterMeansUntyped:
 async def _insert_tag(conn: AsyncConnection, name: str, parent_id: Any = None) -> Any:
     result = await conn.execute(
         text("""
-            INSERT INTO journal_tags (name, color, parent_id)
-            VALUES (:name, '#FF0000', :parent_id)
+            INSERT INTO journal_tags (user_id, name, color, parent_id)
+            VALUES ('test-user-123', :name, '#FF0000', :parent_id)
             RETURNING id
         """),
         {"name": name, "parent_id": parent_id},

@@ -778,49 +778,85 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 ---
 
-#### Phase 10: Journal tags
+#### Phase 10: Journal tags ✅ DONE
 
 **PR Size:** ~450 lines
 
-> **Migration numbers:** `0127_add_user_id_to_journal_tags.py`, `0128_require_journal_tags_user_id.py`.
+> **Migration numbers:** `0127_add_user_id_to_journal_tags.py`, `0128_require_journal_tags_user_id.py`, `0129_scope_journal_tag_names_to_owner.py`.
 
-- [ ] Migration `0124`: `journal_tags.user_id`, derivation (`-x journal_tags_owner`), `NOT NULL`,
-  `uq_journal_tags_user_id_name` replacing `uq_journal_tags_name`, index.
-- [ ] `JournalTag` entity `user_id`; `JournalTagRepository` port and `SqlJournalTagRepository`:
+- [x] Migrations `0127` / `0128` / `0129`: `journal_tags.user_id`, derivation (`-x journal_tags_owner`),
+  `NOT NULL`, `uq_journal_tags_user_id_name_lower` replacing `uq_journal_tags_name_lower`, index.
+- [x] `JournalTag` entity `user_id`; `JournalTagRepository` port and `SqlJournalTagRepository`:
   `find_by_id`, `find_by_name`, `save`, `delete`, `merge_into`, `get_all`,
   `get_descendants_for_tags`, `get_children`, `get_root_tags`, `assign_tag` take `user_id`;
   `assign_tag` requires the journal and the tag to share an owner. `agenda_repository.py` joins
   stay as they are (owner comes through the journal).
-- [ ] `JournalTagService`; journal tag routes in `api/journals/controllers.py`; MCP
+- [x] `JournalTagService`; journal tag routes in `api/journals/controllers.py`; MCP
   `list_journal_tags`, `update_journal_tag`, `delete_journal_tag`, `merge_journal_tag` and the tag
   parameters of `create_journal_entry` / `update_journal_entry` / `search_journals`
   (`tag_ids` descendant expansion is per-user).
 
 **Required Test Coverage:**
-- [ ] **Integration (migration + repository, first):** as Phase 8.
-- [ ] **Integration (REST):** journal tag routes added to `test_journal_ownership.py`'s
-  `CROSS_USER_REQUESTS`; assigning a foreign tag → 404; `/journals?tag_ids=` with a foreign tag
-  returns nothing.
-- [ ] **Integration (MCP):** the four tag tools in `test_mcp_journal_owner_identity.py`.
+- [x] **Integration (migration + repository, first):** as Phase 8
+  (`test_add_user_id_to_journal_tags_migration.py`, `test_require_journal_tags_user_id_migration.py`,
+  `TestJournalTagReadsAreScopedToTheOwner` / `TestJournalTagWritesAreScopedToTheOwner`).
+- [x] **Integration (REST):** journal tag routes in `test_journal_ownership.py`'s
+  `CROSS_USER_TAG_REQUESTS` (the tag-management routes carry no `{journal_id}`, so they get their
+  own table and their own `{tag_id}` coverage guard); assigning a foreign tag to an owned journal
+  → 404; `/journals?tag_ids=` with a foreign tag returns nothing; a foreign parent → 404; another
+  user's tag name is free to create.
+- [x] **Integration (MCP):** the four tag tools, a journal's tag-name list and the
+  `search_journals` tag filter in `test_mcp_journal_owner_identity.py`.
 
-**E2E:** regression — sidebar journal-tag tree and tag editor specs stay green.
+**E2E:** regression — sidebar journal-tag tree and tag editor specs stay green
+(`sidebar-tag-management`, `sidebar`, `journal-detail`, `journal-history`, `journals-list`,
+`home-dashboard`: 222 passed on firefox and Mobile Chrome, 3 desktop-only tests skipped on mobile
+by design).
+
+**Status:** ✅ DONE — journal tags are owned, named per owner and scoped in SQL on every read
+and write, across REST, MCP and the journal filters. Whole suite green on the final stack:
+backend unit 5086, backend integration 3585 (7 pre-existing skips), frontend jest 2976, e2e as
+above.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/database-design.md` — journal tags.
+- [x] `docs/architecture/database-design.md` — journal tags; `domain-architecture.md` — the
+  journal tag ownership rule.
 
-**Delivery:** a four-layer stack, each layer deployable on its own (the Phase 3 shape):
+**Delivery:** a stack, each layer deployable on its own (the Phase 3 shape). The test churn of
+the owner (233 test constructions, ~160 repository/service test calls) splits 10b in two and 10c
+in three to keep each PR near 500 lines:
 - **10a ✅ DONE** — `0127` (nullable `journal_tags.user_id`, per-tag owner assignment,
   `idx_journal_tags_user_id`); `JournalTag.user_id` (optional); the repository writes it on
   INSERT only and maps it; REST `POST /tags` stamps the session user and the find-or-create in
   `JournalWriteService._process_journal_tags` stamps the journal's owner. Reads still global.
-- **10b** — test-only: every test `JournalTag(...)` and raw `INSERT INTO journal_tags` names an
-  owner, through shared helpers.
-- **10c** — `0128` (`NOT NULL`, per-user unique index), required `JournalTag.user_id`, the scoped
-  repository and services, REST and MCP callers passing the acting user.
-- **10d** — the REST and MCP cross-user isolation suites; documentation.
+- **10b ✅ DONE** (two layers, unit then integration) — test-only: every test `JournalTag(...)`
+  names an owner and every raw `INSERT INTO journal_tags` writes the test user (inline, rather
+  than a seeding helper: seven inserts in five files, each with its own column list).
+- **10c1 ✅ DONE** — `0128`: owns any tag still without an owner (as `0127`), refuses if a
+  journal carries another owner's tag or a tag sits under another owner's tag (`0127`'s per-tag
+  derivation can split a parent from its child), then `SET NOT NULL`. `JournalTag.user_id`
+  required. Name uniqueness stays global in this layer: while `find_by_name` is still global, two
+  owners' `Family` tags would let a journal's tag-name list pick up the other's (augment review on
+  #1723), so the index swap waits for the scoped reads.
+- **10c2 ✅ DONE** — owner-scoped reads (`find_by_id`, `find_by_name`, `get_all`,
+  `get_children`, `get_root_tags`, `get_descendants_for_tags`, every level of the descendant walk
+  filtered) through the hierarchy, tag, write and journal services and the REST / MCP callers;
+  with them, `0129` replaces `uq_journal_tags_name_lower` with
+  `uq_journal_tags_user_id_name_lower (user_id, LOWER(name))` (downgrade refuses while two owners
+  share a name) and the service's duplicate-name mapping names the new index.
+- **10c3 ✅ DONE** — owner-scoped writes in SQL: `delete` and `merge_into` change nothing unless
+  the user owns every tag named, and a merge re-parents only the user's own children;
+  `assign_tag` inserts only when the user owns both the journal and the tag; `save`'s UPDATE is
+  keyed by the owner; creating a tag checks its parent is the owner's. `delete` and `merge_into`
+  report whether they wrote, and the service raises not-found when they did not, so a tag gone
+  between the check and the write rolls the unit of work back instead of committing history
+  events for a change that never happened (augment review on #1725).
+- **10d ✅ DONE** — the REST and MCP cross-user isolation suites for journal tags (mutation-checked:
+  dropping the owner filter from `find_by_id` / `get_all` fails 11 of them); the database and
+  domain architecture documents.
 
 **Decisions (recorded during implementation):**
-- **Migration numbers:** `0127` (column) and `0128` (contract). `main` had reached `0126`; if
+- **Migration numbers:** `0127` (column), `0128` (contract) and `0129` (per-owner names). `main` had reached `0126`; if
   Phase 15 lands its contract revision first, these renumber.
 - **Each tag takes its carriers' owner.** Tags are linked to owned journals through
   `journal_tag_assignments`, so `0127` gives a carried tag the owner of the journals carrying it;
@@ -830,10 +866,25 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   not resolve that: either owner would leave the other's journal holding a foreign tag, which the
   journal-keyed reads (`get_tags_for_journal`, the agenda) would show them.
 - **The live unique index is `uq_journal_tags_name_lower` on `LOWER(name)`** (migration `0048`),
-  not `uq_journal_tags_name`; 10c replaces it with `(user_id, LOWER(name))`, keeping names
+  not `uq_journal_tags_name`; `0129` (10c2) replaces it with `(user_id, LOWER(name))`, keeping names
   case-insensitive. The global index stays until then, so the namespace is still global (and
   `find_by_name` correctly unscoped) while the column is nullable.
 - **The owner is written on INSERT only**, so saving an existing tag never re-owns it.
+- **Assigning a missing or foreign tag answers 404, not 400.** `POST /journals/{id}/relationships/tags`
+  used to pre-check the tag in the controller and answer a missing one with a 400 validation
+  error. The check now lives in `JournalTagService.assign_tag`, which raises
+  `JournalTagNotFoundError` for a missing and a foreign tag alike (Delivery Rule 5). Creating a tag
+  under a missing or foreign parent likewise answers 404 (it was an unhandled foreign-key error).
+- **A foreign tag id in a journal filter is kept, not dropped.** Descendant expansion only adds
+  the user's tags; the requested ids stay in the filter, so a foreign id matches none of the
+  user's journals. Dropping it could empty the list, which the REST layer reads as "no filter".
+- **Journal tag events do not gain `user_id`.** They are child events of the journal aggregate
+  (like `JournalTypeAdded`), and neither consumer (history projection, search indexer) needs an
+  owner.
+- **Tests that tagged another owner's journal were corrected.** The history-projection e2e
+  tests, the search tag-reindex tests and several repository/MCP tests assigned
+  `test-user-123` tags to journals of `user-e2e` / `user-tag-reindex` / `test-user`; each now
+  uses one owner for both.
 
 ---
 

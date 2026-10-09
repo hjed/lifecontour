@@ -38,7 +38,7 @@ from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRe
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.models.journal_series import JournalSeries
 from app.core.journal.models.journal_tag import JournalTag
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 from tests.integration.journal_enrichment import enrichment_service_for
 from tests.integration.linked_calendar_seeding import (
     USER_ID,
@@ -195,10 +195,12 @@ class TestEnrichTagsSeriesCalendars:
     ) -> None:
         journal_id = await _create_journal(async_connection)
         tag_repo = SqlJournalTagRepository(async_connection)
-        tag = await tag_repo.save(JournalTag(name="enrichment-test-tag"))
-        await tag_repo.save(JournalTag(name="unrelated-tag"))
+        tag = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="enrichment-test-tag")
+        )
+        await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="unrelated-tag"))
         assert tag.id is not None
-        await tag_repo.assign_tag(journal_id, tag.id)
+        await tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
 
         enrichment = await enrichment_service_for(async_connection).enrich(
             journal_id, USER_ID

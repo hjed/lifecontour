@@ -31,6 +31,7 @@ from app.mcp.shared.annotations import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_current_user_id,
     get_journal_tag_service,
     mcp_depends,
 )
@@ -46,7 +47,7 @@ async def list_journal_tags(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
 ) -> str:
     """
-    List all available journal tags for organising journal entries.
+    List your journal tags for organising journal entries.
 
     Journal tags are a separate namespace from contact tags — use
     list_contact_tags for those. Tags are hierarchical: a tag with a
@@ -59,9 +60,10 @@ async def list_journal_tags(
         JSON string containing journal tags ordered by name, each with its
         colour, description, and parent_id for reconstructing the hierarchy.
     """
+    user_id = await get_current_user_id()
     repos = create_journal_tool_repositories(db_connection)
 
-    all_tags = await repos.tag_repo.get_all()
+    all_tags = await repos.tag_repo.get_all(user_id=user_id)
     tags = all_tags[:limit]
 
     tag_data = [
@@ -96,7 +98,7 @@ async def list_journal_tags(
 async def update_journal_tag(
     tag_id: Annotated[str, Field(description="UUID of the journal tag to update")],
     name: Annotated[
-        str | None, Field(description="New tag name (must be unique)")
+        str | None, Field(description="New tag name (unique among your tags)")
     ] = None,
     color: Annotated[
         str | None, Field(description="New hex colour code, e.g. #FF0000")
@@ -154,6 +156,7 @@ async def update_journal_tag(
     updated = await tag_service.update_tag(
         tag_id=tag_uuid,
         transaction=db_connection,
+        user_id=await get_current_user_id(),
         name=name,
         color=color,
         description=description,
@@ -207,6 +210,7 @@ async def delete_journal_tag(
     await tag_service.delete_tag(
         tag_id=tag_uuid,
         transaction=db_connection,
+        user_id=await get_current_user_id(),
         source=Provenance.MCP,
         changed_by="mcp",
     )
@@ -275,6 +279,7 @@ async def merge_journal_tag(
         source_id=source_uuid,
         target_id=target_uuid,
         transaction=db_connection,
+        user_id=await get_current_user_id(),
         source=Provenance.MCP,
         changed_by="mcp",
     )
