@@ -32,22 +32,29 @@ async def _insert_checkout_metadata(
     asset_id: str,
     journal_id: int,
     sync_status: str = "success",
+    posted: bool = False,
 ) -> None:
-    """Insert a ``snipeit_checkout`` sync_metadata row (successful by default)."""
+    """Insert a ``snipeit_checkout`` sync_metadata row (successful by default).
+
+    ``posted`` marks an attempt that got as far as posting the checkout, as a
+    lost response leaves it: only such an attempt can have taken the asset.
+    """
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
                 (user_id, integration_source, external_id, internal_uuid,
-                 last_synced_at, version_hash, sync_status,
+                 last_synced_at, version_hash, sync_status, reference_data,
                  error_message, retry_count, created_at, updated_at)
             VALUES
                 ('user-123', 'snipeit_checkout', :external_id, :journal_id,
-                 now(), 'hash', :sync_status, NULL, 0, now(), now())
+                 now(), 'hash', :sync_status, :reference_data, NULL, 0,
+                 now(), now())
         """),
         {
             "external_id": f"snipeit_checkout:{asset_id}:{journal_id}",
             "journal_id": str(journal_id),
             "sync_status": sync_status,
+            "reference_data": json.dumps({"posting": True}) if posted else None,
         },
     )
 
@@ -484,7 +491,11 @@ class TestHistoricalDatesIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         mock_transport.add_response(
             "/hardware/41",
@@ -852,7 +863,7 @@ class TestAssetDatesSnapshotIntegration:
             async_connection,
             source="snipeit_checkout",
             journal_id=journal_id,
-            reference_data={"asset_dates_before": self.BEFORE},
+            reference_data={"asset_dates_before": self.BEFORE, "posting": True},
             asset_id="41",
             sync_status="failed",
         )
@@ -2214,7 +2225,11 @@ class TestSupersededAssetRetryIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         mock_transport.add_response(
             "/hardware/41",
@@ -2448,7 +2463,11 @@ class TestPreviousAssetHeldElsewhereIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         other_journal_id = 880001
         await _insert_checkout_metadata(

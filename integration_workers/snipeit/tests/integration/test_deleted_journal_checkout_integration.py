@@ -36,17 +36,22 @@ async def _insert_checkout_row(
     sync_status: str,
     age_seconds: int = 0,
     user_id: str = "user-123",
+    posted: bool = True,
 ) -> None:
-    """Insert a ``snipeit_checkout`` row last touched ``age_seconds`` ago."""
+    """Insert a ``snipeit_checkout`` row last touched ``age_seconds`` ago.
+
+    ``posted`` (the default here) marks an attempt that got as far as posting
+    the checkout, as a lost response leaves it.
+    """
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
                 (user_id, integration_source, external_id, internal_uuid,
-                 last_synced_at, version_hash, sync_status,
+                 last_synced_at, version_hash, sync_status, reference_data,
                  error_message, retry_count, created_at, updated_at)
             VALUES
                 (:user_id, 'snipeit_checkout', :external_id, :journal_id,
-                 now(), 'hash', :sync_status, NULL, 0,
+                 now(), 'hash', :sync_status, :reference_data, NULL, 0,
                  now() - make_interval(secs => :age_seconds),
                  now() - make_interval(secs => :age_seconds))
         """),
@@ -56,6 +61,7 @@ async def _insert_checkout_row(
             "journal_id": str(journal_id),
             "sync_status": sync_status,
             "age_seconds": age_seconds,
+            "reference_data": json.dumps({"posting": True}) if posted else None,
         },
     )
 
@@ -160,6 +166,27 @@ class TestReleaseDeletedJournalIntegration:
         await _release(snipeit_sync_service, async_connection)
 
         assert _posts(mock_transport) == []
+        assert await _checkout_rows(async_connection) == set()
+
+    @pytest.mark.asyncio
+    async def test_an_attempt_that_never_posted_leaves_the_asset_alone(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """An attempt that failed before posting cannot have taken the asset.
+
+        The asset may still be out to the user — by hand, or through a checkout
+        the attempt linked — and that checkout is not this journal's to end.
+        """
+        await _insert_checkout_row(
+            async_connection, asset_id=41, sync_status="failed", posted=False
+        )
+
+        await _release(snipeit_sync_service, async_connection)
+
+        assert mock_transport.requests == []
         assert await _checkout_rows(async_connection) == set()
 
     @pytest.mark.asyncio

@@ -2958,6 +2958,7 @@ class SnipeItSyncService:
     async def _return_abandoned_asset(
         self,
         pair: GearUsagePair,
+        checkout_row: Any,
         *,
         session_factory: Any,
         note: str = "Gear item removed from its gear usage journal",
@@ -2973,12 +2974,20 @@ class SnipeItSyncService:
         checked the asset out too; leaving it out is recoverable, returning an
         asset still in use is not.
 
-        Returns whether the asset is dealt with (returned, not out to the mapped
-        user, gone, or not ours to return — a 403/404 on either call), so the
-        pair can be forgotten. ``False`` while another
+        Only an attempt that got as far as posting the checkout (its row carries
+        the ``posting`` marker) can have checked the asset out. One that failed
+        before posting — missing dates, a failed read, or a link to a checkout
+        already in Snipe-IT — did not, and an asset out to the mapped user then
+        is another checkout's, such as one made by hand.
+
+        Returns whether the asset is dealt with (never posted for, returned, not
+        out to the mapped user, gone, or not ours to return — a 403/404 on
+        either call), so the pair can be forgotten. ``False`` while another
         pair may hold it: the pair is kept, so a later sync retries the return
         rather than lose the only record that the asset may be out.
         """
+        if not self._recorded_posting(checkout_row.reference_data):
+            return True
         asset_id = pair.asset_id
         try:
             asset = await self._api_client.get_asset(asset_id)
@@ -3936,7 +3945,9 @@ class SnipeItSyncService:
                 await self._forget_pair(pair, session_factory)
             return
         _raise_if_checkout_in_flight(pair, checkout_row)
-        if await self._return_abandoned_asset(pair, session_factory=session_factory):
+        if await self._return_abandoned_asset(
+            pair, checkout_row, session_factory=session_factory
+        ):
             await self._forget_pair(pair, session_factory)
 
     async def release_deleted_journal(
@@ -3971,7 +3982,10 @@ class SnipeItSyncService:
                 continue
             _raise_if_checkout_in_flight(pair, checkout_row)
             if not await self._return_abandoned_asset(
-                pair, session_factory=session_factory, note=_JOURNAL_DELETED_NOTE
+                pair,
+                checkout_row,
+                session_factory=session_factory,
+                note=_JOURNAL_DELETED_NOTE,
             ):
                 logger.warning(
                     "Leaving a deleted journal's asset out: another pair may hold it",
@@ -4133,6 +4147,11 @@ class SnipeItSyncService:
         """Return the ``checkout_at`` a checkout sync row recorded, if any."""
         value = cls._recorded_reference(reference_data).get("checkout_at")
         return value if isinstance(value, str) else None
+
+    @classmethod
+    def _recorded_posting(cls, reference_data: object) -> bool:
+        """Whether a checkout attempt got as far as posting to Snipe-IT."""
+        return cls._recorded_reference(reference_data).get(_POSTING) is True
 
     @classmethod
     def _recorded_log_id(cls, reference_data: object) -> int | None:

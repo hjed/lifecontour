@@ -104,6 +104,27 @@ class TestSnipeitZone:
         assert _snipeit_zone(row) is None
 
 
+class TestRecordedPosting:
+    """Only a checkout attempt that reached its POST can have taken the asset."""
+
+    @pytest.mark.parametrize(
+        ("reference_data", "posted"),
+        [
+            (json.dumps({"asset_dates_before": {}, "posting": True}), True),
+            # A success replaces the marker with the recorded checkout.
+            (json.dumps({"checkout_at": "2025-03-08", "snipeit_log_id": 7}), False),
+            (json.dumps({"posting": "true"}), False),
+            (None, False),
+            ("not json", False),
+        ],
+        ids=["posting", "recorded", "non-boolean", "none", "unreadable"],
+    )
+    def test_reads_the_posting_marker(
+        self, reference_data: str | None, posted: bool
+    ) -> None:
+        assert SnipeItSyncService._recorded_posting(reference_data) is posted
+
+
 class TestSnipeitDatetime:
     """Datetimes are sent as Snipe-IT's naive ``Y-m-d H:i:s`` wall-clock time."""
 
