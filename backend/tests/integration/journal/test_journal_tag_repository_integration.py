@@ -19,7 +19,9 @@ async def tag_repo(async_connection: AsyncConnection) -> SqlJournalTagRepository
     return SqlJournalTagRepository(async_connection)
 
 
-async def _create_journal(connection: AsyncConnection, title: str) -> int:
+async def _create_journal(
+    connection: AsyncConnection, title: str, *, user_id: str = TEST_USER_ID
+) -> int:
     """Insert a second journal alongside the shared ``sample_journal_id``.
 
     Only the columns the assignment FK needs are populated: these tests are about
@@ -37,7 +39,7 @@ async def _create_journal(connection: AsyncConnection, title: str) -> int:
             """
         ),
         {
-            "user_id": "test-user-123",
+            "user_id": user_id,
             "title": title,
             "content": "Tag fan-out subject",
             "start": now,
@@ -71,7 +73,7 @@ class TestJournalTagRepositoryIntegration:
         assert found_tag.user_id == "owner-1"
 
     async def test_an_update_never_re_owns_a_tag(self, tag_repo):
-        """The owner is written on INSERT only."""
+        """The owner is written on INSERT only, and an update is keyed by it."""
         saved_tag = await tag_repo.save(JournalTag(name="owned", user_id="owner-1"))
         saved_tag.user_id = "someone-else"
         saved_tag.color = "#123456"
@@ -79,7 +81,7 @@ class TestJournalTagRepositoryIntegration:
 
         found_tag = await tag_repo.find_by_id(saved_tag.id, user_id="owner-1")
         assert found_tag is not None
-        assert found_tag.color == "#123456"
+        assert found_tag.color is None
         assert found_tag.user_id == "owner-1"
 
     async def test_find_tag_by_id(self, tag_repo):
@@ -231,7 +233,7 @@ class TestJournalTagRepositoryIntegration:
         tag = JournalTag(user_id=TEST_USER_ID, name="work")
         saved_tag = await tag_repo.save(tag)
 
-        await tag_repo.delete(saved_tag.id)
+        await tag_repo.delete(saved_tag.id, user_id=TEST_USER_ID)
 
         found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is None
@@ -333,7 +335,7 @@ class TestJournalTagRepositoryIntegration:
         journal_repo = SqlJournalRepository(async_connection)
         saved_journal = await journal_repo.save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Tagged Journal",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -342,9 +344,9 @@ class TestJournalTagRepositoryIntegration:
             )
         )
         saved_tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="doomed"))
-        await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
+        await tag_repo.assign_tag(saved_journal.id, saved_tag.id, user_id=TEST_USER_ID)
 
-        await tag_repo.delete(saved_tag.id)
+        await tag_repo.delete(saved_tag.id, user_id=TEST_USER_ID)
 
         result = await async_connection.execute(
             text("SELECT COUNT(*) FROM journal_tag_assignments WHERE tag_id = :tag_id"),
@@ -360,7 +362,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="climbing", parent_id=parent.id)
         )
 
-        await tag_repo.delete(parent.id)
+        await tag_repo.delete(parent.id, user_id=TEST_USER_ID)
 
         surviving_child = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert surviving_child is not None
@@ -378,7 +380,7 @@ class TestJournalTagRepositoryIntegration:
         journal_repo = SqlJournalRepository(async_connection)
         return await journal_repo.save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title=title,
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -394,9 +396,9 @@ class TestJournalTagRepositoryIntegration:
         target = await tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="bushwalking")
         )
-        await tag_repo.assign_tag(journal.id, source.id)
+        await tag_repo.assign_tag(journal.id, source.id, user_id=TEST_USER_ID)
 
-        await tag_repo.merge_into(source.id, target.id)
+        await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
 
         tag_ids = {tag.id for tag in await tag_repo.get_tags_for_journal(journal.id)}
         assert tag_ids == {target.id}
@@ -417,10 +419,10 @@ class TestJournalTagRepositoryIntegration:
         target = await tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="bushwalking")
         )
-        await tag_repo.assign_tag(journal.id, source.id)
-        await tag_repo.assign_tag(journal.id, target.id)
+        await tag_repo.assign_tag(journal.id, source.id, user_id=TEST_USER_ID)
+        await tag_repo.assign_tag(journal.id, target.id, user_id=TEST_USER_ID)
 
-        await tag_repo.merge_into(source.id, target.id)
+        await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
 
         result = await async_connection.execute(
             text(
@@ -443,7 +445,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="day walks", parent_id=source.id)
         )
 
-        await tag_repo.merge_into(source.id, target.id)
+        await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
 
         surviving_child = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert surviving_child is not None
@@ -464,7 +466,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="hiking", parent_id=source.id)
         )
 
-        await tag_repo.merge_into(source.id, target.id)
+        await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
 
         surviving_target = await tag_repo.find_by_id(target.id, user_id=TEST_USER_ID)
         assert surviving_target is not None
@@ -486,10 +488,10 @@ class TestJournalTagRepositoryIntegration:
         """
         journal = await self._save_journal(async_connection, "Kept")
         tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="hiking"))
-        await tag_repo.assign_tag(journal.id, tag.id)
+        await tag_repo.assign_tag(journal.id, tag.id, user_id=TEST_USER_ID)
 
         with pytest.raises(ValueError, match="distinct source and target"):
-            await tag_repo.merge_into(tag.id, tag.id)
+            await tag_repo.merge_into(tag.id, tag.id, user_id=TEST_USER_ID)
 
         assert await tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is not None
         assert [t.id for t in await tag_repo.get_tags_for_journal(journal.id)] == [
@@ -503,7 +505,7 @@ class TestJournalTagRepositoryIntegration:
             JournalTag(user_id=TEST_USER_ID, name="bushwalking")
         )
 
-        await tag_repo.merge_into(source.id, target.id)
+        await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
 
         assert await tag_repo.find_by_id(source.id, user_id=TEST_USER_ID) is None
         assert await tag_repo.find_by_id(target.id, user_id=TEST_USER_ID) is not None
@@ -520,7 +522,7 @@ class TestJournalTagRepositoryIntegration:
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)
         journal = Journal(
-            user_id="test-user",
+            user_id=TEST_USER_ID,
             title="Test Journal",
             content="Test content",
             event_date_range=EventDateRange(
@@ -575,7 +577,7 @@ class TestJournalTagRepositoryIntegration:
         journal_repo = SqlJournalRepository(async_connection)
         saved_journal = await journal_repo.save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Test Journal",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -587,7 +589,7 @@ class TestJournalTagRepositoryIntegration:
         saved_tag = await tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="work", description="Work entries")
         )
-        await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
+        await tag_repo.assign_tag(saved_journal.id, saved_tag.id, user_id=TEST_USER_ID)
 
         tags = await tag_repo.get_tags_for_journal(saved_journal.id)
         assert [t.description for t in tags] == ["Work entries"]
@@ -603,7 +605,7 @@ class TestJournalTagRepositoryIntegration:
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)
         journal = Journal(
-            user_id="test-user",
+            user_id=TEST_USER_ID,
             title="Test Journal",
             content="Test content",
             event_date_range=EventDateRange(
@@ -617,7 +619,7 @@ class TestJournalTagRepositoryIntegration:
         saved_tag = await tag_repo.save(tag)
 
         # Assign tag to journal
-        await tag_repo.assign_tag(saved_journal.id, saved_tag.id)
+        await tag_repo.assign_tag(saved_journal.id, saved_tag.id, user_id=TEST_USER_ID)
 
         # Verify tag was assigned
         tags = await tag_repo.get_tags_for_journal(saved_journal.id)
@@ -636,7 +638,7 @@ class TestJournalTagRepositoryIntegration:
         # Create a journal
         journal_repo = SqlJournalRepository(async_connection)
         journal = Journal(
-            user_id="test-user",
+            user_id=TEST_USER_ID,
             title="Test Journal",
             content="Test content",
             event_date_range=EventDateRange(
@@ -698,8 +700,14 @@ class TestAssignmentChangeReporting:
             JournalTag(user_id=TEST_USER_ID, name="assign-reporting")
         )
 
-        assert await tag_repo.assign_tag(sample_journal_id, tag.id) is True
-        assert await tag_repo.assign_tag(sample_journal_id, tag.id) is False
+        assert (
+            await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
+            is True
+        )
+        assert (
+            await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
+            is False
+        )
 
         # The repeat must not have created a second row either.
         assert len(await tag_repo.get_tags_for_journal(sample_journal_id)) == 1
@@ -710,7 +718,7 @@ class TestAssignmentChangeReporting:
         tag = await tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="remove-reporting")
         )
-        await tag_repo.assign_tag(sample_journal_id, tag.id)
+        await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
 
         assert await tag_repo.remove_tag(sample_journal_id, tag.id) is True
         assert await tag_repo.remove_tag(sample_journal_id, tag.id) is False
@@ -739,8 +747,8 @@ class TestGetJournalIdsForTag:
     ):
         second_journal_id = await _create_journal(async_connection, "Second subject")
         tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="fan-out"))
-        await tag_repo.assign_tag(sample_journal_id, tag.id)
-        await tag_repo.assign_tag(second_journal_id, tag.id)
+        await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
+        await tag_repo.assign_tag(second_journal_id, tag.id, user_id=TEST_USER_ID)
 
         journal_ids = await tag_repo.get_journal_ids_for_tag(tag.id)
 
@@ -754,8 +762,8 @@ class TestGetJournalIdsForTag:
         other_tag = await tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="unwanted")
         )
-        await tag_repo.assign_tag(sample_journal_id, tag.id)
-        await tag_repo.assign_tag(other_journal_id, other_tag.id)
+        await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
+        await tag_repo.assign_tag(other_journal_id, other_tag.id, user_id=TEST_USER_ID)
 
         assert await tag_repo.get_journal_ids_for_tag(tag.id) == [sample_journal_id]
 
@@ -771,7 +779,7 @@ class TestGetJournalIdsForTag:
     async def test_reflects_a_removed_assignment(self, tag_repo, sample_journal_id):
         """Un-assigning must drop the journal, or a rename would over-report."""
         tag = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="transient"))
-        await tag_repo.assign_tag(sample_journal_id, tag.id)
+        await tag_repo.assign_tag(sample_journal_id, tag.id, user_id=TEST_USER_ID)
         await tag_repo.remove_tag(sample_journal_id, tag.id)
 
         assert await tag_repo.get_journal_ids_for_tag(tag.id) == []
@@ -913,3 +921,91 @@ class TestJournalTagReadsAreScopedToTheOwner:
             == []
         )
         assert await tag_repo.get_children(mine.id, user_id=OTHER_USER_ID) == [theirs]
+
+
+@pytest.mark.integration
+class TestJournalTagWritesAreScopedToTheOwner:
+    """A write naming another user's tag or journal changes nothing."""
+
+    @staticmethod
+    async def _assignments(connection: AsyncConnection) -> set[tuple[int, str]]:
+        rows = await connection.execute(
+            text("SELECT journal_id, tag_id::text FROM journal_tag_assignments")
+        )
+        return {(row[0], row[1]) for row in rows.fetchall()}
+
+    async def test_deleting_a_foreign_tag_changes_nothing(self, tag_repo):
+        theirs = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="theirs"))
+
+        deleted = await tag_repo.delete(theirs.id, user_id=TEST_USER_ID)
+
+        assert deleted is False
+        assert await tag_repo.find_by_id(theirs.id, user_id=OTHER_USER_ID) == theirs
+
+    async def test_merging_across_owners_changes_nothing(
+        self, tag_repo, async_connection
+    ):
+        mine = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="mine"))
+        theirs = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="theirs"))
+        their_journal = await _create_journal(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        await tag_repo.assign_tag(their_journal, theirs.id, user_id=OTHER_USER_ID)
+
+        assert (
+            await tag_repo.merge_into(theirs.id, mine.id, user_id=TEST_USER_ID) is False
+        )
+        assert (
+            await tag_repo.merge_into(mine.id, theirs.id, user_id=TEST_USER_ID) is False
+        )
+
+        assert await tag_repo.find_by_id(theirs.id, user_id=OTHER_USER_ID) == theirs
+        assert await tag_repo.find_by_id(mine.id, user_id=TEST_USER_ID) == mine
+        assert await self._assignments(async_connection) == {
+            (their_journal, str(theirs.id))
+        }
+
+    async def test_a_foreign_tag_is_never_assigned(
+        self, tag_repo, async_connection, sample_journal_id
+    ):
+        theirs = await tag_repo.save(JournalTag(user_id=OTHER_USER_ID, name="theirs"))
+
+        assigned = await tag_repo.assign_tag(
+            sample_journal_id, theirs.id, user_id=TEST_USER_ID
+        )
+
+        assert assigned is False
+        assert await self._assignments(async_connection) == set()
+
+    async def test_a_tag_is_never_assigned_to_a_foreign_journal(
+        self, tag_repo, async_connection
+    ):
+        mine = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="mine"))
+        their_journal = await _create_journal(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+
+        assigned = await tag_repo.assign_tag(
+            their_journal, mine.id, user_id=TEST_USER_ID
+        )
+
+        assert assigned is False
+        assert await self._assignments(async_connection) == set()
+
+    async def test_a_merge_adopts_only_the_owners_children(self, tag_repo):
+        """A child of another owner never moves onto the merging user's tag."""
+        source = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="source"))
+        target = await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="target"))
+        mine = await tag_repo.save(
+            JournalTag(user_id=TEST_USER_ID, name="my-child", parent_id=source.id)
+        )
+        theirs = await tag_repo.save(
+            JournalTag(user_id=OTHER_USER_ID, name="their-child", parent_id=source.id)
+        )
+
+        assert await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
+
+        adopted = await tag_repo.find_by_id(mine.id, user_id=TEST_USER_ID)
+        untouched = await tag_repo.find_by_id(theirs.id, user_id=OTHER_USER_ID)
+        assert adopted is not None and adopted.parent_id == target.id
+        assert untouched is not None and untouched.parent_id != target.id

@@ -333,7 +333,7 @@ class TestUpdateJournalTagMCPTool:
             JournalTag(user_id=TEST_USER_ID, name="mcp-rename-source")
         )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await journal_tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_update_journal_tag(
@@ -397,7 +397,7 @@ class TestDeleteJournalTagMCPTool:
 
         journal = await SqlJournalRepository(async_connection).save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Tagged Journal",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -408,7 +408,7 @@ class TestDeleteJournalTagMCPTool:
         tag = await journal_tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="in-use")
         )
-        await journal_tag_repo.assign_tag(journal.id, tag.id)
+        await journal_tag_repo.assign_tag(journal.id, tag.id, user_id=TEST_USER_ID)
 
         raw = await call_delete_journal_tag(
             authenticated_lifespan_client, {"tag_id": str(tag.id)}
@@ -455,7 +455,7 @@ class TestDeleteJournalTagMCPTool:
             JournalTag(user_id=TEST_USER_ID, name="mcp-delete-subject")
         )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, tag.id)
+        await journal_tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_delete_journal_tag(
@@ -513,7 +513,7 @@ class TestMergeJournalTagMCPTool:
 
         journal = await SqlJournalRepository(async_connection).save(
             Journal(
-                user_id="test-user",
+                user_id=TEST_USER_ID,
                 title="Blue Mountains",
                 content="Test content",
                 event_date_range=EventDateRange(
@@ -530,7 +530,7 @@ class TestMergeJournalTagMCPTool:
         child = await journal_tag_repo.save(
             JournalTag(user_id=TEST_USER_ID, name="day walks", parent_id=source.id)
         )
-        await journal_tag_repo.assign_tag(journal.id, source.id)
+        await journal_tag_repo.assign_tag(journal.id, source.id, user_id=TEST_USER_ID)
 
         raw = await call_merge_journal_tag(
             authenticated_lifespan_client,
@@ -679,7 +679,7 @@ class TestMergeJournalTagMCPTool:
             JournalTag(user_id=TEST_USER_ID, name="mcp-merge-target")
         )
         journal_id = await _create_journal(async_connection)
-        await journal_tag_repo.assign_tag(journal_id, source.id)
+        await journal_tag_repo.assign_tag(journal_id, source.id, user_id=TEST_USER_ID)
         await async_connection.execute(text("DELETE FROM outbox_events"))
 
         await call_merge_journal_tag(

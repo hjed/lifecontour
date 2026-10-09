@@ -57,7 +57,6 @@ from app.infrastructure.events.history_projection_consumer import (
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_relay import OutboxRelay
-from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.infrastructure.events.projection_harness import (
     GROUP_NAME,
     patched_projection_engine,
@@ -68,11 +67,14 @@ from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
 
+# Owns the journals and tags below: a tag is only assigned to its owner's journals.
+JOURNAL_OWNER = "user-e2e"
+
 
 def _make_journal(title: str = "Original title") -> Journal:
     return Journal(
         id=None,
-        user_id="user-e2e",
+        user_id=JOURNAL_OWNER,
         title=title,
         content="c",
         event_date_range=EventDateRange(
@@ -719,7 +721,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Tag history subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=f"Hiking-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"Hiking-{uuid4()}")
         )
         assert tag.id is not None
 
@@ -729,7 +731,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await tag_service.remove_tag(
             journal_id,
@@ -737,7 +739,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
 
         await relay_and_project(
@@ -767,7 +769,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Replay subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=f"Replay-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"Replay-{uuid4()}")
         )
         assert tag.id is not None
 
@@ -777,7 +779,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await tag_service.remove_tag(
             journal_id,
@@ -785,7 +787,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await relay_and_project(
             stream_client,
@@ -892,7 +894,7 @@ class TestJournalTagHistoryProjectionE2E:
         untagged_id = await self._journal_id(async_connection, "Untagged bystander")
         old_name = f"Hiking-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=old_name)
+            JournalTag(user_id=JOURNAL_OWNER, name=old_name)
         )
         assert tag.id is not None
         for journal_id in tagged_ids:
@@ -902,7 +904,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
-                user_id=TEST_USER_ID,
+                user_id=JOURNAL_OWNER,
             )
 
         new_name = f"Trekking-{uuid4()}"
@@ -912,7 +914,7 @@ class TestJournalTagHistoryProjectionE2E:
             name=new_name,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
 
         await relay_and_project(
@@ -944,7 +946,7 @@ class TestJournalTagHistoryProjectionE2E:
         journal_id = await self._journal_id(async_connection, "Rename replay subject")
         old_name = f"ReplayRename-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=old_name)
+            JournalTag(user_id=JOURNAL_OWNER, name=old_name)
         )
         assert tag.id is not None
         await tag_service.assign_tag(
@@ -953,7 +955,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await tag_service.update_tag(
             tag.id,
@@ -961,7 +963,7 @@ class TestJournalTagHistoryProjectionE2E:
             name=f"ReplayRenamed-{uuid4()}",
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await relay_and_project(
             stream_client,
@@ -1000,7 +1002,7 @@ class TestJournalTagHistoryProjectionE2E:
         untagged_id = await self._journal_id(async_connection, "Untagged bystander")
         tag_name = f"Doomed-{uuid4()}"
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=tag_name)
+            JournalTag(user_id=JOURNAL_OWNER, name=tag_name)
         )
         assert tag.id is not None
         for journal_id in tagged_ids:
@@ -1010,7 +1012,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
-                user_id=TEST_USER_ID,
+                user_id=JOURNAL_OWNER,
             )
 
         await tag_service.delete_tag(
@@ -1018,7 +1020,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
 
         await relay_and_project(
@@ -1045,7 +1047,7 @@ class TestJournalTagHistoryProjectionE2E:
         tag_service = await self._tag_service(async_connection)
         journal_id = await self._journal_id(async_connection, "Delete replay subject")
         tag = await SqlJournalTagRepository(async_connection).save(
-            JournalTag(user_id=TEST_USER_ID, name=f"ReplayDoomed-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"ReplayDoomed-{uuid4()}")
         )
         assert tag.id is not None
         await tag_service.assign_tag(
@@ -1054,14 +1056,14 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await tag_service.delete_tag(
             tag.id,
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await relay_and_project(
             stream_client,
@@ -1098,8 +1100,12 @@ class TestJournalTagHistoryProjectionE2E:
         repo = SqlJournalTagRepository(async_connection)
         source_name = f"Hiking-{uuid4()}"
         target_name = f"Bushwalking-{uuid4()}"
-        source_tag = await repo.save(JournalTag(user_id=TEST_USER_ID, name=source_name))
-        target_tag = await repo.save(JournalTag(user_id=TEST_USER_ID, name=target_name))
+        source_tag = await repo.save(
+            JournalTag(user_id=JOURNAL_OWNER, name=source_name)
+        )
+        target_tag = await repo.save(
+            JournalTag(user_id=JOURNAL_OWNER, name=target_name)
+        )
         assert source_tag.id is not None
         assert target_tag.id is not None
         for journal_id in (source_only_id, both_id):
@@ -1109,7 +1115,7 @@ class TestJournalTagHistoryProjectionE2E:
                 async_connection,
                 source=Provenance.UI,
                 changed_by="ui",
-                user_id=TEST_USER_ID,
+                user_id=JOURNAL_OWNER,
             )
         await tag_service.assign_tag(
             both_id,
@@ -1117,7 +1123,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
 
         await tag_service.merge_tag(
@@ -1126,7 +1132,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
 
         await relay_and_project(
@@ -1157,10 +1163,10 @@ class TestJournalTagHistoryProjectionE2E:
         journal_id = await self._journal_id(async_connection, "Merge replay subject")
         repo = SqlJournalTagRepository(async_connection)
         source_tag = await repo.save(
-            JournalTag(user_id=TEST_USER_ID, name=f"ReplaySource-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"ReplaySource-{uuid4()}")
         )
         target_tag = await repo.save(
-            JournalTag(user_id=TEST_USER_ID, name=f"ReplayTarget-{uuid4()}")
+            JournalTag(user_id=JOURNAL_OWNER, name=f"ReplayTarget-{uuid4()}")
         )
         assert source_tag.id is not None
         assert target_tag.id is not None
@@ -1170,7 +1176,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await tag_service.merge_tag(
             source_tag.id,
@@ -1178,7 +1184,7 @@ class TestJournalTagHistoryProjectionE2E:
             async_connection,
             source=Provenance.UI,
             changed_by="ui",
-            user_id=TEST_USER_ID,
+            user_id=JOURNAL_OWNER,
         )
         await relay_and_project(
             stream_client,

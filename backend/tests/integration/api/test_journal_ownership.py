@@ -373,7 +373,7 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
     )
     assert assigned.id is not None
     assert unassigned.id is not None
-    await tag_repo.assign_tag(journal_id, assigned.id)
+    await tag_repo.assign_tag(journal_id, assigned.id, user_id=OTHER_USER_ID)
 
     return ForeignJournal(
         journal_id=journal_id,

@@ -26,6 +26,9 @@ def mock_tag_repo():
     # Renames fan out over this list, so it must be iterable by default. Left
     # empty so a test that cares about the fan-out has to say so explicitly.
     repo.get_journal_ids_for_tag.return_value = []
+    # Destructive writes report whether they changed anything.
+    repo.delete.return_value = True
+    repo.merge_into.return_value = True
     return repo
 
 
@@ -134,7 +137,7 @@ class TestDeleteTag:
             tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
-        mock_tag_repo.delete.assert_awaited_once_with(tag_id)
+        mock_tag_repo.delete.assert_awaited_once_with(tag_id, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_delete_tag_removes_tag_in_use(
@@ -154,7 +157,7 @@ class TestDeleteTag:
             tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
-        mock_tag_repo.delete.assert_awaited_once_with(tag_id)
+        mock_tag_repo.delete.assert_awaited_once_with(tag_id, user_id=TEST_USER_ID)
         mock_transaction.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -268,8 +271,9 @@ class TestDeleteTagEvents:
         )
         mock_tag_repo.get_journal_ids_for_tag.return_value = [7, 9]
 
-        async def _cascade(_tag_id):
+        async def _cascade(_tag_id, *, user_id):
             mock_tag_repo.get_journal_ids_for_tag.return_value = []
+            return True
 
         mock_tag_repo.delete.side_effect = _cascade
 
@@ -680,7 +684,9 @@ class TestMergeTag:
             source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
-        mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
+        mock_tag_repo.merge_into.assert_awaited_once_with(
+            source_id, target_id, user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_merge_into_unrelated_tag_with_parent_allowed(
@@ -706,7 +712,9 @@ class TestMergeTag:
             source_id, target_id, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
-        mock_tag_repo.merge_into.assert_awaited_once_with(source_id, target_id)
+        mock_tag_repo.merge_into.assert_awaited_once_with(
+            source_id, target_id, user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_merge_into_self_rejected(
@@ -1054,7 +1062,7 @@ class TestMergeTagEvents:
             target_on=[9],
         )
 
-        async def _merged(_source_id, _target_id):
+        async def _merged(_source_id, _target_id, *, user_id):
             self._carriers(
                 mock_tag_repo,
                 source_id=source_id,
@@ -1062,6 +1070,7 @@ class TestMergeTagEvents:
                 source_on=[],
                 target_on=[7, 9],
             )
+            return True
 
         mock_tag_repo.merge_into.side_effect = _merged
 
@@ -1092,7 +1101,9 @@ class TestAssignAndRemoveTag:
             7, tag_id, transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
-        mock_tag_repo.assign_tag.assert_awaited_once_with(7, tag_id)
+        mock_tag_repo.assign_tag.assert_awaited_once_with(
+            7, tag_id, user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_remove_tag(self, tag_service, mock_tag_repo, mock_transaction):
@@ -1673,3 +1684,79 @@ class TestEveryOperationIsScopedToTheActingUser:
         assert await tag_service.resolve_filter_tag_ids(
             [foreign_id], user_id=TEST_USER_ID
         ) == [foreign_id]
+
+
+class TestCreateTagParent:
+    """A new tag's parent must be one of the same owner's tags."""
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_parent_is_not_found(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        mock_tag_repo.find_by_id.return_value = None
+        foreign_parent = uuid4()
+        tag = JournalTag(user_id=TEST_USER_ID, name="child", parent_id=foreign_parent)
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.create_tag(tag, transaction=mock_transaction)
+
+        mock_tag_repo.find_by_id.assert_awaited_once_with(
+            foreign_parent, user_id=TEST_USER_ID
+        )
+        mock_tag_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_owned_parent_is_accepted(
+        self, tag_service, mock_tag_repo, mock_transaction
+    ):
+        parent = JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="parent")
+        mock_tag_repo.find_by_id.return_value = parent
+        tag = JournalTag(user_id=TEST_USER_ID, name="child", parent_id=parent.id)
+        mock_tag_repo.save.return_value = tag
+
+        assert await tag_service.create_tag(tag, transaction=mock_transaction) is tag
+
+
+class TestATagGoneMidWriteIsNotFound:
+    """A tag deleted between the check and the write publishes nothing.
+
+    The repository reports that its guarded write changed nothing; the service
+    then raises, so the unit of work rolls back instead of committing history
+    events for a change that did not happen.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_merge_that_changed_nothing_raises_and_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        source = JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="source")
+        target = JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="target")
+        by_id = {source.id: source, target.id: target}
+
+        async def find_by_id(tag_id, *, user_id):
+            return _owned_by(by_id.get(tag_id), user_id)
+
+        mock_tag_repo.find_by_id.side_effect = find_by_id
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.merge_into.return_value = False
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.merge_tag(
+                source.id, target.id, mock_transaction, user_id=TEST_USER_ID
+            )
+
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_delete_that_changed_nothing_raises_and_publishes_nothing(
+        self, tag_service, mock_tag_repo, mock_event_publisher, mock_transaction
+    ):
+        tag = JournalTag(user_id=TEST_USER_ID, id=uuid4(), name="doomed")
+        mock_tag_repo.find_by_id.return_value = tag
+        mock_tag_repo.get_journal_ids_for_tag.return_value = [7]
+        mock_tag_repo.delete.return_value = False
+
+        with pytest.raises(JournalTagNotFoundError):
+            await tag_service.delete_tag(tag.id, mock_transaction, user_id=TEST_USER_ID)
+
+        mock_event_publisher.publish.assert_not_awaited()

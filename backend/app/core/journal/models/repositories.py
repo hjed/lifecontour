@@ -1217,6 +1217,9 @@ class JournalTagRepository(ABC):
         """
         Save a tag (insert or update).
 
+        An insert writes ``tag.user_id`` as the owner; an update touches the
+        row only when ``tag.user_id`` already owns it, and never re-owns it.
+
         Args:
             tag: The tag to save
 
@@ -1226,17 +1229,23 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, tag_id: UUID) -> None:
+    async def delete(self, tag_id: UUID, *, user_id: str) -> bool:
         """
-        Delete a tag by ID.
+        Delete one of the user's tags by ID; another user's tag is left alone.
 
         Args:
             tag_id: The tag UUID to delete
+            user_id: The acting user
+
+        Returns:
+            Whether a tag was deleted: False when it is missing or not the user's.
         """
         pass
 
     @abstractmethod
-    async def merge_into(self, source_id: UUID, target_id: UUID) -> None:
+    async def merge_into(
+        self, source_id: UUID, target_id: UUID, *, user_id: str
+    ) -> bool:
         """
         Fold the source tag into the target tag and delete the source.
 
@@ -1245,11 +1254,17 @@ class JournalTagRepository(ABC):
         tags of the source are re-parented to the target.
 
         Callers are responsible for validating that both tags exist and that
-        the target is not a descendant of the source.
+        the target is not a descendant of the source. Nothing changes unless
+        ``user_id`` owns both tags.
 
         Args:
             source_id: The tag being merged away and deleted
             target_id: The surviving tag
+            user_id: The acting user
+
+        Returns:
+            Whether the merge happened: False when either tag is missing or not
+            the user's, in which case nothing changed.
 
         Raises:
             ValueError: ``source_id`` and ``target_id`` are the same tag.
@@ -1344,20 +1359,23 @@ class JournalTagRepository(ABC):
         pass
 
     @abstractmethod
-    async def assign_tag(self, journal_id: int, tag_id: UUID) -> bool:
+    async def assign_tag(self, journal_id: int, tag_id: UUID, *, user_id: str) -> bool:
         """
-        Assign a tag to a journal.
+        Assign one of the user's tags to one of their journals.
 
         Assignment is idempotent, so the return value is how the caller learns
         whether anything actually changed — the service publishes a history event
-        only when it did.
+        only when it did. A journal and a tag must share an owner: unless
+        ``user_id`` owns both, nothing is written.
 
         Args:
             journal_id: The journal ID
             tag_id: The tag UUID to assign
+            user_id: The acting user
 
         Returns:
-            True if a new assignment was created, False if it already existed.
+            True if a new assignment was created; False if it already existed or
+            the journal or tag is not the user's.
         """
         pass
 

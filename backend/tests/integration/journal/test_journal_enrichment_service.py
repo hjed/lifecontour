@@ -200,7 +200,7 @@ class TestEnrichTagsSeriesCalendars:
         )
         await tag_repo.save(JournalTag(user_id=TEST_USER_ID, name="unrelated-tag"))
         assert tag.id is not None
-        await tag_repo.assign_tag(journal_id, tag.id)
+        await tag_repo.assign_tag(journal_id, tag.id, user_id=TEST_USER_ID)
 
         enrichment = await enrichment_service_for(async_connection).enrich(
             journal_id, USER_ID

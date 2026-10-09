@@ -824,11 +824,19 @@ in three to keep each PR near 500 lines:
   required. Name uniqueness stays global in this layer: while `find_by_name` is still global, two
   owners' `Family` tags would let a journal's tag-name list pick up the other's (augment review on
   #1723), so the index swap waits for the scoped reads.
-- **10c2** — owner-scoped reads (`find_by_id`, `find_by_name`, `get_all`, `get_children`,
-  `get_root_tags`, `get_descendants_for_tags`) through the hierarchy, tag, write and journal
-  services and the REST / MCP callers.
-- **10c3** — owner-scoped writes (`delete`, `merge_into`, `assign_tag`, the update guard in
-  `save`); creating a tag checks its parent belongs to the same owner.
+- **10c2 ✅ DONE** — owner-scoped reads (`find_by_id`, `find_by_name`, `get_all`,
+  `get_children`, `get_root_tags`, `get_descendants_for_tags`, every level of the descendant walk
+  filtered) through the hierarchy, tag, write and journal services and the REST / MCP callers;
+  with them, `0129` replaces `uq_journal_tags_name_lower` with
+  `uq_journal_tags_user_id_name_lower (user_id, LOWER(name))` (downgrade refuses while two owners
+  share a name) and the service's duplicate-name mapping names the new index.
+- **10c3 ✅ DONE** — owner-scoped writes in SQL: `delete` and `merge_into` change nothing unless
+  the user owns every tag named, and a merge re-parents only the user's own children;
+  `assign_tag` inserts only when the user owns both the journal and the tag; `save`'s UPDATE is
+  keyed by the owner; creating a tag checks its parent is the owner's. `delete` and `merge_into`
+  report whether they wrote, and the service raises not-found when they did not, so a tag gone
+  between the check and the write rolls the unit of work back instead of committing history
+  events for a change that never happened (augment review on #1725).
 - **10d** — the REST and MCP cross-user isolation suites; documentation.
 
 **Decisions (recorded during implementation):**
@@ -846,6 +854,21 @@ in three to keep each PR near 500 lines:
   case-insensitive. The global index stays until then, so the namespace is still global (and
   `find_by_name` correctly unscoped) while the column is nullable.
 - **The owner is written on INSERT only**, so saving an existing tag never re-owns it.
+- **Assigning a missing or foreign tag answers 404, not 400.** `POST /journals/{id}/relationships/tags`
+  used to pre-check the tag in the controller and answer a missing one with a 400 validation
+  error. The check now lives in `JournalTagService.assign_tag`, which raises
+  `JournalTagNotFoundError` for a missing and a foreign tag alike (Delivery Rule 5). Creating a tag
+  under a missing or foreign parent likewise answers 404 (it was an unhandled foreign-key error).
+- **A foreign tag id in a journal filter is kept, not dropped.** Descendant expansion only adds
+  the user's tags; the requested ids stay in the filter, so a foreign id matches none of the
+  user's journals. Dropping it could empty the list, which the REST layer reads as "no filter".
+- **Journal tag events do not gain `user_id`.** They are child events of the journal aggregate
+  (like `JournalTypeAdded`), and neither consumer (history projection, search indexer) needs an
+  owner.
+- **Tests that tagged another owner's journal were corrected.** The history-projection e2e
+  tests, the search tag-reindex tests and several repository/MCP tests assigned
+  `test-user-123` tags to journals of `user-e2e` / `user-tag-reindex` / `test-user`; each now
+  uses one owner for both.
 
 ---
 

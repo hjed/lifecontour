@@ -68,9 +68,20 @@ class JournalTagService:
     ) -> JournalTag:
         """Persist a new journal tag, mapping duplicate names to a domain error.
 
+        The tag is owned by ``tag.user_id``, and its parent, if any, must be one
+        of that user's tags.
+
         Raises:
-            JournalValidationError: If a tag with the same name already exists.
+            JournalTagNotFoundError: The parent is not one of the owner's tags.
+            JournalValidationError: If the owner already has a tag of this name.
         """
+        if (
+            tag.parent_id is not None
+            and await self.tag_repo.find_by_id(tag.parent_id, user_id=tag.user_id)
+            is None
+        ):
+            raise JournalTagNotFoundError(str(tag.parent_id))
+
         try:
             return await self.tag_repo.save(tag)
         except IntegrityError as e:
@@ -264,7 +275,10 @@ class JournalTagService:
         # tag through the cascade, so afterwards there is nothing left to read.
         journal_ids = await self.tag_repo.get_journal_ids_for_tag(tag_id)
 
-        await self.tag_repo.delete(tag_id)
+        # The guarded delete changes nothing if the tag went in the meantime;
+        # raising rolls the unit of work back, so no event claims it happened.
+        if not await self.tag_repo.delete(tag_id, user_id=user_id):
+            raise JournalTagNotFoundError(str(tag_id))
 
         # Publish after the write, matching update_tag: the events name a write
         # that completed. The unit of work would discard them with a failed
@@ -329,7 +343,9 @@ class JournalTagService:
         source_journal_ids = await self.tag_repo.get_journal_ids_for_tag(source_id)
         already_had_target = set(await self.tag_repo.get_journal_ids_for_tag(target_id))
 
-        await self.tag_repo.merge_into(source_id, target_id)
+        # As in delete_tag: a tag gone since the check means nothing merged.
+        if not await self.tag_repo.merge_into(source_id, target_id, user_id=user_id):
+            raise JournalTagNotFoundError(str(source_id))
 
         # Publish after the write, matching update_tag and delete_tag.
         for journal_id in source_journal_ids:
@@ -372,7 +388,7 @@ class JournalTagService:
         """
         tag = await self._require_tag(tag_id, user_id)
 
-        if not await self.tag_repo.assign_tag(journal_id, tag_id):
+        if not await self.tag_repo.assign_tag(journal_id, tag_id, user_id=user_id):
             return
 
         await self.event_publisher.publish(
