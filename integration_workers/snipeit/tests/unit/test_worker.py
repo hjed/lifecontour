@@ -521,9 +521,9 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
     redis.enqueue_job = enqueue_job
     ctx = make_arq_ctx(redis=redis, session_factory=session_factory)
 
-    with patch("worker.SyncJobRepository") as mock_repo_cls:
+    with patch("core_shared.tracked_enqueue.SyncJobRepository") as mock_repo_cls:
         mock_repo_cls.return_value.create = AsyncMock()
-        mock_repo_cls.return_value.update_status = AsyncMock()
+        mock_repo_cls.return_value.fail_if_queued = AsyncMock(return_value=True)
         result = await periodic_sync_all_snipeit_accounts(ctx)
 
     assert enqueued == [
@@ -538,11 +538,8 @@ async def test_periodic_sync_continues_past_a_user_whose_enqueue_fails() -> None
     repo = mock_repo_cls.return_value
     created = [call.kwargs["job_id"] for call in repo.create.await_args_list]
     assert created == enqueued_ids
-    failed = [
-        (call.kwargs["job_id"], call.kwargs["status"])
-        for call in repo.update_status.await_args_list
-    ]
-    assert failed == [(created[0], "failed"), (created[1], "failed")]
+    failed = [call.kwargs["job_id"] for call in repo.fail_if_queued.await_args_list]
+    assert failed == [created[0], created[1]]
 
 
 class TestSyncServiceRateLimiting:

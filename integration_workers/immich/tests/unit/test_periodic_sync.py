@@ -154,6 +154,55 @@ class TestPeriodicSyncAllImmichAccounts:
         assert call.kwargs["_queue_name"] == IMMICH_ARQ_QUEUE_NAME
 
     @pytest.mark.asyncio
+    async def test_commits_row_before_enqueueing_under_its_job_id(
+        self, _mock_repo: AsyncMock
+    ) -> None:
+        """The sync_jobs row is committed first, so an immediate run finds it."""
+        from worker import periodic_sync_all_immich_accounts
+
+        ctx, mock_redis, mock_session = _make_mock_ctx(
+            [("user-1", "https://immich.example.com")]
+        )
+        calls: list[str] = []
+        _mock_repo.side_effect = lambda *_a, **_k: calls.append("create")
+        mock_session.commit = AsyncMock(side_effect=lambda: calls.append("commit"))
+        mock_redis.enqueue_job.side_effect = lambda *_a, **_k: (
+            calls.append("enqueue_job") or MagicMock()
+        )
+
+        await periodic_sync_all_immich_accounts(ctx)
+
+        assert calls == ["create", "commit", "enqueue_job"]
+        row = _mock_repo.await_args.kwargs
+        assert row["user_id"] == "user-1"
+        assert row["integration_source"] == "immich"
+        assert row["status"] == "queued"
+        assert mock_redis.enqueue_job.call_args.kwargs["_job_id"] == row["job_id"]
+
+    @pytest.mark.asyncio
+    async def test_unqueued_job_fails_its_row(self, _mock_repo: AsyncMock) -> None:
+        """A job ARQ does not queue fails its row instead of leaving it queued."""
+        from unittest.mock import patch
+
+        from worker import periodic_sync_all_immich_accounts
+
+        ctx, mock_redis, _ = _make_mock_ctx([("user-1", "https://immich.example.com")])
+        mock_redis.enqueue_job = AsyncMock(return_value=None)
+
+        with patch(
+            "core_shared.repositories.sync_job_repository.SyncJobRepository.fail_if_queued",
+            new_callable=AsyncMock,
+        ) as fail_if_queued:
+            result = await periodic_sync_all_immich_accounts(ctx)
+
+        assert result["jobs_enqueued"] == 0
+        fail_if_queued.assert_awaited_once()
+        assert (
+            fail_if_queued.await_args.kwargs["job_id"]
+            == (_mock_repo.await_args.kwargs["job_id"])
+        )
+
+    @pytest.mark.asyncio
     async def test_handles_no_accounts(self) -> None:
         """Should complete successfully with zero accounts."""
         from worker import periodic_sync_all_immich_accounts

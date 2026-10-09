@@ -40,6 +40,7 @@ from core_shared.logging import (
 )
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from core_shared.tracked_enqueue import JobNotEnqueuedError, enqueue_tracked_job
 
 from immich_api_client import ImmichApiClient
 from immich_auth_service import ImmichAuthService
@@ -789,43 +790,30 @@ async def periodic_sync_all_immich_accounts(
                 user_id = row.user_id
 
                 try:
-                    job = await ctx["redis"].enqueue_job(
+                    job_id = await enqueue_tracked_job(
+                        session,
+                        ctx["redis"],
                         "sync_immich_people",
                         str(user_id),
                         "smart",
-                        _queue_name=IMMICH_ARQ_QUEUE_NAME,
+                        queue_name=IMMICH_ARQ_QUEUE_NAME,
+                        user_id=str(user_id),
+                        integration_source="immich",
+                        sync_type="smart",
                     )
-
-                    if job:
-                        jobs_enqueued += 1
-                        logger.info(
-                            "Enqueued periodic Immich sync job",
-                            job_id=job.job_id,
-                            user_id=user_id,
-                        )
-
-                        from core_shared.repositories.sync_job_repository import (
-                            SyncJobRepository,
-                        )
-
-                        conn = await session.connection()
-                        repo = SyncJobRepository(conn)
-                        await repo.create(
-                            job_id=job.job_id,
-                            user_id=str(user_id),
-                            integration_source="immich",
-                            sync_type="smart",
-                            status="queued",
-                        )
-                        await session.commit()
-                    else:
-                        error_msg = f"Failed to enqueue Immich sync for user {user_id}"
-                        errors.append(error_msg)
-                        logger.warning(
-                            "Failed to enqueue periodic Immich sync job",
-                            user_id=user_id,
-                        )
-
+                    jobs_enqueued += 1
+                    logger.info(
+                        "Enqueued periodic Immich sync job",
+                        job_id=job_id,
+                        user_id=user_id,
+                    )
+                except JobNotEnqueuedError:
+                    error_msg = f"Failed to enqueue Immich sync for user {user_id}"
+                    errors.append(error_msg)
+                    logger.warning(
+                        "Failed to enqueue periodic Immich sync job",
+                        user_id=user_id,
+                    )
                 except Exception as e:  # noqa: BLE001
                     await session.rollback()
                     error_msg = (
