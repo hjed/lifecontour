@@ -870,6 +870,32 @@ class FitnessDataRepository(ABC):
         pass
 
     @abstractmethod
+    async def set_duration_if_unchanged(
+        self,
+        journal_id: int,
+        user_id: str,
+        expected: Sequence[int],
+        corrected: int,
+    ) -> bool:
+        """
+        Set the duration only while it still holds one of ``expected``.
+
+        An atomic compare-and-set: a duration changed since ``expected`` was
+        computed (e.g. edited by the user) is left alone, as is a journal not
+        owned by ``user_id``.
+
+        Args:
+            journal_id: The journal whose duration to set
+            user_id: The journal's owner
+            expected: Durations (seconds) the current value must be one of
+            corrected: The duration (seconds) to store
+
+        Returns:
+            True if the duration was updated, False otherwise
+        """
+        pass
+
+    @abstractmethod
     async def delete(self, journal_id: int) -> None:
         """
         Delete fitness data by journal ID.

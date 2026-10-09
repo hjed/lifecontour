@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
+    FitnessDurationCorrectedData,
     ImmichAlbumSyncEventData,
     JournalSeriesCancelledEventData,
     JournalStatusEventData,
@@ -705,3 +706,84 @@ class TestJournalSeriesCancelledEventData:
             "journal_event.series_cancelled", series_cancelled_data
         )
         assert isinstance(parsed, JournalSeriesCancelledEventData)
+
+
+@pytest.fixture
+def duration_corrected_data() -> dict[str, Any]:
+    """Minimal valid FitnessDurationCorrectedData payload."""
+    return {
+        "journal_id": 42,
+        "user_id": "user-1",
+        "expected_durations": [3000],
+        "corrected_duration": 3600,
+        "strava_activity_ids": ["123"],
+    }
+
+
+class TestFitnessDurationCorrectedData:
+    """Tests for journal_event.fitness_duration_corrected payload."""
+
+    def test_valid_payload_parses(
+        self, duration_corrected_data: dict[str, Any]
+    ) -> None:
+        model = FitnessDurationCorrectedData.model_validate(duration_corrected_data)
+        assert model.journal_id == 42
+        assert model.user_id == "user-1"
+        assert model.expected_durations == [3000]
+        assert model.corrected_duration == 3600
+        assert model.strava_activity_ids == ["123"]
+
+    def test_empty_expected_durations_rejected(
+        self, duration_corrected_data: dict[str, Any]
+    ) -> None:
+        """With nothing to compare against, the correction could never apply."""
+        duration_corrected_data["expected_durations"] = []
+        with pytest.raises(ValidationError) as exc_info:
+            FitnessDurationCorrectedData.model_validate(duration_corrected_data)
+        assert "expected_durations" in str(exc_info.value)
+
+    @pytest.mark.parametrize("field", ["corrected_duration", "expected_durations"])
+    def test_negative_duration_rejected(
+        self, duration_corrected_data: dict[str, Any], field: str
+    ) -> None:
+        duration_corrected_data[field] = [-1] if field == "expected_durations" else -1
+        with pytest.raises(ValidationError) as exc_info:
+            FitnessDurationCorrectedData.model_validate(duration_corrected_data)
+        assert field in str(exc_info.value)
+
+    def test_blank_user_id_rejected(
+        self, duration_corrected_data: dict[str, Any]
+    ) -> None:
+        duration_corrected_data["user_id"] = ""
+        with pytest.raises(ValidationError) as exc_info:
+            FitnessDurationCorrectedData.model_validate(duration_corrected_data)
+        assert "user_id" in str(exc_info.value)
+
+    def test_dispatches_to_model(self, duration_corrected_data: dict[str, Any]) -> None:
+        parsed = parse_outbox_event_data(
+            "journal_event.fitness_duration_corrected", duration_corrected_data
+        )
+        assert isinstance(parsed, FitnessDurationCorrectedData)
+
+
+class TestCreateFitnessDurationCorrectionEvent:
+    """Tests for OutboxEvent.create_fitness_duration_correction_event."""
+
+    def test_builds_event_keyed_on_the_journal(self) -> None:
+        event = OutboxEvent.create_fitness_duration_correction_event(
+            journal_id=42,
+            user_id="user-1",
+            expected_durations=[3000, 3300],
+            corrected_duration=3600,
+            strava_activity_ids=["123", "456"],
+        )
+
+        assert event.event_type == "journal_event.fitness_duration_corrected"
+        assert event.aggregate_id == 42
+        assert event.event_data == {
+            "journal_id": 42,
+            "user_id": "user-1",
+            "expected_durations": [3000, 3300],
+            "corrected_duration": 3600,
+            "strava_activity_ids": ["123", "456"],
+        }
