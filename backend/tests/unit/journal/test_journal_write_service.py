@@ -33,6 +33,7 @@ from core_shared.models.journals.gear_usage_data import GearUsageData, GearUsage
 
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_write_service import JournalWriteService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -432,7 +433,9 @@ class TestCreateJournalTags:
     ):
         """An existing tag (by name) is assigned, not re-created."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
-        existing_tag = JournalTag(id=uuid4(), name="alpha", color="#123456")
+        existing_tag = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="alpha", color="#123456"
+        )
         write_service.tag_repo.find_by_name.return_value = existing_tag
 
         await write_service.create_journal(
@@ -455,7 +458,9 @@ class TestCreateJournalTags:
         """A tag name with no existing row is created (grey default) then assigned."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
         write_service.tag_repo.find_by_name.return_value = None
-        created_tag = JournalTag(id=uuid4(), name="beta", color="#808080")
+        created_tag = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="beta", color="#808080"
+        )
         write_service.tag_repo.save.return_value = created_tag
 
         await write_service.create_journal(
@@ -478,7 +483,7 @@ class TestCreateJournalTags:
         mock_journal_service.create_journal.return_value = created
         write_service.tag_repo.find_by_name.return_value = None
         write_service.tag_repo.save.return_value = JournalTag(
-            id=uuid4(), name="beta", color="#808080"
+            user_id=TEST_USER_ID, id=uuid4(), name="beta", color="#808080"
         )
 
         await write_service.create_journal(
@@ -494,7 +499,9 @@ class TestCreateJournalTags:
     ):
         """MCP-created journals must produce MCP-provenance tag history."""
         mock_journal_service.create_journal.return_value = _journal(journal_id=42)
-        existing_tag = JournalTag(id=uuid4(), name="alpha", color="#123456")
+        existing_tag = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="alpha", color="#123456"
+        )
         write_service.tag_repo.find_by_name.return_value = existing_tag
 
         await write_service.create_journal(
@@ -724,9 +731,13 @@ class TestUpdateJournalComposite:
     ):
         """tags=[...] drops the tags that left and assigns the ones that arrived."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
-        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        existing = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
+        )
         write_service.tag_repo.get_tags_for_journal.return_value = [existing]
-        new_tag = JournalTag(id=uuid4(), name="new", color="#808080")
+        new_tag = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="new", color="#808080"
+        )
         write_service.tag_repo.find_by_name.return_value = new_tag
 
         await write_service.update_journal_composite(
@@ -746,7 +757,7 @@ class TestUpdateJournalComposite:
         write_service.tag_repo.get_tags_for_journal.return_value = []
         write_service.tag_repo.find_by_name.return_value = None
         write_service.tag_repo.save.return_value = JournalTag(
-            id=uuid4(), name="new", color="#808080"
+            user_id=TEST_USER_ID, id=uuid4(), name="new", color="#808080"
         )
 
         await write_service.update_journal_composite(
@@ -767,7 +778,9 @@ class TestUpdateJournalComposite:
         activity feed for an update that changed nothing.
         """
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
-        kept = JournalTag(id=uuid4(), name="keep", color="#111111")
+        kept = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="keep", color="#111111"
+        )
         write_service.tag_repo.get_tags_for_journal.return_value = [kept]
         write_service.tag_repo.find_by_name.return_value = kept
 
@@ -788,7 +801,9 @@ class TestUpdateJournalComposite:
         assignment and fabricate history.
         """
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
-        kept = JournalTag(id=uuid4(), name="keep", color="#111111")
+        kept = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="keep", color="#111111"
+        )
         write_service.tag_repo.get_tags_for_journal.return_value = [kept]
         write_service.tag_repo.find_by_name.return_value = kept
 
@@ -805,7 +820,9 @@ class TestUpdateJournalComposite:
     ):
         """tags=[] clears all assignments and adds nothing (distinct from None)."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
-        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        existing = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
+        )
         write_service.tag_repo.get_tags_for_journal.return_value = [existing]
 
         await write_service.update_journal_composite(
@@ -821,9 +838,13 @@ class TestUpdateJournalComposite:
     ):
         """Both halves of the diff carry the caller's provenance."""
         mock_journal_service.update_journal.return_value = _journal(journal_id=9)
-        existing = JournalTag(id=uuid4(), name="old", color="#111111")
+        existing = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
+        )
         write_service.tag_repo.get_tags_for_journal.return_value = [existing]
-        new_tag = JournalTag(id=uuid4(), name="new", color="#808080")
+        new_tag = JournalTag(
+            user_id=TEST_USER_ID, id=uuid4(), name="new", color="#808080"
+        )
         write_service.tag_repo.find_by_name.return_value = new_tag
 
         await write_service.update_journal_composite(

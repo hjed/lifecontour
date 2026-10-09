@@ -17,6 +17,7 @@ from core_shared.models.journals import (
 
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_service import JournalService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.fixture
@@ -609,7 +610,7 @@ class TestTagFilterExpansion:
 
     @staticmethod
     def _tag(tag_id: UUID, name: str) -> JournalTag:
-        return JournalTag(id=tag_id, name=name)
+        return JournalTag(user_id=TEST_USER_ID, id=tag_id, name=name)
 
     async def test_parent_tag_expands_to_all_descendants(
         self, service_with_hierarchy, mock_journal_repo, mock_tag_hierarchy
