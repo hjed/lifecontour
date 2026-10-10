@@ -611,7 +611,7 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
         person_data["names"] = names
 
     # Not sent when unset, so Google keeps its copy: the old import cleared
-    # local nicknames Google still holds, and the full pull migration 0130
+    # local nicknames Google still holds, and the full pull migration 0131
     # forces restores them. Sending an empty list would delete that copy
     # whenever such a contact is pushed first.
     nicknames = _transform_nicknames(contact)

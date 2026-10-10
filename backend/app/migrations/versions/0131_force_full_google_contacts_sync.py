@@ -1,7 +1,7 @@
 """force one full Google contacts sync so nicknames are imported
 
-Revision ID: 0130
-Revises: 0129
+Revision ID: 0131
+Revises: 0130
 Create Date: 2026-10-10 00:00:00.000000
 
 Google contacts sync now imports nicknames. It always pushed them, so Google
@@ -21,8 +21,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0130"
-down_revision: str | Sequence[str] | None = "0129"
+revision: str = "0131"
+down_revision: str | Sequence[str] | None = "0130"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

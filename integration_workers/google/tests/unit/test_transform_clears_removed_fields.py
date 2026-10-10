@@ -85,7 +85,7 @@ class TestNicknamePush:
     """A set nickname is sent; an unset one is not, so Google keeps its copy.
 
     The old import cleared local nicknames Google still holds, and the full
-    pull forced by migration 0130 restores them; sending an empty list on a
+    pull forced by migration 0131 restores them; sending an empty list on a
     push that runs first would delete Google's copy instead.
     """
 

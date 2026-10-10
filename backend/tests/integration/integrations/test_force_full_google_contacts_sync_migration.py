@@ -1,8 +1,8 @@
-"""Migration test for 0130 (force one full Google contacts sync).
+"""Migration test for 0131 (force one full Google contacts sync).
 
 Google sync now imports nicknames, but the processor skips a person whose etag
 has not moved, so a contact Google has not changed would never receive its
-nickname. 0130 clears every account's contacts sync token: the next smart sync
+nickname. 0131 clears every account's contacts sync token: the next smart sync
 is then a full sync, whose events are applied whatever their etag. Nothing else
 - the calendar side, the auth rows, the sync links and their etags (which the
 push still sends for concurrency) - is touched.
@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.integration.migration_helpers import RunAlembic
 
-_PREVIOUS_REVISION = "0129"
-_REVISION = "0130"
+_PREVIOUS_REVISION = "0130"
+_REVISION = "0131"
 
 
 async def _execute(url: str, sql: str, params: dict[str, Any] | None = None) -> Any:
