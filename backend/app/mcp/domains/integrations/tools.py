@@ -381,7 +381,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             SqlContactRepository,
         )
         from app.core.integrations.adapters.sql.sync_metadata_repository import (
-            ExternalLinkOwnedByAnotherUserError,
             SyncMetadataRepository,
         )
 
@@ -454,18 +453,13 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             if not updated:
                 raise ValueError(f"Failed to resolve conflict {conflict_id}.")
 
-            try:
-                await sync_metadata_repo.upsert_contact_link(
-                    contact_id=resolved_contact_id,
-                    user_id=user_id,
-                    external_system="immich",
-                    external_entity_type="person",
-                    external_entity_id=external_id,
-                )
-            except ExternalLinkOwnedByAnotherUserError as e:
-                raise ValueError(
-                    "This Immich person is already linked by another user."
-                ) from e
+            await sync_metadata_repo.upsert_contact_link(
+                contact_id=resolved_contact_id,
+                user_id=user_id,
+                external_system="immich",
+                external_entity_type="person",
+                external_entity_id=external_id,
+            )
 
         result = {
             "conflict_id": conflict_id,

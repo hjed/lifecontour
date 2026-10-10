@@ -41,10 +41,11 @@ async def _link_immich_album(
     await async_connection.execute(
         text(
             "INSERT INTO sync_metadata "
-            "(internal_id, integration_source, external_id, last_synced_at, "
+            "(user_id, internal_id, integration_source, external_id, last_synced_at, "
             "version_hash, sync_status, internal_entity_type, external_entity_type, "
             "reference_data) "
-            "VALUES (:journal_id, 'immich_album', :album_id, now(), "
+            "VALUES ((SELECT user_id FROM journals WHERE id = :journal_id), "
+            ":journal_id, 'immich_album', :album_id, now(), "
             "'hash-1', 'success', 'journal', 'album', :reference_data)"
         ),
         {
@@ -60,9 +61,10 @@ async def _link_strava_activity(async_connection, journal_id, activity_id):
     await async_connection.execute(
         text(
             "INSERT INTO sync_metadata "
-            "(internal_id, integration_source, external_id, last_synced_at, "
+            "(user_id, internal_id, integration_source, external_id, last_synced_at, "
             "version_hash, sync_status, internal_entity_type, external_entity_type) "
-            "VALUES (:journal_id, 'strava', :activity_id, now(), "
+            "VALUES ((SELECT user_id FROM journals WHERE id = :journal_id), "
+            ":journal_id, 'strava', :activity_id, now(), "
             "'hash-1', 'success', 'journal', 'activity')"
         ),
         {"journal_id": journal_id, "activity_id": activity_id},
@@ -462,10 +464,11 @@ class TestContactExternalLinks:
         await async_connection.execute(
             text(
                 "INSERT INTO sync_metadata "
-                "(internal_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status, internal_entity_type, "
+                "(user_id, internal_id, integration_source, external_id, "
+                "last_synced_at, version_hash, sync_status, internal_entity_type, "
                 "external_entity_type) "
-                "VALUES (:contact_id, 'google', :external_id, now(), 'h', "
+                "VALUES ((SELECT user_id FROM contacts WHERE id = :contact_id), "
+                ":contact_id, 'google', :external_id, now(), 'h', "
                 "'success', 'contact', 'person')"
             ),
             {
@@ -497,10 +500,11 @@ class TestContactExternalLinks:
         await async_connection.execute(
             text(
                 "INSERT INTO sync_metadata "
-                "(internal_id, integration_source, external_id, last_synced_at, "
-                "version_hash, sync_status, internal_entity_type, "
+                "(user_id, internal_id, integration_source, external_id, "
+                "last_synced_at, version_hash, sync_status, internal_entity_type, "
                 "external_entity_type) "
-                "VALUES (:contact_id, 'immich', :external_id, now(), 'h', "
+                "VALUES ((SELECT user_id FROM contacts WHERE id = :contact_id), "
+                ":contact_id, 'immich', :external_id, now(), 'h', "
                 "'success', 'contact', 'person')"
             ),
             {"contact_id": contact_id, "external_id": "person-uuid-1"},

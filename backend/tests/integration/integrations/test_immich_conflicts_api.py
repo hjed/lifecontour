@@ -236,7 +236,8 @@ async def test_resolve_immich_conflict_for_a_person_another_user_links(
     async_connection: AsyncConnection,
     pending_conflict: int,
 ) -> None:
-    """Linking a person another user already links is a 409; nothing changes."""
+    """Another user's link for the same person is theirs; linking it here
+    adds this user's own link beside it."""
     contact_id = await seed_contact(
         async_connection, first_name="John", last_name="Doe"
     )
@@ -255,8 +256,7 @@ async def test_resolve_immich_conflict_for_a_person_another_user_links(
         json={"action": "link", "contact_id": contact_id},
     )
 
-    assert response.status_code == 409
-    assert "other-user-456" not in response.text
+    assert response.status_code == 200
     links = (
         await async_connection.execute(
             text(
@@ -265,11 +265,7 @@ async def test_resolve_immich_conflict_for_a_person_another_user_links(
             )
         )
     ).fetchall()
-    assert [tuple(row) for row in links] == [("other-user-456", 999)]
-    status = (
-        await async_connection.execute(
-            text("SELECT status FROM pending_entity_mappings WHERE id = :id"),
-            {"id": pending_conflict},
-        )
-    ).scalar_one()
-    assert status == "unresolved"
+    assert {tuple(row) for row in links} == {
+        ("other-user-456", 999),
+        (TEST_USER_ID, contact_id),
+    }

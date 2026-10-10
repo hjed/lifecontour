@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock
 import pytest
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from immich_models import ImmichPerson
 from immich_sync_service import ImmichSyncService
@@ -203,7 +202,7 @@ class TestLinkOwner:
         assert [tuple(row) for row in rows] == [(CONTACT_OWNER, "vh-2")]
 
     @pytest.mark.asyncio
-    async def test_a_person_another_user_links_is_refused(
+    async def test_a_person_another_user_links_gets_this_users_own_link(
         self,
         sync_service: ImmichSyncService,
         async_connection: Any,
@@ -213,28 +212,29 @@ class TestLinkOwner:
                 INSERT INTO sync_metadata
                     (user_id, internal_id, integration_source, external_id,
                      last_synced_at, version_hash, sync_status)
-                VALUES ('other-user', 77, 'immich', 'person-taken',
+                VALUES ('other-user', 77, 'immich', 'person-shared',
                         now(), 'theirs', 'success')
             """)
         )
 
-        with pytest.raises(IntegrityError):
-            async with async_connection.begin_nested():
-                await sync_service._upsert_sync_metadata(
-                    external_id="person-taken",
-                    internal_id=4444,
-                    version_hash="mine",
-                )
+        await sync_service._upsert_sync_metadata(
+            external_id="person-shared",
+            internal_id=4444,
+            version_hash="mine",
+        )
 
         rows = (
             await async_connection.execute(
                 text(
                     "SELECT user_id, internal_id, version_hash FROM sync_metadata "
-                    "WHERE external_id = 'person-taken'"
+                    "WHERE external_id = 'person-shared'"
                 )
             )
         ).fetchall()
-        assert [tuple(row) for row in rows] == [("other-user", 77, "theirs")]
+        assert {tuple(row) for row in rows} == {
+            ("other-user", 77, "theirs"),
+            (CONTACT_OWNER, 4444, "mine"),
+        }
 
 
 async def _seed_other_users_link(

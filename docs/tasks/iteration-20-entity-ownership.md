@@ -992,7 +992,7 @@ is keyed by the owner; no runtime single-user fallback remains.
 
 **Acceptance Criteria (task-level):**
 - [x] Google and Immich outbound pushes reach only the owner's connected account(s); an event without an owner is skipped and logged, never fanned out.
-- [ ] `sync_metadata.user_id NOT NULL` with `UNIQUE(user_id, integration_source, external_id)`; every lookup and upsert is keyed by owner.
+- [x] `sync_metadata.user_id NOT NULL` with `UNIQUE(user_id, integration_source, external_id)`; every lookup and upsert is keyed by owner.
 - [ ] `get_default_timezone()` no longer exists; the per-user `get_timezone(user_id)` does.
 
 ---
@@ -1120,7 +1120,7 @@ measured, shipped as one PR (see *Decisions*)
   keep inserting owner-less rows after the backfill), the album `upsert_link`, and the Google,
   Immich, Snipe-IT and Strava upserts (the job's user). No writer may still name the global key
   when Phase 15 drops it.
-- [x] **The still-present global index is the cross-owner guard.** With writers conflicting on the
+- [x] **The still-present global index is the cross-owner guard** *(until Phase 15 dropped it)*. With writers conflicting on the
   per-user key, a same-owner re-sync updates as before, and a write for the same
   `(integration_source, external_id)` by a *different* owner finds no per-user conflict, attempts
   the insert, and trips `idx_sync_metadata_integration_external` — an `IntegrityError` the backend
@@ -1149,6 +1149,9 @@ measured, shipped as one PR (see *Decisions*)
 refused instead of re-pointed. Lookups are unchanged until Phase 15.
 
 **Decisions (recorded during implementation):**
+- *Superseded by Phase 15:* the cross-owner refusal described below
+  (`ExternalLinkOwnedByAnotherUserError`, the Immich 409) existed only while the global index did;
+  Phase 15 removed both.
 - **One PR, not a stack (user decision).** The measured diff is ~1,850 lines (about two thirds tests and docs). Once a writer
   conflicts on the per-user key, a row written owner-less by a writer not yet updated no longer
   matches it, and the next owner-aware upsert for that row trips the global index. Shipping every
@@ -1197,7 +1200,7 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
   user's row. Today: `SyncMetadataRepository.update_reference_data`, the repoint UPDATE/DELETE
   pairs in `repoint_contact_links` / `repoint_journal_links`, `AlbumSyncReadRepository.delete`,
   the Snipe-IT pair UPDATE in `journal_merge_service.py`, Google `worker.py` (2), Immich
-  `worker.py` (1) and 19 statements in `snipeit_sync_service.py`.
+  `worker.py` (1) and 19 statements in `snipeit_sync_service.py` (18 on recount in Phase 15).
 
 ---
 
@@ -1205,33 +1208,35 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
 
 **PR Size:** ~300 lines
 
-> **Migration number:** indicative `0127_sync_metadata_user_scoped_unique_key.py`.
+> **Migration number:** `0128_sync_metadata_user_scoped_unique_key.py` (Phase 10a took `0127` first;
+> Phase 10b's planned `0128` must take the next free number).
 
-- [ ] Migration `0127`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
+- [x] Migration `0128`: re-run the Phase 14 owner assignment over rows still `NULL` (written by a
   not-yet-deployed writer during the Phase 14 rollout); `SET NOT NULL`; drop
   `idx_sync_metadata_integration_external`. The per-user unique index already exists and every
   writer already conflicts on it (Phase 14), so dropping the global index invalidates no conflict
   target and no sync write fails across the deploy. Downgrade recreates the global index (refusing
   if two owners now hold the same external id) and makes the column nullable again.
-- [ ] Every UPDATE / DELETE on `sync_metadata` keyed by `(integration_source, external_id)` or
+- [x] Every UPDATE / DELETE on `sync_metadata` keyed by `(integration_source, external_id)` or
   the internal id is scoped by the owner (list in Phase 14's *Follow-ups*).
-- [ ] `SyncMetadataRepository.find_by_external_id(user_id, source, external_id)`, `find_and_lock`,
-  `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`;
+- [x] `SyncMetadataRepository.find_by_external_id(user_id, source, external_id)`, `find_and_lock`,
+  `IntegrationLinkRepository` lookups, `ContactRepository.find_by_external_reference(user_id, …)`
+  (implemented with `user_id` keyword-only, last, so mypy names every caller);
   the inbound consumer's idempotency check uses the event's owner; MCP
   `get_contact_by_external_id` / `get_journal_by_external_id` pass the current user; worker lookups
   (Google etag check, Immich, Snipe-IT, Strava `find_by_external_id`) pass the job's user.
 
 **Required Test Coverage:**
-- [ ] **Integration (first):** two users link the same `(source, external_id)` to their own
+- [x] **Integration (first):** two users link the same `(source, external_id)` to their own
   contacts and both rows exist; a lookup for the other user returns `None`; the inbound consumer
   does not treat user B's external id as already-processed for user A.
-- [ ] **Integration (MCP):** external-id tools in `test_external_id_lookup_mcp.py` with a foreign
+- [x] **Integration (MCP):** external-id tools in `test_external_id_lookup_mcp.py` with a foreign
   link → not found.
 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/integration-architecture.md` — the canonical link key is
+- [x] `docs/architecture/integration-architecture.md` — the canonical link key is
   `(user_id, integration_source, external_id)`.
 
 **Delivery:** a four-layer stack in deploy order. Scoping a statement by its owner changes nothing
@@ -1253,13 +1258,21 @@ first and the contract last:
   the `_delete_maintenance_claim` / `_fetch_maintenance_claim` helpers (now `user_id`-keyed), the
   check-in-of-checkout join (`ci.user_id = co.user_id`), and the stream consumer's `JournalDeleted`
   fast path. ✅
-- **15d** — migration `0127`, removal of the cross-owner refusal, documentation.
+- **15d** — migration `0128` (the Phase 14 assignment re-run over unowned rows, `NOT NULL`, the
+  global index dropped; the downgrade refuses while two owners hold one external id), removal of
+  the cross-owner refusal, both-owners tests, documentation. ✅
+
+**Status:** ✅ DONE — every link has an owner and is keyed by `(user_id, integration_source,
+external_id)` alone; two users may link the same external id, and every lookup, update and delete
+in the backend and the four workers takes the owner.
 
 **Decisions (recorded during implementation):**
 - **What is scoped.** Every statement matching on an external id (`=`, `= ANY`, `LIKE`, joins,
   `NOT EXISTS` subqueries) and every UPDATE / DELETE takes `user_id = :user_id`. A SELECT keyed only
   by an internal id, or joined through an owner-scoped entity, stays as it is: the link is a child
-  row of an aggregate already proven to be the user's (Delivery Rule 4).
+  row of an aggregate already proven to be the user's (Delivery Rule 4). The "Google etag check"
+  above is two such reads: `find_contacts_to_push` joins through `contacts.user_id`, and
+  `_read_sync_link` reads the event's contact by its id, so neither takes an owner.
 - **Where the owner comes from (15a).** Inbound contact events: `payload.user_id`. Immich album and
   Snipe-IT maintenance events: `journal_data["user_id"]`; an event naming none fails rather than
   being matched to anyone's link. Contact merge: the acting user. Journal merge: the journals'
@@ -1278,9 +1291,30 @@ first and the contract last:
   to the fitness row's `strava_activity_id` for activities imported before sync rows existed; it
   matched any user's journal, so it now joins `journals` on the syncing user. Strava has no
   `find_by_external_id` (named above); these two helpers are its lookups.
+- **The cross-owner refusal is removed (15d).** With the global index gone nothing can raise
+  `ExternalLinkOwnedByAnotherUserError`, so it, `_link_holder` and the global-index branch of
+  `execute_link_write` are deleted with their catch sites. Behaviour change, as Part 6 intends: an
+  Immich person another user links is now linked for this user too (REST conflict-resolve 200, not
+  409; the MCP tool succeeds), a Snipe-IT asset id another user's instance uses is synced, and an
+  inbound contact or album for an id another user holds gets this user's own row.
+  `execute_link_write` keeps its savepoint and re-raises the `IntegrityError` a concurrent insert of
+  the same owner's link can raise.
+- **The owner backfill is shared.** `0126`'s entity backfill and orphan assignment moved to
+  `app/migrations/sync_metadata_owner.py` (frozen, like `owner_derivation.py`); `0126` and `0128` call
+  it with their own label and evidence tuple, so `0126` behaves as before. `0128`'s evidence adds
+  `sync_metadata` itself. As for `0124`, unowned orphans with no derivable owner refuse the upgrade
+  before `SET NOT NULL`; `-x sync_metadata_owner=<id>` resolves it.
+- **No `user_id` on the backend `SyncMetadata` dataclass** (`integrations/models/entities.py`), as
+  planned: nothing imports it. The ORM model's column is `Mapped[str]`, and the repository's
+  lookups and upsert now return the owner they matched.
 - **Album participants were a live leak.** An album tagging an Immich person another user had
   linked made that user's contact a participant of this user's journal; the person lookup is now
   the album owner's.
+
+**Follow-ups (found in Phase 15):**
+- **Phase 11:** `repoint_contact_links` now moves only the acting user's links. Until the merge
+  requires both contacts to share an owner, a foreign source contact's links are left behind
+  (orphaned once the source is deleted) rather than moved to the survivor under another owner.
 
 ---
 

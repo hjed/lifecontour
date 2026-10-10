@@ -14,9 +14,6 @@ from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.integrations.adapters.sql.sync_metadata_repository import (
-    ExternalLinkOwnedByAnotherUserError,
-)
 from app.core.integrations.immich.album_outbox_event_processor import (
     EVENT_TYPE_IMMICH_ALBUM_CREATED,
     EVENT_TYPE_IMMICH_ALBUM_UPDATED,
@@ -875,22 +872,34 @@ async def test_another_users_album_link_is_not_this_users_journal(
     clean_database: None,  # noqa: ARG001
 ) -> None:
     """An album another user has imported is not "already linked" for this
-    user: their journal is never resolved, updated or re-pointed."""
+    user: their journal is left alone and this user gets their own."""
     album_id = str(uuid.uuid4())
     their_journal = await _seed_other_users_album_journal(async_connection, album_id)
     processor = _processor(async_connection)
 
-    # Until the global key goes the link write is refused; what matters is
-    # that the event never resolved to the other user's journal.
-    with pytest.raises(ExternalLinkOwnedByAnotherUserError):
-        await processor.process_event(
-            _event(
-                EVENT_TYPE_IMMICH_ALBUM_CREATED,
-                album_id=album_id,
-                version_hash="v1",
-                title="Mine",
-            )
+    result = await processor.process_event(
+        _event(
+            EVENT_TYPE_IMMICH_ALBUM_CREATED,
+            album_id=album_id,
+            version_hash="v1",
+            title="Mine",
         )
+    )
 
+    assert result["status"] == "created"
+    assert result["journal_id"] != their_journal
     row = await _journal_row(async_connection, their_journal)
     assert row.title == "Theirs"
+    owners = (
+        await async_connection.execute(
+            text("""
+                SELECT user_id, internal_id FROM sync_metadata
+                WHERE integration_source = 'immich_album' AND external_id = :id
+            """),
+            {"id": album_id},
+        )
+    ).fetchall()
+    assert {tuple(r) for r in owners} == {
+        (OTHER_USER_ID, their_journal),
+        (USER_ID, result["journal_id"]),
+    }

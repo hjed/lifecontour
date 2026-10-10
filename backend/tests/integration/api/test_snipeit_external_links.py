@@ -63,11 +63,11 @@ async def _link_import(
     await connection.execute(
         text(
             """
-            INSERT INTO sync_metadata (integration_source, external_id, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_maintenance', :external_id, 'success', 'import-hash', CURRENT_TIMESTAMP)
+            INSERT INTO sync_metadata (user_id, integration_source, external_id, sync_status, version_hash, last_synced_at)
+            VALUES (:user_id, 'snipeit_maintenance', :external_id, 'success', 'import-hash', CURRENT_TIMESTAMP)
             """
         ),
-        {"external_id": external_id},
+        {"user_id": user_id, "external_id": external_id},
     )
 
 
@@ -78,8 +78,8 @@ async def _record_push(
     await connection.execute(
         text(
             """
-            INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_maintenance', :external_id, :journal_id, 'success', 'push-hash', CURRENT_TIMESTAMP)
+            INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+            VALUES ((SELECT user_id FROM journals WHERE id::text = :journal_id), 'snipeit_maintenance', :external_id, :journal_id, 'success', 'push-hash', CURRENT_TIMESTAMP)
             """
         ),
         {"external_id": external_id, "journal_id": str(journal_id)},
@@ -121,8 +121,8 @@ async def journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_maintenance', 'snipeit_maint:42', :journal_id, 'success', 'hash1', CURRENT_TIMESTAMP)
+            INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+            VALUES ((SELECT user_id FROM journals WHERE id::text = :journal_id), 'snipeit_maintenance', 'snipeit_maint:42', :journal_id, 'success', 'hash1', CURRENT_TIMESTAMP)
             """
         ),
         {"journal_id": str(journal_id)},
@@ -154,8 +154,8 @@ async def checkout_journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit', '100', :gear_id, 'success', 'hash2', CURRENT_TIMESTAMP)
+            INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+            VALUES ((SELECT user_id FROM gear_items WHERE id::text = :gear_id), 'snipeit', '100', :gear_id, 'success', 'hash2', CURRENT_TIMESTAMP)
             """
         ),
         {"gear_id": str(gear_id)},
@@ -198,8 +198,8 @@ async def checkout_journal_with_snipeit_links(
     await async_connection.execute(
         text(
             """
-            INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-            VALUES ('snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash3', CURRENT_TIMESTAMP)
+            INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+            VALUES ((SELECT user_id FROM journals WHERE id::text = :journal_uuid), 'snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash3', CURRENT_TIMESTAMP)
             """
         ),
         {
@@ -307,8 +307,8 @@ async def test_each_checked_out_gear_item_links_its_asset(
         await async_connection.execute(
             text(
                 """
-                INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-                VALUES ('snipeit', :asset_id, :gear_id, 'success', 'hash', CURRENT_TIMESTAMP)
+                INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+                VALUES ((SELECT user_id FROM gear_items WHERE id::text = :gear_id), 'snipeit', :asset_id, :gear_id, 'success', 'hash', CURRENT_TIMESTAMP)
                 """
             ),
             {"asset_id": asset_id, "gear_id": gear_id},
@@ -324,8 +324,8 @@ async def test_each_checked_out_gear_item_links_its_asset(
             await async_connection.execute(
                 text(
                     """
-                    INSERT INTO sync_metadata (integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
-                    VALUES ('snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash', CURRENT_TIMESTAMP)
+                    INSERT INTO sync_metadata (user_id, integration_source, external_id, internal_uuid, sync_status, version_hash, last_synced_at)
+                    VALUES ((SELECT user_id FROM journals WHERE id::text = :journal_uuid), 'snipeit_checkout', :external_id, :journal_uuid, 'success', 'hash', CURRENT_TIMESTAMP)
                     """
                 ),
                 {

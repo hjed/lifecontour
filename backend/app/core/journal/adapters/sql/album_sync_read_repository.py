@@ -109,9 +109,6 @@ class AlbumSyncReadRepository:
 
         The link is stamped with, and keyed by, the journal's owner
         ``user_id``.
-
-        Raises:
-            ExternalLinkOwnedByAnotherUserError: Another user links the album.
         """
         now = datetime.now(UTC)
         # The anchor for a freshly inserted row: advancing it (now) is only
@@ -160,9 +157,6 @@ class AlbumSyncReadRepository:
                 "insert_anchor": insert_anchor,
                 "bump_anchor": bump_anchor,
             },
-            user_id=user_id,
-            integration_source=INTEGRATION_SOURCE,
-            external_id=album_id,
         )
 
     async def find_by_journal_id(self, journal_id: int) -> dict[str, Any] | None:

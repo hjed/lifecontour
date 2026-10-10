@@ -48,10 +48,10 @@ async def _add_sync_metadata(
     await connection.execute(
         text("""
             INSERT INTO sync_metadata (
-                internal_id, integration_source, external_id,
+                user_id, internal_id, integration_source, external_id,
                 last_synced_at, version_hash, sync_status
             ) VALUES (
-                :internal_id, :integration_source, :external_id,
+                (SELECT user_id FROM journals WHERE id = :internal_id), :internal_id, :integration_source, :external_id,
                 now(), :version_hash, 'success'
             )
         """),

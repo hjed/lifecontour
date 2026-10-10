@@ -347,10 +347,10 @@ class TestLogbookExportEndpoint:
         await async_connection.execute(
             text("""
                 INSERT INTO sync_metadata (
-                    internal_id, integration_source, external_id,
+                    user_id, internal_id, integration_source, external_id,
                     last_synced_at, version_hash, sync_status,
                     internal_entity_type, external_entity_type, reference_data
-                ) VALUES (:id, 'immich_album', 'album-api-1', now(), 'h', 'success',
+                ) VALUES ((SELECT user_id FROM journals WHERE id = :id), :id, 'immich_album', 'album-api-1', now(), 'h', 'success',
                           'journal', 'album', :ref)
             """),
             {

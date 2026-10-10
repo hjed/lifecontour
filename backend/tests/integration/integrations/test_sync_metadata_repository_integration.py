@@ -5,18 +5,17 @@ Verifies that ``upsert`` persists the consolidated link columns
 real database, that a later writer which omits them does not clobber the
 existing values (COALESCE-on-conflict behaviour), and that every link write
 stamps its owner and is keyed by ``(user_id, integration_source, external_id)``
-— a link another user already holds is refused, not re-pointed.
+— two users may each link the same external id, and every lookup, update and
+delete sees only the acting owner's link.
 """
 
 from typing import Any
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
-    ExternalLinkOwnedByAnotherUserError,
     SyncMetadataRepository,
 )
 from tests.integration.contact_seeding import TEST_USER_ID
@@ -137,9 +136,11 @@ class TestSyncMetadataRepositoryOwner:
             (first.id, TEST_USER_ID, 301, "hash-2")
         ]
 
-    async def test_another_owners_link_is_refused_and_left_intact(
+    async def test_two_owners_each_link_the_same_external_id(
         self, clean_database: AsyncConnection
     ) -> None:
+        """Snipe-IT ids are per instance: a second user's link for the same
+        id is that user's own row, and the first owner's is left as it was."""
         repo = SyncMetadataRepository(clean_database)
         first = await repo.upsert(
             user_id=TEST_USER_ID,
@@ -149,21 +150,18 @@ class TestSyncMetadataRepositoryOwner:
             internal_id=401,
         )
 
-        with pytest.raises(ExternalLinkOwnedByAnotherUserError) as refused:
-            await repo.upsert(
-                user_id=OTHER_USER_ID,
-                integration_source="snipeit",
-                external_id="asset-7",
-                version_hash="hash-2",
-                internal_id=402,
-            )
+        second = await repo.upsert(
+            user_id=OTHER_USER_ID,
+            integration_source="snipeit",
+            external_id="asset-7",
+            version_hash="hash-2",
+            internal_id=402,
+        )
 
-        assert refused.value.integration_source == "snipeit"
-        assert refused.value.external_id == "asset-7"
-        assert OTHER_USER_ID not in str(refused.value)
-        # The refusal is contained: the connection still serves the caller.
+        assert second.id != first.id
         assert await _links(clean_database, "asset-7") == [
-            (first.id, TEST_USER_ID, 401, "hash-1")
+            (first.id, TEST_USER_ID, 401, "hash-1"),
+            (second.id, OTHER_USER_ID, 402, "hash-2"),
         ]
 
     async def test_a_contact_link_is_stamped_with_its_owner(
@@ -208,7 +206,7 @@ class TestSyncMetadataRepositoryOwner:
         [(_, owner, internal_id, _)] = await _links(clean_database, "activity-601")
         assert (owner, internal_id) == (TEST_USER_ID, 601)
 
-    async def test_a_merge_link_another_owner_holds_is_refused(
+    async def test_a_merge_link_another_owner_holds_is_still_recorded(
         self, clean_database: AsyncConnection
     ) -> None:
         repo = SyncMetadataRepository(clean_database)
@@ -221,44 +219,21 @@ class TestSyncMetadataRepositoryOwner:
             transaction=clean_database,
         )
 
-        with pytest.raises(ExternalLinkOwnedByAnotherUserError):
-            await repo.link_journal_if_unlinked(
-                journal_id=702,
-                user_id=TEST_USER_ID,
-                integration_source="strava",
-                external_id="activity-701",
-                external_entity_type="activity",
-                transaction=clean_database,
-            )
-
-        [(_, owner, internal_id, _)] = await _links(clean_database, "activity-701")
-        assert (owner, internal_id) == (OTHER_USER_ID, 701)
-
-    async def test_an_unowned_row_is_not_reported_as_another_users(
-        self, clean_database: AsyncConnection
-    ) -> None:
-        """A row with no owner yet (written before its writer stamped one) is
-        not another user's: the write fails as it is, to be retried once
-        ``0126`` assigns the row, rather than being refused for good."""
-        await clean_database.execute(
-            text(
-                "INSERT INTO sync_metadata (integration_source, external_id, "
-                "last_synced_at, version_hash, sync_status) "
-                "VALUES ('google', 'people/unowned', now(), 'h', 'success')"
-            )
+        created = await repo.link_journal_if_unlinked(
+            journal_id=702,
+            user_id=TEST_USER_ID,
+            integration_source="strava",
+            external_id="activity-701",
+            external_entity_type="activity",
+            transaction=clean_database,
         )
-        repo = SyncMetadataRepository(clean_database)
 
-        with pytest.raises(IntegrityError):
-            await repo.upsert(
-                user_id=TEST_USER_ID,
-                integration_source="google",
-                external_id="people/unowned",
-                version_hash="hash-2",
-            )
-
-        [(_, owner, _, version_hash)] = await _links(clean_database, "people/unowned")
-        assert (owner, version_hash) == (None, "h")
+        assert created is True
+        owners = {
+            (owner, internal_id)
+            for _, owner, internal_id, _ in await _links(clean_database, "activity-701")
+        }
+        assert owners == {(OTHER_USER_ID, 701), (TEST_USER_ID, 702)}
 
 
 async def _seed_link(
@@ -439,4 +414,37 @@ class TestSyncMetadataRepositoryOwnerScopedLookups:
         ]
         assert await _reference_data(clean_database, "album-theirs") == [
             (OTHER_USER_ID, 41, '{"original": true}')
+        ]
+
+
+@pytest.mark.integration
+class TestTwoOwnersOfOneExternalId:
+    """Two users' contacts linked to the same external id stay apart."""
+
+    async def test_both_links_exist_and_each_lookup_finds_its_own(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        repo = SyncMetadataRepository(clean_database)
+        await _seed_link(
+            repo, user_id=TEST_USER_ID, external_id="people/shared", internal_id=51
+        )
+        await _seed_link(
+            repo, user_id=OTHER_USER_ID, external_id="people/shared", internal_id=52
+        )
+
+        mine = await repo.find_by_external_id(
+            "google", "people/shared", user_id=TEST_USER_ID
+        )
+        theirs = await repo.find_and_lock(
+            "google", "people/shared", user_id=OTHER_USER_ID
+        )
+        await repo.update_reference_data(
+            "google", "people/shared", '{"synced_tags": []}', user_id=TEST_USER_ID
+        )
+
+        assert mine is not None and mine.internal_id == 51
+        assert theirs is not None and theirs.internal_id == 52
+        assert await _reference_data(clean_database, "people/shared") == [
+            (TEST_USER_ID, 51, '{"synced_tags": []}'),
+            (OTHER_USER_ID, 52, '{"original": true}'),
         ]

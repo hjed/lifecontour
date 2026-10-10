@@ -14,80 +14,25 @@ from typing import Any
 
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from sqlalchemy import CursorResult, TextClause, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.unit_of_work import savepoint
-
-# The global ``(integration_source, external_id)`` unique index. Every writer
-# conflicts on the per-user key, so a violation of this one usually means a
-# different user holds the external id — but also, until ``0127`` requires an
-# owner, a row no writer has stamped yet, and a concurrent insert of the same
-# owner's link (``ON CONFLICT`` is race-safe only on its arbiter index).
-_GLOBAL_LINK_INDEX = "idx_sync_metadata_integration_external"
-
-
-class ExternalLinkOwnedByAnotherUserError(Exception):
-    """A link write for an external id that a different user already holds.
-
-    Carries the link's key and never the other owner (a foreign row is not
-    described, as for any other entity).
-    """
-
-    def __init__(self, integration_source: str, external_id: str) -> None:
-        super().__init__(
-            f"{integration_source} id {external_id!r} is linked by another user"
-        )
-        self.integration_source = integration_source
-        self.external_id = external_id
 
 
 async def execute_link_write(
     connection: AsyncConnection,
     statement: TextClause,
     params: Mapping[str, Any],
-    *,
-    user_id: str,
-    integration_source: str,
-    external_id: str,
 ) -> CursorResult[Any]:
-    """Run ``user_id``'s ``INSERT INTO sync_metadata`` keyed by the per-user target.
+    """Run an ``INSERT INTO sync_metadata`` keyed by the per-user target.
 
-    The write runs in a savepoint, so a refusal leaves the caller's unit of work
-    usable. A violation of the global index by a row a *different* user owns is
-    raised as :class:`ExternalLinkOwnedByAnotherUserError`. Any other violation
-    — the holder has no owner yet (it is assigned, and so writable, once
-    ``0127`` runs), or is ``user_id``'s own row inserted concurrently — is not
-    another user's and is re-raised as it is, for the caller to retry.
+    The write runs in a savepoint, so a failure leaves the caller's unit of work
+    usable. ``ON CONFLICT`` is race-safe only on its arbiter, so two concurrent
+    inserts of one owner's link can still raise ``IntegrityError``; it is
+    re-raised as it is, for the caller to retry.
     """
-    try:
-        async with savepoint(connection):
-            return await connection.execute(statement, params)
-    except IntegrityError as exc:
-        if _GLOBAL_LINK_INDEX not in str(exc.orig):
-            raise
-        holder = await _link_holder(connection, integration_source, external_id)
-        if holder is not None and holder != user_id:
-            raise ExternalLinkOwnedByAnotherUserError(
-                integration_source, external_id
-            ) from exc
-        raise
-
-
-async def _link_holder(
-    connection: AsyncConnection, integration_source: str, external_id: str
-) -> str | None:
-    """The owner of the row holding ``(integration_source, external_id)``, if any."""
-    result = await connection.execute(
-        text("""
-            SELECT user_id FROM sync_metadata
-            WHERE integration_source = :integration_source
-              AND external_id = :external_id
-        """),
-        {"integration_source": integration_source, "external_id": external_id},
-    )
-    holder: str | None = result.scalar_one_or_none()
-    return holder
+    async with savepoint(connection):
+        return await connection.execute(statement, params)
 
 
 @dataclass(frozen=True)
@@ -108,6 +53,42 @@ class IntegrationLinkCollision:
     def as_dict(self) -> dict[str, str]:
         """Serialise for inclusion in the ``ContactMerged`` event payload."""
         return asdict(self)
+
+
+_LINK_COLUMNS = (
+    "id, user_id, internal_id, internal_uuid, integration_source, external_id, "
+    "last_synced_at, version_hash, sync_status, error_message, retry_count, "
+    "internal_entity_type, external_entity_type, reference_data, "
+    "created_at, updated_at"
+)
+
+_SELECT_LINK = (
+    f"SELECT {_LINK_COLUMNS} FROM sync_metadata "  # noqa: S608 - a literal column list
+    "WHERE user_id = :user_id AND integration_source = :integration_source "
+    "AND external_id = :external_id"
+)
+
+
+def _to_sync_metadata(row: Any) -> SyncMetadata:
+    """Map a ``sync_metadata`` row selected with ``_LINK_COLUMNS``."""
+    return SyncMetadata(
+        id=row.id,
+        user_id=row.user_id,
+        internal_id=row.internal_id,
+        internal_uuid=row.internal_uuid,
+        integration_source=row.integration_source,
+        external_id=row.external_id,
+        last_synced_at=row.last_synced_at,
+        version_hash=row.version_hash,
+        sync_status=row.sync_status,
+        error_message=row.error_message,
+        retry_count=row.retry_count,
+        internal_entity_type=row.internal_entity_type,
+        external_entity_type=row.external_entity_type,
+        reference_data=row.reference_data,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 class SyncMetadataRepository:
@@ -139,44 +120,7 @@ class SyncMetadataRepository:
         Returns:
             SyncMetadata if found, None otherwise
         """
-        query = text("""
-            SELECT id, internal_id, internal_uuid, integration_source, external_id,
-                   last_synced_at, version_hash, sync_status,
-                   error_message, retry_count, created_at, updated_at
-            FROM sync_metadata
-            WHERE user_id = :user_id
-              AND integration_source = :integration_source
-              AND external_id = :external_id
-            FOR UPDATE
-        """)
-
-        result = await self.conn.execute(
-            query,
-            {
-                "user_id": user_id,
-                "integration_source": integration_source,
-                "external_id": external_id,
-            },
-        )
-        row = result.fetchone()
-
-        if not row:
-            return None
-
-        return SyncMetadata(
-            id=row.id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return await self._find(integration_source, external_id, user_id, lock=True)
 
     async def find_by_external_id(
         self, integration_source: str, external_id: str, *, user_id: str
@@ -192,18 +136,14 @@ class SyncMetadataRepository:
         Returns:
             SyncMetadata if found, None otherwise
         """
-        query = text("""
-            SELECT id, internal_id, internal_uuid, integration_source, external_id,
-                   last_synced_at, version_hash, sync_status,
-                   error_message, retry_count, created_at, updated_at
-            FROM sync_metadata
-            WHERE user_id = :user_id
-              AND integration_source = :integration_source
-              AND external_id = :external_id
-        """)
+        return await self._find(integration_source, external_id, user_id, lock=False)
 
+    async def _find(
+        self, integration_source: str, external_id: str, user_id: str, *, lock: bool
+    ) -> SyncMetadata | None:
+        """``user_id``'s link for ``(integration_source, external_id)``, if any."""
         result = await self.conn.execute(
-            query,
+            text(_SELECT_LINK + (" FOR UPDATE" if lock else "")),
             {
                 "user_id": user_id,
                 "integration_source": integration_source,
@@ -211,24 +151,7 @@ class SyncMetadataRepository:
             },
         )
         row = result.fetchone()
-
-        if not row:
-            return None
-
-        return SyncMetadata(
-            id=row.id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _to_sync_metadata(row) if row else None
 
     async def upsert(
         self,
@@ -263,17 +186,14 @@ class SyncMetadataRepository:
 
         Returns:
             Created or updated SyncMetadata
-
-        Raises:
-            ExternalLinkOwnedByAnotherUserError: Another user holds
-                ``(integration_source, external_id)``.
         """
         now = datetime.now(UTC)
 
         # The link columns use COALESCE on conflict so a writer that does not
         # supply them (e.g. an integration worker still on the old code path)
         # never clears values populated by another writer or the backfill.
-        query = text("""
+        query = text(  # noqa: S608 - a literal column list
+            f"""
             INSERT INTO sync_metadata
                 (user_id, internal_id, internal_uuid, integration_source, external_id,
                  last_synced_at, version_hash, sync_status, error_message, retry_count,
@@ -306,11 +226,9 @@ class SyncMetadataRepository:
                     EXCLUDED.reference_data, sync_metadata.reference_data
                 ),
                 updated_at = EXCLUDED.updated_at
-            RETURNING id, internal_id, internal_uuid, integration_source, external_id,
-                      last_synced_at, version_hash, sync_status,
-                      error_message, retry_count, internal_entity_type,
-                      external_entity_type, reference_data, created_at, updated_at
-        """)
+            RETURNING {_LINK_COLUMNS}
+        """
+        )
 
         result = await execute_link_write(
             self.conn,
@@ -331,32 +249,13 @@ class SyncMetadataRepository:
                 "created_at": now,
                 "updated_at": now,
             },
-            user_id=user_id,
-            integration_source=integration_source,
-            external_id=external_id,
         )
         row = result.fetchone()
 
         if not row:
             raise RuntimeError("Failed to upsert sync metadata")
 
-        return SyncMetadata(
-            id=row.id,
-            internal_id=row.internal_id,
-            internal_uuid=row.internal_uuid,
-            integration_source=row.integration_source,
-            external_id=row.external_id,
-            last_synced_at=row.last_synced_at,
-            version_hash=row.version_hash,
-            sync_status=row.sync_status,
-            error_message=row.error_message,
-            retry_count=row.retry_count,
-            internal_entity_type=row.internal_entity_type,
-            external_entity_type=row.external_entity_type,
-            reference_data=row.reference_data,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _to_sync_metadata(row)
 
     async def update_reference_data(
         self,
@@ -754,9 +653,6 @@ class SyncMetadataRepository:
 
         Returns:
             True when a link was created.
-
-        Raises:
-            ExternalLinkOwnedByAnotherUserError: Another user holds the record.
         """
         now = datetime.now(UTC)
         result = await execute_link_write(
@@ -784,9 +680,6 @@ class SyncMetadataRepository:
                 "sync_status": SyncStatus.PENDING.value,
                 "now": now,
             },
-            user_id=user_id,
-            integration_source=integration_source,
-            external_id=external_id,
         )
         return result.fetchone() is not None
 
