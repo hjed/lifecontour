@@ -167,17 +167,14 @@ async def link_journal_to_contact(
     # Create repositories
     repos = create_journal_tool_repositories(db_connection)
 
-    # Check that contact and journal exist. Both are read owner-scoped:
-    # linking writes a row to each, so somebody else's must be as unreachable
-    # here as it is through the read tools (#1267).
+    # The journal is read owner-scoped: linking writes to it, so somebody else's
+    # must be as unreachable here as it is through the read tools (#1267). The
+    # contact is the service's to check, against the same owner: another user's
+    # contact answers not-found exactly as a missing one does.
     user_id = await get_current_user_id()
     journal = await repos.journal_repo.find_by_id_for_user(journal_id, str(user_id))
     if not journal:
         raise ValueError(f"Could not find journal with ID {journal_id}")
-
-    contact = await repos.contact_repo.find_by_id(contact_id, user_id=str(user_id))
-    if not contact:
-        raise ValueError(f"Could not find contact with ID {contact_id}")
 
     rel = JournalContactRelationship(
         journal_id=journal_id,
@@ -191,7 +188,7 @@ async def link_journal_to_contact(
 
     try:
         await journal_contact_service.add_contact_to_journal(
-            rel, transaction=db_connection
+            rel, user_id=str(user_id), transaction=db_connection
         )
     except sqlalchemy.exc.IntegrityError as e:
         raise ValueError("Relationship already exists") from e

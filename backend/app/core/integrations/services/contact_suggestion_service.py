@@ -157,6 +157,7 @@ class ContactSuggestionService:
                             status=row.status,
                             role=row.role,
                         ),
+                        user_id=user_id,
                         transaction=transaction,
                     )
                 linked += 1

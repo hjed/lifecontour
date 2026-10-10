@@ -35,6 +35,7 @@ from core_shared.models.journals.daily_summary import JournalDailySummary
 from core_shared.stream_client import StreamClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.journal.adapters.sql.daily_summary_repository import (
     SqlJournalDailySummaryRepository,
 )
@@ -340,6 +341,7 @@ class TestTheOtherWaysADayChanges:
 
         contact_id = await seed_contact(
             async_connection,
+            user_id=USER_ID,
             first_name="Ada",
             last_name=f"Lovelace-{uuid.uuid4().hex[:6]}",
         )
@@ -350,6 +352,7 @@ class TestTheOtherWaysADayChanges:
                 async_connection
             ),
             event_publisher=OutboxEventPublisher(async_connection),
+            contact_repo=SqlContactRepository(async_connection),
         )
         await contact_service.add_contact_to_journal(
             JournalContactRelationship(
@@ -357,7 +360,8 @@ class TestTheOtherWaysADayChanges:
                 contact_id=contact_id,
                 relationship_type=JournalContactRelationshipType.PARTICIPANT,
             ),
-            async_connection,
+            user_id=USER_ID,
+            transaction=async_connection,
         )
         await _relay_and_invalidate(
             stream_client, test_stream_name, async_connection, "test-contact"

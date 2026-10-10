@@ -152,6 +152,9 @@ class TestCreateJournal:
         assert write_service.mood_data_repo.save.await_count >= 1
         # contact relationship was added through the contact service
         mock_journal_contact_service.add_contact_to_journal.assert_awaited_once()
+        # ...as the journal's owner, whose contacts are the only ones it may hold
+        add = mock_journal_contact_service.add_contact_to_journal
+        assert add.await_args.kwargs["user_id"] == created.user_id
 
     @pytest.mark.asyncio
     async def test_create_journal_rolls_back_on_type_data_failure(
@@ -891,6 +894,8 @@ class TestUpdateJournalComposite:
 
         mock_journal_contact_service.remove_contact_from_journal.assert_awaited_once()
         mock_journal_contact_service.add_contact_to_journal.assert_awaited_once()
+        add = mock_journal_contact_service.add_contact_to_journal
+        assert add.await_args.kwargs["user_id"] == _journal(journal_id=9).user_id
 
     @pytest.mark.asyncio
     async def test_replace_types_ignores_type_data_for_non_desired_types(
