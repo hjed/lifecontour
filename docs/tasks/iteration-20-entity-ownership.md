@@ -597,13 +597,15 @@ its callers. Every layer is deployable on its own.
   `DuplicateEmailError(…, 0)` names no foreign contact, but a 409 still reveals that the address
   exists somewhere. Per-owner uniqueness needs the owner in the index (a denormalised
   `contact_methods.user_id`, or a trigger). It is not covered by any phase yet.
-- `TaskService` `add_contacts` replacement path (`task_service.py:~1496`) still relies on the foreign
-  key and checks names only after an `IntegrityError`, so it does not refuse a foreign contact that
-  exists. It belongs with Phase 11's task-contact bullet.
-- `ContactResolver.resolve_by_email` (`journal_outbox_event_processor.py`, inbound calendar
+- ~~`TaskService` `add_contacts` replacement path (`task_service.py:~1496`) still relies on the
+  foreign key and checks names only after an `IntegrityError`, so it does not refuse a foreign
+  contact that exists. It belongs with Phase 11's task-contact bullet.~~ **Resolved in Phase 11:**
+  stale — it is only reached after the scoped `_resolve_contacts`.
+- ~~`ContactResolver.resolve_by_email` (`journal_outbox_event_processor.py`, inbound calendar
   attendees → journal participants) is raw SQL over every user's contacts. It does not go through
   `ContactRepository`, so Phase 4 does not reach it. It must resolve within the journal's owner
-  (`journal_data["user_id"]`) and belongs with Phase 11's participant writes.
+  (`journal_data["user_id"]`) and belongs with Phase 11's participant writes.~~ **Resolved in
+  Phase 11:** it takes the journal's owner.
 - `ContactRepository.lock(contact_id)` runs before the ownership check on child-row writes (the
   lock-ordering rule), so a foreign id briefly takes another user's row lock and then answers 404.
   Nothing is written.
@@ -897,11 +899,11 @@ resolving the divergences recorded in iterations 13 and 18.
 
 **Acceptance Criteria (task-level):**
 - [ ] Journal participants, task contacts, contact relationships, contact merge, athlete mappings, suggestion accept, Immich conflict resolution and contact history treat a foreign contact as not found and write nothing.
-- [ ] The divergence notes in `task_service.py:1638`, iteration 13, iteration 18 phase 4 and `domain-architecture.md` are replaced by pointers to the enforced rule.
+- [x] The divergence notes in `task_service.py:1638`, iteration 13, iteration 18 phase 4 and `domain-architecture.md` are replaced by pointers to the enforced rule. (Phase 11)
 
 ---
 
-#### Phase 11: Core links — journals, tasks, relationships, merge
+#### Phase 11: Core links — journals, tasks, relationships, merge ✅ DONE
 
 **PR Size:** ~400 lines
 
@@ -912,41 +914,85 @@ resolving the divergences recorded in iterations 13 and 18.
 > - `merge_contacts(…, user_id)` scopes both sides.
 > - `ContactService.get_contact_history` proves the contact first.
 >
-> What remains:
-> - the integration proofs below
-> - `JournalContactService` / `JournalWriteService` participant writes, and inbound attendee
->   resolution (`ContactResolver.resolve_by_email`)
-> - the task `add_contacts` replacement path (see the Phase 4 follow-ups)
-> - `ContactHistoryService`'s own entry points (the REST history route already reads the contact
->   first)
+> Phase 11 added the integration proofs below, the journal participant writes and inbound
+> attendee resolution, and `ContactHistoryService`'s own check; the task `add_contacts` path
+> needed no change (see the decisions).
 
-- [ ] `JournalContactService.add_contact_to_journal` and the `JournalWriteService` paths that link
+- [x] `JournalContactService.add_contact_to_journal` and the `JournalWriteService` paths that link
   contacts (create with contacts, participant updates, attendance) check
-  `contact_exists(contact_id, user_id=journal.user_id)` before writing.
-- [ ] `TaskService._resolve_contacts(contact_ids, user_id)` (the docstring's "single place the rule
+  `contact_exists(contact_id, user_id=journal.user_id)` before writing. The service takes the
+  journal's owner as a required `user_id`; REST, MCP, the composite create/update and suggestion
+  accept pass it. Inbound attendees resolve within the journal's owner
+  (`ContactResolver.resolve_by_email(email, user_id=…)`).
+- [x] `TaskService._resolve_contacts(contact_ids, user_id)` (the docstring's "single place the rule
   lands") uses the scoped existence check; `TaskContactRepository` unchanged (it stands in for a
-  foreign key).
-- [ ] `ContactRelationshipService.create_relationship` / `update_relationship`: both ends scoped to
-  the acting user.
-- [ ] `ContactMergeService.merge_contacts(survivor_id, source_id, user_id, …)`: both scoped;
-  `ContactMerged` carries the owner (Phase 3).
-- [ ] `ContactHistoryService.get_contact_history` / `_count`: load the contact for
-  `reader_user_id` first; 404 otherwise.
+  foreign key). Already so since Phase 4; proven here.
+- [x] `ContactRelationshipService.create_relationship` / `update_relationship`: both ends scoped to
+  the acting user. Already so since Phase 4; proven here.
+- [x] `ContactMergeService.merge_contacts(survivor_id, source_id, user_id, …)`: both scoped;
+  `ContactMerged` carries the owner (Phase 3). Already so since Phase 4; proven here.
+- [x] `ContactHistoryService.get_contact_history` / `_count`: load the contact for
+  `reader_user_id` first; 404 otherwise. `reader_user_id` is now required; the REST route and
+  `ContactService.get_contact_history` no longer check separately.
 
 **Required Test Coverage:**
-- [ ] **Integration (first):** for each link, a contact seeded with `OTHER_USER_ID` → the
-  domain's not-found error and no link row (`test_task_service_integration.py` — the iteration 18
-  phase 4 test "a contact owned by another user (rejected)" becomes real; journal contact
-  relationship, relationship, merge and history suites).
-- [ ] **Unit:** services raise before any repository write.
+- [x] **Integration (first):** for each link, a contact seeded with `OTHER_USER_ID` → the
+  domain's not-found error and no link row:
+  - journal participants: `tests/integration/journal/test_journal_contact_ownership.py` (service,
+    composite create/update), `test_journal_ownership.py::TestJournalContactOwnershipIsEnforced`
+    (REST 404, identical to a missing id), `test_mcp_journal_owner_identity.py::TestMCPJournalContactsAreTheJournalOwners`,
+    `test_unmatched_participant_capture.py::test_an_email_only_another_user_holds_is_unmatched`
+  - tasks: `test_task_service_create_integration.py::TestContactLinks` (the iteration 18 phase 4
+    test "a contact owned by another user (rejected)" is now real) and
+    `test_task_contact_links_integration.py` (`link_contact`)
+  - relationships, merge and history: `tests/integration/contacts/test_contact_cross_entity_ownership.py`
+- [x] **Unit:** services raise before any repository write — `test_journal_contact_service.py`,
+  `test_contact_history_service.py`, `test_task_service_create.py`, and the existing
+  `test_contact_relationship_service.py::TestForeignRelationshipsAreNotFound`.
 
 **E2E:** not applicable.
 
+**Status:** ✅ DONE — a journal's people, a task's contacts, a relationship's two ends, a merge's
+survivor and source, and a contact's history are all the acting user's; another user's contact is
+not found and nothing is written. Backend unit 5089 passed; backend integration 3636 passed (7
+pre-existing skips).
+
+**Delivery:** a stack of three, each deployable on its own — 11a journal-contact writes (REST,
+MCP, composite, suggestion accept); 11b inbound attendee resolution, the history check, and the
+relationship, merge and history proofs; 11c the task proofs and the documents.
+
 **Required Documentation Updates:**
-- [ ] `docs/architecture/domain-architecture.md` — Tasks Domain and journal-contact sections: the
-  ownership rule replaces the "existence only" notes.
-- [ ] `docs/tasks/iteration-13-contact-merge.md`, `iteration-18-home-dashboard-and-tasks.md` — a
+- [x] `docs/architecture/domain-architecture.md` — Tasks Domain and journal-contact sections: the
+  ownership rule replaces the "existence only" notes (plus the contact "links stay within one
+  owner" rule); `database-design.md` — unmatched participant emails.
+- [x] `docs/tasks/iteration-13-contact-merge.md`, `iteration-18-home-dashboard-and-tasks.md` — a
   one-line resolution pointer under each recorded divergence.
+
+**Decisions (recorded during implementation):**
+- **Linking a missing or foreign contact to a journal over REST answers 404 `CONTACT_NOT_FOUND`,
+  not 400.** A missing contact used to surface as a foreign-key violation, answered 400 "Contact
+  not found or relationship already exists". The check now lives in the service and raises
+  `ContactNotFoundError` for both (Delivery Rule 5), as Phase 10 did for tag assignment. A
+  duplicate link still answers 400.
+- **The composite create/update skip a foreign contact** (warning log), exactly as they already
+  skipped a missing one.
+- **An inbound attendee address that only another user's contact holds is unmatched**, so it
+  becomes a contact suggestion for the journal's owner; it is never linked.
+- **The MCP link tool no longer pre-reads the contact**; the service's `ContactNotFoundError`
+  reaches the tool's error handler as the standard not-found payload. A missing contact used to
+  come back as a validation error.
+- **The caller-less `JournalWriteService.add_contact_to_journal` and
+  `ContactHistoryService.get_entity_history` were deleted**, not threaded.
+- **The task `add_contacts` path needed no change.** `_link_contacts` is reached only after
+  `_resolve_contacts`, so its foreign-key re-read covers a contact deleted in between, not
+  ownership. The Phase 4 follow-up describing it was stale.
+- **The contact-merge task re-point stays unfiltered by owner.** The merge proves both contacts
+  are the user's first, and a contact can only be linked to its owner's tasks, so every row it
+  moves is the user's. This also resolves Phase 15's follow-up: a foreign source never reaches
+  `repoint_contact_links`.
+- **Test fixtures that crossed owners were corrected:** `test_journal_ownership.py`'s foreign
+  journal carried the test user's contact, and the unmatched-participant tests seeded contacts
+  under a different owner from the synced journals.
 
 ---
 
@@ -1315,6 +1361,9 @@ in the backend and the four workers takes the owner.
 - **Phase 11:** `repoint_contact_links` now moves only the acting user's links. Until the merge
   requires both contacts to share an owner, a foreign source contact's links are left behind
   (orphaned once the source is deleted) rather than moved to the survivor under another owner.
+  **Resolved:** the merge has required one owner since Phase 4 (both contacts are read scoped), and
+  Phase 11's `test_contact_cross_entity_ownership.py` proves a foreign survivor or source is not
+  found with nothing written.
 
 ---
 

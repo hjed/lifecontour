@@ -91,6 +91,10 @@ domain/
   inbound consumer the sync event's owner); `create_contact` is the exception, because the new
   contact carries its owner. The one read with no acting user is `find_owner_id`, for the summary
   consumer: it resolves the owner, then reads the contact as that owner
+- **Links stay within one owner.** A relationship's two contacts, a merge's survivor and source,
+  a task's contacts and a journal's people all belong to the acting user; another user's contact is
+  `ContactNotFoundError` and nothing is written. `ContactHistoryService` proves the contact is the
+  reader's before either history read, so neither REST nor MCP can read a foreign contact's history
 - **Business Rules**:
   - Contact name validation (first_name required)
   - Email uniqueness validation: the service checks within the owner's contacts; the
@@ -131,7 +135,13 @@ See [Journal System Specification](../journal-system-specification.md) for compr
 - **Business Rules**:
   - Type system with automatic dependency resolution
   - Hierarchical organization (max 5 levels)
-  - Contact relationship management (4 types)
+  - Contact relationship management (4 types). **A journal's people are its owner's contacts:**
+    `JournalContactService.add_contact_to_journal` takes the journal's owner and checks the contact
+    with the owner-scoped `contact_exists` before writing, so another user's contact is
+    `ContactNotFoundError` (404) on REST and MCP, and the composite create/update skip it exactly
+    as they skip a missing one. Inbound calendar attendees resolve by email within the journal
+    owner's contacts only (`ContactResolver.resolve_by_email`); an address only another user's
+    contact holds is recorded as an unmatched participant
   - Integration conflict resolution
   - Route tracking and reuse
   - **Journal tags are owned.** A tag (`JournalTag.user_id`) belongs to one user and names are
@@ -822,8 +832,9 @@ Three things about the service half are load-bearing:
 the rule lands: it resolves the contacts with the owner-scoped `find_names_by_ids`, so a create or a
 link naming another user's contact raises `ContactNotFoundError`, exactly as a missing one does. This
 resolves the divergence recorded in [iteration 18](../tasks/iteration-18-home-dashboard-and-tasks.md).
-The batch replace path (`add_contacts`) still relies on the foreign key and is scoped with the other
-cross-entity links in [iteration 20](../tasks/iteration-20-entity-ownership.md) Phase 11.
+The batched insert (`_link_contacts` → `TaskRepository.add_contacts`) is only reached after that
+check; its foreign-key re-read covers a contact deleted in between, not ownership
+([iteration 20](../tasks/iteration-20-entity-ownership.md) Phase 11).
 
 ### Task read model and lapsed derivation
 

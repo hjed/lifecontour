@@ -478,13 +478,65 @@ class TestFutureDatedAgainstStoredSettings:
 
 @pytest.mark.integration
 class TestContactLinks:
-    """Contacts must exist before they can be referenced.
+    """A task's contacts must exist and be the task owner's.
 
     The phase's acceptance criterion asks for a contact *owned by another user*
-    to be rejected. The ``contacts`` table has no owner column — see the Phase 4
-    divergence in the iteration document — so the enforceable rule, and the one
-    tested here, is existence.
+    to be rejected. Contacts carry an owner since iteration 20, so that is now
+    the rule: another user's contact is not found, exactly as a missing one is.
     """
+
+    async def test_rejects_another_users_contact(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Their contact fails the create and writes nothing at all."""
+        creating_id, due_id = task_anchors
+        theirs = await create_contact(async_connection, user_id=OTHER_USER_ID)
+
+        with pytest.raises(ContactNotFoundError) as exc_info:
+            await service.create_task(
+                user_id=USER_ID,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                text="return the book",
+                contact_ids=[theirs],
+                transaction=async_connection,
+            )
+
+        assert exc_info.value.contact_id == theirs
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
+
+    async def test_a_foreign_contact_is_indistinguishable_from_a_missing_one(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = task_anchors
+        theirs = await create_contact(async_connection, user_id=OTHER_USER_ID)
+
+        async def rejection(contact_id: int) -> ContactNotFoundError:
+            with pytest.raises(ContactNotFoundError) as exc_info:
+                await service.create_task(
+                    user_id=USER_ID,
+                    creating_journal_id=creating_id,
+                    due_journal_id=due_id,
+                    text="a commitment",
+                    contact_ids=[contact_id],
+                    transaction=async_connection,
+                )
+            return exc_info.value
+
+        foreign = await rejection(theirs)
+        absent = await rejection(999_999)
+
+        assert foreign.status_code == absent.status_code
+        assert str(foreign).replace(str(theirs), "") == str(absent).replace(
+            "999999", ""
+        )
 
     async def test_rejects_a_contact_that_does_not_exist(
         self,

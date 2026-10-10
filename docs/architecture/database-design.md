@@ -740,8 +740,9 @@ Migration: `backend/app/migrations/versions/0088_add_sync_job_fanout_hierarchy.p
 #### Unmatched Participant Emails
 
 `journal_unmatched_participant_emails` holds, per journal, the participant
-emails inbound sync could not resolve to a contact: the source of contact
-suggestions. Written only by `JournalOutboxEventProcessor`, which replaces a
+emails inbound sync could not resolve to a contact of the journal's owner: the
+source of contact suggestions. An address only another user's contact holds is
+unmatched too. Written only by `JournalOutboxEventProcessor`, which replaces a
 journal's rows on every sync.
 
 | Column | Type | Notes |

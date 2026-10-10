@@ -895,12 +895,19 @@ class TestContactLinks:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Validation precedes persistence, so a bad contact leaves no task behind."""
+        """Validation precedes persistence, so a bad contact leaves no task behind.
+
+        The lookup is the acting user's, so a contact the repository does not
+        return for them — missing, or another user's — is rejected here.
+        """
         mock_contact_repo.find_names_by_ids.return_value = {}
 
         with pytest.raises(ContactNotFoundError):
             await create(service, mock_transaction, contact_ids=[404])
 
+        mock_contact_repo.find_names_by_ids.assert_awaited_once_with(
+            [404], user_id=USER_ID
+        )
         mock_task_repo.save.assert_not_awaited()
         mock_task_repo.add_contacts.assert_not_awaited()
 
