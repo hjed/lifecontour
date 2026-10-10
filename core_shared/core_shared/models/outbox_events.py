@@ -14,6 +14,8 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, Field, NonNegativeInt
 
+from core_shared.models.contacts.sync_scope import ContactSyncScope
+
 # ── Contact Sync ──────────────────────────────────────────────────────
 
 
@@ -45,6 +47,11 @@ class ContactSyncEventData(BaseModel):
         min_length=1,
         description="Owner of the synced contact (the integration's user). The "
         "backend refuses an event without one rather than guess.",
+    )
+    sync_scope: ContactSyncScope | None = Field(
+        default=None,
+        description="Fields the source owns; the rest keep their stored values. "
+        "None (an event queued before scopes) overwrites the contact whole.",
     )
 
 

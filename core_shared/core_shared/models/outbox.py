@@ -15,6 +15,7 @@ from sqlalchemy import Column, DateTime, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
+from .contacts.sync_scope import ContactSyncScope
 from .outbox_events import (
     ContactSyncEventData,
     FitnessDurationCorrectedData,
@@ -110,6 +111,7 @@ class OutboxEvent(Base):
         etag: str | None = None,
         *,
         user_id: str,
+        sync_scope: ContactSyncScope | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -121,6 +123,7 @@ class OutboxEvent(Base):
             sync_type: Type of sync operation ('created', 'updated', 'deleted')
             etag: External system's version identifier (e.g., Google ETag)
             user_id: Owner of the synced contact (the integration's user)
+            sync_scope: The fields the source owns; see ``ContactSyncScope``
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -136,6 +139,7 @@ class OutboxEvent(Base):
             sync_type=sync_type,
             etag=etag,
             user_id=user_id,
+            sync_scope=sync_scope,
         )
         return cls(
             event_type=f"contact.{sync_type}",

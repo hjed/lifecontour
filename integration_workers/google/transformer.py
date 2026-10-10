@@ -22,12 +22,36 @@ from core_shared.models.contacts.important_date_types import (
     DatePrecision,
     ImportantDateType,
 )
+from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSyncScope
 from core_shared.models.contacts.value_objects import TagName
 
 from api_models import GoogleBirthday, GoogleDate, GooglePerson, GooglePersonEvent
 from group_translator import GoogleGroupNameTranslator
 
 logger = structlog.get_logger()
+
+# What a Google import may change: the fields this transformer maps from the
+# personFields the client requests. Anything else on the contact - the avatar
+# another integration set, date types Google cannot hold - keeps its value.
+GOOGLE_CONTACT_SYNC_SCOPE = ContactSyncScope(
+    fields=frozenset(
+        {
+            ContactSyncField.FIRST_NAME,
+            ContactSyncField.LAST_NAME,
+            ContactSyncField.MIDDLE_NAME,
+            ContactSyncField.COMPANY,
+            ContactSyncField.JOB_TITLE,
+            ContactSyncField.IS_FAVOURITE,
+            ContactSyncField.METHODS,
+            ContactSyncField.ADDRESSES,
+            ContactSyncField.NOTES,
+            ContactSyncField.TAGS,
+        }
+    ),
+    important_date_types=frozenset(
+        {ImportantDateType.BIRTHDAY, ImportantDateType.MARRIAGE_ANNIVERSARY}
+    ),
+)
 
 
 class GoogleContactTransformer:
@@ -525,18 +549,20 @@ class GoogleContactTransformer:
     ) -> list[ImportantDate] | None:
         """Transform Google birthdays and events into ImportantDate entities.
 
-        Returns None when both lists are empty (Google provided no date
-        data), which signals the sync layer to preserve local-only dates.
-        Returns a (possibly empty) list when at least one source had data.
+        The list is authoritative for the date types Google sync owns (see
+        ``GOOGLE_CONTACT_SYNC_SCOPE``): an empty one clears them, and the sync
+        scope keeps every other local date type. None - Google holds an owned
+        date, but none could be read - leaves the local dates alone.
         """
         birthday_dates = self._transform_birthdays(birthdays)
         event_dates = self._transform_events(events)
         transformed_dates = birthday_dates + event_dates
 
-        # Only trigger downstream replacement when Google produced at least
-        # one supported, valid important date. Unsupported event types or
-        # invalid date payloads should preserve existing local-only dates.
-        if not transformed_dates:
+        holds_owned_date = bool(birthdays) or any(
+            event.type is not None and event.type.lower() in self._GOOGLE_EVENT_TYPE_MAP
+            for event in events
+        )
+        if not transformed_dates and holds_owned_date:
             return None
 
         return transformed_dates

@@ -197,7 +197,7 @@ class TestEventTransformation:
     def test_unknown_event_type_skipped(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """Events with unsupported types are silently skipped (returns None if no valid dates)."""
+        """Unsupported event types are skipped: Google holds no date it owns."""
         person = GooglePerson(
             resourceName="people/c12",
             names=[GoogleName(givenName="Test")],
@@ -215,10 +215,10 @@ class TestEventTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is None
+        assert contact.important_dates == []
 
     def test_event_no_date_skipped(self, transformer: GoogleContactTransformer) -> None:
-        """Event with no date is skipped (returns None if no valid dates)."""
+        """An anniversary with no date is unusable: None preserves local dates."""
         person = GooglePerson(
             resourceName="people/c13",
             names=[GoogleName(givenName="Test")],
@@ -232,7 +232,7 @@ class TestEventTransformation:
         assert contact.important_dates is None
 
     def test_event_no_type_skipped(self, transformer: GoogleContactTransformer) -> None:
-        """Event with no type is skipped (returns None if no valid dates)."""
+        """An event with no type is not one Google sync owns: an empty list."""
         person = GooglePerson(
             resourceName="people/c14",
             names=[GoogleName(givenName="Test")],
@@ -246,7 +246,7 @@ class TestEventTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is None
+        assert contact.important_dates == []
 
 
 class TestCombinedDateTransformation:
@@ -276,12 +276,13 @@ class TestCombinedDateTransformation:
         assert ImportantDateType.BIRTHDAY in types
         assert ImportantDateType.MARRIAGE_ANNIVERSARY in types
 
-    def test_empty_birthdays_and_events_yields_none(
+    def test_empty_birthdays_and_events_yields_empty_list(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """When Google provides no birthdays and no events, important_dates is None.
+        """When Google provides no birthdays and no events, important_dates is [].
 
-        This preserves local-only dates during sync updates.
+        The sync scope clears the birthday and anniversary Google owns and keeps
+        every other local date type.
         """
         person = GooglePerson(
             resourceName="people/c21",
@@ -292,8 +293,7 @@ class TestCombinedDateTransformation:
 
         contact = transformer.transform_person(person)
 
-        # Empty lists from Google = no date data provided = preserve local
-        assert contact.important_dates is None
+        assert contact.important_dates == []
 
     def test_birthday_present_but_no_events_sets_list(
         self, transformer: GoogleContactTransformer
@@ -311,10 +311,10 @@ class TestCombinedDateTransformation:
         assert contact.important_dates is not None
         assert len(contact.important_dates) == 1
 
-    def test_no_date_fields_default_yields_none(
+    def test_no_date_fields_default_yields_empty_list(
         self, transformer: GoogleContactTransformer
     ) -> None:
-        """When person has default empty lists for dates, important_dates is None."""
+        """When person has default empty lists for dates, important_dates is []."""
         person = GooglePerson(
             resourceName="people/c23",
             names=[GoogleName(givenName="Test")],
@@ -322,4 +322,4 @@ class TestCombinedDateTransformation:
 
         contact = transformer.transform_person(person)
 
-        assert contact.important_dates is None
+        assert contact.important_dates == []

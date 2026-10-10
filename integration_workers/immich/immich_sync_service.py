@@ -32,6 +32,7 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSyncScope
 from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
@@ -43,6 +44,14 @@ from immich_api_client import ImmichApiClient
 from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson, ImmichSharedLink
 
 logger = structlog.get_logger(__name__)
+
+# What an Immich update may change on a linked contact: the avatar and the
+# birthday. Names are set only when Immich creates the contact - its split of
+# a person's name is a guess that would overwrite Google's or the user's.
+IMMICH_CONTACT_SYNC_SCOPE = ContactSyncScope(
+    fields=frozenset({ContactSyncField.PHOTO_URL}),
+    important_date_types=frozenset({ImportantDateType.BIRTHDAY}),
+)
 
 
 @dataclass
@@ -702,8 +711,9 @@ class ImmichSyncService:
         """
         first_name, last_name = self.parse_person_name(person.name)
 
-        # Build important_dates from birthday
-        important_dates: list[ImportantDate] | None = None
+        # Build important_dates from birthday: no birthday in Immich clears the
+        # one it owns; one it holds but that cannot be read (None) is left alone.
+        important_dates: list[ImportantDate] | None = None if person.birth_date else []
         parsed_birthday = self.parse_birth_date(person.birth_date)
         if parsed_birthday:
             year, month, day = parsed_birthday
@@ -758,6 +768,7 @@ class ImmichSyncService:
             sync_type=sync_type,
             etag=version_hash,
             user_id=self._user_id,
+            sync_scope=IMMICH_CONTACT_SYNC_SCOPE,
         )
         event_id = await self._insert_outbox_event(event)
         logger.debug(
