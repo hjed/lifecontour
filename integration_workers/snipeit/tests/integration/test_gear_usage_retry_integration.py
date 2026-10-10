@@ -538,12 +538,7 @@ class TestReconcilingOneRemovedPair:
         await _checkout_row(
             async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
         )
-        # The failed attempt never reached Snipe-IT: the asset is not out.
-        mock_transport.add_response(
-            "/hardware/41",
-            json_data={"id": 41, "asset_tag": "T-41", "assigned_to": None},
-            method="GET",
-        )
+        # The failed attempt never posted, so it cannot have taken the asset.
 
         await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
@@ -551,7 +546,7 @@ class TestReconcilingOneRemovedPair:
             asset_id=41,
         )
 
-        assert [r.url.path for r in mock_transport.requests] == ["/api/v1/hardware/41"]
+        assert mock_transport.requests == []
         remaining = await async_connection.execute(
             text("""
                 SELECT external_id FROM sync_metadata

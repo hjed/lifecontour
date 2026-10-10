@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 """Tests for Snipe-IT sync service outbound maintenance methods."""
 
+import itertools
 import json
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -102,6 +103,27 @@ class TestSnipeitZone:
     def test_invalid_user_zone_is_utc(self) -> None:
         row = MagicMock(event_timezone="Europe/London", user_timezone="Not/AZone")
         assert _snipeit_zone(row) is None
+
+
+class TestRecordedPosting:
+    """Only a checkout attempt that reached its POST can have taken the asset."""
+
+    @pytest.mark.parametrize(
+        ("reference_data", "posted"),
+        [
+            (json.dumps({"asset_dates_before": {}, "posting": True}), True),
+            # A success replaces the marker with the recorded checkout.
+            (json.dumps({"checkout_at": "2025-03-08", "snipeit_log_id": 7}), False),
+            (json.dumps({"posting": "true"}), False),
+            (None, False),
+            ("not json", False),
+        ],
+        ids=["posting", "recorded", "non-boolean", "none", "unreadable"],
+    )
+    def test_reads_the_posting_marker(
+        self, reference_data: str | None, posted: bool
+    ) -> None:
+        assert SnipeItSyncService._recorded_posting(reference_data) is posted
 
 
 class TestSnipeitDatetime:
@@ -1273,8 +1295,13 @@ class TestPushCheckoutCreate:
         mock_begin_3.__aexit__ = AsyncMock(return_value=False)
         third_session.begin = MagicMock(return_value=mock_begin_3)
         third_session.execute = AsyncMock()
+        # The third session serves every later write: marking the post,
+        # clearing the mark once Snipe-IT refuses it, and unlocking the row.
         session_factory = MagicMock(
-            side_effect=[first_session_ctx, second_session_ctx, third_session_ctx]
+            side_effect=itertools.chain(
+                [first_session_ctx, second_session_ctx],
+                itertools.repeat(third_session_ctx),
+            )
         )
 
         service = SnipeItSyncService(

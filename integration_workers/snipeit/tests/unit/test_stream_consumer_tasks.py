@@ -16,7 +16,6 @@ if "DATABASE_URL" not in os.environ:
 if "ENCRYPTION_KEY" not in os.environ:
     os.environ["ENCRYPTION_KEY"] = "testkey"
 
-from snipeit_sync_service import GearUsagePair
 from stream_consumer_tasks import SnipeItWorkerStreamConsumer
 
 
@@ -872,34 +871,20 @@ async def test_handle_journal_deleted_clears_a_leftover_claim(
 
 
 @pytest.mark.asyncio
-async def test_handle_journal_deleted_checks_in_asset(
+async def test_handle_journal_deleted_releases_its_checkouts(
     mock_stream_client: AsyncMock,
     mock_session_factory: MagicMock,
 ) -> None:
-    """JournalDeleted checks in every (journal, asset) pair the journal held."""
+    """JournalDeleted hands the journal's checkouts to the sync service to release."""
     consumer = SnipeItWorkerStreamConsumer(
         stream_client=mock_stream_client,
         session_factory=mock_session_factory,
     )
-    event = StreamEvent(
-        message_id="123",
-        event_id="abc",
-        event_type="JournalDeleted",
-        aggregate_id=100,
-        event_data={"journal_id": 100, "user_id": "user1"},
-        occurred_at="2024-01-01T00:00:00Z",
-    )
 
     mock_session = AsyncMock()
     mock_session_factory.return_value.__aenter__.return_value = mock_session
-
-    checkout_rows = MagicMock()
-    checkout_rows.__iter__.return_value = [
-        MagicMock(external_id="snipeit_checkout:42:100"),
-        MagicMock(external_id="snipeit_checkout:43:100"),
-    ]
     mock_session.execute = AsyncMock(
-        side_effect=[_sync_rows("snipeit_checkout"), _settings_row(), checkout_rows]
+        side_effect=[_sync_rows("snipeit_checkout"), _settings_row()]
     )
 
     mock_sync_service = AsyncMock()
@@ -909,11 +894,12 @@ async def test_handle_journal_deleted_checks_in_asset(
         patch("worker._get_auth_data", return_value={"mock": "auth"}),
         patch("worker._create_sync_service", return_value=mock_sync_service),
     ):
-        await consumer._handle_event(event)
+        await consumer._handle_event(_journal_deleted_event())
 
-    assert [
-        call.args[0] for call in mock_sync_service.push_checkin_create.await_args_list
-    ] == [GearUsagePair(100, 42), GearUsagePair(100, 43)]
+    mock_sync_service.release_deleted_journal.assert_awaited_once_with(
+        journal_id=100, session_factory=mock_session_factory
+    )
+    mock_sync_service.push_checkin_create.assert_not_called()
     mock_sync_service.delete_pushed_maintenance.assert_not_called()
     mock_sync_service._api_client.close.assert_called_once()
 

@@ -32,22 +32,29 @@ async def _insert_checkout_metadata(
     asset_id: str,
     journal_id: int,
     sync_status: str = "success",
+    posted: bool = False,
 ) -> None:
-    """Insert a ``snipeit_checkout`` sync_metadata row (successful by default)."""
+    """Insert a ``snipeit_checkout`` sync_metadata row (successful by default).
+
+    ``posted`` marks an attempt that got as far as posting the checkout, as a
+    lost response leaves it: only such an attempt can have taken the asset.
+    """
     await async_connection.execute(
         text("""
             INSERT INTO sync_metadata
                 (user_id, integration_source, external_id, internal_uuid,
-                 last_synced_at, version_hash, sync_status,
+                 last_synced_at, version_hash, sync_status, reference_data,
                  error_message, retry_count, created_at, updated_at)
             VALUES
                 ('user-123', 'snipeit_checkout', :external_id, :journal_id,
-                 now(), 'hash', :sync_status, NULL, 0, now(), now())
+                 now(), 'hash', :sync_status, :reference_data, NULL, 0,
+                 now(), now())
         """),
         {
             "external_id": f"snipeit_checkout:{asset_id}:{journal_id}",
             "journal_id": str(journal_id),
             "sync_status": sync_status,
+            "reference_data": json.dumps({"posting": True}) if posted else None,
         },
     )
 
@@ -484,7 +491,11 @@ class TestHistoricalDatesIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         mock_transport.add_response(
             "/hardware/41",
@@ -852,7 +863,7 @@ class TestAssetDatesSnapshotIntegration:
             async_connection,
             source="snipeit_checkout",
             journal_id=journal_id,
-            reference_data={"asset_dates_before": self.BEFORE},
+            reference_data={"asset_dates_before": self.BEFORE, "posting": True},
             asset_id="41",
             sync_status="failed",
         )
@@ -2190,6 +2201,75 @@ class TestActivityClaimsIntegration:
         assert _posts(mock_transport) == [_CHECKOUT_POST, _CHECKIN_POST]
 
 
+class TestRefusedCheckoutPostIntegration:
+    """A checkout Snipe-IT answered with a refusal took nothing.
+
+    Only an attempt that may have checked the asset out keeps the ``posting``
+    marker, which is what lets an abandoned pair return the asset later.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body", "previously_posted", "posting_kept"),
+        [
+            (200, {"status": "error", "messages": "Not available."}, False, False),
+            (422, {"status": "error", "messages": "Invalid."}, False, False),
+            # The answer may have been lost after Snipe-IT checked it out.
+            (500, {"status": "error"}, False, True),
+            # An earlier post's response was lost: the refusal may be because
+            # that checkout holds the asset, so its marker must stay.
+            (200, {"status": "error", "messages": "Not available."}, True, True),
+        ],
+        ids=["refused", "rejected", "server-error", "refused-after-a-lost-post"],
+    )
+    async def test_only_a_post_that_may_have_landed_keeps_its_marker(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        status_code: int,
+        body: dict[str, Any],
+        previously_posted: bool,
+        posting_kept: bool,
+    ) -> None:
+        from snipeit_api_client import SnipeItAPIError
+
+        journal_id = await _sydney_trip(async_connection)
+        if previously_posted:
+            await _insert_checkout_metadata(
+                async_connection,
+                asset_id="42",
+                journal_id=journal_id,
+                sync_status="failed",
+                posted=True,
+            )
+        _queue_asset_dates(mock_transport)
+        mock_transport.add_response(
+            "/hardware/42/checkout",
+            status_code=status_code,
+            json_data=body,
+            method="POST",
+        )
+
+        with pytest.raises(SnipeItAPIError):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        assert _posts(mock_transport) == [_CHECKOUT_POST]
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "failed"
+        }
+        reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert reference.get("posting", False) is posting_kept
+        if not previously_posted:
+            # The dates read before posting are kept for the retry either way.
+            assert "asset_dates_before" in reference
+
+
 class TestSupersededAssetRetryIntegration:
     """A failed return of a removed item's asset is retried against that asset."""
 
@@ -2214,7 +2294,11 @@ class TestSupersededAssetRetryIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         mock_transport.add_response(
             "/hardware/41",
@@ -2448,7 +2532,11 @@ class TestPreviousAssetHeldElsewhereIntegration:
             asset_id="42",
         )
         await _insert_checkout_metadata(
-            async_connection, asset_id="41", journal_id=journal_id, sync_status="failed"
+            async_connection,
+            asset_id="41",
+            journal_id=journal_id,
+            sync_status="failed",
+            posted=True,
         )
         other_journal_id = 880001
         await _insert_checkout_metadata(
