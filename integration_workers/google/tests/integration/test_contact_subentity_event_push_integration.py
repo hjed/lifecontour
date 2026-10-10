@@ -239,6 +239,33 @@ class TestSubEntityEventsReachGoogle:
             "renamed@example.com"
         ]
 
+    async def test_push_clears_a_nickname_unset_locally(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """A contact with no nickname is pushed with an empty ``nicknames``.
+
+        The field is in the update mask, so a nickname cleared locally is
+        cleared in Google rather than re-imported by the next pull.
+        """
+        mock_client = _mock_google_client()
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactMethodAdded",
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": synced_contact["contact_id"],
+                    "source": "ui",
+                },
+            )
+
+        pushed = mock_client.update_contact.call_args[1]["contact_data"]
+        assert pushed["nicknames"] == []
+
     async def test_push_advances_the_stored_etag(
         self, db_session: AsyncSession, synced_contact: dict[str, int]
     ) -> None:
