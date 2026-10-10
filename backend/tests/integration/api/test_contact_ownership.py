@@ -123,11 +123,17 @@ RELATIONSHIPS_ROUTE = "/api/contacts/{contact_id}/relationships"
 RELATIONSHIP_ROUTE = RELATIONSHIPS_ROUTE + "/{relationship_id}"
 
 
-def _field_update(resource_type: str) -> dict[str, Any]:
+# Every refused write is otherwise valid, and every other contact it names is
+# the caller's own: then only the ownership check on the URL's contact can
+# refuse it. A payload that failed validation, or a second foreign id, would
+# answer 404 or 422 even with that check gone.
+def _field_update(
+    resource_type: str, value: str = "Rewritten By A Stranger"
+) -> dict[str, Any]:
     return {
         "data": {
             "type": resource_type,
-            "attributes": {"value": "Rewritten By A Stranger"},
+            "attributes": {"value": value},
         }
     }
 
@@ -143,7 +149,7 @@ _IMPORTANT_DATE_ATTRIBUTES = {
 _RELATIONSHIP_ATTRIBUTES = {
     "relationship_type": "sibling",
     "from_contact_id": "{contact_id}",
-    "to_contact_id": "{partner_id}",
+    "to_contact_id": "{own_contact_id}",
 }
 
 
@@ -178,6 +184,7 @@ class ForeignContact:
             "tag_id": str(self.tag_id),
             "unassigned_tag_id": str(self.unassigned_tag_id),
             "relationship_id": str(self.relationship_id),
+            "own_contact_id": str(self.own_contact_id),
         }
 
 
@@ -253,7 +260,7 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         body={
             "data": {
                 "type": "contact-merge",
-                "attributes": {"source_contact_id": "{partner_id}"},
+                "attributes": {"source_contact_id": "{own_contact_id}"},
             }
         },
     ),
@@ -285,7 +292,7 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         "PATCH",
         METHOD_ROUTE + "/fields/{field_name}",
         params={"field_name": "value"},
-        body=_field_update("contact_method_fields"),
+        body=_field_update("contact_method_fields", "stranger@stranger.example"),
     ),
     CrossUserRequest(
         "POST",
