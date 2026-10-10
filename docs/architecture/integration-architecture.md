@@ -300,7 +300,7 @@ rows, and every row the Snipe-IT worker writes — is typed by its
 `integration_source`. A row no entity owns (it names none, or one since deleted) is
 logged and given the site's one owner (`app.migrations.sync_metadata_owner`, using
 `app.migrations.owner_derivation`; `-x sync_metadata_owner=<id>` overrides).
-Migration `0128_sync_metadata_user_scoped_unique_key` re-ran that assignment over
+Migration `0130_sync_metadata_user_scoped_unique_key` re-ran that assignment over
 rows a not-yet-deployed writer left unowned, made the column `NOT NULL`, and dropped
 the global `(integration_source, external_id)` index; its downgrade refuses while
 two owners hold one external id.
