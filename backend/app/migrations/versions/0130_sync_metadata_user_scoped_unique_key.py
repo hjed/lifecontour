@@ -1,7 +1,7 @@
 """every integration link has an owner, and is keyed by it alone
 
-Revision ID: 0128
-Revises: 0127
+Revision ID: 0130
+Revises: 0129
 Create Date: 2026-10-09 00:00:00.000000
 
 ``0126`` gave every link an owner and created the per-user unique index
@@ -31,16 +31,16 @@ from app.migrations.owner_derivation import log
 from app.migrations.sync_metadata_owner import assign_link_owners
 
 # revision identifiers, used by Alembic.
-revision: str = "0128"
-down_revision: str | None = "0127"
+revision: str = "0130"
+down_revision: str | None = "0129"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_LABEL = "0128"
+_LABEL = "0130"
 _GLOBAL_INDEX = "idx_sync_metadata_integration_external"
 
 # 0126's evidence, plus the owned links and the journal tags 0127 gave an owner
-# — every table holding a user_id at 0127, as a test pins.
+# — every table holding a user_id at 0129, as a test pins.
 EVIDENCE_TABLES = (
     "contacts",
     "journals",
