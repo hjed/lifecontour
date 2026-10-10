@@ -172,7 +172,7 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         # Create services
         address_validation_service = AddressValidationService()
         contact_validation_service = ContactValidationService(contact_repository)
-        history_service = ContactHistoryService(history_repository)
+        history_service = ContactHistoryService(history_repository, contact_repository)
         tag_hierarchy_service = TagHierarchyService(tag_repository)
 
         # Create contact service

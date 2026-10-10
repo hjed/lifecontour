@@ -128,6 +128,25 @@ class TestContactHistoryEndpoints:
         assert "errors" in data
 
     @pytest.mark.asyncio
+    async def test_another_users_contact_has_no_history(
+        self,
+        authenticated_client,
+        async_connection,
+    ) -> None:
+        """Their contact's history answers exactly as a missing contact's."""
+        from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
+
+        theirs = await seed_contact(
+            async_connection, user_id=OTHER_USER_ID, first_name="Theirs"
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{theirs}/history")
+
+        assert response.status_code == 404
+        assert response.json()["errors"][0]["code"] == "CONTACT_NOT_FOUND"
+        assert "Theirs" not in response.text
+
+    @pytest.mark.asyncio
     async def test_get_contact_history_structure(
         self,
         authenticated_client,
@@ -661,12 +680,12 @@ class TestATaskAppearsOnAContactsHistoryEndpoint:
         async_connection,
         task_anchors,
     ):
-        """Contacts are shared; the commitments people make about them are not.
+        """The commitments people make about a contact are their own.
 
-        The endpoint authorises by the contact *existing*, because ``contacts``
-        has no owner column — so this is the one row on the feed that has to
-        carry its own scope. Since the entry now names the task, an unscoped
-        branch would leak its text too.
+        The endpoint authorises by the contact being the reader's, but a task
+        row is written against the contact by the task's owner, so it carries
+        its own scope too. Since the entry names the task, an unscoped branch
+        would leak its text.
         """
         from core_shared.models.history import Provenance
 

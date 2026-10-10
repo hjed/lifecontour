@@ -65,7 +65,7 @@ class TestContactService:
         # Create service dependencies
         address_validation_service = AddressValidationService()
         contact_validation_service = ContactValidationService(mock_contact_repo)
-        history_service = ContactHistoryService(mock_history_repo)
+        history_service = ContactHistoryService(mock_history_repo, mock_contact_repo)
         tag_hierarchy_service = TagHierarchyService(mock_tag_repo)
 
         return ContactService(
@@ -108,7 +108,7 @@ class TestContactService:
             event_publisher=mock_event_publisher,
             address_validation_service=AddressValidationService(),
             contact_validation_service=ContactValidationService(mock_contact_repo),
-            history_service=ContactHistoryService(mock_history_repo),
+            history_service=ContactHistoryService(mock_history_repo, mock_contact_repo),
             tag_hierarchy_service=TagHierarchyService(mock_tag_repo),
             tag_service=mock_tag_service,
         )

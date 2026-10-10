@@ -92,7 +92,7 @@ class ContactTestProvider(Provider):
         address_validation_service = AddressValidationService()
 
         # Create history service
-        history_service = ContactHistoryService(history_repository)
+        history_service = ContactHistoryService(history_repository, contact_repository)
 
         # Create tag hierarchy service
         tag_hierarchy_service = TagHierarchyService(tag_repository)

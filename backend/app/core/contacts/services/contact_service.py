@@ -243,7 +243,9 @@ class ContactService:
         self.contact_validation = (
             contact_validation_service or ContactValidationService(contact_repo)
         )
-        self.history_service = history_service or ContactHistoryService(history_repo)
+        self.history_service = history_service or ContactHistoryService(
+            history_repo, contact_repo
+        )
         self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
 
     async def _execute_with_retry(
@@ -2611,13 +2613,12 @@ class ContactService:
         """Get contact history.
 
         ``user_id`` is the reader: the contact must be theirs, and it scopes the
-        linked-task rows this feed carries; see
-        ``ContactHistoryService.get_contact_history``.
+        linked-task rows this feed carries; ``ContactHistoryService`` proves
+        both.
 
         Raises:
             ContactNotFoundError: The contact is missing or another user's.
         """
-        await self._require_owned(contact_id, user_id=user_id)
         return await self.history_service.get_contact_history(
             contact_id, limit, reader_user_id=user_id
         )
