@@ -130,6 +130,15 @@ altogether. For the same reason `contactGroups/starred` is written back from
 `is_favourite` (the field inbound sync reads it into): omitting it would unstar
 every favourite on any edit.
 
+The nickname is two-way. Inbound sync imports the primary Google nickname (or
+the first one), and the push always sends `nicknames`: a nickname cleared locally
+goes as an empty list, so Google drops it too and the next pull does not bring it
+back. The import changes only the fields in `GOOGLE_CONTACT_SYNC_SCOPE`
+(`transformer.py`); see "Contact sync scope" in
+`docs/architecture/integration-architecture.md`. A full sync re-applies every
+person, even one whose etag is unchanged (`force_apply`), so a field the scope
+newly claims reaches every contact.
+
 Because an incomplete group mapping would strip memberships, outbound code lists
 groups with the strict `_fetch_contact_group_mapping`, which raises on any failed
 page. On the event path that leaves the stream event unacknowledged for retry;

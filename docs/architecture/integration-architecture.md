@@ -658,6 +658,12 @@ branch of `contact.created`) pass the incoming contact through
 - **No scope** (an event queued before scopes existed): overwrites the contact
   whole, as before.
 
+An event's etag normally gates it: the processor skips a person whose etag
+matches the stored one. A full sync sets `force_apply`, so every person is
+re-applied. That is how a field a source newly claims, such as Google's nickname,
+reaches contacts the provider has not changed since. A migration that clears the
+accounts' contacts sync tokens forces that full sync once (`0130`).
+
 The scope is an allow-list declared by the worker beside the fields it requests
 (`GOOGLE_CONTACT_SYNC_SCOPE` in the Google transformer, `IMMICH_CONTACT_SYNC_SCOPE`
 in the Immich sync service), so a field added to contacts later is safe from every

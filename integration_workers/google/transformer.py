@@ -25,7 +25,13 @@ from core_shared.models.contacts.important_date_types import (
 from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSyncScope
 from core_shared.models.contacts.value_objects import TagName
 
-from api_models import GoogleBirthday, GoogleDate, GooglePerson, GooglePersonEvent
+from api_models import (
+    GoogleBirthday,
+    GoogleDate,
+    GoogleNickname,
+    GooglePerson,
+    GooglePersonEvent,
+)
 from group_translator import GoogleGroupNameTranslator
 
 logger = structlog.get_logger()
@@ -39,6 +45,7 @@ GOOGLE_CONTACT_SYNC_SCOPE = ContactSyncScope(
             ContactSyncField.FIRST_NAME,
             ContactSyncField.LAST_NAME,
             ContactSyncField.MIDDLE_NAME,
+            ContactSyncField.NICK_NAME,
             ContactSyncField.COMPANY,
             ContactSyncField.JOB_TITLE,
             ContactSyncField.IS_FAVOURITE,
@@ -98,9 +105,8 @@ class GoogleContactTransformer:
             has_phones=len(google_person.phone_numbers) > 0,
         )
 
-        first_name, last_name, middle_name, nick_name = self._extract_names(
-            google_person.names
-        )
+        first_name, last_name, middle_name = self._extract_names(google_person.names)
+        nick_name = self._extract_nickname(google_person.nicknames)
 
         if not first_name:
             first_name = "Unknown"
@@ -168,10 +174,10 @@ class GoogleContactTransformer:
 
     def _extract_names(
         self, names: list[Any]
-    ) -> tuple[str | None, str | None, str | None, str | None]:
-        """Extract name components from Google names array."""
+    ) -> tuple[str | None, str | None, str | None]:
+        """Extract given, family and middle names from Google names array."""
         if not names:
-            return None, None, None, None
+            return None, None, None
 
         primary_name = None
         for name in names:
@@ -186,8 +192,19 @@ class GoogleContactTransformer:
             getattr(primary_name, "given_name", None),
             getattr(primary_name, "family_name", None),
             getattr(primary_name, "middle_name", None),
-            None,
         )
+
+    @staticmethod
+    def _extract_nickname(nicknames: list[GoogleNickname]) -> str | None:
+        """The primary nickname, else the first one with a value.
+
+        The contact holds one nickname; the push sends it back as Google's only
+        one.
+        """
+        values = [n for n in nicknames if n.value and n.value.strip()]
+        primary = next((n for n in values if n.metadata.primary), None)
+        chosen = primary or (values[0] if values else None)
+        return chosen.value.strip() if chosen and chosen.value else None
 
     def _transform_email_addresses(
         self, email_addresses: list[Any]

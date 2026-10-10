@@ -79,3 +79,32 @@ class TestEmptyAddressListClearsGoogle:
         result = _transform_contact_to_google_person(_contact())
 
         assert "addresses" not in result
+
+
+class TestNicknameClearsGoogle:
+    """A nickname cleared locally is sent empty, so Google drops it too.
+
+    The import owns the nickname, so leaving Google's copy would bring the
+    cleared value back on the next pull.
+    """
+
+    def test_set_nickname_is_sent(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact(nick_name="Ada"))
+
+        assert result["nicknames"] == [{"value": "Ada"}]
+
+    def test_cleared_nickname_is_sent_empty(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact(nick_name=None))
+
+        assert result["nicknames"] == []
+
+    def test_nickname_key_absent_leaves_the_field_alone(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact())
+
+        assert "nicknames" not in result

@@ -437,11 +437,11 @@ def _transform_names(contact: dict[str, Any]) -> list[dict[str, Any]]:
     return [name_data] if name_data else []
 
 
-def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]] | None:
-    """Transform contact nickname to Google Person format."""
+def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]]:
+    """Transform contact nickname to Google Person format (empty when unset)."""
     if contact.get("nick_name"):
         return [{"value": contact["nick_name"]}]
-    return None
+    return []
 
 
 def _normalize_contact_type(label: str | None) -> str:
@@ -610,9 +610,11 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if names:
         person_data["names"] = names
 
-    nicknames = _transform_nicknames(contact)
-    if nicknames:
-        person_data["nicknames"] = nicknames
+    # Sent even when empty: the import owns the nickname, so a nickname
+    # cleared locally but left standing in Google would come back on the next
+    # pull. Both push paths load nick_name; a caller that did not leaves it be.
+    if "nick_name" in contact:
+        person_data["nicknames"] = _transform_nicknames(contact)
 
     # Transform contact methods (emails and phones). Both fields are sent
     # whenever methods were loaded, even when empty: update_contact derives
@@ -1666,6 +1668,9 @@ async def _perform_full_sync(
                     etag=google_person.etag,
                     user_id=str(user_id),
                     sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
+                    # A full sync re-applies every person, etag unchanged or
+                    # not, so a field Google newly owns reaches every contact.
+                    force_apply=True,
                 )
 
                 # Add to session (will be committed with transaction)

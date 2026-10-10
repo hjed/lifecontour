@@ -971,9 +971,12 @@ class OutboxEventProcessor:
                 external_id=external_id,
             )
 
-        # Idempotency check: Skip if version hash matches
+        # Idempotency check: Skip if version hash matches, unless the event is
+        # from a full sync, which re-applies every person.
         # should_sync() handles None gracefully (returns True to proceed with sync)
-        if not self.sync_metadata_repo.should_sync(sync_metadata, new_version_hash):
+        if not payload.force_apply and not self.sync_metadata_repo.should_sync(
+            sync_metadata, new_version_hash
+        ):
             logger.info(
                 "Contact update skipped - version hash unchanged (idempotent)",
                 integration_source=integration_source,

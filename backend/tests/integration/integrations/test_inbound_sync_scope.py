@@ -289,3 +289,52 @@ class TestInboundSyncScope:
         assert row.nick_name is None
         assert row.photo_url is None
         assert await _dates(async_connection, contact_id) == {"birthday": 9}
+
+
+@pytest.mark.integration
+@pytest.mark.usefixtures("clean_database")
+class TestForceApply:
+    """A full sync re-applies a person whose etag is unchanged.
+
+    That is how a field a source newly owns (Google's nickname) reaches
+    contacts Google has not changed since: the next full pull applies it.
+    """
+
+    @staticmethod
+    def _unchanged_event(*, force_apply: bool) -> OutboxEvent:
+        return OutboxEvent.create_contact_sync_event(
+            contact_data={"user_id": TEST_USER_ID, **GOOGLE_UPDATE},
+            integration_source="google",
+            external_id=EXTERNAL_ID,
+            sync_type="updated",
+            etag="etag-old",
+            user_id=TEST_USER_ID,
+            sync_scope=GOOGLE_LIKE,
+            force_apply=force_apply,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unchanged_etag_is_skipped(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        contact_id = await _seed(async_connection)
+
+        result = await _processor(async_connection).process_event(
+            self._unchanged_event(force_apply=False)
+        )
+
+        assert result["status"] == "skipped"
+        assert (await _contact(async_connection, contact_id)).first_name == "Robert"
+
+    @pytest.mark.asyncio
+    async def test_force_apply_applies_an_unchanged_etag(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        contact_id = await _seed(async_connection)
+
+        result = await _processor(async_connection).process_event(
+            self._unchanged_event(force_apply=True)
+        )
+
+        assert result["status"] == "success"
+        assert (await _contact(async_connection, contact_id)).first_name == "Rob"

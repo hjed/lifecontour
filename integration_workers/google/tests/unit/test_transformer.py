@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, "/core_shared")
 
 from core_shared.models.contacts.entities import Contact, MethodType
+from core_shared.models.contacts.sync_scope import ContactSyncField
 
 from api_models import (
     GoogleAddress,
@@ -22,12 +23,13 @@ from api_models import (
     GoogleFieldMetadata,
     GoogleMembership,
     GoogleName,
+    GoogleNickname,
     GoogleOrganization,
     GooglePerson,
     GooglePhoneNumber,
 )
 from group_translator import GoogleGroupNameTranslator
-from transformer import GoogleContactTransformer
+from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 TEST_USER_ID = "test-user-google"
 
@@ -483,12 +485,11 @@ class TestGoogleContactTransformer:
             ),
         ]
 
-        first, last, middle, nick = transformer._extract_names(names)
+        first, last, middle = transformer._extract_names(names)
 
         assert first == "Primary"
         assert last == "Name"
         assert middle == "Middle"
-        assert nick is None
 
     def test_extract_names_no_primary(
         self, transformer: GoogleContactTransformer
@@ -502,23 +503,21 @@ class TestGoogleContactTransformer:
             ),
         ]
 
-        first, last, middle, nick = transformer._extract_names(names)
+        first, last, middle = transformer._extract_names(names)
 
         assert first == "First"
         assert last == "Available"
         assert middle is None
-        assert nick is None
 
     def test_extract_names_empty_list(
         self, transformer: GoogleContactTransformer
     ) -> None:
         """Test name extraction with empty names list."""
-        first, last, middle, nick = transformer._extract_names([])
+        first, last, middle = transformer._extract_names([])
 
         assert first is None
         assert last is None
         assert middle is None
-        assert nick is None
 
     def test_transform_person_starred_is_favourite(
         self, transformer: GoogleContactTransformer
@@ -971,3 +970,51 @@ class TestInboundHierarchySplitting:
 
         assert len(contact.tags) == 1  # type: ignore[arg-type]
         assert contact.tags[0].name.value == "Scouts"  # type: ignore[index]
+
+
+class TestNicknameTransformation:
+    """Google nicknames are imported: the app pushes them, so Google holds them."""
+
+    def test_primary_nickname_is_imported(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = GooglePerson(
+            resourceName="people/n1",
+            names=[GoogleName(givenName="Robert")],
+            nicknames=[
+                GoogleNickname(value="Robbie"),
+                GoogleNickname(metadata=GoogleFieldMetadata(primary=True), value="Bob"),
+            ],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.nick_name == "Bob"
+
+    def test_first_nickname_is_imported_without_a_primary(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = GooglePerson(
+            resourceName="people/n2",
+            names=[GoogleName(givenName="Robert")],
+            nicknames=[GoogleNickname(value="  "), GoogleNickname(value="Bob")],
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.nick_name == "Bob"
+
+    def test_no_nickname_in_google_imports_none(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = GooglePerson(
+            resourceName="people/n3", names=[GoogleName(givenName="Robert")]
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.nick_name is None
+
+    def test_google_sync_owns_the_nickname(self) -> None:
+        """Owned, so a nickname removed in Google is cleared locally too."""
+        assert ContactSyncField.NICK_NAME in GOOGLE_CONTACT_SYNC_SCOPE.fields
