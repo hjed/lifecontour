@@ -608,28 +608,69 @@ its callers. Every layer is deployable on its own.
   lock-ordering rule), so a foreign id briefly takes another user's row lock and then answers 404.
   Nothing is written.
 
-#### Phase 5: REST cross-user isolation suite for contacts
+#### Phase 5: REST cross-user isolation suite for contacts ✅ DONE
 
-**PR Size:** ~350 lines (test-heavy)
+**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged (39 tests); two reds fixed (avatar, relationship by-id).
 
-- [ ] `backend/tests/integration/api/test_contact_ownership.py` modelled on
+**PR Size:** ~350 lines estimated (test-heavy); ~900 delivered (see Decisions)
+
+- [x] `backend/tests/integration/api/test_contact_ownership.py` modelled on
   `test_journal_ownership.py`: a `foreign_contact` fixture seeded with `OTHER_USER_ID` (with a
   method, address, note, important date, tag and relationship so `UNCHANGED_ROWS` covers every child
   table); a `CROSS_USER_REQUESTS` table over **every** by-id route in `controllers.py` and
   `relationship_controllers.py` (GET, PATCH, DELETE, favourites, avatar, history, summary, methods,
   addresses, notes, important dates, tags, relationships, merge); each answers 404 with a body that
   echoes neither name; every child row is byte-identical afterwards.
-- [ ] List, filter, favourites, by-tag and count endpoints exclude the foreign contact.
-- [ ] `DELETE /api/contacts/test/cleanup` leaves the foreign contact.
-- [ ] Any red found is fixed in this PR and recorded under this phase.
+- [x] List, filter, favourites, by-tag and count endpoints exclude the foreign contact (the count is the list's `meta.total_count`; there is no separate count route).
+- [x] `DELETE /api/contacts/test/cleanup` leaves the foreign contact.
+- [x] Any red found is fixed in this PR and recorded under this phase.
 
 **Required Test Coverage:** the suite itself (integration, `authenticated_client`).
 
 **E2E:** not applicable — a single OAuth user; isolation is proven here, as journals did.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/api-design.md` — contacts join the "404, never 403" rule with the suite
+- [x] `docs/architecture/api-design.md` — contacts join the "404, never 403" rule with the suite
   named as its proof.
+- [x] `docs/architecture/testing-strategy.md` — the isolation-suite shape, so the next owned entity copies it.
+
+**Reds found and fixed:**
+- **The avatar served another user's Immich thumbnail.** `GET /api/contacts/{id}/avatar` never
+  checked the contact. `IntegrationLinkRepository.get_immich_person_id(contact_id)` read any user's
+  link, and `AvatarProxyService` then fetched that person with the *caller's* Immich key: 200 and
+  the image. The lookup now takes `user_id` and filters `sync_metadata.user_id` in SQL, like its
+  neighbour `get_contact_ids_by_immich_person_ids`. The only caller is the avatar proxy.
+- **Relationship GET, PUT and DELETE by id answered 422 for a foreign contact.** The controllers
+  loaded the relationship before the contact, so a foreign contact got the relationship's
+  `ContactValidationError`. The new `ContactRelationshipService.get_relationship_of_contact` proves
+  the contact first (`ContactNotFoundError`, 404) and replaces the three copies of the
+  "load, then check it involves the contact" code. For the caller's own contact, a missing or
+  unrelated relationship stays a 422, as Phase 4 decided; it answers alike for a missing id and a
+  foreign one.
+
+**Decisions (recorded during implementation):**
+- **Whole-table snapshots.** `UNCHANGED_ROWS` compares every row of each contact table, plus
+  `tags`, `field_history` and `sync_metadata`, not just the foreign contact's rows. A refused merge
+  or relationship write must leave the caller's own contact unchanged too.
+- **The coverage guard scans every mounted path with `{contact_id}`**, as the journal guard does.
+  The journal-contact PATCH/DELETE and task-contact DELETE routes are in `COVERED_ELSEWHERE`,
+  because their journal or task is owner-checked first. A foreign contact on the caller's *own*
+  journal or task is Phase 11's cross-entity check.
+- **The avatar entry carries weight.** The foreign contact has a real Immich link, and the suite
+  stubs credentials and the Immich server (respx). `test_your_own_avatar_is_served` proves the stub
+  would serve the image, so the foreign 404 is an ownership refusal.
+- **Search and the dashboard are not asserted here:** Phase 7 and Phases 4/6 respectively.
+- **Tags are still global** until Phase 8, so the foreign and own contacts share one tag and the
+  `tags` snapshot covers the global table. The tag-filter test proves the *contact* owner filter;
+  tag ownership gets its own suite with Phase 8.
+- **PR size.** About 900 changed lines, most of them the 760-line suite (the journal suite is 739).
+  The table cannot shrink without dropping routes, so the phase ships as one PR.
+
+**Follow-ups (found in Phase 5):**
+- **Phase 6:** the MCP relationship update and delete tools (`mcp/domains/contacts/tools.py`) still
+  call `get_relationship_by_id` directly. Their isolation suite should check that a foreign contact
+  gets the contact not-found payload; `get_relationship_of_contact` is the method to use if it does
+  not.
 
 ---
 

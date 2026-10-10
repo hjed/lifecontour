@@ -266,6 +266,21 @@ An integration test that needs a contact row **seeds it with `seed_contact`**, n
   `backend/tests`, `core_shared` or `integration_workers/*/tests`. The only exemptions are
   migration tests, which seed a schema pinned at an older revision the helper does not describe.
 
+### Cross-User Isolation Suites
+
+An owned aggregate's REST surface is proven by one suite per aggregate:
+`backend/tests/integration/api/test_journal_ownership.py` and `test_contact_ownership.py`. Copy their
+shape for the next owned entity:
+
+- **A foreign fixture** seeded for `OTHER_USER_ID` with every child row a real one carries, so each
+  request names ids that exist and can be refused only for ownership.
+- **`CROSS_USER_REQUESTS`**, one entry per by-id route. Each must answer 404, echo none of the
+  row's text, and leave a `to_jsonb` snapshot of every reachable table byte-identical.
+- **A coverage guard** that compares the table with `app.openapi()`: every mounted route carrying
+  the id placeholder is listed, or recorded in `COVERED_ELSEWHERE` with its reason, and no entry
+  names a route the app no longer serves.
+- **A route that 404s for some other reason** (no linked Immich person, say) gets real seeding and
+  a stub that would otherwise succeed. Without it, the 404 proves nothing about ownership.
 ### Migration Tests
 
 A data migration is tested on an isolated database: the `throwaway_database` fixture creates one,

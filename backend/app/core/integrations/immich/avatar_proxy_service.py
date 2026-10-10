@@ -50,7 +50,7 @@ class AvatarProxyService:
 
         Args:
             contact_id: Internal contact ID.
-            user_id: Internal user ID (for credential lookup).
+            user_id: Internal user ID (link owner and credential lookup).
 
         Returns:
             Tuple of (raw image bytes, content-type string).
@@ -59,8 +59,12 @@ class AvatarProxyService:
             AvatarNotFoundError: If the contact has no Immich link, the user
                 has no Immich credentials, or the thumbnail fetch fails.
         """
-        # 1. Look up the Immich person_id for this contact
-        person_id = await self._ext_ref_repo.get_immich_person_id(contact_id)
+        # 1. Look up the Immich person_id the user linked to this contact. Scoped
+        # to the user: the thumbnail is fetched with *their* key, so another
+        # user's link must read as no link at all.
+        person_id = await self._ext_ref_repo.get_immich_person_id(
+            contact_id, user_id=user_id
+        )
         if person_id is None:
             raise AvatarNotFoundError(
                 f"Contact {contact_id} is not linked to an Immich person"

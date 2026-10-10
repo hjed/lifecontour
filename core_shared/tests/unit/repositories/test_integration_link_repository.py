@@ -157,12 +157,13 @@ class TestGetImmichPersonId:
         row.external_id = "person-uuid-9"
         mock_connection.execute = AsyncMock(return_value=_result_with(row))
 
-        person_id = await repository.get_immich_person_id(99)
+        person_id = await repository.get_immich_person_id(99, user_id="owner-1")
 
         assert person_id == "person-uuid-9"
         query, params = mock_connection.execute.call_args[0]
         assert "sync_metadata" in str(query)
-        assert params["contact_id"] == 99
+        assert "user_id = :user_id" in str(query)
+        assert params == {"contact_id": 99, "user_id": "owner-1"}
 
     @pytest.mark.asyncio
     async def test_returns_none_when_unlinked(
@@ -172,7 +173,7 @@ class TestGetImmichPersonId:
     ) -> None:
         mock_connection.execute = AsyncMock(return_value=_result_with(None))
 
-        assert await repository.get_immich_person_id(99) is None
+        assert await repository.get_immich_person_id(99, user_id="owner-1") is None
 
 
 def _person_row(person_id: str, contact_id: int) -> MagicMock:

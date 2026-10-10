@@ -74,3 +74,19 @@ class TestIntegrationLinkRepositoryOwner:
         )
 
         assert resolved == {"person-mine": mine}
+
+    async def test_a_contacts_person_is_found_only_by_its_owner(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        """The avatar proxy fetches whatever person this returns with the
+        caller's own Immich key, so another user's link must not resolve."""
+        contact_id = await _seed_person_link(
+            clean_database, user_id=OTHER_USER_ID, person_id="person-theirs"
+        )
+        repo = IntegrationLinkRepository(clean_database)
+
+        assert await repo.get_immich_person_id(contact_id, user_id=TEST_USER_ID) is None
+        assert (
+            await repo.get_immich_person_id(contact_id, user_id=OTHER_USER_ID)
+            == "person-theirs"
+        )
