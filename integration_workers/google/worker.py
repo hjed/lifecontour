@@ -437,11 +437,11 @@ def _transform_names(contact: dict[str, Any]) -> list[dict[str, Any]]:
     return [name_data] if name_data else []
 
 
-def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]]:
-    """Transform contact nickname to Google Person format (empty when unset)."""
+def _transform_nicknames(contact: dict[str, Any]) -> list[dict[str, str]] | None:
+    """Transform contact nickname to Google Person format."""
     if contact.get("nick_name"):
         return [{"value": contact["nick_name"]}]
-    return []
+    return None
 
 
 def _normalize_contact_type(label: str | None) -> str:
@@ -610,11 +610,13 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if names:
         person_data["names"] = names
 
-    # Sent even when empty: the import owns the nickname, so a nickname
-    # cleared locally but left standing in Google would come back on the next
-    # pull. Both push paths load nick_name; a caller that did not leaves it be.
-    if "nick_name" in contact:
-        person_data["nicknames"] = _transform_nicknames(contact)
+    # Not sent when unset, so Google keeps its copy: the old import cleared
+    # local nicknames Google still holds, and the full pull migration 0130
+    # forces restores them. Sending an empty list would delete that copy
+    # whenever such a contact is pushed first.
+    nicknames = _transform_nicknames(contact)
+    if nicknames:
+        person_data["nicknames"] = nicknames
 
     # Transform contact methods (emails and phones). Both fields are sent
     # whenever methods were loaded, even when empty: update_contact derives
