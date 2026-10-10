@@ -61,19 +61,26 @@ from app.core.contacts.adapters.sql import (
 from app.main import create_app
 from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
 
-# The foreign contact's text. Every one is asserted absent from every response
-# body: a 404 that still echoed a name would leak what it refused.
+# The foreign contact's private text, every string seeded on it. Each is
+# asserted absent from every response body: a 404 that still echoed a name,
+# an email or a linked person would leak what it refused.
 OTHER_FIRST_NAME = "Theodora"
 OTHER_LAST_NAME = "Blackwood-Quince"
 OTHER_PARTNER_NAME = "Ignatius"
+OTHER_EMAIL = "theodora@foreign.example"
+OTHER_STREET = "3 Stone Lane"
 OTHER_NOTE = "Keeps the spare key under the third stone."
 OTHER_SUMMARY = "Met at the hut; owes me a rope."
+IMMICH_PERSON_ID = "person-theirs"
 OTHER_TEXT = (
     OTHER_FIRST_NAME,
     OTHER_LAST_NAME,
     OTHER_PARTNER_NAME,
+    OTHER_EMAIL,
+    OTHER_STREET,
     OTHER_NOTE,
     OTHER_SUMMARY,
+    IMMICH_PERSON_ID,
 )
 
 # The caller's own contact: the legitimate other half of a merge or a
@@ -84,11 +91,13 @@ OWN_FIRST_NAME = "Sarah"
 TAG_NAME = "climbing-partners"
 UNASSIGNED_TAG_NAME = "unassigned"
 IMMICH_SERVER = "http://immich.test"
-IMMICH_PERSON_ID = "person-theirs"
 
 # Everything a refused request must leave identical. Whole tables rather than
 # the foreign contact's rows alone: a refused merge or relationship must not
-# touch the caller's own contact either. Written out as whole statements so
+# touch the caller's own contact either. The outbox and edit-event tables
+# catch a deferred write: this client runs no event consumers, so a refused
+# request that enqueued a history, summary or search update would otherwise
+# leave every other table unchanged. Written out as whole statements so
 # nothing here builds SQL by string formatting.
 UNCHANGED_ROWS = {
     "contacts": text("SELECT to_jsonb(t) FROM contacts t"),
@@ -102,6 +111,8 @@ UNCHANGED_ROWS = {
     "summaries": text("SELECT to_jsonb(t) FROM contact_summaries t"),
     "history": text("SELECT to_jsonb(t) FROM field_history t"),
     "links": text("SELECT to_jsonb(t) FROM sync_metadata t"),
+    "outbox": text("SELECT to_jsonb(t) FROM outbox_events t"),
+    "edit_events": text("SELECT to_jsonb(t) FROM contact_edit_event t"),
 }
 
 CONTACT_ROUTE = "/api/contacts/{contact_id}"
@@ -452,7 +463,7 @@ async def foreign_contact(async_connection: AsyncConnection) -> ForeignContact:
         contact_id,
         ContactMethod(
             method_type=MethodType.EMAIL,
-            value="theodora@foreign.example",
+            value=OTHER_EMAIL,
             contact_id=contact_id,
             is_primary=True,
         ),
@@ -460,7 +471,7 @@ async def foreign_contact(async_connection: AsyncConnection) -> ForeignContact:
     address = await repo.add_address(
         contact_id,
         ContactAddress(
-            street_line_1="3 Stone Lane", country_code="AU", contact_id=contact_id
+            street_line_1=OTHER_STREET, country_code="AU", contact_id=contact_id
         ),
     )
     note = await repo.add_note(
