@@ -27,7 +27,7 @@ from core_shared.models.outbox_events import (
     ContactSyncEventData,
     SyncCompletedEventData,
 )
-from core_shared.models.sync_metadata import SyncStatus
+from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
@@ -143,6 +143,14 @@ def _keep_archived_values(incoming: Contact, stored: Contact) -> None:
     """
     incoming.methods = keep_archived(stored.methods, incoming.methods)
     incoming.addresses = keep_archived(stored.addresses, incoming.addresses)
+
+
+def _has_unpushed_local_changes(contact: Contact, link: SyncMetadata) -> bool:
+    """Whether ``contact`` changed after its last sync, so a push is still owed.
+
+    The same test the Google worker selects contacts to push by.
+    """
+    return contact.updated_at is not None and contact.updated_at > link.last_synced_at
 
 
 class OutboxEventProcessor:
@@ -974,9 +982,10 @@ class OutboxEventProcessor:
         # Idempotency check: Skip if version hash matches, unless the event is
         # from a full sync, which re-applies every person.
         # should_sync() handles None gracefully (returns True to proceed with sync)
-        if not payload.force_apply and not self.sync_metadata_repo.should_sync(
+        version_unchanged = not self.sync_metadata_repo.should_sync(
             sync_metadata, new_version_hash
-        ):
+        )
+        if version_unchanged and not payload.force_apply:
             logger.info(
                 "Contact update skipped - version hash unchanged (idempotent)",
                 integration_source=integration_source,
@@ -1018,6 +1027,27 @@ class OutboxEventProcessor:
                 external_id=external_id,
             )
             return await self._process_contact_created(event)
+
+        # The version check is also what keeps a local edit whose push failed:
+        # Google's copy is unchanged, so it is skipped and the edit is pushed on
+        # the next cycle. A forced re-apply must not bypass that.
+        if (
+            version_unchanged
+            and sync_metadata is not None
+            and _has_unpushed_local_changes(existing_contact, sync_metadata)
+        ):
+            logger.info(
+                "Forced contact update skipped - local changes not yet pushed",
+                integration_source=integration_source,
+                external_id=external_id,
+            )
+            return {
+                "status": "skipped",
+                "reason": "unpushed_local_changes",
+                "event_type": EVENT_TYPE_CONTACT_UPDATED,
+                "integration_source": integration_source,
+                "external_id": external_id,
+            }
 
         # Deserialize contact data from outbox event
         try:

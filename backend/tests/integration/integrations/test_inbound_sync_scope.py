@@ -338,3 +338,26 @@ class TestForceApply:
 
         assert result["status"] == "success"
         assert (await _contact(async_connection, contact_id)).first_name == "Rob"
+
+    @pytest.mark.asyncio
+    async def test_force_apply_keeps_a_local_edit_not_yet_pushed(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A failed push leaves Google's etag unchanged; the edit must survive
+        the forced re-apply so the next push can still send it."""
+        contact_id = await _seed(async_connection)
+        await async_connection.execute(
+            text(
+                "UPDATE sync_metadata SET last_synced_at = now() - interval '1 hour' "
+                "WHERE internal_id = :c"
+            ),
+            {"c": contact_id},
+        )
+
+        result = await _processor(async_connection).process_event(
+            self._unchanged_event(force_apply=True)
+        )
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "unpushed_local_changes"
+        assert (await _contact(async_connection, contact_id)).first_name == "Robert"
