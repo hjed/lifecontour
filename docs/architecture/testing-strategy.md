@@ -273,7 +273,9 @@ An owned aggregate's REST surface is proven by one suite per aggregate:
 shape for the next owned entity:
 
 - **A foreign fixture** seeded for `OTHER_USER_ID` with every child row a real one carries, so each
-  request names ids that exist and can be refused only for ownership.
+  request names ids that exist and can be refused only for ownership. Every snapshotted table
+  starts with rows (history included), bar insert-only queues, and a test asserts it: an empty
+  table cannot show that a refused request moved or deleted one.
 - **`CROSS_USER_REQUESTS`**, one entry per by-id route. Each must answer 404, echo none of the
   row's text, and leave a `to_jsonb` snapshot of every reachable table byte-identical.
 - **A coverage guard** that compares the table with `app.openapi()`: every mounted route carrying

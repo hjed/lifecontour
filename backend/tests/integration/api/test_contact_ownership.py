@@ -58,6 +58,10 @@ from app.core.contacts.adapters.sql import (
     SqlContactSummaryRepository,
     SqlTagRepository,
 )
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryEntry
 from app.main import create_app
 from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
 
@@ -71,6 +75,7 @@ OTHER_EMAIL = "theodora@foreign.example"
 OTHER_STREET = "3 Stone Lane"
 OTHER_NOTE = "Keeps the spare key under the third stone."
 OTHER_SUMMARY = "Met at the hut; owes me a rope."
+OTHER_FORMER_NAME = "Dora Quince"
 IMMICH_PERSON_ID = "person-theirs"
 OTHER_TEXT = (
     OTHER_FIRST_NAME,
@@ -80,6 +85,7 @@ OTHER_TEXT = (
     OTHER_STREET,
     OTHER_NOTE,
     OTHER_SUMMARY,
+    OTHER_FORMER_NAME,
     IMMICH_PERSON_ID,
 )
 
@@ -114,6 +120,10 @@ UNCHANGED_ROWS = {
     "outbox": text("SELECT to_jsonb(t) FROM outbox_events t"),
     "edit_events": text("SELECT to_jsonb(t) FROM contact_edit_event t"),
 }
+# Queues that only an insert can disturb, so they may start empty. Every other
+# table holds seeded rows, or a refused request that moved or deleted one
+# would compare an empty table with an empty table.
+EMPTY_UNTIL_WRITTEN = frozenset({"outbox", "edit_events"})
 
 CONTACT_ROUTE = "/api/contacts/{contact_id}"
 METHOD_ROUTE = "/api/contacts/{contact_id}/methods/{method_id}"
@@ -515,6 +525,16 @@ async def foreign_contact(async_connection: AsyncConnection) -> ForeignContact:
         ContactSummary(contact_id=contact_id, summary_text=OTHER_SUMMARY)
     )
     await _link_to_immich(async_connection, contact_id)
+    await SqlFieldHistoryRepository(async_connection).record_change(
+        FieldHistoryEntry(
+            entity_type="contact",
+            entity_id=contact_id,
+            field_name="first_name",
+            old_value=OTHER_FORMER_NAME,
+            new_value=OTHER_FIRST_NAME,
+            user_id=OTHER_USER_ID,
+        )
+    )
 
     own_contact_id = await seed_contact(
         async_connection, first_name=OWN_FIRST_NAME, is_favourite=True
@@ -617,6 +637,7 @@ class TestContactOwnershipIsEnforced:
         for table in (
             text("UPDATE contacts SET user_id = :me WHERE user_id = :them"),
             text("UPDATE sync_metadata SET user_id = :me WHERE user_id = :them"),
+            text("UPDATE field_history SET user_id = :me WHERE user_id = :them"),
         ):
             await async_connection.execute(
                 table, {"me": TEST_USER_ID, "them": OTHER_USER_ID}
@@ -632,6 +653,16 @@ class TestContactOwnershipIsEnforced:
             f"{request_spec.method} {request_spec.route} answered "
             f"{response.status_code} for the owner: {response.text[:400]}"
         )
+
+    async def test_every_snapshotted_table_starts_with_rows(
+        self, async_connection: AsyncConnection, foreign_contact: ForeignContact
+    ) -> None:
+        """An empty table cannot show that a refused request moved or deleted a row."""
+        snapshot = await _snapshot(async_connection)
+
+        assert {
+            name for name, rows in snapshot.items() if not rows
+        } <= EMPTY_UNTIL_WRITTEN
 
     async def test_merging_another_users_contact_into_your_own_is_refused(
         self,

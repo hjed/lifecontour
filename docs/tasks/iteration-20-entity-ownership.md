@@ -610,7 +610,7 @@ its callers. Every layer is deployable on its own.
 
 #### Phase 5: REST cross-user isolation suite for contacts ✅ DONE
 
-**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged, while the owner's identical request succeeds (69 tests); two reds fixed (avatar, relationship by-id).
+**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged, while the owner's identical request succeeds (70 tests); two reds fixed (avatar, relationship by-id).
 
 **PR Size:** ~350 lines estimated (test-heavy); ~900 delivered (see Decisions)
 
