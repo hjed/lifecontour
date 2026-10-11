@@ -144,6 +144,8 @@ Build the hardest re-points first, behind a not-yet-exposed `ContactMergeService
 **Status:** ✅ DONE — repository re-points, service skeleton, and DI wiring implemented with unit + integration coverage; all backend quality gates (pytest, `ruff`, `mypy`) green locally.
 
 > **Ownership note (deviation):** the `contacts` table has **no `user_id`/owner column** (contacts are single-user in this system — verified in `contact_tables.py` and the `core_shared` `Contact` entity), so the AC's "same owner" precondition is **not applicable** at the data layer. Phase 1 validates only *both exist* + *distinct*. A cross-owner check can be added if/when contacts gain ownership.
+>
+> **Resolved:** contacts are owned since iteration 20; `merge_contacts` scopes both sides to the acting user, proven in [iteration 20 Phase 11](./iteration-20-entity-ownership.md) (`test_contact_cross_entity_ownership.py`).
 
 **Acceptance Criteria:**
 - [x] `ContactRelationshipRepository` gains a `repoint_contact(source_id, survivor_id, transaction)` that re-points both `from_contact_id` and `to_contact_id`, **drops self-loops** between the two contacts before they violate `ck_contact_relationships_no_self_reference`, and dedupes the result against `uq_contact_relationships_contact_target` and `uq_contact_relationships_user_target` (delete-colliding-then-update — the unique constraints are partial indexes, so a plain `UPDATE … ON CONFLICT` cannot name them).
@@ -182,6 +184,8 @@ Expose the engine. **This phase makes contact merge live via API and MCP.**
 **Status:** ✅ DONE — `ContactMerged` event emitted via the dual publisher, `POST /api/contacts/{id}/merge` REST endpoint, and the `merge_contacts` MCP tool implemented with unit + integration coverage. All backend quality gates (pytest, `ruff`, `ruff format`, `mypy`) green locally.
 
 > **Ownership note (deviation, carried from Phase 1):** the `contacts` table has **no `user_id`/owner column** (contacts are single-user), so "enforce ownership of both" reduces to **existence** at the data layer — matching the existing `get_contact` MCP tool, which checks only existence. The service validates *both exist* + *distinct*; the MCP tool surfaces those as error payloads. A cross-owner check can be added if/when contacts gain ownership.
+>
+> **Resolved:** contacts are owned since iteration 20; `merge_contacts` scopes both sides to the acting user, proven in [iteration 20 Phase 11](./iteration-20-entity-ownership.md) (`test_contact_cross_entity_ownership.py`).
 
 **Acceptance Criteria:**
 - [x] A `ContactMerged(survivor_contact_id, source_contact_id, …)` domain event is added to `backend/app/core/contacts/models/events.py` and emitted by `ContactMergeService` via the dual publisher, carrying provenance (`source`/`changed_by`). The **search indexer** consumes it to de-index the deleted source's now-stale document (the merge deliberately does **not** emit `ContactDeleted` for the source — the Google worker consumes that to delete the *remote* contact unconditionally, which contradicts merge semantics). The integration-worker `ContactMerged` handlers (consolidate / carry-over / remote delete) are still ITER13-005; an absent worker consumer must not error.

@@ -1272,6 +1272,10 @@ asks for ("a contact owned by another user (rejected)") is therefore written as 
 is rejected, and no task or link row is written*. **Follow-up:** if contacts ever gain ownership, this
 service's contact check is the single place the rule lands.
 
+> **Resolved:** contacts are owned since iteration 20, and `_resolve_contacts` is owner-scoped; "a
+> contact owned by another user (rejected)" is now a real test
+> ([iteration 20 Phase 11](./iteration-20-entity-ownership.md)).
+
 **Acceptance Criteria:**
 
 - [x] `TaskService.create_task` as a `@transactional` unit of work, taking creating journal, text, due

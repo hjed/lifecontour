@@ -419,6 +419,30 @@ class TestRejections:
         assert exc_info.value.contact_id == 999_999
         assert await _links_for(async_connection, task_id) == 0
 
+    async def test_another_users_contact_is_rejected_and_nothing_is_written(
+        self,
+        service: TaskService,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Your task, their contact: not found, exactly as a missing contact."""
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        theirs = await create_contact(async_connection, user_id=OTHER_USER_ID)
+
+        with pytest.raises(ContactNotFoundError) as exc_info:
+            await service.link_contact(
+                user_id=USER_ID,
+                task_id=task_id,
+                contact_id=theirs,
+                transaction=async_connection,
+            )
+
+        assert exc_info.value.contact_id == theirs
+        assert await _links_for(async_connection, task_id) == 0
+
     async def test_another_users_task_cannot_be_linked_to(
         self,
         service: TaskService,
