@@ -3164,8 +3164,10 @@ async def process_tag_event(
     """
     Process tag events like renamed or deleted for Google Contacts.
 
-    This ARQ task receives domain events (TagUpdated, TagDeleted)
-    and updates the corresponding Contact Groups across all synced Google Accounts.
+    This ARQ task receives domain events (TagUpdated, TagDeleted) and updates
+    the matching Contact Group in the tag owner's Google account(s) only: tags
+    are per user, so another user's group of the same name is a different
+    group. An event that names no owner is skipped.
 
     Args:
         ctx: ARQ context dictionary
@@ -3183,20 +3185,19 @@ async def process_tag_event(
         event_type=event_type,
     )
 
+    owner = _event_owner(event_data)
+    if owner is None:
+        logger.warning(
+            "Skipping tag event without an owner", job_id=job_id, event_type=event_type
+        )
+        return {"status": "skipped", "reason": "no_owner"}
+
     processed_users = 0
     errors = []
 
     try:
         async with session_factory() as session:
-            # Find all users with Google Integration
-            auth_stmt = text("""
-                SELECT user_id, google_account_email
-                FROM user_google_auth
-            """)
-            auth_result = await session.execute(auth_stmt)
-            users = auth_result.fetchall()
-
-            for row in users:
+            for row in await _owner_google_accounts(session, owner):
                 user_id = row.user_id
                 google_account_email = row.google_account_email
 

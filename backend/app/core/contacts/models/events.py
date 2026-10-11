@@ -204,7 +204,7 @@ class TagRemoved(DomainEvent):
 
 @dataclass(frozen=True)
 class TagUpdated(DomainEvent):
-    """Event raised when a tag is updated."""
+    """Event raised when a tag is updated; ``user_id`` is the tag's owner."""
 
     def __init__(
         self,
@@ -212,6 +212,8 @@ class TagUpdated(DomainEvent):
         tag_name: str,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         now = datetime.now(tz=UTC)
         super().__init__(
@@ -223,6 +225,7 @@ class TagUpdated(DomainEvent):
                 "tag_id": tag_id,
                 "tag_name": tag_name,
                 "changed_fields": changed_fields,
+                "user_id": user_id,
             },
             transaction=transaction,
         )
@@ -230,13 +233,15 @@ class TagUpdated(DomainEvent):
 
 @dataclass(frozen=True)
 class TagDeleted(DomainEvent):
-    """Event raised when a tag is deleted."""
+    """Event raised when a tag is deleted; ``user_id`` is the tag's owner."""
 
     def __init__(
         self,
         tag_id: int,
         tag_name: str,
         transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ):
         now = datetime.now(tz=UTC)
         super().__init__(
@@ -247,6 +252,7 @@ class TagDeleted(DomainEvent):
             event_data={
                 "tag_id": tag_id,
                 "tag_name": tag_name,
+                "user_id": user_id,
             },
             transaction=transaction,
         )

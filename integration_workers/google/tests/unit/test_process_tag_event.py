@@ -55,6 +55,7 @@ class TestProcessTagEvent:
                 event_type="TagUpdated",
                 event_data={
                     "changed_fields": {"full_path": ("Work/Project", "Work/Project2")},
+                    "user_id": 1,
                 },
             )
 
@@ -86,6 +87,7 @@ class TestProcessTagEvent:
                 event_data={
                     "tag_id": 1,
                     "tag_name": "To_Delete",
+                    "user_id": 1,
                 },
             )
 
