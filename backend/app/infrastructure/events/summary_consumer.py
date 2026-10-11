@@ -254,11 +254,18 @@ class SummaryConsumer(DeadLetterConsumerMixin, StreamConsumer):
         activity_checker = LowActivityChecker()
         prompt_builder = SummaryPromptBuilder()
 
-        # Resolve the user's timezone so generated summaries render dates/times
-        # in local time. This is a background worker with no request user, so we
-        # use the single-user fallback.
-        user_settings_repo = SqlUserSettingsRepository(connection)
-        timezone = await user_settings_repo.get_default_timezone()
+        # Render dates/times in the contact owner's timezone. This background
+        # worker has no request user, so the owner is resolved from the contact;
+        # a contact with none has been deleted and has nothing to summarise.
+        owner = await contact_repo.find_owner_id(contact_id)
+        if owner is None:
+            logger.warning(
+                "Contact not found, skipping summary generation",
+                event_id=event.event_id,  # type: ignore[attr-defined]
+                contact_id=contact_id,
+            )
+            return
+        timezone = await SqlUserSettingsRepository(connection).get_timezone(owner)
 
         generator = SummaryGenerator(
             input_assembler=input_assembler,

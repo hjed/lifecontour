@@ -271,7 +271,7 @@ class TestInboundEventConsumerHandleEvent:
                 return_value=mock_journal_processor,
             ),
             patch(
-                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
                 new_callable=AsyncMock,
                 return_value="UTC",
             ),
@@ -315,7 +315,7 @@ class TestInboundEventConsumerHandleEvent:
                 return_value=mock_match_processor,
             ),
             patch(
-                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
                 new_callable=AsyncMock,
                 return_value="UTC",
             ),
@@ -401,3 +401,134 @@ class TestInboundEventConsumerHandleEvent:
             pytest.raises(Exception, match="Processing failed"),
         ):
             await consumer._handle_event(event)
+
+
+class TestInboundEventConsumerOwnerTimezone:
+    """The title-similarity assessor renders in the event owner's timezone."""
+
+    OWNER_ZONES = {"owner-1": "Australia/Sydney", "other-1": "Pacific/Auckland"}
+
+    @pytest.fixture
+    def consumer(self, mock_stream_client: MagicMock) -> InboundEventConsumer:
+        """Create an InboundEventConsumer with Gemini configured."""
+        settings = MagicMock(spec=Settings)
+        settings.gemini_api_key = "test-key"
+        settings.gemini_model = "gemini-2.5-flash"
+        return InboundEventConsumer(
+            stream_client=mock_stream_client,
+            container=MagicMock(),
+            settings=settings,
+            stream_name="pms:domain-events",
+        )
+
+    async def _handle(
+        self,
+        consumer: InboundEventConsumer,
+        mock_db_engine: MagicMock,
+        event: StreamEvent,
+        processor_path: str,
+    ) -> tuple[MagicMock, AsyncMock, MagicMock]:
+        """Handle ``event`` with the domain processor and assessor patched.
+
+        Returns the patched assessor class, ``get_timezone`` and processor class.
+        """
+        mock_processor = AsyncMock()
+        mock_processor.process_event = AsyncMock(return_value={"status": "success"})
+
+        async def zone_of(user_id: str) -> str:
+            return self.OWNER_ZONES[user_id]
+
+        with (
+            patch(
+                "app.infrastructure.events.inbound_event_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(processor_path, return_value=mock_processor) as processor_cls,
+            patch(
+                "app.core.journal.services.title_similarity_assessor.GeminiTitleSimilarityAssessor"
+            ) as assessor_cls,
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
+                new_callable=AsyncMock,
+                side_effect=zone_of,
+            ) as get_timezone,
+        ):
+            await consumer._handle_event(event)
+
+        mock_processor.process_event.assert_called_once()
+        return assessor_cls, get_timezone, processor_cls
+
+    @pytest.mark.asyncio
+    async def test_journal_sync_event_assessor_uses_owner_timezone(
+        self, consumer: InboundEventConsumer, mock_db_engine: MagicMock
+    ) -> None:
+        """journal_event.created: the owner is journal_data.user_id."""
+        event = _make_stream_event(
+            event_type="journal_event.created",
+            event_data={
+                "integration_source": "google",
+                "external_event_id": "evt-1",
+                "journal_data": {"user_id": "owner-1", "title": "Climb"},
+            },
+        )
+
+        assessor_cls, get_timezone, _ = await self._handle(
+            consumer,
+            mock_db_engine,
+            event,
+            "app.core.integrations.journal_outbox_event_processor.JournalOutboxEventProcessor",
+        )
+
+        get_timezone.assert_awaited_once_with("owner-1")
+        assert assessor_cls.call_args.kwargs["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_journal_sync_event_without_owner_builds_no_detector(
+        self, consumer: InboundEventConsumer, mock_db_engine: MagicMock
+    ) -> None:
+        """journal_event.cancelled names no owner: no detector, no timezone read."""
+        event = _make_stream_event(
+            event_type="journal_event.cancelled",
+            event_data={
+                "external_event_id": "evt-1",
+                "calendar_id": "cal-1",
+                "existing_journal_id": 7,
+            },
+        )
+
+        assessor_cls, get_timezone, processor_cls = await self._handle(
+            consumer,
+            mock_db_engine,
+            event,
+            "app.core.integrations.journal_outbox_event_processor.JournalOutboxEventProcessor",
+        )
+
+        assessor_cls.assert_not_called()
+        get_timezone.assert_not_awaited()
+        assert processor_cls.call_args.kwargs["match_candidate_detector"] is None
+
+    @pytest.mark.asyncio
+    async def test_detect_matches_assessor_uses_payload_owner_timezone(
+        self, consumer: InboundEventConsumer, mock_db_engine: MagicMock
+    ) -> None:
+        """journal_review.detect_matches: the owner is payload.user_id."""
+        event = _make_stream_event(
+            event_type="journal_review.detect_matches",
+            event_data={
+                "journal_id": 1,
+                "user_id": "owner-1",
+                "journal_title": "Climb",
+                "event_date_range_start": "2024-01-01T10:00:00Z",
+                "event_date_range_end": "2024-01-01T11:00:00Z",
+            },
+        )
+
+        assessor_cls, get_timezone, _ = await self._handle(
+            consumer,
+            mock_db_engine,
+            event,
+            "app.core.integrations.match_detection_event_processor.MatchDetectionEventProcessor",
+        )
+
+        get_timezone.assert_awaited_once_with("owner-1")
+        assert assessor_cls.call_args.kwargs["timezone"] == "Australia/Sydney"

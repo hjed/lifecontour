@@ -17,8 +17,13 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 from app.infrastructure.events.summary_consumer import SummaryConsumer
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
+from tests.integration.infrastructure.events.user_settings_rows import (
+    save_newer_timezone_for_other_user,
+    save_timezone,
+)
 
 
 @asynccontextmanager
@@ -211,6 +216,91 @@ class TestSummaryConsumerIntegration:
             mock_indexer.process_event.assert_called_once()
             call_args = mock_indexer.process_event.call_args[0]
             assert call_args[0].event_type == "ContactSummaryRefreshDue"
+
+    async def _generate_due_event(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        contact_id: int,
+    ) -> MagicMock:
+        """Consume one due event for ``contact_id``; return the generator class."""
+        await stream_client.publish(
+            stream_name=test_stream_name,
+            event_id=f"evt-{uuid.uuid4().hex[:8]}",
+            event_type="ContactSummaryRefreshDue",
+            aggregate_id=contact_id,
+            event_data={"contact_id": contact_id},
+            occurred_at="2024-01-01T12:00:00Z",
+        )
+        consumer = self._make_consumer(stream_client, test_stream_name)
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
+
+        mock_generator = MagicMock()
+        mock_generator.generate = AsyncMock(return_value=None)
+        mock_settings = MagicMock()
+        mock_settings.gemini_api_key = "fake-key-for-test"
+        mock_settings.gemini_summary_model = "fake-model"
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=self._mock_engine(async_connection),
+            ),
+            patch(
+                "app.infrastructure.events.summary_consumer.get_settings",
+                return_value=mock_settings,
+            ),
+            patch(
+                "app.core.contacts.services.summary_generation_service.SummaryGenerator",
+                return_value=mock_generator,
+            ) as generator_cls,
+            patch(
+                "app.infrastructure.events.summary_consumer.SearchIndexer"
+            ) as mock_indexer_cls,
+        ):
+            mock_indexer_cls.return_value.process_event = AsyncMock()
+            assert await consumer._process_batch() == 1
+
+        mock_generator.generate.assert_called_once_with(contact_id=contact_id)
+        return generator_cls
+
+    @pytest.mark.asyncio
+    async def test_due_event_generates_in_contact_owner_timezone(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The owner's zone is used even when another user updated theirs later."""
+        contact_id = 9995
+        await self._insert_contact(async_connection, contact_id)
+        await save_timezone(async_connection, TEST_USER_ID, "Australia/Sydney")
+        await save_newer_timezone_for_other_user(async_connection)
+
+        generator_cls = await self._generate_due_event(
+            test_stream_name, async_connection, stream_client, contact_id
+        )
+
+        assert generator_cls.call_args.kwargs["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_due_event_owner_without_settings_gets_default_timezone(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """An owner who never configured a zone gets the default, not another user's."""
+        contact_id = 9994
+        await self._insert_contact(async_connection, contact_id)
+        await save_newer_timezone_for_other_user(async_connection)
+
+        generator_cls = await self._generate_due_event(
+            test_stream_name, async_connection, stream_client, contact_id
+        )
+
+        assert generator_cls.call_args.kwargs["timezone"] == DEFAULT_TIMEZONE
 
     @pytest.mark.asyncio
     async def test_due_event_leaves_user_disabled_summary_with_override_untouched(

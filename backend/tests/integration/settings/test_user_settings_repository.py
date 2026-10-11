@@ -48,14 +48,3 @@ class TestSqlUserSettingsRepository:
             UserSettings(user_id="u2", timezone="Europe/London")
         )
         assert await user_settings_repo.get_timezone("u2") == "Europe/London"
-
-    @pytest.mark.asyncio
-    async def test_get_default_timezone_when_empty(self, user_settings_repo):
-        assert await user_settings_repo.get_default_timezone() == "UTC"
-
-    @pytest.mark.asyncio
-    async def test_get_default_timezone_returns_latest(self, user_settings_repo):
-        await user_settings_repo.save(
-            UserSettings(user_id="solo", timezone="Pacific/Auckland")
-        )
-        assert await user_settings_repo.get_default_timezone() == "Pacific/Auckland"

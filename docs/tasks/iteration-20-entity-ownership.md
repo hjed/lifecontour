@@ -161,7 +161,7 @@ Established by reviewing the current code during spec planning:
   Separately, Google `process_tag_event` (`google/worker.py:3071`) handles `TagUpdated` /
   `TagDeleted` with its own every-`user_google_auth` loop (`:3103`), renaming or deleting the
   matching contact group in each account.
-- **Timezone helper** `get_default_timezone()` (`user_settings_repository.py:79`) reads the most
+- **Timezone helper** (deleted in Phase 16) `get_default_timezone()` (`user_settings_repository.py:79`) read the most
   recently updated `user_settings` row; callers: `inbound_event_consumer.py:255,386`,
   `summary_consumer.py:261`. `get_timezone(user_id)` (`:72`) already exists and stays. The owner is
   already available at both inbound call sites: journal sync events carry it in
@@ -1098,7 +1098,7 @@ is keyed by the owner; no runtime single-user fallback remains.
 **Acceptance Criteria (task-level):**
 - [x] Google and Immich outbound pushes reach only the owner's connected account(s); an event without an owner is skipped and logged, never fanned out.
 - [x] `sync_metadata.user_id NOT NULL` with `UNIQUE(user_id, integration_source, external_id)`; every lookup and upsert is keyed by owner.
-- [ ] `get_default_timezone()` no longer exists; the per-user `get_timezone(user_id)` does.
+- [x] `get_default_timezone()` no longer exists; the per-user `get_timezone(user_id)` does.
 
 ---
 
@@ -1426,31 +1426,61 @@ in the backend and the four workers takes the owner.
 
 ---
 
-#### Phase 16: Remove the single-user timezone fallback
+#### Phase 16: Remove the single-user timezone fallback ✅ DONE
 
 **PR Size:** ~150 lines
 
-- [ ] Delete `UserSettingsRepository.get_default_timezone()` from the port (`settings/models.py:41`)
+- [x] Delete `UserSettingsRepository.get_default_timezone()` from the port (`settings/models.py:41`)
   and the adapter (`user_settings_repository.py:79`). `get_timezone(user_id)` stays (the user's
   condition: "as long as we still have one per user").
-- [ ] `inbound_event_consumer.py:255, 386`: the Gemini similarity assessor's timezone is
+- [x] `inbound_event_consumer.py:255, 386`: the Gemini similarity assessor's timezone is
   `get_timezone(owner)` where the owner is `journal_data["user_id"]` for `journal_event.*` sync
   events and `payload.user_id` for `journal_review.detect_matches` (both carry it today — see
   *Grounding Findings*).
-- [ ] `summary_consumer.py:261`: load the contact, then `get_timezone(contact.user_id)`;
+- [x] `summary_consumer.py:261`: load the contact, then `get_timezone(contact.user_id)`;
   `SummaryGenerationService` already accepts `timezone`.
-- [ ] Grep gate in the PR: no `get_default_timezone` anywhere in `backend/`, `core_shared/`,
+- [x] Grep gate in the PR: no `get_default_timezone` anywhere in `backend/`, `core_shared/`,
   `integration_workers/`.
 
 **Required Test Coverage:**
-- [ ] **Unit (first):** each consumer resolves the owner's stored timezone (two users with different
+- [x] **Unit (first):** each consumer resolves the owner's stored timezone (two users with different
   zones → the owner's is used); a user without settings gets `DEFAULT_TIMEZONE`.
 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/domain-architecture.md` — user settings: the per-user resolver is the only
+- [x] `docs/architecture/domain-architecture.md` — user settings: the per-user resolver is the only
   timezone lookup.
+
+**Status:** ✅ DONE — `get_default_timezone()` is gone from the port, the adapter and every caller;
+the inbound consumer's title-similarity assessor and the summary consumer render in the timezone of
+the owner named by the event or contact, and nothing falls back to another user's zone.
+
+**Decisions (recorded during implementation):**
+- **No owner, no detector — not a default zone.** `_process_journal_sync_event` handles every
+  `journal_event.*` type, but only `created` / `updated` carry `journal_data`; the status events
+  (`conflicted`, `cancelled`, `series_cancelled`, `fitness_duration_corrected`) name no owner. The
+  detector is consulted in one place — the non-`None` gate on `created` emitting
+  `journal_review.detect_matches` (`journal_outbox_event_processor.py`) — so
+  `InboundEventConsumer._build_match_detector(connection, owner)` returns `None` for an event naming
+  no owner (as it does without a Gemini key) instead of inventing a zone. Those events process as
+  before. One helper replaces the two duplicated blocks.
+- **The owner is read leniently** (`.get` on `event_data`), not by validating the payload in the
+  consumer, so a malformed event still fails or skips in its processor exactly as before.
+- **Summary: `find_owner_id`, and skip a contact with none.** The consumer reuses Phase 4's
+  `ContactRepository.find_owner_id` rather than loading the aggregate. `None` means the contact was
+  deleted; the consumer logs and returns before building the generator (the assembler used to end
+  the same case with "not found"), so no zone is invented. The assembler's own `find_owner_id` call
+  stays — one cheap extra read per due event rather than threading the owner through
+  `SummaryGenerator`.
+- **Tests.** The two-users unit tests patch `get_timezone` with a per-user mapping; the integration
+  tests (`test_summary_consumer_integration.py`, `test_inbound_event_consumer_integration.py`) give
+  another user the most recently updated settings row (dated a day later, since every row in the
+  test transaction shares `NOW()`) — the row the deleted helper would have picked — and prove the
+  owner's zone, or `DEFAULT_TIMEZONE` for an owner with no row, is used. The deleted method's two
+  repository tests went with it; `test_get_timezone_falls_back_to_utc` stays.
+- **"single-user" wording** in `backend/app` is gone outside `backend/app/migrations`, whose
+  owner-derivation history is frozen and left to Phase 17's grep gate.
 
 ---
 

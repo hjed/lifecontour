@@ -28,6 +28,9 @@ from app.infrastructure.unit_of_work import unit_of_work
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+    from app.core.journal.services.match_candidate_detector import (
+        MatchCandidateDetector,
+    )
     from app.infrastructure.events.outbox_repository import OutboxEvent
 
 logger = structlog.get_logger()
@@ -126,6 +129,37 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             event_type=event.event_type,
         )
 
+    async def _build_match_detector(
+        self, connection: AsyncConnection, owner: str | None
+    ) -> MatchCandidateDetector | None:
+        """Build the match detector, rendering times in ``owner``'s timezone.
+
+        ``None`` when Gemini is not configured or the event names no owner:
+        only an owned journal can be matched, and there is no one else's zone
+        to fall back on.
+        """
+        if not self._settings.gemini_api_key or not owner:
+            return None
+
+        from app.core.journal.services.match_candidate_detector import (
+            MatchCandidateDetector,
+        )
+        from app.core.journal.services.title_similarity_assessor import (
+            GeminiTitleSimilarityAssessor,
+        )
+        from app.core.settings.adapters.sql.user_settings_repository import (
+            SqlUserSettingsRepository,
+        )
+
+        timezone = await SqlUserSettingsRepository(connection).get_timezone(owner)
+        return MatchCandidateDetector(
+            similarity_assessor=GeminiTitleSimilarityAssessor(
+                api_key=self._settings.gemini_api_key,
+                model=self._settings.gemini_model,
+                timezone=timezone,
+            ),
+        )
+
     async def _process_contact_event(
         self, event: OutboxEvent, connection: AsyncConnection
     ) -> None:
@@ -222,12 +256,6 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             SqlJournalRepository,
         )
         from app.core.journal.services.journal_service import JournalService
-        from app.core.journal.services.match_candidate_detector import (
-            MatchCandidateDetector,
-        )
-        from app.core.journal.services.title_similarity_assessor import (
-            GeminiTitleSimilarityAssessor,
-        )
         from app.core.tasks.adapters.sql.task_anchor_repository import (
             SqlTaskAnchorRepository,
         )
@@ -245,24 +273,13 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
-        # Need optional detector for gating Phase 2 emission
-        match_detector = None
-        if self._settings.gemini_api_key:
-            from app.core.settings.adapters.sql.user_settings_repository import (
-                SqlUserSettingsRepository,
-            )
-
-            timezone = await SqlUserSettingsRepository(
-                connection
-            ).get_default_timezone()
-            similarity_assessor = GeminiTitleSimilarityAssessor(
-                api_key=self._settings.gemini_api_key,
-                model=self._settings.gemini_model,
-                timezone=timezone,
-            )
-            match_detector = MatchCandidateDetector(
-                similarity_assessor=similarity_assessor,
-            )
+        # Optional detector gating Phase 2 emission. Only created/updated events
+        # carry journal_data (and its owner); the status events have none and
+        # never consult the detector.
+        journal_data = event.event_data.get("journal_data") or {}
+        match_detector = await self._build_match_detector(
+            connection, journal_data.get("user_id")
+        )
 
         from app.core.contacts.adapters.sql.contact_repository import (
             SqlContactRepository,
@@ -369,31 +386,12 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.adapters.sql.review_item_repository import (
             SqlReviewItemRepository,
         )
-        from app.core.journal.services.match_candidate_detector import (
-            MatchCandidateDetector,
-        )
-        from app.core.journal.services.title_similarity_assessor import (
-            GeminiTitleSimilarityAssessor,
-        )
 
         review_item_repo = SqlReviewItemRepository(connection)
-        match_detector = None
-        if self._settings.gemini_api_key:
-            from app.core.settings.adapters.sql.user_settings_repository import (
-                SqlUserSettingsRepository,
-            )
-
-            timezone = await SqlUserSettingsRepository(
-                connection
-            ).get_default_timezone()
-            similarity_assessor = GeminiTitleSimilarityAssessor(
-                api_key=self._settings.gemini_api_key,
-                model=self._settings.gemini_model,
-                timezone=timezone,
-            )
-            match_detector = MatchCandidateDetector(
-                similarity_assessor=similarity_assessor,
-            )
+        match_detector = await self._build_match_detector(
+            connection,
+            event.event_data.get("user_id"),
+        )
 
         processor = MatchDetectionEventProcessor(
             connection=connection,

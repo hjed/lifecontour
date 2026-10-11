@@ -689,8 +689,12 @@ disclose and nothing is drawn.
 
 That precedence is also why `GET /api/user-settings` answers `timezone: null` rather than the `UTC`
 default when a user has never configured one: the frontend needs to tell "chose UTC" from "told us
-nothing", and only the second may fall back to the browser. `UserSettingsRepository.get_timezone` still
-applies the default everywhere the backend resolves a zone for itself.
+nothing", and only the second may fall back to the browser. `UserSettingsRepository.get_timezone(user_id)`
+still applies the default everywhere the backend resolves a zone for itself, and it is the **only**
+timezone lookup: there is no "the" timezone. Background consumers with no request user resolve the owner
+of what they process and read that user's zone — the inbound consumer's title-similarity assessor from
+the event's owner (`journal_data.user_id` / `payload.user_id`; an event naming none gets no detector), the
+summary consumer from `ContactRepository.find_owner_id` (a contact with no owner is skipped).
 
 What this deliberately does **not** move: the journal **list** still groups and labels in the browser's
 zone — the `groupJournalsByDay` divergence described below, whose follow-up is ITER18-004 Phase 3.

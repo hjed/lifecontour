@@ -75,19 +75,3 @@ class SqlUserSettingsRepository:
         if settings and settings.timezone:
             return settings.timezone
         return DEFAULT_TIMEZONE
-
-    async def get_default_timezone(self) -> str:
-        """Return the sole stored timezone, or the default (single-user fallback)."""
-        stmt = text(
-            """
-            SELECT timezone
-            FROM user_settings
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """
-        )
-        result = await self.connection.execute(stmt)
-        row = result.fetchone()
-        if row and row.timezone:
-            return str(row.timezone)
-        return DEFAULT_TIMEZONE
