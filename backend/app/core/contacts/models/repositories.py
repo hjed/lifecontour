@@ -400,38 +400,40 @@ class TagRepository(ABC):
     """Repository interface for tag operations."""
 
     @abstractmethod
-    async def find_by_id(self, tag_id: int) -> Tag | None:
-        """Find a tag by ID."""
+    async def find_by_id(self, tag_id: int, *, user_id: str) -> Tag | None:
+        """Find ``user_id``'s tag by ID."""
         pass
 
     @abstractmethod
-    async def find_by_name(self, name: str) -> Tag | None:
-        """Find a tag by name."""
+    async def find_by_name(self, name: str, *, user_id: str) -> Tag | None:
+        """Find ``user_id``'s tag by name, case-insensitively."""
         pass
 
     @abstractmethod
-    async def find_by_names(self, names: list[str]) -> dict[str, Tag]:
-        """Find multiple tags by their names, returned as a dict keyed by tag name."""
+    async def find_by_names(self, names: list[str], *, user_id: str) -> dict[str, Tag]:
+        """Find ``user_id``'s tags by name, as a dict keyed by requested name."""
         pass
 
     @abstractmethod
-    async def get_all(self) -> list[Tag]:
-        """Get all tags."""
+    async def get_all(self, *, user_id: str) -> list[Tag]:
+        """Get all of ``user_id``'s tags."""
         pass
 
     @abstractmethod
-    async def get_children(self, parent_id: int) -> list[Tag]:
-        """Get child tags of a parent tag."""
+    async def get_children(self, parent_id: int, *, user_id: str) -> list[Tag]:
+        """Get ``user_id``'s child tags of a parent tag."""
         pass
 
     @abstractmethod
-    async def get_descendants_for_tags(self, tag_ids: list[int]) -> list[Tag]:
-        """Get all descendant tags (recursive) for a list of tag IDs."""
+    async def get_descendants_for_tags(
+        self, tag_ids: list[int], *, user_id: str
+    ) -> list[Tag]:
+        """Get ``user_id``'s descendant tags (recursive) of a list of tag IDs."""
         pass
 
     @abstractmethod
-    async def get_root_tags(self) -> list[Tag]:
-        """Get all root tags (no parent)."""
+    async def get_root_tags(self, *, user_id: str) -> list[Tag]:
+        """Get ``user_id``'s root tags (no parent)."""
         pass
 
     @abstractmethod

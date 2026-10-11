@@ -137,7 +137,10 @@ class TestContactUpdatePrecondition:
             )
 
         assert (
-            await SqlTagRepository(clean_database).find_by_name("Mathematician") is None
+            await SqlTagRepository(clean_database).find_by_name(
+                "Mathematician", user_id=TEST_USER_ID
+            )
+            is None
         )
 
     @pytest.mark.asyncio

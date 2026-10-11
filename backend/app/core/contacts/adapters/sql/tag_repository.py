@@ -31,15 +31,15 @@ class SqlTagRepository(TagRepository):
     def __init__(self, connection: AsyncConnection):
         self.conn = connection
 
-    async def find_by_id(self, tag_id: int) -> Tag | None:
-        """Find a tag by ID."""
+    async def find_by_id(self, tag_id: int, *, user_id: str) -> Tag | None:
+        """Find ``user_id``'s tag by ID."""
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags WHERE id = :tag_id
+            FROM tags WHERE id = :tag_id AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"tag_id": tag_id})
+        result = await self.conn.execute(query, {"tag_id": tag_id, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -47,15 +47,15 @@ class SqlTagRepository(TagRepository):
 
         return _row_to_tag(row)
 
-    async def find_by_name(self, name: str) -> Tag | None:
-        """Find a tag by name."""
+    async def find_by_name(self, name: str, *, user_id: str) -> Tag | None:
+        """Find ``user_id``'s tag by name, case-insensitively."""
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags WHERE LOWER(name) = LOWER(:name)
+            FROM tags WHERE LOWER(name) = LOWER(:name) AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"name": name})
+        result = await self.conn.execute(query, {"name": name, "user_id": user_id})
         row = result.fetchone()
 
         if not row:
@@ -63,8 +63,8 @@ class SqlTagRepository(TagRepository):
 
         return _row_to_tag(row)
 
-    async def find_by_names(self, names: list[str]) -> dict[str, Tag]:
-        """Find multiple tags by their names, returned as a dict keyed by tag name."""
+    async def find_by_names(self, names: list[str], *, user_id: str) -> dict[str, Tag]:
+        """Find ``user_id``'s tags by name, returned as a dict keyed by requested name."""
         if not names:
             return {}
 
@@ -72,10 +72,12 @@ class SqlTagRepository(TagRepository):
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags WHERE LOWER(name) = ANY(:names)
+            FROM tags WHERE LOWER(name) = ANY(:names) AND user_id = :user_id
         """
         )
-        result = await self.conn.execute(query, {"names": lower_names})
+        result = await self.conn.execute(
+            query, {"names": lower_names, "user_id": user_id}
+        )
 
         lower_to_tag = {}
         for row in result:
@@ -89,32 +91,39 @@ class SqlTagRepository(TagRepository):
 
         return tags_dict
 
-    async def get_all(self) -> list[Tag]:
-        """Get all tags."""
+    async def get_all(self, *, user_id: str) -> list[Tag]:
+        """Get all of ``user_id``'s tags."""
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags ORDER BY name
+            FROM tags WHERE user_id = :user_id ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
 
         return [_row_to_tag(row) for row in result.fetchall()]
 
-    async def get_children(self, parent_id: int) -> list[Tag]:
-        """Get child tags of a parent tag."""
+    async def get_children(self, parent_id: int, *, user_id: str) -> list[Tag]:
+        """Get ``user_id``'s child tags of a parent tag."""
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags WHERE parent_id = :parent_id ORDER BY name
+            FROM tags WHERE parent_id = :parent_id AND user_id = :user_id ORDER BY name
         """
         )
-        result = await self.conn.execute(query, {"parent_id": parent_id})
+        result = await self.conn.execute(
+            query, {"parent_id": parent_id, "user_id": user_id}
+        )
 
         return [_row_to_tag(row) for row in result.fetchall()]
 
-    async def get_descendants_for_tags(self, tag_ids: list[int]) -> list[Tag]:
-        """Get all descendant tags (recursive) for a list of tag IDs."""
+    async def get_descendants_for_tags(
+        self, tag_ids: list[int], *, user_id: str
+    ) -> list[Tag]:
+        """Get ``user_id``'s descendant tags (recursive) of a list of tag IDs.
+
+        Every level is filtered, so the walk never steps into another owner's tags.
+        """
         if not tag_ids:
             return []
 
@@ -123,48 +132,51 @@ class SqlTagRepository(TagRepository):
             WITH RECURSIVE descendants AS (
                 SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
                 FROM tags
-                WHERE parent_id = ANY(:tag_ids)
+                WHERE parent_id = ANY(:tag_ids) AND user_id = :user_id
 
                 UNION ALL
 
                 SELECT t.id, t.user_id, t.name, t.parent_id, t.color, t.description, t.created_at, t.updated_at
                 FROM tags t
                 INNER JOIN descendants d ON t.parent_id = d.id
+                WHERE t.user_id = :user_id
             )
             SELECT DISTINCT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM descendants
             ORDER BY name
             """
         )
-        result = await self.conn.execute(query, {"tag_ids": tag_ids})
+        result = await self.conn.execute(
+            query, {"tag_ids": tag_ids, "user_id": user_id}
+        )
 
         return [_row_to_tag(row) for row in result.fetchall()]
 
-    async def get_root_tags(self) -> list[Tag]:
-        """Get all root tags (no parent)."""
+    async def get_root_tags(self, *, user_id: str) -> list[Tag]:
+        """Get ``user_id``'s root tags (no parent)."""
         query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
-            FROM tags WHERE parent_id IS NULL ORDER BY name
+            FROM tags WHERE parent_id IS NULL AND user_id = :user_id ORDER BY name
         """
         )
-        result = await self.conn.execute(query)
+        result = await self.conn.execute(query, {"user_id": user_id})
 
         return [_row_to_tag(row) for row in result.fetchall()]
 
-    async def search(self, query: str, limit: int = 50) -> list[Tag]:
-        """Search tags by name pattern."""
+    async def search(self, query: str, limit: int = 50, *, user_id: str) -> list[Tag]:
+        """Search ``user_id``'s tags by name pattern."""
         search_query = text(
             """
             SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags
-            WHERE name ILIKE :pattern
+            WHERE name ILIKE :pattern AND user_id = :user_id
             ORDER BY name
             LIMIT :limit
         """
         )
         result = await self.conn.execute(
-            search_query, {"pattern": f"%{query}%", "limit": limit}
+            search_query, {"pattern": f"%{query}%", "limit": limit, "user_id": user_id}
         )
 
         return [_row_to_tag(row) for row in result.fetchall()]

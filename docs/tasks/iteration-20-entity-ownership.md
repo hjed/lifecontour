@@ -894,8 +894,18 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   an event without an owner is skipped as `no_owner` with a warning, before any database work.
   Proven against two real accounts (`test_process_tag_event_owner_integration.py`). It lands
   before per-user names (8c), while a name still identifies one tag.
-- **8c** — owner-scoped reads through repository, services, REST, MCP and the inbound
-  processor; `0136` per-owner names.
+- **8c ✅ DONE** — owner-scoped reads: every `TagRepository` read takes a keyword-only `user_id`
+  and filters in SQL (`get_descendants_for_tags` at every level of the walk), and
+  `TagHierarchyService` and `TagService` (create, update, delete, merge) act for one user, so
+  another user's tag, parent or merge target answers `TagNotFoundError` (404). The REST tag
+  routes and the MCP `list_contact_tags` / `update_contact_tag` / `delete_contact_tag` /
+  `merge_contact_tags` tools pass the acting user; `ContactService` resolves tag names, assigns
+  and removes tags, and expands the contact tag filter within the contact owner's tags; the
+  inbound processor matches names (and its duplicate-name fallback) within the event owner's
+  tags. `0136` replaces `uq_tags_name_lower` with `uq_tags_user_id_name_lower (user_id,
+  LOWER(name))`; its downgrade refuses while two owners share a name. The `0129` name-scope
+  migration test is parametrised over both tag tables
+  (`tests/integration/test_scope_tag_names_to_owner_migrations.py`) instead of copied.
 - **8d** — owner-scoped writes in SQL (update, delete, merge, re-parent, assign).
 - **8e** — REST and MCP cross-user isolation suites for tags.
 

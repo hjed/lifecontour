@@ -311,7 +311,7 @@ class ContactService:
         if contact.tags is None:
             contact.tags = []
         for name in tag_names:
-            existing = await self.tag_repo.find_by_name(name)
+            existing = await self.tag_repo.find_by_name(name, user_id=owner)
             tag = (
                 existing
                 if existing is not None
@@ -1872,8 +1872,8 @@ class ContactService:
                 contact_id, transaction, user_id=user_id
             )
 
-            # Validate tag exists
-            tag = await self.tag_repo.find_by_id(tag_id)
+            # The tag must be the contact owner's: another user's is not found.
+            tag = await self.tag_repo.find_by_id(tag_id, user_id=contact.user_id)
             if not tag:
                 from app.core.contacts.models.exceptions import TagNotFoundError
 
@@ -1922,7 +1922,7 @@ class ContactService:
             )
 
             # Get tag for event
-            tag = await self.tag_repo.find_by_id(tag_id)
+            tag = await self.tag_repo.find_by_id(tag_id, user_id=contact.user_id)
             if not tag:
                 from app.core.contacts.models.exceptions import TagNotFoundError
 
@@ -2518,15 +2518,20 @@ class ContactService:
         """Get all contacts with pagination."""
         return await self.contact_repo.get_all(limit, offset, user_id=user_id)
 
-    async def _expand_tag_ids_with_descendants(self, tag_ids: list[int]) -> list[int]:
-        """Expand tag IDs to include all descendant tag IDs.
+    async def _expand_tag_ids_with_descendants(
+        self, tag_ids: list[int], user_id: str
+    ) -> list[int]:
+        """Expand tag IDs to include all of ``user_id``'s descendant tag IDs.
 
         For each tag ID, fetches all descendant tags and includes their IDs.
         This enables hierarchical filtering: filtering by a parent tag
         automatically includes contacts tagged with any descendant tag.
 
         Args:
-            tag_ids: Original list of tag IDs
+            tag_ids: Original list of tag IDs. Another user's id is kept as
+                given — it matches none of ``user_id``'s contacts — but its
+                descendants are never added.
+            user_id: The acting user.
 
         Returns:
             Expanded list including original IDs plus all descendant IDs
@@ -2535,7 +2540,9 @@ class ContactService:
             return []
 
         expanded: set[int] = set(tag_ids)
-        descendants = await self.tag_hierarchy.get_all_descendants_bulk(tag_ids)
+        descendants = await self.tag_hierarchy.get_all_descendants_bulk(
+            tag_ids, user_id=user_id
+        )
         for descendant in descendants:
             if descendant.id is not None:
                 expanded.add(descendant.id)
@@ -2572,7 +2579,7 @@ class ContactService:
 
         # Expand tag_ids to include descendants for hierarchical filtering
         expanded_tag_ids = (
-            await self._expand_tag_ids_with_descendants(tag_ids)
+            await self._expand_tag_ids_with_descendants(tag_ids, user_id)
             if tag_ids is not None
             else None
         )
@@ -2603,7 +2610,7 @@ class ContactService:
 
         # Expand tag_ids to include descendants for hierarchical filtering
         expanded_tag_ids = (
-            await self._expand_tag_ids_with_descendants(tag_ids)
+            await self._expand_tag_ids_with_descendants(tag_ids, user_id)
             if tag_ids is not None
             else None
         )

@@ -81,5 +81,5 @@ class TestTagServiceCreateOrGetIntegration:
         assert other.id is not None
 
         repo = SqlTagRepository(clean_database)
-        assert (await repo.find_by_name("Work")) is not None
-        assert (await repo.find_by_name("Personal")) is not None
+        assert (await repo.find_by_name("Work", user_id=TEST_USER_ID)) is not None
+        assert (await repo.find_by_name("Personal", user_id=TEST_USER_ID)) is not None

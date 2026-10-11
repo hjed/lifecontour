@@ -492,7 +492,7 @@ class OutboxEventProcessor:
         """Return the already-found tag for ``tag_name`` or create it for ``user_id``.
 
         Creation happens outside the contact update transaction, but is safe:
-        tags are reusable shared entities, creation is idempotent
+        tags are reusable entities of the owner, creation is idempotent
         (``find_by_names`` will find them on retry), and orphan tag rows (if
         the contact update later fails) are harmless.
         """
@@ -507,7 +507,7 @@ class OutboxEventProcessor:
                 return await self.tag_repo.save(new_tag, user_id=user_id)
         except DuplicateTagNameError:
             # Race condition: another worker created the same tag
-            found_tag = await self.tag_repo.find_by_name(tag_name)
+            found_tag = await self.tag_repo.find_by_name(tag_name, user_id=user_id)
             if found_tag is None:
                 raise
             return found_tag
@@ -530,7 +530,9 @@ class OutboxEventProcessor:
                 continue
             if child_tag.parent_id == parent_tag.id:
                 continue
-            if await self._would_create_cycle(parent_tag.id, child_tag.id):
+            if await self._would_create_cycle(
+                parent_tag.id, child_tag.id, user_id=user_id
+            ):
                 logger.warning(
                     "Skip setting parent due to cycle",
                     child_id=child_tag.id,
@@ -586,7 +588,9 @@ class OutboxEventProcessor:
             return []
 
         # Bulk lookup all required tags; missing ones are created on demand
-        found_tags_dict = await self.tag_repo.find_by_names(final_tag_names_ordered)
+        found_tags_dict = await self.tag_repo.find_by_names(
+            final_tag_names_ordered, user_id=user_id
+        )
 
         resolved_tags: list[Tag] = []
         seen_tag_ids: set[int] = set()
@@ -610,7 +614,9 @@ class OutboxEventProcessor:
 
         return resolved_tags
 
-    async def _would_create_cycle(self, parent_id: int, child_id: int | None) -> bool:
+    async def _would_create_cycle(
+        self, parent_id: int, child_id: int | None, *, user_id: str
+    ) -> bool:
         """Check if setting parent_id would create a circular reference."""
         if child_id is None:
             return False
@@ -628,7 +634,7 @@ class OutboxEventProcessor:
                 return True
 
             visited.add(current_id)
-            current_tag = await self.tag_repo.find_by_id(current_id)
+            current_tag = await self.tag_repo.find_by_id(current_id, user_id=user_id)
             if current_tag:
                 current_id = current_tag.parent_id
             else:

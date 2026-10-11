@@ -21,13 +21,6 @@ def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
     return str(fallback_tag.name)
 
 
-def _owner(tag: Tag) -> str:
-    """The owner of a tag read from the database, which always carries one."""
-    if tag.user_id is None:
-        raise ValueError(f"Tag {tag.id} was read without its owner")
-    return tag.user_id
-
-
 class TagService:
     """
     Service for tag mutations and event publishing.
@@ -35,6 +28,9 @@ class TagService:
     Operations on tags that change their data or life cycle use this service
     so DomainEvents (like TagUpdated and TagDeleted) are correctly emitted for
     downstream integrations (such as Google Contacts sync).
+
+    Every operation acts for one user (``user_id``) and sees only their tags:
+    another user's tag, or a parent or merge target of theirs, is not found.
     """
 
     def __init__(
@@ -62,7 +58,7 @@ class TagService:
         Create a tag owned by ``user_id`` (or return the existing one of the same
         name) as a committed unit of work.
 
-        Tag names are unique. To stay safe under a concurrent duplicate-name
+        Tag names are unique per owner. To stay safe under a concurrent duplicate-name
         race (e.g. two requests that both look up a tag by name, find nothing,
         and try to create it), the insert is guarded by a SAVEPOINT: if it
         violates the unique-name constraint, the SAVEPOINT rolls back just that
@@ -82,7 +78,7 @@ class TagService:
             TagNotFoundError: ``parent_id`` was provided but no such tag exists.
         """
         if parent_id is not None:
-            parent_tag = await self.tag_repo.find_by_id(parent_id)
+            parent_tag = await self.tag_repo.find_by_id(parent_id, user_id=user_id)
             if not parent_tag:
                 raise TagNotFoundError(parent_id)
 
@@ -99,7 +95,7 @@ class TagService:
             # Lost a create-or-get race: another writer already created this
             # name. The SAVEPOINT rolled the failed insert back, so the
             # connection is still usable — return the winner's tag.
-            existing = await self.tag_repo.find_by_name(name)
+            existing = await self.tag_repo.find_by_name(name, user_id=user_id)
             if existing is not None:
                 return existing
             # No row found despite the unique violation (e.g. the other writer
@@ -116,6 +112,8 @@ class TagService:
         description: str | None = None,
         parent_id: int | None = None,
         set_parent_null: bool = False,
+        *,
+        user_id: str,
     ) -> Tag:
         """
         Update a tag and publish a TagUpdated event.
@@ -129,18 +127,20 @@ class TagService:
             parent_id: New parent tag ID (if updating)
             set_parent_null: Set to True to move the tag to the root (clear parent_id)
         """
-        tag = await self.tag_repo.find_by_id(tag_id)
+        tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if not tag:
             raise TagNotFoundError(tag_id)
 
-        old_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
+        old_path_tags = await self.tag_hierarchy_service.get_tag_path(
+            tag_id, user_id=user_id
+        )
         old_path_str = _compute_path_string(old_path_tags, tag)
 
         changed_fields: dict[str, Any] = {}
 
         if name is not None:
             await self._apply_name_change(
-                tag, tag_id, name, transaction, changed_fields
+                tag, tag_id, name, transaction, changed_fields, user_id=user_id
             )
 
         if color is not None:
@@ -151,15 +151,23 @@ class TagService:
             tag.description = description
 
         await self._apply_parent_change(
-            tag, tag_id, parent_id, set_parent_null, transaction, changed_fields
+            tag,
+            tag_id,
+            parent_id,
+            set_parent_null,
+            transaction,
+            changed_fields,
+            user_id=user_id,
         )
 
         if changed_fields:
             # Re-trigger domain validation
             tag.__post_init__()
-            tag = await self.tag_repo.save(tag, user_id=_owner(tag))
+            tag = await self.tag_repo.save(tag, user_id=user_id)
 
-        new_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
+        new_path_tags = await self.tag_hierarchy_service.get_tag_path(
+            tag_id, user_id=user_id
+        )
         new_path_str = _compute_path_string(new_path_tags, tag)
 
         if old_path_str != new_path_str:
@@ -171,7 +179,7 @@ class TagService:
                 tag_name=new_path_str,
                 changed_fields=changed_fields,
                 transaction=transaction,
-                user_id=_owner(tag),
+                user_id=user_id,
             )
             await self.event_publisher.publish(event)
 
@@ -184,12 +192,14 @@ class TagService:
         name: str,
         transaction: AsyncConnection,
         changed_fields: dict[str, Any],
+        *,
+        user_id: str,
     ) -> None:
         """Validate and apply a tag name change."""
         if str(tag.name) == name:
             return
         await self.tag_hierarchy_service.validate_tag_name_uniqueness(
-            name, transaction, exclude_tag_id=tag_id
+            name, transaction, exclude_tag_id=tag_id, user_id=user_id
         )
         old_name = str(tag.name)
         tag.name = TagName(name)
@@ -215,17 +225,25 @@ class TagService:
         set_parent_null: bool,
         transaction: AsyncConnection,
         changed_fields: dict[str, Any],
+        *,
+        user_id: str,
     ) -> None:
-        """Validate and apply a parent_id change, or clear it if requested."""
+        """Validate and apply a parent_id change, or clear it if requested.
+
+        The parent must be one of ``user_id``'s tags; another user's is not found.
+        """
         # An explicit parent wins over set_parent_null. The "no change needed"
         # case is nested rather than flat so that supplying a parent_id equal to
         # the current parent does not fall through and clear it instead.
         if parent_id is not None:
             if tag.parent_id != parent_id:
                 await self.tag_hierarchy_service.validate_parent_child_relationship(
-                    parent_id=parent_id, child_id=tag_id, transaction=transaction
+                    parent_id=parent_id,
+                    child_id=tag_id,
+                    transaction=transaction,
+                    user_id=user_id,
                 )
-                parent_tag = await self.tag_repo.find_by_id(parent_id)
+                parent_tag = await self.tag_repo.find_by_id(parent_id, user_id=user_id)
                 if not parent_tag:
                     raise TagNotFoundError(parent_id)
                 old_parent = tag.parent_id
@@ -237,15 +255,19 @@ class TagService:
             changed_fields["parent_id"] = (old_parent, None)
 
     @transactional
-    async def delete_tag(self, tag_id: int, transaction: AsyncConnection) -> None:
+    async def delete_tag(
+        self, tag_id: int, transaction: AsyncConnection, *, user_id: str
+    ) -> None:
         """
         Delete a tag cascade removing it from contacts, and publish TagDeleted event.
         """
-        tag = await self.tag_repo.find_by_id(tag_id)
+        tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if not tag:
             raise TagNotFoundError(tag_id)
 
-        path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
+        path_tags = await self.tag_hierarchy_service.get_tag_path(
+            tag_id, user_id=user_id
+        )
         path_str = _compute_path_string(path_tags, tag)
 
         # The assignment rows go with it via cascade, which no application code
@@ -259,13 +281,18 @@ class TagService:
             tag_id=tag_id,
             tag_name=path_str,
             transaction=transaction,
-            user_id=_owner(tag),
+            user_id=user_id,
         )
         await self.event_publisher.publish(event)
 
     @transactional
     async def merge_tags(
-        self, source_id: int, target_id: int, transaction: AsyncConnection
+        self,
+        source_id: int,
+        target_id: int,
+        transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """
         Merge source tag into target tag.
@@ -278,8 +305,8 @@ class TagService:
         if source_id == target_id:
             raise ValueError("Source and target tags must be different")
 
-        source_tag = await self.tag_repo.find_by_id(source_id)
-        target_tag = await self.tag_repo.find_by_id(target_id)
+        source_tag = await self.tag_repo.find_by_id(source_id, user_id=user_id)
+        target_tag = await self.tag_repo.find_by_id(target_id, user_id=user_id)
 
         if not source_tag:
             raise TagNotFoundError(source_id)
@@ -291,7 +318,7 @@ class TagService:
         while current and current.parent_id:
             if current.parent_id == source_id:
                 raise ValueError("Cannot merge a tag into its own descendant")
-            current = await self.tag_repo.find_by_id(current.parent_id)
+            current = await self.tag_repo.find_by_id(current.parent_id, user_id=user_id)
 
         from sqlalchemy import text
 
@@ -337,4 +364,4 @@ class TagService:
         )
 
         # 4. Delete the source tag itself (this will publish the event)
-        await self.delete_tag(source_id, transaction)
+        await self.delete_tag(source_id, transaction, user_id=user_id)

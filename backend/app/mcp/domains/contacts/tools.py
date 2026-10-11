@@ -1441,9 +1441,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             int, Field(description="Maximum number of tags to return", ge=1, le=100)
         ] = 50,
         tag_repo: TagRepository = mcp_depends(get_tag_repository),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
-        List all available tags for AI-managed contact categorization.
+        List the current user's tags for AI-managed contact categorization.
 
         Retrieves all tags that can be used to categorize contacts, providing
         AI with a comprehensive view of available contact categories and
@@ -1462,8 +1463,8 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         logger.info("MCP: Listing tags", limit=limit)
 
         try:
-            # Get all tags from repository
-            all_tags = await tag_repo.get_all()
+            # Get the user's tags from repository
+            all_tags = await tag_repo.get_all(user_id=user_id)
             # Apply limit manually since repository doesn't support it
             tags = all_tags[:limit] if limit < len(all_tags) else all_tags
 
@@ -1533,6 +1534,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = False,
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Update an existing contact tag's name, colour, description, or parent.
@@ -1574,6 +1576,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 description=description,
                 parent_id=parsed_parent_id,
                 set_parent_null=move_to_root,
+                user_id=user_id,
             )
 
             response = UpdatedTagInfo(
@@ -1599,6 +1602,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tag_id: Annotated[str, Field(description="ID of the contact tag to delete")],
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Delete a contact tag, removing it from every contact it is assigned to.
@@ -1621,7 +1625,11 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         try:
             parsed_tag_id = _parse_contact_tag_id("tag_id", tag_id)
             # The service owns the unit of work; MCP tools never open transactions.
-            await tag_service.delete_tag(tag_id=parsed_tag_id, transaction=connection)
+            await tag_service.delete_tag(
+                tag_id=parsed_tag_id,
+                transaction=connection,
+                user_id=user_id,
+            )
 
             response = ContactActionResponse(
                 status="success",
@@ -1646,6 +1654,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ],
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Merge a source contact tag into a target contact tag.
@@ -1672,6 +1681,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 source_id=parsed_source_id,
                 target_id=parsed_target_id,
                 transaction=connection,
+                user_id=user_id,
             )
 
             response = ContactActionResponse(

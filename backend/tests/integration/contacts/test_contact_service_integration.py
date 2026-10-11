@@ -113,7 +113,9 @@ class TestContactServiceIntegration:
         names = {str(t.name) for t in (created.tags or [])}
         assert names == {"Friend", "Colleague"}
         # The new tag was persisted (committed via the unit of work).
-        assert await tag_repo.find_by_name("Colleague") is not None
+        assert (
+            await tag_repo.find_by_name("Colleague", user_id=TEST_USER_ID) is not None
+        )
 
     @pytest.mark.asyncio
     async def test_create_contact_tag_names_are_create_or_get(
