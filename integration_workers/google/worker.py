@@ -60,7 +60,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import from the installed core_shared package
-from api_models import ListConnectionsResponse
+from api_models import GooglePerson, ListConnectionsResponse
 
 # Import worker-specific services
 from event_transformer import google_event_times
@@ -1589,6 +1589,92 @@ async def _find_existing_external_ids(
     return {row[0] for row in result.fetchall()}
 
 
+async def _emit_contact_sync_events(
+    session: AsyncSession,
+    connections: list[GooglePerson],
+    transformer: GoogleContactTransformer,
+    google_account_email: str,
+    metrics: dict[str, Any],
+    user_id: str | int,
+    *,
+    force_apply: bool = False,
+) -> tuple[int, int]:
+    """
+    Add a contact sync outbox event for each person on one page of results.
+
+    A person is emitted as 'updated' when the backend already holds sync
+    metadata for it and as 'created' otherwise. Both full syncs and incremental
+    deltas return remotely added contacts, so the backend must not receive a
+    brand-new contact as an update ("Contact not found for update").
+
+    Args:
+        session: Database session (events commit with the job's transaction)
+        connections: People from one page of the connections list
+        transformer: Contact transformer for this user
+        google_account_email: Google account email
+        metrics: Metrics dictionary to update
+        user_id: Owning user ID
+        force_apply: Apply each person even when its etag is unchanged
+
+    Returns:
+        The number of (created, updated) events added
+    """
+    created_count = 0
+    updated_count = 0
+
+    # Transform and serialize contacts, handling per-item failures
+    serialized_contacts = _process_contacts_batch(
+        connections, transformer, google_account_email, metrics
+    )
+
+    # Determine which contacts already exist via sync metadata
+    batch_external_ids = [
+        google_person.resource_name for google_person, _ in serialized_contacts
+    ]
+    existing_external_ids = await _find_existing_external_ids(
+        session, batch_external_ids, "google", user_id=str(user_id)
+    )
+
+    for google_person, contact_data in serialized_contacts:
+        try:
+            sync_type = (
+                "updated"
+                if google_person.resource_name in existing_external_ids
+                else "created"
+            )
+
+            outbox_event = OutboxEvent.create_contact_sync_event(
+                contact_data=contact_data,
+                integration_source="google",
+                external_id=google_person.resource_name,
+                sync_type=sync_type,
+                etag=google_person.etag,
+                user_id=str(user_id),
+                sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
+                force_apply=force_apply,
+            )
+
+            # Add to session (will be committed with transaction)
+            session.add(outbox_event)
+
+            if sync_type == "created":
+                created_count += 1
+            else:
+                updated_count += 1
+            metrics["contacts_processed"] += 1
+
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "Failed to create outbox event for contact",
+                google_account_email=google_account_email,
+                contact_resource_name=google_person.resource_name,
+                error=str(e),
+            )
+            metrics["errors"] = metrics.get("errors", 0) + 1
+
+    return created_count, updated_count
+
+
 async def _perform_full_sync(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -1634,64 +1720,19 @@ async def _perform_full_sync(
         if not contacts_response.connections:
             break
 
-        # Transform and serialize contacts, handling per-item failures
-        serialized_contacts = _process_contacts_batch(
+        page_created, page_updated = await _emit_contact_sync_events(
+            session,
             contacts_response.connections,
             transformer,
             google_account_email,
             metrics,
+            user_id,
+            # A full sync re-applies every person, etag unchanged or
+            # not, so a field Google newly owns reaches every contact.
+            force_apply=True,
         )
-
-        # Determine which contacts already exist via sync metadata
-        batch_external_ids = [
-            google_person.resource_name for google_person, _ in serialized_contacts
-        ]
-        existing_external_ids = await _find_existing_external_ids(
-            session, batch_external_ids, "google", user_id=str(user_id)
-        )
-
-        # Process each contact using outbox pattern
-        for google_person, contact_data in serialized_contacts:
-            try:
-                # Use 'updated' for contacts that already have sync metadata,
-                # 'created' for new contacts
-                sync_type = (
-                    "updated"
-                    if google_person.resource_name in existing_external_ids
-                    else "created"
-                )
-
-                # Create outbox event for contact sync
-                outbox_event = OutboxEvent.create_contact_sync_event(
-                    contact_data=contact_data,
-                    integration_source="google",
-                    external_id=google_person.resource_name,
-                    sync_type=sync_type,
-                    etag=google_person.etag,
-                    user_id=str(user_id),
-                    sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
-                    # A full sync re-applies every person, etag unchanged or
-                    # not, so a field Google newly owns reaches every contact.
-                    force_apply=True,
-                )
-
-                # Add to session (will be committed with transaction)
-                session.add(outbox_event)
-
-                if sync_type == "created":
-                    created_count += 1
-                else:
-                    updated_count += 1
-                metrics["contacts_processed"] += 1
-
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    "Failed to create outbox event for contact",
-                    google_account_email=google_account_email,
-                    contact_resource_name=google_person.resource_name,
-                    error=str(e),
-                )
-                metrics["errors"] = metrics.get("errors", 0) + 1
+        created_count += page_created
+        updated_count += page_updated
 
         # Check for next page
         page_token = contacts_response.next_page_token
@@ -1726,6 +1767,11 @@ async def _perform_incremental_sync(
 ) -> dict[str, Any]:
     """
     Perform an incremental sync of Google Contacts using sync token.
+
+    A delta can span several pages (e.g. after a bulk edit in Google). Every
+    page is requested with the stored sync token plus that page's token, and
+    only the final page carries the next sync token, which is saved once all
+    pages are imported.
 
     Args:
         session: Database session
@@ -1766,74 +1812,39 @@ async def _perform_incremental_sync(
             session, client, google_account_email, metrics, user_id, job_id
         )
 
-    # Fetch changes since last sync
-    response = await client.list_connections(sync_token=sync_token)
-    contacts_response = ListConnectionsResponse(**response)
-
-    total_processed = 0
     created_count = 0
     updated_count = 0
-
-    # Transform and serialize contacts, handling per-item failures
     transformer = await _create_transformer(client, user_id)
-    serialized_contacts = _process_contacts_batch(
-        contacts_response.connections,
-        transformer,
-        google_account_email,
-        metrics,
-    )
+    page_token = None
 
-    # An incremental delta returns contacts added remotely since the last sync
-    # as well as modified ones. Emit 'created' for contacts the backend has not
-    # seen and 'updated' for known ones, mirroring the full-sync decision, so the
-    # backend doesn't reject brand-new contacts as "Contact not found for update".
-    batch_external_ids = [
-        google_person.resource_name for google_person, _ in serialized_contacts
-    ]
-    existing_external_ids = await _find_existing_external_ids(
-        session, batch_external_ids, "google", user_id=str(user_id)
-    )
+    while True:
+        # Fetch the next page of changes since the last sync. A page may be
+        # empty yet still have a next page, so only the page token ends the loop.
+        response = await client.list_connections(
+            sync_token=sync_token, page_token=page_token
+        )
+        contacts_response = ListConnectionsResponse(**response)
 
-    # Process changed contacts using outbox pattern
-    for google_person, contact_data in serialized_contacts:
-        try:
-            sync_type = (
-                "updated"
-                if google_person.resource_name in existing_external_ids
-                else "created"
-            )
+        page_created, page_updated = await _emit_contact_sync_events(
+            session,
+            contacts_response.connections,
+            transformer,
+            google_account_email,
+            metrics,
+            user_id,
+        )
+        created_count += page_created
+        updated_count += page_updated
 
-            # Create outbox event for contact sync
-            outbox_event = OutboxEvent.create_contact_sync_event(
-                contact_data=contact_data,
-                integration_source="google",
-                external_id=google_person.resource_name,
-                sync_type=sync_type,
-                etag=google_person.etag,
-                user_id=str(user_id),
-                sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
-            )
+        page_token = contacts_response.next_page_token
+        if not page_token:
+            break
 
-            # Add to session (will be committed with transaction)
-            session.add(outbox_event)
+        # Check if job has been cancelled before fetching the next page
+        if job_id and await _check_job_cancelled(session, job_id):
+            raise JobCancelledException(job_id=job_id)
 
-            total_processed += 1
-            if sync_type == "created":
-                created_count += 1
-            else:
-                updated_count += 1
-            metrics["contacts_processed"] += 1
-
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "Failed to create outbox event for contact",
-                google_account_email=google_account_email,
-                contact_resource_name=google_person.resource_name,
-                error=str(e),
-            )
-            metrics["errors"] = metrics.get("errors", 0) + 1
-
-    # Save new sync token
+    # Save new sync token (only the last page carries it)
     if contacts_response.next_sync_token:
         await _save_sync_token(
             session, google_account_email, contacts_response.next_sync_token, user_id
@@ -1842,7 +1853,7 @@ async def _perform_incremental_sync(
     logger.info(
         "Incremental sync completed",
         google_account_email=google_account_email,
-        total_processed=total_processed,
+        total_processed=created_count + updated_count,
         contacts_created=created_count,
         contacts_updated=updated_count,
     )

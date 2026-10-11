@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 from worker import sync_google_contacts
@@ -308,3 +309,134 @@ class TestIncrementalSyncIntegration:
         assert [tuple(row) for row in updated_scopes] == [
             (GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json"), False)
         ]
+
+    async def test_incremental_sync_follows_next_page_token(self, db_session):
+        """A multi-page delta imports every page and saves the last page's token.
+
+        Google splits a large delta (e.g. after a bulk edit) across pages; only
+        the final page carries nextSyncToken. Stopping after the first page would
+        drop the later changes while the saved token moved past them.
+        """
+        test_email = "incremental_paged_test@example.com"
+        test_user = "1"
+        fernet_key = await _seed_incremental_integration(
+            db_session, test_email, test_user, "paged_sync_token"
+        )
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        ctx = {
+            "session_factory": mock_session_factory,
+            "redis": None,
+            "job_id": "test_job_paged",
+        }
+
+        mock_connections = MagicMock()
+        mock_list = MagicMock()
+        mock_list.execute.side_effect = [
+            {
+                "connections": [{"resourceName": "people/page1", "etag": "etag_1"}],
+                "nextPageToken": "page_2_token",
+            },
+            {
+                "connections": [{"resourceName": "people/page2", "etag": "etag_2"}],
+                "nextSyncToken": "sync_token_after_page_2",
+            },
+        ]
+        mock_connections.list.return_value = mock_list
+        mock_people = MagicMock()
+        mock_people.connections.return_value = mock_connections
+        mock_service = MagicMock()
+        mock_service.people.return_value = mock_people
+
+        with (
+            patch(
+                "worker.settings.encryption_key.get_secret_value",
+                return_value=fernet_key.decode(),
+            ),
+            patch("google_client.build", return_value=mock_service),
+        ):
+            result = await sync_google_contacts(
+                ctx=ctx,
+                google_account_email=test_email,
+                user_id=test_user,
+                sync_type="smart",
+            )
+
+        # Every page request keeps the sync token; later pages add the page token.
+        list_calls = mock_connections.list.call_args_list
+        assert [call.kwargs.get("syncToken") for call in list_calls] == [
+            "paged_sync_token",
+            "paged_sync_token",
+        ]
+        assert [call.kwargs.get("pageToken") for call in list_calls] == [
+            None,
+            "page_2_token",
+        ]
+
+        assert result.get("contacts_created") == 2
+
+        emitted = await db_session.execute(
+            text(
+                """
+                SELECT (event_data::jsonb)->>'external_id' FROM outbox_events
+                WHERE event_type = 'contact.created'
+                ORDER BY 1
+                """
+            )
+        )
+        assert [row[0] for row in emitted] == ["people/page1", "people/page2"]
+
+        stored_token = await db_session.execute(
+            text(
+                "SELECT contacts_sync_token FROM user_google_integration "
+                "WHERE google_account_email = :email"
+            ),
+            {"email": test_email},
+        )
+        assert stored_token.scalar() == "sync_token_after_page_2"
+
+
+async def _seed_incremental_integration(
+    db_session: AsyncSession, email: str, user_id: str, sync_token: str
+) -> bytes:
+    """Seed decryptable Google auth and a stored contacts sync token.
+
+    Returns the Fernet key the auth tokens were encrypted with, for patching
+    the worker's encryption key.
+    """
+    now = datetime.now(UTC)
+    fernet_key = Fernet.generate_key()
+    fernet = Fernet(fernet_key)
+    await db_session.execute(
+        text(
+            """
+            INSERT INTO user_google_auth (user_id, google_account_email,
+                                          encrypted_access_token, encrypted_refresh_token,
+                                          expires_at, created_at, updated_at)
+            VALUES (:user_id, :email, :token, :refresh, :expiry, :now, :now)
+            """
+        ),
+        {
+            "user_id": user_id,
+            "email": email,
+            "token": fernet.encrypt(b"access_token"),
+            "refresh": fernet.encrypt(b"refresh_token"),
+            "expiry": now + timedelta(hours=1),
+            "now": now,
+        },
+    )
+    await db_session.execute(
+        text(
+            """
+            INSERT INTO user_google_integration (user_id, google_account_email,
+                                                 contacts_sync_token, created_at, updated_at)
+            VALUES (:user_id, :email, :sync_token, :now, :now)
+            """
+        ),
+        {"user_id": user_id, "email": email, "sync_token": sync_token, "now": now},
+    )
+    await db_session.commit()
+    return fernet_key
