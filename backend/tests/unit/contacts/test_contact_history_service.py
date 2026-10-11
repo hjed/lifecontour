@@ -3,12 +3,16 @@
 ITER12-003 Phase 2 removed the synchronous ``record_*`` write methods (contact
 history is now produced by the event-driven HistoryProjectionConsumer). Only the
 read methods remain, so only they are tested here.
+
+Both reads prove the contact is the reader's before touching the history: a
+contact's history is as much the contact as its name is.
 """
 
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 from app.core.contacts.services.contact_history_service import ContactHistoryService
 
@@ -27,9 +31,16 @@ class TestContactHistoryService:
         return AsyncMock()
 
     @pytest.fixture
-    def service(self, mock_history_repo):
+    def mock_contact_repo(self):
+        """The reader holds the contact unless a test says otherwise."""
+        repo = AsyncMock()
+        repo.contact_exists.return_value = True
+        return repo
+
+    @pytest.fixture
+    def service(self, mock_history_repo, mock_contact_repo):
         """Create ContactHistoryService instance."""
-        return ContactHistoryService(mock_history_repo)
+        return ContactHistoryService(mock_history_repo, mock_contact_repo)
 
     @pytest.mark.asyncio
     async def test_get_contact_history(
@@ -49,38 +60,12 @@ class TestContactHistoryService:
         mock_history_repo.get_contact_history.return_value = expected_entries
 
         result = await service.get_contact_history(
-            1, limit=50, _transaction=mock_transaction
+            1, limit=50, _transaction=mock_transaction, reader_user_id="reader-9"
         )
 
         assert result == expected_entries
         mock_history_repo.get_contact_history.assert_called_once_with(
-            1, 50, 0, reader_user_id=None
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_entity_history(
-        self, service, mock_history_repo, mock_transaction
-    ):
-        """Test getting entity history."""
-        expected_entries = [
-            ContactFieldHistoryEntry(
-                entity_type="contact_method",
-                entity_id=1,
-                field_name="value",
-                old_value="old@example.com",
-                new_value="new@example.com",
-                changed_by="system",
-            )
-        ]
-        mock_history_repo.get_entity_history.return_value = expected_entries
-
-        result = await service.get_entity_history(
-            "contact_method", 1, _transaction=mock_transaction
-        )
-
-        assert result == expected_entries
-        mock_history_repo.get_entity_history.assert_called_once_with(
-            "contact_method", 1
+            1, 50, 0, reader_user_id="reader-9"
         )
 
     @pytest.mark.asyncio
@@ -145,3 +130,27 @@ class TestContactHistoryService:
         mock_history_repo.get_contact_history_count.assert_called_once_with(
             1, reader_user_id="reader-9"
         )
+
+    @pytest.mark.asyncio
+    async def test_another_users_contact_has_no_history_to_read(
+        self, service, mock_history_repo, mock_contact_repo
+    ):
+        """Not found, exactly as a missing contact, before any history is read."""
+        mock_contact_repo.contact_exists.return_value = False
+
+        with pytest.raises(ContactNotFoundError):
+            await service.get_contact_history(1, reader_user_id="reader-9")
+
+        mock_contact_repo.contact_exists.assert_awaited_once_with(1, user_id="reader-9")
+        mock_history_repo.get_contact_history.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_another_users_contact_has_no_history_to_count(
+        self, service, mock_history_repo, mock_contact_repo
+    ):
+        mock_contact_repo.contact_exists.return_value = False
+
+        with pytest.raises(ContactNotFoundError):
+            await service.get_contact_history_count(1, reader_user_id="reader-9")
+
+        mock_history_repo.get_contact_history_count.assert_not_called()

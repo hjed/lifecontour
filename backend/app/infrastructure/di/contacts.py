@@ -167,9 +167,11 @@ class ContactProvider(Provider):
 
     @provide
     def get_contact_history_service(
-        self, history_repo: ContactFieldHistoryRepository
+        self,
+        history_repo: ContactFieldHistoryRepository,
+        contact_repo: ContactRepository,
     ) -> ContactHistoryService:
-        return ContactHistoryService(history_repo)
+        return ContactHistoryService(history_repo, contact_repo)
 
     @provide
     def get_tag_hierarchy_service(self, tag_repo: TagRepository) -> TagHierarchyService:

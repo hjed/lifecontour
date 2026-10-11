@@ -799,7 +799,6 @@ async def update_contact_note_field(
 async def get_contact_history(
     contact_id: int,
     request: Request,
-    contact_service: FromDishka[ContactService],
     history_service: FromDishka[ContactHistoryService],
     user: FromDishka[SessionUser],
     page: Annotated[int, Query(description=PAGE_NUMBER_DESCRIPTION, ge=1)] = 1,
@@ -815,17 +814,12 @@ async def get_contact_history(
     """
     base_url = get_request_base_url(request)
 
-    # Verify contact exists
-    contact = await contact_service.get_contact_by_id(contact_id, user_id=user.id)
-    if not contact:
-        raise ContactNotFoundError(contact_id)
-
     # Calculate offset for database-level pagination
     offset = (page - 1) * limit
 
-    # Get paginated history entries from database
-    # The reader is passed to both: this feed carries a linked task's rows, and
-    # a task is owned.
+    # Get paginated history entries from database. The service proves the
+    # contact is the reader's first (404 otherwise), and the reader scopes the
+    # linked task rows this feed carries.
     history_entries = await history_service.get_contact_history(
         contact_id=contact_id,
         limit=limit,

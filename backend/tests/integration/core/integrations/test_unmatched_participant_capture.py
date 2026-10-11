@@ -14,8 +14,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
 from tests.integration.core.integrations.journal_sync_seeding import (
+    USER_ID,
     build_processor,
     create_calendar,
     sync_event,
@@ -43,9 +44,14 @@ async def _unmatched_rows(
 
 
 async def _create_contact_with_email(
-    connection: AsyncConnection, email: str, *, archived: bool = False
+    connection: AsyncConnection,
+    email: str,
+    *,
+    archived: bool = False,
+    user_id: str = USER_ID,
 ) -> int:
-    contact_id = await seed_contact(connection, first_name="Known")
+    """A contact holding ``email``, owned by the synced journals' owner by default."""
+    contact_id = await seed_contact(connection, first_name="Known", user_id=user_id)
     await connection.execute(
         text(
             """
@@ -108,6 +114,35 @@ class TestUnmatchedParticipantCapture:
             }
         }
         assert await _linked_contact_ids(async_connection, journal_id) == {known_id}
+
+    async def test_an_email_only_another_user_holds_is_unmatched(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Attendees resolve within the journal's owner's contacts only.
+
+        Another user's contact holding the address is invisible: the attendee is
+        recorded as unmatched for the journal's owner, never linked to it.
+        """
+        await _create_contact_with_email(
+            async_connection, "shared@x.com", user_id=OTHER_USER_ID
+        )
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="evt-capture-foreign",
+                contact_relationships=[_invitee("shared@x.com")],
+            )
+        )
+
+        journal_id = result["journal_id"]
+        assert await _linked_contact_ids(async_connection, journal_id) == set()
+        assert set(await _unmatched_rows(async_connection, journal_id)) == {
+            "shared@x.com"
+        }
 
     async def test_update_replaces_the_journals_unmatched_emails(
         self, async_connection: AsyncConnection

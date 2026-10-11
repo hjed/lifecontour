@@ -206,14 +206,16 @@ class ContactResolver:
         """Initialize with database connection."""
         self.connection = connection
 
-    async def resolve_by_email(self, email: str) -> int | None:
-        """Resolve a contact by email address, ignoring case and whitespace.
+    async def resolve_by_email(self, email: str, *, user_id: str) -> int | None:
+        """Resolve one of ``user_id``'s contacts by email, ignoring case and whitespace.
 
         Args:
             email: Email address to search for
+            user_id: The journal's owner; only their contacts can match
 
         Returns:
-            Contact ID if found, None otherwise
+            Contact ID if found, None otherwise (including when only another
+            user's contact holds the address)
         """
         result = await self.connection.execute(
             text("""
@@ -222,9 +224,10 @@ class ContactResolver:
                 JOIN contact_methods cm ON c.id = cm.contact_id
                 WHERE cm.method_type = 'email'
                   AND LOWER(BTRIM(cm.value)) = :email
+                  AND c.user_id = :user_id
                 LIMIT 1
             """),
-            {"email": normalise_participant_email(email)},
+            {"email": normalise_participant_email(email), "user_id": user_id},
         )
         row = result.fetchone()
         return row.id if row else None
@@ -487,6 +490,7 @@ class JournalOutboxEventProcessor:
         await self._sync_contact_relationships(
             journal_id=created_journal.id,
             contact_relationships=contact_relationships,
+            user_id=created_journal.user_id,
         )
 
         # Save fitness data and journal types if present (Strava-sourced events)
@@ -773,6 +777,7 @@ class JournalOutboxEventProcessor:
         await self._sync_contact_relationships(
             journal_id=existing_journal_id,
             contact_relationships=contact_relationships,
+            user_id=existing_journal.user_id,
         )
 
         # Update fitness data and journal types if present (Strava-sourced events)
@@ -2302,11 +2307,15 @@ class JournalOutboxEventProcessor:
         self,
         emails: list[str],
         journal_id: int,
+        *,
+        user_id: str,
     ) -> dict[str, int]:
-        """Resolve a list of emails to contact IDs, skipping unknown emails."""
+        """Resolve emails to ``user_id``'s contact IDs, skipping unknown emails."""
         resolved: dict[str, int] = {}
         for email in emails:
-            contact_id = await self.contact_resolver.resolve_by_email(email)
+            contact_id = await self.contact_resolver.resolve_by_email(
+                email, user_id=user_id
+            )
             if contact_id is not None:
                 resolved[email] = contact_id
             else:
@@ -2376,12 +2385,16 @@ class JournalOutboxEventProcessor:
         self,
         journal_id: int,
         contact_relationships: list[dict[str, Any]],
+        *,
+        user_id: str,
     ) -> None:
         """Sync contact relationships for a journal from inbound data.
 
-        Emails that resolve to no contact are recorded as the journal's
-        unmatched participants (see ``_unmatched_entries``), replacing whatever
-        the previous sync recorded.
+        Emails resolve within ``user_id``'s contacts only, the journal's owner:
+        a journal's people are its owner's contacts. Emails that resolve to no
+        contact — including one only another user's contact holds — are
+        recorded as the journal's unmatched participants (see
+        ``_unmatched_entries``), replacing whatever the previous sync recorded.
         """
         if contact_relationships is None:
             return
@@ -2402,7 +2415,7 @@ class JournalOutboxEventProcessor:
 
             emails = [p["email"] for p in payloads]
             resolved_contact_ids = await self._resolve_emails_to_contact_ids(
-                emails, journal_id
+                emails, journal_id, user_id=user_id
             )
             for entry in self._unmatched_entries(
                 journal_id, rel_type, payloads, resolved_contact_ids

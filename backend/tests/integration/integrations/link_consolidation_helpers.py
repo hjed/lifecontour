@@ -40,7 +40,7 @@ def build_contact_service(conn: AsyncConnection) -> ContactService:
         event_publisher=event_publisher,
         address_validation_service=AddressValidationService(),
         contact_validation_service=ContactValidationService(contact_repo),
-        history_service=ContactHistoryService(history_repo),
+        history_service=ContactHistoryService(history_repo, contact_repo),
         tag_hierarchy_service=tag_hierarchy_service,
         tag_service=TagService(
             tag_repo=tag_repo,
