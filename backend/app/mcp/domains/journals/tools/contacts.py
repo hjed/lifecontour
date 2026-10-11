@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from core_shared.models.journals import (
+    Journal,
     JournalContactRelationship,
     JournalContactRelationshipType,
 )
@@ -11,6 +12,8 @@ from fastmcp.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.services.contact_service import ContactService
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
@@ -30,6 +33,7 @@ from app.mcp.shared.annotations import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
+    get_contact_service,
     get_current_user_id,
     get_journal_contact_service,
     mcp_depends,
@@ -51,6 +55,8 @@ async def get_contact_journals(
         ),
     ] = 20,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    contact_service: ContactService = mcp_depends(get_contact_service),
+    user_id: str = mcp_depends(get_current_user_id),
 ) -> str:
     """
     Get journals associated with a contact.
@@ -66,19 +72,24 @@ async def get_contact_journals(
         JSON string containing AI-friendly journal summaries
 
     Raises:
-        ContactNotFoundError: If the contact with the given ID does not exist
+        ContactNotFoundError: If the contact does not exist or is another
+            user's; the two are answered alike
     """
-    # Create repositories
+    if await contact_service.get_contact_by_id(contact_id, user_id=user_id) is None:
+        raise ContactNotFoundError(contact_id)
+
     contact_rel_repo = SqlJournalContactRelationshipRepository(db_connection)
     journal_repo = SqlJournalRepository(db_connection)
 
-    # Get relationships
     relationships = await contact_rel_repo.get_by_contact(contact_id)
 
-    # Get journals
-    journals = []
-    for rel in relationships[:limit]:
-        journal = await journal_repo.find_by_id(rel.journal_id)
+    # Owner-scoped too: a link to another user's journal names nothing here,
+    # and is not counted against the limit.
+    journals: list[Journal] = []
+    for rel in relationships:
+        if len(journals) >= limit:
+            break
+        journal = await journal_repo.find_by_id_for_user(rel.journal_id, user_id)
         if journal:
             journals.append(journal)
 

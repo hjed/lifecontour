@@ -206,7 +206,7 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 **Acceptance Criteria (task-level):**
 - [x] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
 - [x] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
-- [ ] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
+- [x] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
 - [ ] Contact search, global search and search suggestions return only the acting user's contacts.
 - [x] Worker-published contact sync events and backend contact events carry `user_id`.
 
@@ -683,39 +683,106 @@ its callers. Every layer is deployable on its own.
 - **Phase 6:** the MCP relationship update and delete tools (`mcp/domains/contacts/tools.py`) still
   call `get_relationship_by_id` directly. Their isolation suite should check that a foreign contact
   gets the contact not-found payload; `get_relationship_of_contact` is the method to use if it does
-  not.
+  not. *(Resolved in Phase 6: both now use it.)*
 - **Phase 11:** `test_journal_ownership.py` has no owner counterpart. Add one (replay its
   `CROSS_USER_REQUESTS` for the owner, expect success) when Phase 11 extends that suite, so its
   404s are proven to come from the ownership check.
 
 ---
 
-#### Phase 6: MCP parity for contacts
+#### Phase 6: MCP parity for contacts ✅ DONE
+
+**Status:** ✅ DONE — every MCP tool that takes a contact id answers another user's contact exactly as a missing one and changes nothing, while the owner's identical call succeeds (55 tests); two reds fixed (`get_contact_journals`, relationship update/remove).
 
 **PR Size:** ~400 lines
 
 > **Already done in Phase 4:** every contact tool that calls a by-id, list or read service
 > method, plus the Immich conflict tool and the journal-contact tool, resolves the current user and
 > passes it to the scoped services; mypy required it, since the signatures changed. What remains is the isolation suite below,
-> plus any tool its reds turn up.
+> plus any tool its reds turn up. *(Phase 6: not quite — `get_contact_journals` took no user;
+> see Reds found.)*
 
-- [ ] All 19 tools in `mcp/domains/contacts/tools.py` and the contact-touching integration tools
-  (`get_contact_by_external_id`, athlete-mapping create/link, Immich conflict resolve, suggestion
-  accept/ignore) resolve `user_id = await get_current_user_id()` and pass it to the scoped service.
-  Tools stay controller-equivalent: no transactions opened.
-- [ ] Not-found payloads for a foreign id are identical to a missing id.
+- [x] All 19 tools in `mcp/domains/contacts/tools.py` and the contact-touching integration tools
+  (`get_contact_by_external_id`, ~~athlete-mapping create/link~~ (no such MCP tool exists; only
+  `get_strava_athlete_mappings`), Immich conflict resolve, suggestion accept/ignore) resolve
+  `user_id = await get_current_user_id()` and pass it to the scoped service.
+  Tools stay controller-equivalent: no transactions opened. **13 of the 19:** every tool that names
+  a contact does; `search_contacts` and `global_search` resolve no user until Phase 7, and
+  `list_contact_tags`, `update_contact_tag`, `delete_contact_tag` and `merge_contact_tags` until
+  Phase 8 (tags are still global). **Divergence:** `resolve_immich_conflict`
+  still opens `unit_of_work` inside the tool, as its REST controller does; tracked in
+  [#1750](https://github.com/hjed/lifecontour/issues/1750).
+- [x] Not-found payloads for a foreign id are identical to a missing id.
 
 **Required Test Coverage:**
-- [ ] **Integration (MCP, written first):** `backend/tests/integration/mcp/test_mcp_contact_ownership.py`
+- [x] **Integration (MCP, written first):** `backend/tests/integration/mcp/test_mcp_contact_ownership.py`
   modelled on `test_mcp_journal_owner_identity.py` — for every by-id tool, a foreign contact yields
-  the not-found payload and its rows are unchanged; `list_contacts` / `search_contacts` /
+  the not-found payload and its rows are unchanged; `list_contacts` /
   `list_upcoming_important_dates` exclude it. Uses `authenticated_lifespan_client`.
-- [ ] **Unit:** tool argument plumbing where the tool has unit tests today.
+  `search_contacts` moved to Phase 7 (see Decisions).
+- [x] **Unit:** tool argument plumbing where the tool has unit tests today — none of the changed
+  tools has one (`tests/unit/mcp/domains/contacts/test_tools.py` covers registration and schemas),
+  so the integration suite is the coverage; the existing schema and annotation unit tests stay green.
 
 **E2E:** not applicable.
 
-**Required Documentation Updates:** none — MCP tool docs live in the docstrings/schemas
-(`docs/mcp-setup.md` is not per-tool).
+**Required Documentation Updates:** none required — MCP tool docs live in the docstrings/schemas
+(`docs/mcp-setup.md` is not per-tool). Done anyway: `testing-strategy.md` (the MCP suite's shape)
+and `api-design.md` (MCP joins the "404, never 403" rule).
+
+**Reds found and fixed:**
+- **`get_contact_journals` served another user's journals.** It took no user: it read the contact's
+  journal links unscoped and loaded each journal with the unscoped `find_by_id`, so naming a foreign
+  contact returned that user's journal summaries, while a missing id returned an empty success. It
+  now proves the contact through `ContactService.get_contact_by_id(user_id)` (`ContactNotFoundError`
+  for missing and foreign alike, as REST `GET /contacts/{id}/journals` does) and loads journals with
+  `find_by_id_for_user`, counting only the caller's journals against `limit` (review caught the
+  first version truncating to `limit` before the owner filter). A missing contact now answers
+  "Contact not found" instead of "Found 0".
+- **`update_contact_relationship` / `remove_contact_relationship` never proved the contact** (the
+  Phase 5 follow-up). The relationship lookup was already owner-scoped, so nothing leaked, but a
+  foreign or missing contact got a relationship validation error. Both now call
+  `get_relationship_of_contact`, as the REST controllers do: the contact is proved first
+  ("Contact not found"), then the relationship through it.
+
+**Decisions (recorded during implementation):**
+- **Each tool is compared with itself.** Every `CROSS_USER_CALLS` entry is made with the foreign id
+  and with an absent one; the payloads must be equal once both are masked, and an error. MCP tools
+  refuse in different words (contact not-found, validation error, `ValueError`), so asserting one
+  shape would have been wrong; only foreign-versus-missing matters. Entries also cover the second id
+  of a two-id call (a merge source, a relationship target, another user's relationship named through
+  the caller's own contact, another user's Immich conflict).
+- **Owner replay**, as in Phase 5: every call succeeds after the foreign rows are handed to the
+  caller, except the entries that name another user's relationship or email through the caller's
+  own contact, which still name a row that does not belong to that contact.
+  `get_contact_journals` additionally proves its journal read is owner-scoped: your contact linked
+  to their journal lists only your journals, and the owner's replay lists theirs.
+- **PR size.** About 1,380 added and 425 removed lines, against ~400 estimated. Roughly 370 of
+  each are the seeding moved out of the REST suite (User decision: one shared module rather than a
+  test importing another test), and the MCP suite is ~835 lines because it covers 23 calls across
+  four domains, each with an owner replay. As in Phase 5, the table cannot shrink without dropping
+  tools, so the phase ships as one PR.
+- **Shared seeding.** The REST suite's foreign contact, snapshot and leak check moved to
+  `backend/tests/integration/foreign_contact_seeding.py`; the MCP suite adds the caller's journals,
+  task and Immich conflict, and the other user's conflict, participant-email suggestion, suggestion
+  ignore and Strava athlete mapping, and snapshots those tables too.
+- **The coverage guard walks input schemas** of the real server's tools for `contact_id`,
+  `*_contact_id` and `contact_ids`. `COVERED_ELSEWHERE`: `unlink_task_from_contact` (keyed on the
+  owner-checked task, like the REST exemption), `search_journals` (a filter inside the caller's own
+  journals), and `create_journal_entry` / `update_journal_entry`, whose untyped
+  `contact_relationships` list the guard cannot see.
+- **`search_contacts` and `global_search` are Phase 7's.** The contacts index carries no `user_id`
+  yet, and Phase 7 already owns passing it from those MCP tools; its integration test now names them.
+
+**Follow-ups (found in Phase 6):**
+- [#1750](https://github.com/hjed/lifecontour/issues/1750): Immich conflict resolution opens its
+  transaction in the MCP tool and the REST controller, with two diverging copies of the logic.
+- **Self-merge over MCP renders "Internal error".** `ContactMergeConflictError` has no branch in
+  `mcp_unified_error_handler`, so `merge_contacts` with one id twice falls to the catch-all.
+- **Phase 11:** `create_journal_entry` / `update_journal_entry` silently skip a foreign (or missing)
+  contact in `contact_relationships` rather than refusing it
+  (`JournalWriteService._process_journal_contact_relationships`). No leak, but the journal-participant
+  cross-entity rule should decide whether that is a refusal.
 
 ---
 
@@ -740,7 +807,8 @@ its callers. Every layer is deployable on its own.
 - [ ] **Unit:** filter composition puts `user_id` first and cannot be overridden by client filters.
 - [ ] **Integration (real MeiliSearch, the `index_journal`-style fixture):** a contact of
   `OTHER_USER_ID` is indexed but not returned to `TEST_USER_ID` by contact search, global search or
-  suggestions.
+  suggestions — over REST **and** the MCP `search_contacts` / `global_search` tools (deferred here
+  from Phase 6's isolation suite).
 
 **E2E:** regression — the contacts search e2e spec stays green (the e2e stack indexes from events, so
 documents already carry the owner).

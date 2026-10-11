@@ -37,10 +37,8 @@ branches — relationships, important dates, the summary, task links — stay wi
 the feed; whether those edits are *activity* is a separate question this change
 does not answer.
 
-**Not scoped by user**, because ``contacts`` has no owner column in this schema
-and every other contacts repository is likewise unscoped. Adding a scope to the
-journal half alone would change what the indexer counts, which is precisely what
-this phase must not do.
+**Scoped to the acting user** in SQL, by ``contacts.user_id``: another user's
+contact has no importance here.
 """
 
 from __future__ import annotations

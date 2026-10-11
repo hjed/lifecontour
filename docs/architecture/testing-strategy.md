@@ -289,6 +289,22 @@ shape for the next owned entity:
   where every request must succeed. A payload the owner could not send either (one that fails
   validation, or names a second foreign id) would 404 or 422 with the ownership check gone, so
   this is what gives each 404 its weight. The contact suite has it; the journal suite does not yet.
+
+The furnished foreign contact, its snapshot and the leak check live in
+`backend/tests/integration/foreign_contact_seeding.py`, shared by the REST suite and its MCP
+counterpart, `backend/tests/integration/mcp/test_mcp_contact_ownership.py`. The MCP suite differs
+in three ways:
+
+- **Each tool is compared with itself.** MCP tools refuse in different words (a contact not-found,
+  a validation error, a `ValueError`), so each call is made twice, with the foreign id and with an
+  absent one, and the two payloads must be equal once both ids are masked (word-boundary regexes).
+- **Filters get their own table.** A tool that answers an unknown contact with an empty result
+  must give the foreign contact the same empty result, and the owner a non-empty one.
+- **The coverage guard reads input schemas.** It lists the real server's tools
+  (`fastmcp.Client(create_mcp_server()).list_tools()`) and walks each `input_schema`, request
+  models included, for `contact_id`, `*_contact_id` or `contact_ids` properties. Every such tool is
+  in the tables or in `COVERED_ELSEWHERE` with its reason.
+
 ### Migration Tests
 
 A data migration is tested on an isolated database: the `throwaway_database` fixture creates one,

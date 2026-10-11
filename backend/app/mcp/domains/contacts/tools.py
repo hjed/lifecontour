@@ -1326,24 +1326,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         try:
             rel_type = RelationshipType(request.relationship_type.lower())
 
-            # Fetch the existing relationship to determine direction
-            existing_relationship = await relationship_service.get_relationship_by_id(
-                request.relationship_id, user_id=user_id
+            # The contact is proved first, then the relationship through it,
+            # which also gives its direction
+            existing_relationship = (
+                await relationship_service.get_relationship_of_contact(
+                    request.contact_id, request.relationship_id, user_id=user_id
+                )
             )
-            if not existing_relationship:
-                raise ContactValidationError(
-                    "relationship",
-                    f"Relationship with ID {request.relationship_id} not found",
-                )
-
-            # Check that the request.contact_id is a participant in the relationship
-            if (
-                existing_relationship.from_contact_id != request.contact_id
-                and existing_relationship.to_contact_id != request.contact_id
-            ):
-                raise ContactValidationError(
-                    "relationship", "Relationship does not belong to the active contact"
-                )
 
             # If we are updating from the perspective of the 'to_contact' (target),
             # the requested type is from target -> source, so we invert it for canonical storage (source -> target)
@@ -1413,22 +1402,10 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
 
         try:
-            existing_relationship = await relationship_service.get_relationship_by_id(
-                relationship_id, user_id=user_id
+            # The contact is proved first, then the relationship through it
+            await relationship_service.get_relationship_of_contact(
+                contact_id, relationship_id, user_id=user_id
             )
-            if not existing_relationship:
-                raise ContactValidationError(
-                    "relationship", f"Relationship with ID {relationship_id} not found"
-                )
-
-            # Verify it belongs to the contact
-            if (
-                existing_relationship.from_contact_id != contact_id
-                and existing_relationship.to_contact_id != contact_id
-            ):
-                raise ContactValidationError(
-                    "relationship", "Relationship does not belong to the active contact"
-                )
 
             await relationship_service.delete_relationship(
                 relationship_id,

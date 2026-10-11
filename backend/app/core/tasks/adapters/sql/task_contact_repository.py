@@ -16,8 +16,7 @@ carries, and both statements can say so with ``RETURNING``. So the two
 concurrency caveat ``_summarise`` carries there does not arise.
 
 The join back to ``tasks`` is for the owner id, which the merge never read
-because it reached these tasks through a contact — and could not have supplied,
-since ``contacts`` has no owner column at all.
+because it reached these tasks through a contact.
 """
 
 from core_shared.models.tasks import TaskContactRepointing

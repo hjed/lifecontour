@@ -101,8 +101,8 @@ class UpcomingImportantDatesService:
 
         Args:
             user_id: The acting user, whose configured timezone decides where
-                their day starts. Note that the *dates* are not scoped by it:
-                ``contacts`` carries no owner column in this schema.
+                their day starts, and whose contacts' dates are the only ones
+                read.
             days_ahead: How far to look, inclusive of both ends. Defaults to the
                 seven days the dashboard shows.
             today: Today's date, already resolved in the user's timezone. Pass
