@@ -610,7 +610,7 @@ its callers. Every layer is deployable on its own.
 
 #### Phase 5: REST cross-user isolation suite for contacts ✅ DONE
 
-**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged (39 tests); two reds fixed (avatar, relationship by-id).
+**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged, while the owner's identical request succeeds (69 tests); two reds fixed (avatar, relationship by-id).
 
 **PR Size:** ~350 lines estimated (test-heavy); ~900 delivered (see Decisions)
 
@@ -659,6 +659,11 @@ its callers. Every layer is deployable on its own.
 - **The avatar entry carries weight.** The foreign contact has a real Immich link, and the suite
   stubs credentials and the Immich server (respx). `test_your_own_avatar_is_served` proves the stub
   would serve the image, so the foreign 404 is an ownership refusal.
+- **Every refused request is one the owner could make.** Each `CROSS_USER_REQUESTS` payload is
+  valid and names no foreign id besides the URL's contact, and
+  `test_the_same_request_succeeds_for_the_owner` replays the table after handing the foreign rows
+  to the caller. Without it, a request that failed validation or named a second foreign contact
+  would be refused with the ownership check gone (review found four such payloads).
 - **Search and the dashboard are not asserted here:** Phase 7 and Phases 4/6 respectively.
 - **Tags are still global** until Phase 8, so the foreign and own contacts share one tag and the
   `tags` snapshot covers the global table. The tag-filter test proves the *contact* owner filter;
@@ -671,6 +676,9 @@ its callers. Every layer is deployable on its own.
   call `get_relationship_by_id` directly. Their isolation suite should check that a foreign contact
   gets the contact not-found payload; `get_relationship_of_contact` is the method to use if it does
   not.
+- **Phase 11:** `test_journal_ownership.py` has no owner counterpart. Add one (replay its
+  `CROSS_USER_REQUESTS` for the owner, expect success) when Phase 11 extends that suite, so its
+  404s are proven to come from the ownership check.
 
 ---
 

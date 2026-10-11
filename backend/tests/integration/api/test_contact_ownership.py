@@ -126,7 +126,8 @@ RELATIONSHIP_ROUTE = RELATIONSHIPS_ROUTE + "/{relationship_id}"
 # Every refused write is otherwise valid, and every other contact it names is
 # the caller's own: then only the ownership check on the URL's contact can
 # refuse it. A payload that failed validation, or a second foreign id, would
-# answer 404 or 422 even with that check gone.
+# answer 404 or 422 even with that check gone. So a created date is not a
+# second birthday, and an updated relationship keeps the pair it already has.
 def _field_update(
     resource_type: str, value: str = "Rewritten By A Stranger"
 ) -> dict[str, Any]:
@@ -146,10 +147,11 @@ _IMPORTANT_DATE_ATTRIBUTES = {
     "day": 2,
 }
 
+# The seeded relationship's own pair: an update may change only its type.
 _RELATIONSHIP_ATTRIBUTES = {
     "relationship_type": "sibling",
     "from_contact_id": "{contact_id}",
-    "to_contact_id": "{own_contact_id}",
+    "to_contact_id": "{partner_id}",
 }
 
 
@@ -323,7 +325,7 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         body={
             "data": {
                 "type": "contact_important_dates",
-                "attributes": _IMPORTANT_DATE_ATTRIBUTES,
+                "attributes": {**_IMPORTANT_DATE_ATTRIBUTES, "date_type": "first_met"},
             }
         },
     ),
@@ -356,6 +358,7 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
                 "attributes": {
                     **_RELATIONSHIP_ATTRIBUTES,
                     "relationship_type": "friend",
+                    "to_contact_id": "{own_contact_id}",
                 },
             }
         },
@@ -592,6 +595,43 @@ class TestContactOwnershipIsEnforced:
         )
         _assert_nothing_leaked(response)
         assert await _snapshot(async_connection) == before
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_the_same_request_succeeds_for_the_owner(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        """Hand the contact to the caller and every request goes through.
+
+        This is what gives each 404 above its weight: a request the owner could
+        not make either (a bad payload, a second foreign id) would be refused
+        whether or not the ownership check ran.
+        """
+        for table in (
+            text("UPDATE contacts SET user_id = :me WHERE user_id = :them"),
+            text("UPDATE sync_metadata SET user_id = :me WHERE user_id = :them"),
+        ):
+            await async_connection.execute(
+                table, {"me": TEST_USER_ID, "them": OTHER_USER_ID}
+            )
+
+        response = await integration_api_client.request(
+            request_spec.method,
+            request_spec.path(foreign_contact),
+            json=request_spec.filled_body(foreign_contact),
+        )
+
+        assert response.is_success, (
+            f"{request_spec.method} {request_spec.route} answered "
+            f"{response.status_code} for the owner: {response.text[:400]}"
+        )
 
     async def test_merging_another_users_contact_into_your_own_is_refused(
         self,

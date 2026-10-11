@@ -281,6 +281,10 @@ shape for the next owned entity:
   names a route the app no longer serves.
 - **A route that 404s for some other reason** (no linked Immich person, say) gets real seeding and
   a stub that would otherwise succeed. Without it, the 404 proves nothing about ownership.
+- **The owner's counterpart**: the same table replayed after handing the foreign rows to the caller,
+  where every request must succeed. A payload the owner could not send either (one that fails
+  validation, or names a second foreign id) would 404 or 422 with the ownership check gone, so
+  this is what gives each 404 its weight. The contact suite has it; the journal suite does not yet.
 ### Migration Tests
 
 A data migration is tested on an isolated database: the `throwaway_database` fixture creates one,
