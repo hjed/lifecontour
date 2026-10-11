@@ -82,23 +82,9 @@ async def get_contact_relationship(
     """
     base_url = get_request_base_url(request)
 
-    relationship = await relationship_service.get_relationship_by_id(
-        relationship_id, user_id=user.id
+    relationship = await relationship_service.get_relationship_of_contact(
+        contact_id, relationship_id, user_id=user.id
     )
-    if not relationship:
-        raise ContactValidationError(
-            "relationship", f"Relationship with ID {relationship_id} not found"
-        )
-
-    # Verify the relationship belongs to the specified contact
-    if (
-        relationship.from_contact_id != contact_id
-        and relationship.to_contact_id != contact_id
-    ):
-        raise ContactValidationError(
-            "relationship",
-            f"Relationship {relationship_id} does not belong to contact {contact_id}",
-        )
 
     # Resolve contact name for display
     [relationship] = await relationship_service.resolve_relationship_contact_names(
@@ -213,24 +199,10 @@ async def update_contact_relationship(
             f"must match relationship_id in URL ({relationship_id})",
         )
 
-    # Get existing relationship to verify ownership
-    existing_relationship = await relationship_service.get_relationship_by_id(
-        relationship_id, user_id=user.id
+    # Prove the contact is the caller's, then reach the relationship through it
+    existing_relationship = await relationship_service.get_relationship_of_contact(
+        contact_id, relationship_id, user_id=user.id
     )
-    if not existing_relationship:
-        raise ContactValidationError(
-            "relationship", f"Relationship with ID {relationship_id} not found"
-        )
-
-    # Verify the relationship belongs to the specified contact
-    if (
-        existing_relationship.from_contact_id != contact_id
-        and existing_relationship.to_contact_id != contact_id
-    ):
-        raise ContactValidationError(
-            "relationship",
-            f"Relationship {relationship_id} does not belong to contact {contact_id}",
-        )
 
     # Determine expected target fields based on perspective
     expected_to: int | None
@@ -310,24 +282,10 @@ async def delete_contact_relationship(
 
     Removes the relationship from the system.
     """
-    # Get existing relationship to verify ownership
-    existing_relationship = await relationship_service.get_relationship_by_id(
-        relationship_id, user_id=user.id
+    # Prove the contact is the caller's, then reach the relationship through it
+    await relationship_service.get_relationship_of_contact(
+        contact_id, relationship_id, user_id=user.id
     )
-    if not existing_relationship:
-        raise ContactValidationError(
-            "relationship", f"Relationship with ID {relationship_id} not found"
-        )
-
-    # Verify the relationship belongs to the specified contact
-    if (
-        existing_relationship.from_contact_id != contact_id
-        and existing_relationship.to_contact_id != contact_id
-    ):
-        raise ContactValidationError(
-            "relationship",
-            f"Relationship {relationship_id} does not belong to contact {contact_id}",
-        )
 
     await relationship_service.delete_relationship(
         relationship_id=relationship_id,

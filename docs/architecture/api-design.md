@@ -284,6 +284,22 @@ and all writers queue instead of deadlocking.
 - Map HTTP status codes to appropriate error types
 - Log unexpected errors for debugging
 
+### Another User's Entity Is a 404
+
+An owned entity (journal, task, contact, …) that belongs to another user answers exactly as a
+missing one does: **404, never 403**, with an error body that names nothing about the row, and a
+write against it changes nothing. A 403 would confirm that the id exists. This holds on every
+by-id route, including child-row routes (a contact's methods, a journal's tags) and the *second*
+id of a two-id write (a merge source, a relationship's other end).
+
+The rule is enforced in SQL by the owner-scoped repositories (see
+[Domain Architecture](domain-architecture.md)). It is proven per aggregate by a cross-user
+isolation suite whose coverage guard fails when a new by-id route lacks an ownership test:
+`backend/tests/integration/api/test_journal_ownership.py` (journals and journal tags) and
+`test_contact_ownership.py` (contacts and their methods, addresses, notes, important dates, tags,
+relationships, summary, history, avatar and merge). See
+[Testing Strategy → Cross-User Isolation Suites](testing-strategy.md#cross-user-isolation-suites).
+
 ### Structured Error Detail (`errors[].meta`)
 
 Most refusals are fully expressed by their prose — a caller told "journal 4 not

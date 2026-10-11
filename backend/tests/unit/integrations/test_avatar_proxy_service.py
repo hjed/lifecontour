@@ -210,6 +210,22 @@ class TestGetAvatarBytes:
         with pytest.raises(AvatarNotFoundError, match="not linked"):
             await service.get_avatar_bytes(contact_id=42, user_id="user1")
 
+    async def test_looks_up_the_person_as_the_acting_user(
+        self,
+        service: AvatarProxyService,
+        mock_ext_ref_repo: AsyncMock,
+    ) -> None:
+        """Another user's link must not resolve: the thumbnail is fetched with
+        the caller's own Immich key, whatever person the lookup returns."""
+        mock_ext_ref_repo.get_immich_person_id.return_value = None
+
+        with pytest.raises(AvatarNotFoundError):
+            await service.get_avatar_bytes(contact_id=42, user_id="user1")
+
+        mock_ext_ref_repo.get_immich_person_id.assert_awaited_once_with(
+            42, user_id="user1"
+        )
+
     async def test_raises_when_no_immich_credentials(
         self,
         service: AvatarProxyService,

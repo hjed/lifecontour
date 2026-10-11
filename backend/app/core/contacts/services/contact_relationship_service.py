@@ -365,6 +365,35 @@ class ContactRelationshipService:
             return None
         return relationship
 
+    async def get_relationship_of_contact(
+        self, contact_id: int, relationship_id: int, *, user_id: str
+    ) -> ContactRelationship:
+        """Get a relationship through the contact at one of its ends.
+
+        The contact is proved first, so another user's contact answers exactly
+        as a missing one does, whatever relationship id is named alongside it.
+
+        Raises:
+            ContactNotFoundError: The contact is missing or another user's.
+            ContactValidationError: The relationship is missing, another
+                user's, or does not involve the contact.
+        """
+        if not await self.contact_repo.contact_exists(contact_id, user_id=user_id):
+            raise ContactNotFoundError(contact_id)
+        relationship = await self.get_relationship_by_id(
+            relationship_id, user_id=user_id
+        )
+        if relationship is None:
+            raise ContactValidationError(
+                "relationship", f"Relationship with ID {relationship_id} not found"
+            )
+        if contact_id not in (relationship.from_contact_id, relationship.to_contact_id):
+            raise ContactValidationError(
+                "relationship",
+                f"Relationship {relationship_id} does not belong to contact {contact_id}",
+            )
+        return relationship
+
     async def resolve_relationship_contact_names(
         self,
         relationships: list[ContactRelationship],

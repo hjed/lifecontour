@@ -144,11 +144,14 @@ class IntegrationLinkRepository:
             "day": row.day,
         }
 
-    async def get_immich_person_id(self, contact_id: int) -> str | None:
-        """Look up the Immich person id linked to a contact.
+    async def get_immich_person_id(
+        self, contact_id: int, *, user_id: str
+    ) -> str | None:
+        """Look up the Immich person id the owner has linked to a contact.
 
         Args:
             contact_id: Internal contact id.
+            user_id: The acting user; another user's link is never returned.
 
         Returns:
             The Immich person id string, or ``None`` if unlinked.
@@ -160,10 +163,13 @@ class IntegrationLinkRepository:
               AND internal_entity_type = 'contact'
               AND external_entity_type = 'person'
               AND internal_id = :contact_id
+              AND user_id = :user_id
             ORDER BY id
             LIMIT 1
         """)
-        result = await self._conn.execute(query, {"contact_id": contact_id})
+        result = await self._conn.execute(
+            query, {"contact_id": contact_id, "user_id": user_id}
+        )
         row = result.fetchone()
         return row.external_id if row else None
 

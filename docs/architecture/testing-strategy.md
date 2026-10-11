@@ -266,6 +266,29 @@ An integration test that needs a contact row **seeds it with `seed_contact`**, n
   `backend/tests`, `core_shared` or `integration_workers/*/tests`. The only exemptions are
   migration tests, which seed a schema pinned at an older revision the helper does not describe.
 
+### Cross-User Isolation Suites
+
+An owned aggregate's REST surface is proven by one suite per aggregate:
+`backend/tests/integration/api/test_journal_ownership.py` and `test_contact_ownership.py`. Copy their
+shape for the next owned entity:
+
+- **A foreign fixture** seeded for `OTHER_USER_ID` with every child row a real one carries, so each
+  request names ids that exist and can be refused only for ownership. Every snapshotted table
+  starts with rows (history included), bar insert-only queues, and a test asserts it: an empty
+  table cannot show that a refused request moved or deleted one. Seeded `updated_at` values are
+  backdated, and a test asserts they stick: seeding and request share one transaction, so `now()`
+  is the same instant in both and a premature touch would write the value already there.
+- **`CROSS_USER_REQUESTS`**, one entry per by-id route. Each must answer 404, echo none of the
+  row's text, and leave a `to_jsonb` snapshot of every reachable table byte-identical.
+- **A coverage guard** that compares the table with `app.openapi()`: every mounted route carrying
+  the id placeholder is listed, or recorded in `COVERED_ELSEWHERE` with its reason, and no entry
+  names a route the app no longer serves.
+- **A route that 404s for some other reason** (no linked Immich person, say) gets real seeding and
+  a stub that would otherwise succeed. Without it, the 404 proves nothing about ownership.
+- **The owner's counterpart**: the same table replayed after handing the foreign rows to the caller,
+  where every request must succeed. A payload the owner could not send either (one that fails
+  validation, or names a second foreign id) would 404 or 422 with the ownership check gone, so
+  this is what gives each 404 its weight. The contact suite has it; the journal suite does not yet.
 ### Migration Tests
 
 A data migration is tested on an isolated database: the `throwaway_database` fixture creates one,
