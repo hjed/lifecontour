@@ -300,6 +300,45 @@ class TestMergeKeepsAbsorbedRecordsAsAliases:
 
         assert await _aliases(conn) == [(target, "strava", "222", None, None, None)]
 
+    async def test_an_aliased_activity_keeps_no_live_link_on_the_survivor(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        """A record is the survivor's either live or as an alias, never both.
+
+        The survivor's Strava id was typed in by hand, so it has no synthetic
+        calendar link and the absorbed activity's one moves across untouched
+        — while the replace merge drops its sync row as the rival it is. Left
+        live, that link would route the absorbed activity's next webhook to
+        the survivor and overwrite the metrics the merge chose to keep.
+        """
+        conn = clean_database
+        strava_calendar = await _calendar(conn, integration_source="strava")
+        target = await _journal(conn, "Ride")
+        source = await _journal(conn, "Ride re-import")
+        await SqlFitnessDataRepository(conn).save(
+            FitnessData(journal_id=target, distance=5000, strava_activity_id="111")
+        )
+        await _strava_activity(
+            conn,
+            journal_id=source,
+            activity_id="222",
+            strava_calendar_id=strava_calendar,
+        )
+
+        await _merge_service(conn).merge_journals(
+            target, source, conn, fitness_merge_mode=FitnessMergeMode.REPLACE
+        )
+
+        assert await _aliases(conn) == [(target, "strava", "222", None, None, None)]
+        live = await conn.execute(
+            text(
+                "SELECT external_event_id FROM journal_external_event_links "
+                "WHERE journal_id = :id"
+            ),
+            {"id": target},
+        )
+        assert live.fetchall() == []
+
     async def test_an_additive_merge_keeps_both_activities_live_and_aliases_none(
         self, clean_database: AsyncConnection
     ) -> None:

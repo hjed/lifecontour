@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
+from core_shared.merged_alias_keys import merged_alias_key
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
@@ -123,6 +124,44 @@ def _merged_gear_usage_item(
         )
 
 
+async def _drop_event_links_to(
+    journal_id: int, records: list[ExternalRecord], transaction: AsyncConnection
+) -> None:
+    """Remove the journal's calendar links that name an aliased record.
+
+    A record is the survivor's live or as an alias, never both. A link the
+    registry does not list — Strava's synthetic-calendar ``strava:<id>`` —
+    can move across while the record's canonical link is dropped as a rival;
+    left in place, it would route the absorbed record's next sync to the
+    survivor and apply it there.
+    """
+    aliased = {(r.integration_source, r.external_id) for r in records}
+    result = await transaction.execute(
+        text("""
+            SELECT l.calendar_id, l.external_event_id,
+                   COALESCE(
+                       c.integration_source,
+                       CASE WHEN c.google_calendar_id IS NOT NULL THEN 'google' END
+                   ) AS integration_source
+            FROM journal_external_event_links l
+            JOIN calendars c ON c.id = l.calendar_id
+            WHERE l.journal_id = :journal_id AND l.external_event_id IS NOT NULL
+        """),
+        {"journal_id": journal_id},
+    )
+    for row in result.fetchall():
+        key = merged_alias_key(row.integration_source, row.external_event_id)
+        if key is None or (key.integration_source, key.external_id) not in aliased:
+            continue
+        await transaction.execute(
+            text("""
+                DELETE FROM journal_external_event_links
+                WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+            """),
+            {"journal_id": journal_id, "calendar_id": row.calendar_id},
+        )
+
+
 class JournalMergeService:
     """Service for handling journal merges in Phase 1."""
 
@@ -222,13 +261,6 @@ class JournalMergeService:
         changed_fields: dict[str, Any] = {}
         overrides = overrides or {}
 
-        # What the source was imported from, read before anything moves: the
-        # moves below drop whatever link the target cannot take over, and the
-        # records they drop are the ones step 9 keeps as merged aliases.
-        absorbed_records = await SqlExternalRecordRepository(
-            transaction
-        ).external_records_for_journal(source_id)
-
         # 0. Re-point task links, before any other write.
         #
         # It has to happen before the source is deleted: a task's two anchors are
@@ -258,6 +290,15 @@ class JournalMergeService:
             source=source,
             changed_by=changed_by,
         )
+
+        # What the source was imported from, read before anything moves: the
+        # moves below drop whatever link the target cannot take over, and the
+        # records they drop are the ones step 9 keeps as merged aliases. Read
+        # under the locks step 0 took, so a merge into the source that commits
+        # first is in it.
+        absorbed_records = await SqlExternalRecordRepository(
+            transaction
+        ).external_records_for_journal(source_id)
 
         # Determine default base survivor based on manual journal precedence
         default_survivor, default_loser = await self._determine_precedence(
@@ -645,6 +686,7 @@ class JournalMergeService:
         await alias_repo.record_aliases(
             journal_id=target_id, user_id=owner_id, records=lost
         )
+        await _drop_event_links_to(target_id, lost, transaction)
         logger.info(
             "Merge kept absorbed records as aliases",
             target_id=target_id,
