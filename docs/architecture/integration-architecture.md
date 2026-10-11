@@ -638,6 +638,36 @@ reference and matching but are never synced out:
   their digits, addresses on every line) restores that row rather than adding a
   second one — the provider holding it again means it is back in use.
 
+### Contact sync scope (field ownership)
+
+A contact sync event carries the whole serialized contact, but a source only
+knows part of it, and `ContactRepository.save` writes every scalar column. Each
+event therefore names a `sync_scope` (`core_shared/models/contacts/sync_scope.py`):
+the `ContactSyncField`s and `ImportantDateType`s its source owns. Both
+`OutboxEventProcessor` update paths (`contact.updated` and the reconcile-by-email
+branch of `contact.created`) pass the incoming contact through
+`apply_sync_scope` before saving:
+
+- **Unowned scalar** (nickname, avatar, …): keeps the stored value.
+- **Unowned list** (methods, addresses, notes, tags): set to None, which the save
+  leaves untouched.
+- **Important dates:** owned per type. Incoming dates of owned types replace the
+  stored ones (an empty list clears them); stored dates of every other type are
+  kept. A None list still means "leave the dates alone": the transformers send
+  None when the provider holds an owned date that could not be read.
+- **No scope** (an event queued before scopes existed): overwrites the contact
+  whole, as before.
+
+The scope is an allow-list declared by the worker beside the fields it requests
+(`GOOGLE_CONTACT_SYNC_SCOPE` in the Google transformer, `IMMICH_CONTACT_SYNC_SCOPE`
+in the Immich sync service), so a field added to contacts later is safe from every
+sync until a source claims it. Immich owns only the avatar and birthday of a
+linked contact; its names apply only when it creates the contact.
+
+**Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
+than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy
+the backend no later than the workers.
+
 ### 2. External Data References (Immich)
 
 **Challenge**: Large binary data should stay external

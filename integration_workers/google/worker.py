@@ -75,7 +75,7 @@ from google_client import (
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
-from transformer import GoogleContactTransformer
+from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
 settings = GoogleSettings()
@@ -1665,6 +1665,7 @@ async def _perform_full_sync(
                     sync_type=sync_type,
                     etag=google_person.etag,
                     user_id=str(user_id),
+                    sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
                 )
 
                 # Add to session (will be committed with transaction)
@@ -1803,6 +1804,7 @@ async def _perform_incremental_sync(
                 sync_type=sync_type,
                 etag=google_person.etag,
                 user_id=str(user_id),
+                sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
             )
 
             # Add to session (will be committed with transaction)

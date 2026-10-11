@@ -20,6 +20,7 @@ from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
 )
+from core_shared.models.contacts.sync_scope import apply_sync_scope
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
@@ -822,6 +823,7 @@ class OutboxEventProcessor:
                     )
                     if stored is not None:
                         _keep_archived_values(contact, stored)
+                        apply_sync_scope(contact, stored, payload.sync_scope)
                 created_contact = await self.contact_service.update_contact(
                     contact,
                     self.connection,
@@ -1055,6 +1057,10 @@ class OutboxEventProcessor:
                 existing_reference_data,
                 existing_tags,
             )
+            if full_existing_contact is not None:
+                apply_sync_scope(
+                    updated_contact_data, full_existing_contact, payload.sync_scope
+                )
         except ContactDeserializationError as e:
             raise PermanentOutboxEventProcessingError(str(e)) from e
 

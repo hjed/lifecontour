@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
+from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 from worker import sync_google_contacts
 
 
@@ -289,15 +290,18 @@ class TestIncrementalSyncIntegration:
         )
         assert created_count.scalar() == 1
 
-        # The known contact must produce a contact.updated outbox event.
-        updated_count = await db_session.execute(
+        # The known contact must produce a contact.updated outbox event, naming
+        # the Google scope so fields Google does not own keep their values.
+        updated_scopes = await db_session.execute(
             text(
                 """
-                SELECT count(*) FROM outbox_events
+                SELECT (event_data::jsonb)->'sync_scope' FROM outbox_events
                 WHERE event_type = 'contact.updated'
                   AND (event_data::jsonb)->>'external_id' = :external_id
                 """
             ),
             {"external_id": known_external_id},
         )
-        assert updated_count.scalar() == 1
+        assert [row[0] for row in updated_scopes] == [
+            GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json")
+        ]

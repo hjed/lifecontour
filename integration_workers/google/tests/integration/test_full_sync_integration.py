@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
+from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 from worker import sync_google_contacts
 
 
@@ -149,3 +150,18 @@ class TestFullSyncIntegration:
                 )
             )
             assert result_owners.all() == [(test_user, test_user)] * 2
+
+            # Each event names the Google scope, so fields Google does not own
+            # (nickname, avatar, other date types) keep their local values.
+            result_scopes = await db_session.execute(
+                text(
+                    """
+                    SELECT (event_data::jsonb)->'sync_scope'
+                    FROM outbox_events
+                    WHERE (event_data::jsonb)->>'external_id'
+                          IN ('people/full_sync_1', 'people/full_sync_2')
+                    """
+                )
+            )
+            expected_scope = GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json")
+            assert [row[0] for row in result_scopes] == [expected_scope] * 2

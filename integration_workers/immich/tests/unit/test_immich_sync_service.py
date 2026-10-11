@@ -446,6 +446,13 @@ class TestSyncPeopleFlow:
         assert contact_data["important_dates"][0]["date_type"] == "birthday"
         assert contact_data["important_dates"][0]["year"] == 1990
 
+        # Only the avatar and birthday are Immich's to change on the linked
+        # contact; its names, nickname and other dates keep their values.
+        assert events[0]["event_data"]["sync_scope"] == {
+            "fields": ["photo_url"],
+            "important_date_types": ["birthday"],
+        }
+
     @pytest.mark.asyncio
     async def test_auto_link_writes_sync_metadata_with_entity_types(
         self,
@@ -740,13 +747,22 @@ class TestBuildContactData:
     def test_build_contact_data_without_birthday(
         self, service: ImmichSyncService
     ) -> None:
-        """Contact data has no important_dates when birthday is absent."""
+        """No birthday in Immich is an empty list: the owned birthday clears."""
         person = _make_person("p1", "Jane Doe")
         data = service._build_contact_data(person, contact_id=10)
 
         assert data["first_name"] == "Jane"
         assert data["last_name"] == "Doe"
         assert data["photo_url"] == "/api/contacts/10/avatar"
+        assert data["important_dates"] == []
+
+    def test_build_contact_data_unreadable_birthday_leaves_dates_alone(
+        self, service: ImmichSyncService
+    ) -> None:
+        """A birthday Immich holds but that cannot be read is None, not a clear."""
+        person = _make_person("p1", "Jane Doe", "20/03/1990")
+        data = service._build_contact_data(person, contact_id=10)
+
         assert data["important_dates"] is None
 
     def test_build_contact_data_no_contact_id(self, service: ImmichSyncService) -> None:
