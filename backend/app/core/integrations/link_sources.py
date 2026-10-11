@@ -28,7 +28,23 @@ class IntegrationSource(StrEnum):
     FIREFLY_III = "firefly_iii"
 
 
-@dataclass(frozen=True)
+class AliasPolicy(StrEnum):
+    """Whether a merge keeps a store's absorbed records as merged aliases.
+
+    Every store has to say. A merge that cannot carry a source journal's
+    record over as a live link on the target keeps an ``INBOUND`` record as an
+    alias (``core_shared.repositories.merged_alias_repository``), so the next
+    sync recognises it instead of importing it again.
+    """
+
+    # Imported from the source: losing it means the sync re-imports it.
+    INBOUND = "inbound"
+    # Pushed to the source (or derived from such a push): the source journal's
+    # deletion undoes it upstream, so there is nothing to recognise later.
+    NOT_ALIASABLE = "not_aliasable"
+
+
+@dataclass(frozen=True, kw_only=True)
 class JournalLinkStore:
     """One SQL location holding links of a source to journals.
 
@@ -36,12 +52,22 @@ class JournalLinkStore:
     query is scoped to the requesting user; ``journal_id_sql`` and
     ``external_id_sql`` are the expressions yielding the journal id and the
     external id **as the journal's external links expose it**.
+
+    ``alias_policy`` has no default on purpose: a new store has to decide
+    whether its records come *from* the source (see :class:`AliasPolicy`).
+    The optional ``*_sql`` expressions are what a calendar store can add to an
+    alias — the calendar for deleting it upstream with its journal, the
+    cross-calendar identity and recurring series for recognising it.
     """
 
     from_sql: str
     journal_id_sql: str
     external_id_sql: str
+    alias_policy: AliasPolicy
     where_sql: str = ""
+    calendar_id_sql: str | None = None
+    external_identity_sql: str | None = None
+    recurring_event_id_sql: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +114,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                     "m.integration_source = 'strava' "
                     "AND m.internal_entity_type = 'journal'"
                 ),
+                alias_policy=AliasPolicy.INBOUND,
             ),
             # Activities imported before sync_metadata recorded them only have
             # the fitness column.
@@ -99,6 +126,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                     "f.strava_activity_id IS NOT NULL "
                     "AND trim(f.strava_activity_id) != ''"
                 ),
+                alias_policy=AliasPolicy.INBOUND,
             ),
         ),
     ),
@@ -119,6 +147,10 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                     "AND trim(l.external_event_id) != '' "
                     "AND c.google_calendar_id IS NOT NULL"
                 ),
+                alias_policy=AliasPolicy.INBOUND,
+                calendar_id_sql="l.calendar_id",
+                external_identity_sql="l.external_identity",
+                recurring_event_id_sql="l.recurring_event_id",
             ),
         ),
     ),
@@ -131,6 +163,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 journal_id_sql="m.internal_id",
                 external_id_sql="m.external_id",
                 where_sql="m.integration_source = 'immich_album'",
+                alias_policy=AliasPolicy.INBOUND,
             ),
         ),
     ),
@@ -154,6 +187,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 journal_id_sql="j.id",
                 external_id_sql="m_asset.external_id",
                 where_sql=f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_checkout'",
+                alias_policy=AliasPolicy.NOT_ALIASABLE,
             ),
         ),
     ),
@@ -166,6 +200,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 journal_id_sql="j.id",
                 external_id_sql="m.external_id",
                 where_sql=f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_checkout'",
+                alias_policy=AliasPolicy.NOT_ALIASABLE,
             ),
         ),
     ),
@@ -181,6 +216,7 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                     f"{_SNIPEIT_JOURNAL_ROW_WHERE}'snipeit_maintenance' "
                     f"AND {SNIPEIT_MAINTENANCE_NOT_IMPORTED}"
                 ),
+                alias_policy=AliasPolicy.NOT_ALIASABLE,
             ),
             # Journals imported from Snipe-IT
             JournalLinkStore(
@@ -190,6 +226,8 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
                 ),
                 journal_id_sql="l.journal_id",
                 external_id_sql="l.external_event_id",
+                alias_policy=AliasPolicy.INBOUND,
+                calendar_id_sql="l.calendar_id",
             ),
         ),
     ),

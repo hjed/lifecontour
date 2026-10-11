@@ -651,7 +651,9 @@ async def test_merge_journals_with_external_links_to_same_calendar(
 
     Reproduces the production IntegrityError on journal_external_event_links_pkey
     when source and target both link to the same calendar_id with different
-    external_event_id values.
+    external_event_id values. The survivor can hold one link per calendar, so
+    the absorbed event is kept as a merged alias instead: dropping it made the
+    next sync import it again as a new journal.
     """
     from uuid import uuid4
 
@@ -661,8 +663,8 @@ async def test_merge_journals_with_external_links_to_same_calendar(
     calendar_id = uuid4()
     await async_connection.execute(
         text("""
-            INSERT INTO calendars (id, user_id, name, color)
-            VALUES (:id, :user_id, :name, :color)
+            INSERT INTO calendars (id, user_id, name, color, google_calendar_id)
+            VALUES (:id, :user_id, :name, :color, 'shared@example.com')
         """),
         {
             "id": calendar_id,
@@ -773,6 +775,18 @@ async def test_merge_journals_with_external_links_to_same_calendar(
     count_row = all_links.fetchone()
     assert count_row is not None
     assert count_row[0] == 1
+
+    # 7. The absorbed event is kept as an alias of the survivor
+    aliases = await async_connection.execute(
+        text("""
+            SELECT journal_id, integration_source, external_id, calendar_id
+            FROM journal_merged_aliases
+            WHERE user_id = 'test-user-123'
+        """)
+    )
+    assert [tuple(row) for row in aliases.fetchall()] == [
+        (target_id, "google_calendar", "source-google-event-xyz", calendar_id)
+    ]
 
 
 @pytest.mark.integration

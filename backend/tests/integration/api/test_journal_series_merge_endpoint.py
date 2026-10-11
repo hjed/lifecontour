@@ -310,7 +310,19 @@ class TestMergeSeries:
     async def test_a_same_calendar_pair_merges_and_keeps_the_targets_link(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
     ) -> None:
+        """The target keeps its link; the source's instance becomes an alias.
+
+        A journal holds one link per calendar, so the absorbed instance cannot
+        move as a link — and dropped, the next sync imported it again.
+        """
         calendar = await seed_calendar(clean_database)
+        await clean_database.execute(
+            text(
+                "UPDATE calendars SET google_calendar_id = 'work@example.com'"
+                " WHERE id = :id"
+            ),
+            {"id": calendar},
+        )
         source = await seed_series(clean_database, "Old standup")
         destination = await seed_series(clean_database, "Standup")
         paired_source = await seed_member(
@@ -351,6 +363,16 @@ class TestMergeSeries:
             {"id": paired_destination},
         )
         assert [row.external_event_id for row in links] == ["new-instance"]
+        aliases = await clean_database.execute(
+            text(
+                "SELECT journal_id, integration_source, external_id"
+                " FROM journal_merged_aliases WHERE user_id = :user_id"
+            ),
+            {"user_id": USER_ID},
+        )
+        assert [tuple(row) for row in aliases] == [
+            (paired_destination, "google_calendar", "old-instance")
+        ]
 
     async def test_unconfirmed_and_skipped_pairs_are_kept_and_join_the_destination(
         self, integration_api_client: AsyncClient, clean_database: AsyncConnection
