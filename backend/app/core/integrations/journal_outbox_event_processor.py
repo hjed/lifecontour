@@ -449,15 +449,6 @@ class JournalOutboxEventProcessor:
             event.event_data["existing_journal_id"] = existing_link.journal_id
             return await self._process_journal_updated(event)
 
-        # A merge absorbed this event into another journal. Creating it again
-        # would undo the merge; this is the last place that can stop it, since
-        # a merge can land between the worker's check and this write.
-        merged_alias = await self._merged_alias_for(payload)
-        if merged_alias is not None:
-            return _skipped_as_merged(
-                EVENT_TYPE_JOURNAL_EVENT_CREATED, merged_alias, external_event_id
-            )
-
         # The same real-world event can reach us from more than one calendar
         # — one calendar invites another, and each returns its own copy under
         # its own event id, so the lookup above cannot match them. The source
@@ -484,6 +475,18 @@ class JournalOutboxEventProcessor:
             )
             event.event_data["existing_journal_id"] = journal_id_for_identity
             return await self._process_journal_updated(event)
+
+        # A merge absorbed this event into another journal. Creating it again
+        # would undo the merge; this is the last place that can stop it, since
+        # a merge can land between the worker's check and this write. Asked
+        # last, after every lookup that could still find a journal, so a merge
+        # committing between those lookups and here — taking the absorbed
+        # event's link with it — has already recorded the alias.
+        merged_alias = await self._merged_alias_for(payload)
+        if merged_alias is not None:
+            return _skipped_as_merged(
+                EVENT_TYPE_JOURNAL_EVENT_CREATED, merged_alias, external_event_id
+            )
 
         # Build the journal entity
         journal = self._build_journal_from_data(journal_data)
