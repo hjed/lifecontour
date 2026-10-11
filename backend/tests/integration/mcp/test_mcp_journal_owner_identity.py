@@ -12,6 +12,8 @@ integration tests use, because the DI fallback resolves the same ``SessionUser``
 for MCP and REST and so cannot reproduce the split.
 """
 
+import json
+import re
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,13 +23,19 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRepository
 from app.core.journal.models.journal_tag import JournalTag
-from tests.integration.contact_seeding import OTHER_USER_ID
+from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    extract_mcp_json_payload,
     post_mcp_tool,
 )
+from tests.integration.tasks.task_seeding import create_journal
+
+# Another user's contact; its name is asserted absent from every refusal.
+THEIR_CONTACT = "TheirClimbingPartner"
 
 # The OAuth client the request arrived through. It names the application, never
 # the person — pinned here so the regression is visible if the fallback to it is
@@ -328,3 +336,80 @@ class TestMCPJournalTagsAreTheAuthenticatedUsers:
 
         assert response.status_code == 200
         assert "unknown journal tag" in response.text.lower()
+
+
+@pytest.mark.integration
+class TestMCPJournalContactsAreTheJournalOwners:
+    """Over MCP too, another user's contact cannot join your journal."""
+
+    async def _link(
+        self,
+        authenticated_lifespan_client: Any,
+        oauth_authenticated_mcp: Callable[..., Any],
+        acting_user_id: str,
+        journal_id: int,
+        contact_id: int,
+    ) -> str:
+        """The tool's payload, with the contact's id masked where it names it.
+
+        Only ``ID <n>`` is masked: a bare substring replace would also rewrite
+        any other number that happens to contain the id.
+        """
+        async with oauth_authenticated_mcp(acting_user_id):
+            async with authenticated_lifespan_client() as client:
+                response = await post_mcp_tool(
+                    client,
+                    "link_journal_to_contact",
+                    {
+                        "journal_id": journal_id,
+                        "contact_id": contact_id,
+                        "relationship_type": "PARTICIPANT",
+                    },
+                    request_id=2,
+                )
+        assert response.status_code == 200
+        payload = json.dumps(extract_mcp_json_payload(response.text), sort_keys=True)
+        return re.sub(rf"\bID {contact_id}\b", "ID <id>", payload)
+
+    async def test_their_contact_is_not_found_and_not_linked(
+        self,
+        authenticated_lifespan_client: Any,
+        async_connection: AsyncConnection,
+        oauth_authenticated_mcp: Callable[..., Any],
+        test_user: Any,
+    ) -> None:
+        journal_id = await create_journal(
+            SqlJournalRepository(async_connection), user_id=test_user.id
+        )
+        theirs = await seed_contact(
+            async_connection, first_name=THEIR_CONTACT, user_id=OTHER_USER_ID
+        )
+        missing_id = 999_999
+
+        foreign = await self._link(
+            authenticated_lifespan_client,
+            oauth_authenticated_mcp,
+            test_user.id,
+            journal_id,
+            theirs,
+        )
+        absent = await self._link(
+            authenticated_lifespan_client,
+            oauth_authenticated_mcp,
+            test_user.id,
+            journal_id,
+            missing_id,
+        )
+
+        assert "not found" in foreign.lower()
+        assert THEIR_CONTACT not in foreign
+        assert "ID <id>" in foreign
+        assert foreign == absent
+        linked = await async_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM journal_contact_relationships "
+                "WHERE journal_id = :journal_id"
+            ),
+            {"journal_id": journal_id},
+        )
+        assert linked.scalar_one() == 0

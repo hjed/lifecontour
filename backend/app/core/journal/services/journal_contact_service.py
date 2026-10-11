@@ -10,6 +10,8 @@ from core_shared.models.journals.contact_event_role import ContactEventRole
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.events import ContactSummaryRefreshRequested
+from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.models.repositories import ContactRepository
 from app.core.journal.models.repositories import JournalContactRelationshipRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
@@ -23,12 +25,17 @@ class JournalContactService:
 
     Handles CRUD operations for relationships between journals and contacts,
     ensuring appropriate domain events (like summary refreshes) are published.
+
+    A journal's people are its owner's contacts: linking is the one place that
+    rule lands, so every path that adds a contact to a journal goes through
+    :meth:`add_contact_to_journal`.
     """
 
     def __init__(
         self,
         contact_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: OutboxEventPublisher,
+        contact_repo: ContactRepository,
     ):
         """
         Initialize the journal contact service.
@@ -36,19 +43,36 @@ class JournalContactService:
         Args:
             contact_relationship_repo: Repository for contact relationships
             event_publisher: Publisher for domain events via outbox pattern
+            contact_repo: Owner-scoped contact reads, for the ownership check
         """
         self.contact_relationship_repo = contact_relationship_repo
         self.event_publisher = event_publisher
+        self.contact_repo = contact_repo
 
     @transactional
     async def add_contact_to_journal(
-        self, relationship: JournalContactRelationship, transaction: AsyncConnection
+        self,
+        relationship: JournalContactRelationship,
+        *,
+        user_id: str,
+        transaction: AsyncConnection,
     ) -> JournalContactRelationship:
         """
         Add a contact relationship to a journal.
 
+        ``user_id`` is the journal's owner, which every caller has already
+        proved. The contact must be theirs too: another user's contact is not
+        found, exactly as a missing one is, and nothing is written or published.
+
         Publishes ContactSummaryRefreshRequested for the contact.
+
+        Raises:
+            ContactNotFoundError: The contact is missing or another user's.
         """
+        if not await self.contact_repo.contact_exists(
+            relationship.contact_id, user_id=user_id
+        ):
+            raise ContactNotFoundError(relationship.contact_id)
         created = await self.contact_relationship_repo.create(relationship)
         await self.event_publisher.publish(
             ContactSummaryRefreshRequested(

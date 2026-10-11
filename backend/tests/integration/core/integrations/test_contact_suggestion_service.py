@@ -12,6 +12,7 @@ from core_shared.models.history import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
     SqlContactSuggestionIgnoreRepository,
@@ -61,6 +62,7 @@ def service(
         journal_contact_service=JournalContactService(
             SqlJournalContactRelationshipRepository(async_connection),
             OutboxEventPublisher(async_connection),
+            SqlContactRepository(async_connection),
         ),
     )
 

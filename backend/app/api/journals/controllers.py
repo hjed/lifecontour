@@ -2131,9 +2131,12 @@ async def add_contact_to_journal(
         status=status,
         role=role,
     )
+    # A contact that is missing or another user's raises ContactNotFoundError
+    # (404) from the service; an integrity error is a duplicate link, or a
+    # contact deleted since that check.
     try:
         await journal_contact_service.add_contact_to_journal(
-            relationship, transaction=connection
+            relationship, user_id=user.id, transaction=connection
         )
     except IntegrityError as e:
         raise JournalValidationError(

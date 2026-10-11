@@ -35,6 +35,7 @@ from core_shared.models.journals import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.adapters.sql.album_sync_read_repository import (
     AlbumSyncReadRepository,
 )
@@ -455,7 +456,10 @@ class JournalWriteService:
 
         if relationships:
             await self._process_journal_contact_relationships(
-                journal_id, relationships, transaction
+                journal_id,
+                relationships,
+                transaction,
+                user_id=created_journal.user_id,
             )
 
         if tags:
@@ -567,7 +571,7 @@ class JournalWriteService:
 
         if relationships is not None:
             await self._replace_contact_relationships(
-                journal_id, relationships, transaction
+                journal_id, relationships, transaction, user_id=journal.user_id
             )
 
         if tags is not None:
@@ -1028,17 +1032,6 @@ class JournalWriteService:
             )
 
     @transactional
-    async def add_contact_to_journal(
-        self,
-        relationship: JournalContactRelationship,
-        transaction: AsyncConnection,
-    ) -> JournalContactRelationship:
-        """Add a single contact relationship to a journal."""
-        return await self.journal_contact_service.add_contact_to_journal(
-            relationship, transaction=transaction
-        )
-
-    @transactional
     async def remove_contact_from_journal(
         self,
         journal_id: int,
@@ -1451,12 +1444,15 @@ class JournalWriteService:
         journal_id: int,
         contacts_data: list[dict[str, Any]],
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """Create contact relationships for a journal, skipping invalid items.
 
         Each relationship is wrapped in a SAVEPOINT so a missing contact or a
         unique-constraint violation rolls back only that item, not the whole
-        composite write.
+        composite write. ``user_id`` is the journal's owner: another user's
+        contact is skipped exactly as a missing one is.
         """
         for contact_data in contacts_data:
             try:
@@ -1515,9 +1511,9 @@ class JournalWriteService:
                     try:
                         async with savepoint(transaction):
                             await self.journal_contact_service.add_contact_to_journal(
-                                relationship, transaction=transaction
+                                relationship, user_id=user_id, transaction=transaction
                             )
-                    except IntegrityError:
+                    except ContactNotFoundError, IntegrityError:
                         # Log error and ignore; the savepoint handles the rollback
                         logger.warning(
                             "Invalid journal contact relationship ignored",
@@ -1750,6 +1746,8 @@ class JournalWriteService:
         journal_id: int,
         relationships: list[dict[str, Any]],
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """Remove all existing contact relationships, then add the provided set."""
         repo = self.journal_contact_service.contact_relationship_repo
@@ -1762,7 +1760,7 @@ class JournalWriteService:
                 transaction=transaction,
             )
         await self._process_journal_contact_relationships(
-            journal_id, relationships, transaction
+            journal_id, relationships, transaction, user_id=user_id
         )
 
     async def _replace_journal_tags(

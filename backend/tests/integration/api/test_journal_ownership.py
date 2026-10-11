@@ -26,6 +26,7 @@ next endpoint cannot quietly ship without an ownership test.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,7 @@ from core_shared.models.journals import (
 )
 from core_shared.models.journals.attendee_status import AttendeeStatus
 from core_shared.models.journals.mood_data import MoodData
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -61,6 +63,8 @@ OTHER_CONTENT = "The hut is booked under my name."
 # Their tag names, likewise asserted absent: a tag's name is its content.
 OTHER_TAG = "their-assigned-tag"
 OTHER_UNASSIGNED_TAG = "their-other-tag"
+# Their contact's name, asserted absent: a refused link must not name the person.
+OTHER_CONTACT = "TheirFriend"
 # The caller's own tag, the legitimate other half of a cross-owner merge.
 OWN_TAG = "my-own-tag"
 
@@ -368,7 +372,9 @@ async def foreign_journal(async_connection: AsyncConnection) -> ForeignJournal:
         MoodData(journal_id=journal_id, mood_value=9, mood_label="Elated")
     )
 
-    contact_id = await create_contact(async_connection, first_name="TheirFriend")
+    contact_id = await create_contact(
+        async_connection, first_name=OTHER_CONTACT, user_id=OTHER_USER_ID
+    )
     await SqlJournalContactRelationshipRepository(async_connection).create(
         JournalContactRelationship(
             journal_id=journal_id,
@@ -717,6 +723,100 @@ class TestJournalTagOwnershipIsEnforced:
         assert response.status_code == 200
         assert response.json()["data"] == []
         assert OTHER_TITLE not in response.text
+
+
+async def _contact_link_exists(
+    connection: AsyncConnection, journal_id: int, contact_id: int
+) -> bool:
+    row = await connection.execute(
+        text(
+            "SELECT 1 FROM journal_contact_relationships "
+            "WHERE journal_id = :journal_id AND contact_id = :contact_id"
+        ),
+        {"journal_id": journal_id, "contact_id": contact_id},
+    )
+    return row.fetchone() is not None
+
+
+def _error_without_ids(response: Response, contact_id: int) -> list[dict[str, Any]]:
+    """The JSON:API errors, minus the per-response error id and the contact id.
+
+    Only ``ID <n>`` is masked: a bare substring replace would also rewrite the
+    status whenever the contact id is a substring of it (contact 40 in "404").
+    """
+    return [
+        {
+            key: re.sub(rf"\bID {contact_id}\b", "ID <id>", str(value))
+            for key, value in error.items()
+            if key != "id"
+        }
+        for error in response.json()["errors"]
+    ]
+
+
+def _link_contact_body(contact_id: int) -> dict[str, Any]:
+    return {
+        "data": {
+            "type": CONTACT_RELATIONSHIP_RESOURCE,
+            "attributes": {
+                "contact_id": str(contact_id),
+                "relationship_type": PARTICIPANT,
+            },
+        }
+    }
+
+
+@pytest.mark.integration
+class TestJournalContactOwnershipIsEnforced:
+    """Another user's contact cannot join your journal, and says so as a missing one.
+
+    The journal is the caller's, so only the contact's owner can refuse the link:
+    a journal's people are the journal owner's contacts.
+    """
+
+    async def test_their_contact_cannot_join_your_journal(
+        self,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_journal: ForeignJournal,
+    ) -> None:
+        response = await integration_api_client.post(
+            f"/api/journals/{foreign_journal.attacker_journal_id}"
+            "/relationships/contacts",
+            json=_link_contact_body(foreign_journal.contact_id),
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert OTHER_CONTACT not in response.text
+        assert not await _contact_link_exists(
+            async_connection,
+            foreign_journal.attacker_journal_id,
+            foreign_journal.contact_id,
+        )
+
+    async def test_their_contact_is_refused_exactly_as_a_missing_one(
+        self,
+        integration_api_client: AsyncClient,
+        foreign_journal: ForeignJournal,
+    ) -> None:
+        route = (
+            f"/api/journals/{foreign_journal.attacker_journal_id}"
+            "/relationships/contacts"
+        )
+        missing_id = 999_999
+
+        foreign = await integration_api_client.post(
+            route, json=_link_contact_body(foreign_journal.contact_id)
+        )
+        absent = await integration_api_client.post(
+            route, json=_link_contact_body(missing_id)
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        assert "ID <id>" in str(_error_without_ids(foreign, foreign_journal.contact_id))
+        assert _error_without_ids(
+            foreign, foreign_journal.contact_id
+        ) == _error_without_ids(absent, missing_id)
 
 
 @pytest.mark.integration

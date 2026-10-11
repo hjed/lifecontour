@@ -664,11 +664,13 @@ class JournalProvider(Provider):
         self,
         contact_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: OutboxEventPublisher,
+        contact_repo: ContactRepository,
     ) -> JournalContactService:
         """Provide a JournalContactService instance."""
         return JournalContactService(
             contact_relationship_repo=contact_relationship_repo,
             event_publisher=event_publisher,
+            contact_repo=contact_repo,
         )
 
     @provide(scope=Scope.REQUEST)
