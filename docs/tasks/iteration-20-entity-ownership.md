@@ -596,7 +596,10 @@ its callers. Every layer is deployable on its own.
   user's contact holds. The service pre-check is now per owner, and the database's
   `DuplicateEmailError(…, 0)` names no foreign contact, but a 409 still reveals that the address
   exists somewhere. Per-owner uniqueness needs the owner in the index (a denormalised
-  `contact_methods.user_id`, or a trigger). It is not covered by any phase yet.
+  `contact_methods.user_id`, or a trigger). It is not covered by any phase yet. When it lands,
+  `UnmatchedParticipantEmailRepository.list_candidates` should exclude only emails the *user's*
+  contacts hold: it excludes any contact's email today, so an attendee address only another user
+  holds is recorded but never suggested (Phase 11).
 - ~~`TaskService` `add_contacts` replacement path (`task_service.py:~1496`) still relies on the
   foreign key and checks names only after an `IntegrityError`, so it does not refuse a foreign
   contact that exists. It belongs with Phase 11's task-contact bullet.~~ **Resolved in Phase 11:**
@@ -976,8 +979,12 @@ relationship, merge and history proofs; 11c the task proofs and the documents.
   duplicate link still answers 400.
 - **The composite create/update skip a foreign contact** (warning log), exactly as they already
   skipped a missing one.
-- **An inbound attendee address that only another user's contact holds is unmatched**, so it
-  becomes a contact suggestion for the journal's owner; it is never linked.
+- **An inbound attendee address that only another user's contact holds is unmatched**: it is
+  recorded for the journal's owner and never linked. It is **not suggested** while another user's
+  contact holds it: `list_candidates` leaves out any email any contact holds, which matches what
+  accept could do, since the system-wide `ix_contact_methods_email_unique` index would refuse the
+  address (the Phase 4 email-uniqueness follow-up). Once uniqueness is per owner, that exclusion
+  should become per owner too (augment review on #1747).
 - **The MCP link tool no longer pre-reads the contact**; the service's `ContactNotFoundError`
   reaches the tool's error handler as the standard not-found payload. A missing contact used to
   come back as a validation error.
