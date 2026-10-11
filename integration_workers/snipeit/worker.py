@@ -14,7 +14,6 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, NamedTuple, cast
-from uuid import uuid4
 
 from arq import Retry
 from arq.typing import StartupShutdown, WorkerSettingsBase
@@ -38,6 +37,7 @@ from core_shared.logging import configure_logging, get_logger
 from core_shared.models.sync_job import SyncJobStatus, SyncType
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from core_shared.tracked_enqueue import JobNotEnqueuedError, enqueue_tracked_job
 from core_shared.worker_arq import DEFAULT_MAX_TRIES
 
 from snipeit_models import SNIPEIT_DATETIME_FORMAT
@@ -744,67 +744,38 @@ async def _schedule_periodic_sync(
 ) -> str | None:
     """Record one periodic sync's ``sync_jobs`` row, then enqueue it.
 
-    The row is committed before the job is queued, so an orchestrator that runs
-    at once always finds its parent row. A job that is not queued fails its row
-    rather than leaving it queued for ever. Returns an error, or ``None``.
+    ``enqueue_tracked_job`` commits the row before the job is queued and fails
+    it if the job is not queued. Returns an error, or ``None``, so one user's
+    failure does not stop the others.
     """
-    job_id = uuid4().hex
     try:
-        await SyncJobRepository(await session.connection()).create(
-            job_id=job_id,
-            user_id=user_id,
-            integration_source="snipeit",
-            sync_type="smart",
-            status=SyncJobStatus.QUEUED.value,
-        )
-        await session.commit()
-    except Exception as exc:  # noqa: BLE001
-        await session.rollback()
-        logger.error(
-            "Error recording periodic Snipe-IT sync job",
-            function=function,
-            user_id=user_id,
-            exc_info=True,
-        )
-        return f"{function} failed for {user_id}: {exc!s}"
-
-    try:
-        job = await redis.enqueue_job(
+        await enqueue_tracked_job(
+            session,
+            redis,
             function,
             user_id,
             "smart",
-            _job_id=job_id,
-            _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "Error enqueueing periodic Snipe-IT sync job",
-            function=function,
+            queue_name=SNIPEIT_ARQ_QUEUE_NAME,
             user_id=user_id,
-            exc_info=True,
+            integration_source="snipeit",
+            sync_type="smart",
         )
-        row_error, error = str(exc), f"{function} failed for {user_id}: {exc!s}"
-    else:
-        if job is not None:
-            return None
+    except JobNotEnqueuedError:
         logger.warning(
             "Failed to enqueue periodic Snipe-IT sync job",
             function=function,
             user_id=user_id,
         )
-        row_error, error = (
-            "Job was not enqueued",
-            f"{function} was not enqueued for {user_id}",
+        return f"{function} was not enqueued for {user_id}"
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Error scheduling periodic Snipe-IT sync job",
+            function=function,
+            user_id=user_id,
+            exc_info=True,
         )
-
-    await SyncJobRepository(await session.connection()).update_status(
-        job_id=job_id,
-        status=SyncJobStatus.FAILED.value,
-        completed_at=datetime.now(UTC),
-        error_message=row_error,
-    )
-    await session.commit()
-    return error
+        return f"{function} failed for {user_id}: {exc!s}"
+    return None
 
 
 @trace_arq_job

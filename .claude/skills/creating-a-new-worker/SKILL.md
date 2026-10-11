@@ -409,6 +409,35 @@ the entry point thin and the data access testable in isolation.
 > them as legacy, **not** a pattern to copy — a new worker should route all data access
 > through a data-access/service module.
 
+### Enqueue tracked jobs with `enqueue_tracked_job`
+
+Any job that has a `sync_jobs` row (a periodic sync, an orchestrator) must be queued through
+`core_shared.tracked_enqueue.enqueue_tracked_job`, never `redis.enqueue_job` followed by
+`SyncJobRepository.create`. The helper commits the `queued` row first, enqueues under its id, and
+fails the row if the job is not queued — so a job that runs at once always finds its row:
+
+```python
+from core_shared.tracked_enqueue import JobNotEnqueuedError, enqueue_tracked_job
+
+try:
+    job_id = await enqueue_tracked_job(
+        session,
+        ctx["redis"],
+        "sync_<name>_items",
+        user_id,
+        "smart",
+        queue_name=<NAME>_ARQ_QUEUE_NAME,
+        user_id=user_id,
+        integration_source="<name>",
+        sync_type="smart",
+    )
+except JobNotEnqueuedError:
+    ...  # the row is already failed; record the error and carry on
+```
+
+Fan-out children use `core_shared.fanout.persist_fanout_children` instead, which writes their
+rows before they are dispatched.
+
 ---
 
 ## (g) Communicate with the backend via events only

@@ -481,6 +481,14 @@ return immediately. Parent completion is decided out-of-band by a shared reconci
   top-level jobs).
 - `expected_children`, `completed_children`, `failed_children` — child counters on the parent.
 
+**Enqueueing a tracked job:** every job with a `sync_jobs` row — backend-triggered syncs
+(`TaskQueueService.enqueue_*`) and worker periodic syncs alike — is queued through
+`core_shared.tracked_enqueue.enqueue_tracked_job`. It commits the `queued` row under a
+pre-generated id, then enqueues with that `_job_id`, and fails the row if the job is not queued.
+An orchestrator that runs at once therefore always finds its parent row, so its status updates
+match and its children satisfy the `parent_job_id` foreign key; queueing first would leave a late
+row `queued` for ever, since the reconciler only scans `IN_PROGRESS` parents.
+
 **Non-blocking lifecycle:**
 
 1. The orchestrator persists a `sync_jobs` row per child linked via `parent_job_id`, records
