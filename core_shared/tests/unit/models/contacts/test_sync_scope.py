@@ -234,6 +234,22 @@ class TestContactSyncScopeOnTheEvent:
         )
 
         assert parsed.sync_scope is None
+        assert parsed.force_apply is False
+
+    def test_event_carries_force_apply(self) -> None:
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Rob"},
+            integration_source="google",
+            external_id="people/c1",
+            sync_type="updated",
+            etag="etag-1",
+            user_id="user-1",
+            force_apply=True,
+        )
+
+        parsed = ContactSyncEventData.model_validate(event.event_data)
+
+        assert parsed.force_apply is True
 
     def test_unknown_field_name_is_rejected(self) -> None:
         with pytest.raises(ValidationError):

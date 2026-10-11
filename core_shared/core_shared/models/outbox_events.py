@@ -53,6 +53,12 @@ class ContactSyncEventData(BaseModel):
         description="Fields the source owns; the rest keep their stored values. "
         "None (an event queued before scopes) overwrites the contact whole.",
     )
+    force_apply: bool = Field(
+        default=False,
+        description="Apply even when the etag matches the stored one: a full "
+        "sync re-applies every person, so a field a source newly owns reaches "
+        "contacts the provider has not changed since.",
+    )
 
 
 # ── Sync Completed ───────────────────────────────────────────────────

@@ -610,6 +610,10 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if names:
         person_data["names"] = names
 
+    # Not sent when unset, so Google keeps its copy: the old import cleared
+    # local nicknames Google still holds, and the full pull migration 0131
+    # forces restores them. Sending an empty list would delete that copy
+    # whenever such a contact is pushed first.
     nicknames = _transform_nicknames(contact)
     if nicknames:
         person_data["nicknames"] = nicknames
@@ -1666,6 +1670,9 @@ async def _perform_full_sync(
                     etag=google_person.etag,
                     user_id=str(user_id),
                     sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
+                    # A full sync re-applies every person, etag unchanged or
+                    # not, so a field Google newly owns reaches every contact.
+                    force_apply=True,
                 )
 
                 # Add to session (will be committed with transaction)

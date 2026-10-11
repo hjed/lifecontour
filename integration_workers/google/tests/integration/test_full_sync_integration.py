@@ -165,3 +165,17 @@ class TestFullSyncIntegration:
             )
             expected_scope = GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json")
             assert [row[0] for row in result_scopes] == [expected_scope] * 2
+
+            # A full sync re-applies every person, even one whose etag is
+            # unchanged, so a field Google newly owns reaches every contact.
+            result_force = await db_session.execute(
+                text(
+                    """
+                    SELECT (event_data::jsonb)->'force_apply'
+                    FROM outbox_events
+                    WHERE (event_data::jsonb)->>'external_id'
+                          IN ('people/full_sync_1', 'people/full_sync_2')
+                    """
+                )
+            )
+            assert [row[0] for row in result_force] == [True, True]

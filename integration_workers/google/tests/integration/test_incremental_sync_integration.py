@@ -140,7 +140,7 @@ class TestIncrementalSyncIntegration:
             mock_connections.list.assert_called_with(
                 resourceName="people/me",
                 pageSize=100,
-                personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
+                personFields="names,nicknames,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
                 syncToken="valid_incremental_sync_token",
             )
             # Result should show at least some metrics
@@ -295,13 +295,16 @@ class TestIncrementalSyncIntegration:
         updated_scopes = await db_session.execute(
             text(
                 """
-                SELECT (event_data::jsonb)->'sync_scope' FROM outbox_events
+                SELECT (event_data::jsonb)->'sync_scope',
+                       (event_data::jsonb)->'force_apply'
+                FROM outbox_events
                 WHERE event_type = 'contact.updated'
                   AND (event_data::jsonb)->>'external_id' = :external_id
                 """
             ),
             {"external_id": known_external_id},
         )
-        assert [row[0] for row in updated_scopes] == [
-            GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json")
+        # An incremental change is applied only when its etag moved.
+        assert [tuple(row) for row in updated_scopes] == [
+            (GOOGLE_CONTACT_SYNC_SCOPE.model_dump(mode="json"), False)
         ]

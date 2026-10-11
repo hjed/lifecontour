@@ -112,6 +112,7 @@ class OutboxEvent(Base):
         *,
         user_id: str,
         sync_scope: ContactSyncScope | None = None,
+        force_apply: bool = False,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -124,6 +125,7 @@ class OutboxEvent(Base):
             etag: External system's version identifier (e.g., Google ETag)
             user_id: Owner of the synced contact (the integration's user)
             sync_scope: The fields the source owns; see ``ContactSyncScope``
+            force_apply: Apply even when ``etag`` is unchanged (a full sync)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -140,6 +142,7 @@ class OutboxEvent(Base):
             etag=etag,
             user_id=user_id,
             sync_scope=sync_scope,
+            force_apply=force_apply,
         )
         return cls(
             event_type=f"contact.{sync_type}",

@@ -5,7 +5,7 @@ Tests the processing of outbox events from integration workers,
 including contact sync events and sync completion events.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -14,6 +14,7 @@ import pytest
 from core_shared.models.contacts.entities import Contact, ContactMethod, MethodType, Tag
 from core_shared.models.contacts.value_objects import TagName
 from core_shared.models.outbox import OutboxEvent
+from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services.contact_service import ContactService
@@ -21,6 +22,7 @@ from app.core.integrations.outbox_event_processor import (
     OutboxEventProcessingError,
     OutboxEventProcessor,
     PermanentOutboxEventProcessingError,
+    _has_unpushed_local_changes,
 )
 
 # The user whose integration published the sync events below.
@@ -1383,3 +1385,41 @@ class TestOutboxEventProcessor:
         # Verify changed_by uses the normalized source
         call_kwargs = mock_contact_service.update_contact.call_args
         assert call_kwargs.kwargs.get("changed_by") == "google_sync"
+
+
+class TestHasUnpushedLocalChanges:
+    """A forced re-apply leaves a contact edited since its last sync alone."""
+
+    SYNCED_AT = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+    def _link(self) -> SyncMetadata:
+        return SyncMetadata(
+            internal_id=1,
+            integration_source="google",
+            external_id="people/c1",
+            last_synced_at=self.SYNCED_AT,
+            version_hash="etag-1",
+            sync_status=SyncStatus.SUCCESS,
+        )
+
+    def _contact(self, updated_at: datetime | None) -> Contact:
+        return Contact(
+            id=1, user_id=SYNC_OWNER, first_name="Rob", updated_at=updated_at
+        )
+
+    @pytest.mark.parametrize(
+        ("updated_at", "expected"),
+        [
+            (SYNCED_AT + timedelta(seconds=1), True),
+            (SYNCED_AT, False),
+            (SYNCED_AT - timedelta(minutes=5), False),
+            (None, False),
+        ],
+    )
+    def test_edited_after_the_last_sync(
+        self, updated_at: datetime | None, expected: bool
+    ) -> None:
+        assert (
+            _has_unpushed_local_changes(self._contact(updated_at), self._link())
+            is expected
+        )

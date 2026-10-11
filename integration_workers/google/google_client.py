@@ -17,6 +17,13 @@ from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
 
 logger = structlog.get_logger()
 
+# The Person fields the contacts sync reads; GOOGLE_CONTACT_SYNC_SCOPE in the
+# transformer names the contact fields mapped from them.
+PERSON_FIELDS = (
+    "names,nicknames,emailAddresses,phoneNumbers,addresses,organizations,"
+    "birthdays,events,metadata,memberships,biographies"
+)
+
 # Google's reason code for "this event's type does not allow that change".
 # A contact-linked birthday event accepts only colorId, summary and reminders;
 # an event from Gmail accepts even less. See
@@ -224,7 +231,7 @@ class GoogleAPIClient:
             request_params = {
                 "resourceName": "people/me",
                 "pageSize": min(page_size, 2000),  # Google's max limit
-                "personFields": "names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
+                "personFields": PERSON_FIELDS,
             }
 
             if page_token:
@@ -352,7 +359,7 @@ class GoogleAPIClient:
                 service.people()
                 .get(
                     resourceName=resource_name,
-                    personFields="names,emailAddresses,phoneNumbers,addresses,organizations,birthdays,events,metadata,memberships,biographies",
+                    personFields=PERSON_FIELDS,
                 )
                 .execute()
             )
