@@ -326,9 +326,22 @@ class JournalService:
         # source, so the id it syncs under stands in for one. A calendar with
         # neither belongs to the user alone; its link is left out, since no
         # worker could act on it and every key here is an instruction to.
+        #
+        # Events the journal absorbed by merging (its merged aliases) go with
+        # it, filed the same way: once the journal and its aliases are gone,
+        # anything left upstream would be imported again as a new journal.
         stmt = text("""
-            SELECT jeel.external_event_id,
-                   jeel.calendar_id,
+            WITH event_ids AS (
+                SELECT external_event_id, calendar_id
+                FROM journal_external_event_links
+                WHERE journal_id = :journal_id AND external_event_id IS NOT NULL
+                UNION ALL
+                SELECT external_id, calendar_id
+                FROM journal_merged_aliases
+                WHERE journal_id = :journal_id AND calendar_id IS NOT NULL
+            )
+            SELECT e.external_event_id,
+                   e.calendar_id,
                    c.google_calendar_id,
                    COALESCE(
                        c.integration_source,
@@ -336,9 +349,8 @@ class JournalService:
                            WHEN c.google_calendar_id IS NOT NULL THEN 'google'
                        END
                    ) AS integration_source
-            FROM journal_external_event_links jeel
-            JOIN calendars c ON jeel.calendar_id = c.id
-            WHERE jeel.journal_id = :journal_id AND jeel.external_event_id IS NOT NULL
+            FROM event_ids e
+            JOIN calendars c ON e.calendar_id = c.id
         """)
         result = await transaction.execute(stmt, {"journal_id": journal_id})
         external_identifiers: dict[str, list[dict[str, Any]]] = {}
