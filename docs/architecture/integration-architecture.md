@@ -331,8 +331,10 @@ links, can reach it.
   after the type-data merge, records each one the target does not hold as an alias.
   The source's own aliases move to the target. The merge never needs to know *why*
   a link was lost, so a store is covered as soon as it is registered.
-- **One reader and writer.** `MergedAliasRepository` (`core_shared`) is the only code
-  that touches the table. `core_shared.merged_alias_keys` maps the names a payload
+- **One writer, one lookup.** `MergedAliasRepository` (`core_shared`) is the only code
+  that writes the table and the only way to ask "did a merge absorb this record?". Two
+  read-only joins also read it: the `MERGED_ALIAS` link stores (see below) and the
+  deletion identifiers in `JournalService.delete_journal`. `core_shared.merged_alias_keys` maps the names a payload
   uses (`google`, `strava:<id>`) onto the link store's (`google_calendar`, `<id>`),
   so a worker asks in its own terms. A lookup matches on the record's id, then on
   its cross-calendar `external_identity` **from any calendar**.

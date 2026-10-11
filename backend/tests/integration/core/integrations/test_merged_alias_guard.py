@@ -80,7 +80,13 @@ class SourceSeeder:
 
     link: Callable[[AsyncConnection, int, str], Awaitable[None]]
     replay: Callable[[AsyncConnection, str], Awaitable[dict[str, Any]]]
+    # Whether deleting a journal deletes its own record of this source
+    # upstream: the absorbed record must follow, and the test must fail if
+    # neither is sent rather than pass on "both missing".
+    deleted_upstream: bool
     payload_id: Callable[[str], str] = lambda record_id: record_id
+    # (survivor's record, absorbed record), in the shape the source issues.
+    record_ids: tuple[str, str] = ("rec-own", "rec-absorbed")
 
 
 async def _calendar(
@@ -239,21 +245,27 @@ SEEDERS: dict[str, SourceSeeder] = {
     "google_calendar": SourceSeeder(
         link=_link_google,
         replay=_calendar_event_replay("google", "google", "work@example.com"),
+        deleted_upstream=True,
     ),
     "snipeit_maintenance": SourceSeeder(
         link=_link_snipeit_import,
         replay=_calendar_event_replay(
             "snipeit_maintenance", "snipeit_maintenance", version_hash=_snipeit_hash
         ),
+        deleted_upstream=True,
+        record_ids=("snipeit_maint:41", "snipeit_maint:42"),
     ),
     "strava": SourceSeeder(
         link=_link_strava,
         replay=_calendar_event_replay("strava", "strava"),
+        deleted_upstream=False,
         payload_id=lambda record_id: f"strava:{record_id}",
+        record_ids=("111", "222"),
     ),
     "immich_album": SourceSeeder(
         link=_link_immich_album,
         replay=_replay_immich_album,
+        deleted_upstream=False,
     ),
 }
 
@@ -318,10 +330,11 @@ async def test_a_replace_merge_never_lets_the_absorbed_record_back_in(
 ) -> None:
     conn = async_connection
     seeder = SEEDERS[source]
+    own, absorbed_record = seeder.record_ids
     survivor = await _journal(conn, "Survivor")
     absorbed = await _journal(conn, "Absorbed")
-    await seeder.link(conn, survivor, "rec-own")
-    await seeder.link(conn, absorbed, "rec-absorbed")
+    await seeder.link(conn, survivor, own)
+    await seeder.link(conn, absorbed, absorbed_record)
 
     await JournalMergeService(
         journal_repo=SqlJournalRepository(conn),
@@ -337,13 +350,13 @@ async def test_a_replace_merge_never_lets_the_absorbed_record_back_in(
     # 3. The survivor still answers for the absorbed record.
     assert (
         await SqlJournalRepository(conn).find_id_by_external_id(
-            USER_ID, source, "rec-absorbed"
+            USER_ID, source, absorbed_record
         )
         == survivor
     )
 
     # 4. Its sync coming round again creates nothing.
-    result = await seeder.replay(conn, seeder.payload_id("rec-absorbed"))
+    result = await seeder.replay(conn, seeder.payload_id(absorbed_record))
     assert result["status"] == "skipped"
     assert result["journal_id"] == survivor
     count = await conn.execute(
@@ -354,6 +367,5 @@ async def test_a_replace_merge_never_lets_the_absorbed_record_back_in(
 
     # 5. Deleting the survivor treats the absorbed record as its own.
     deleted = await _deletion_ids(conn, survivor)
-    assert (
-        seeder.payload_id("rec-absorbed") in deleted or "rec-absorbed" in deleted
-    ) == (seeder.payload_id("rec-own") in deleted or "rec-own" in deleted)
+    assert (seeder.payload_id(own) in deleted) is seeder.deleted_upstream
+    assert (seeder.payload_id(absorbed_record) in deleted) is seeder.deleted_upstream
