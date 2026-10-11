@@ -5,15 +5,97 @@ Tests the ARQ task queue integration for enqueueing jobs
 and checking job status.
 """
 
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from arq.connections import RedisSettings
 from arq.jobs import JobStatus
+from core_shared.integration_constants import (
+    IMMICH_ARQ_QUEUE_NAME,
+    SNIPEIT_ARQ_QUEUE_NAME,
+    STRAVA_ARQ_QUEUE_NAME,
+)
+from core_shared.tracked_enqueue import JobNotEnqueuedError
 
-from app.core.integrations.exceptions import JobNotFoundException
+from app.core.integrations.exceptions import JobEnqueueError, JobNotFoundException
 from app.core.integrations.task_queue_service import ARQ_QUEUE_NAME, TaskQueueService
 from app.infrastructure.config import Settings
+
+
+@dataclass(frozen=True)
+class TrackedEnqueueCase:
+    """One ``enqueue_*`` method and the tracked job it should queue."""
+
+    method: str
+    kwargs: dict[str, Any]
+    function: str
+    args: tuple[Any, ...]
+    queue_name: str
+    integration_source: str
+    sync_type: str = field(default="smart")
+
+
+TRACKED_ENQUEUE_CASES = [
+    TrackedEnqueueCase(
+        method="enqueue_google_sync",
+        kwargs={"google_account_email": "a@example.com", "user_id": 123},
+        function="sync_google_contacts",
+        args=("a@example.com", 123, "smart"),
+        queue_name=ARQ_QUEUE_NAME,
+        integration_source="google",
+    ),
+    TrackedEnqueueCase(
+        method="enqueue_calendar_sync",
+        kwargs={"google_account_email": "a@example.com", "user_id": 123},
+        function="sync_calendar_events",
+        args=("a@example.com", 123, "smart"),
+        queue_name=ARQ_QUEUE_NAME,
+        integration_source="google",
+    ),
+    TrackedEnqueueCase(
+        method="enqueue_strava_sync",
+        kwargs={"user_id": 123},
+        function="sync_strava_activities",
+        args=("123", "full"),
+        queue_name=STRAVA_ARQ_QUEUE_NAME,
+        integration_source="strava",
+        sync_type="full",
+    ),
+    TrackedEnqueueCase(
+        method="enqueue_snipeit_sync",
+        kwargs={"user_id": 123},
+        function="sync_snipeit_assets",
+        args=("123", "full"),
+        queue_name=SNIPEIT_ARQ_QUEUE_NAME,
+        integration_source="snipeit",
+        sync_type="full",
+    ),
+    TrackedEnqueueCase(
+        method="enqueue_snipeit_maintenance_sync",
+        kwargs={"user_id": 123},
+        function="sync_snipeit_maintenances",
+        args=("123", "full"),
+        queue_name=SNIPEIT_ARQ_QUEUE_NAME,
+        integration_source="snipeit",
+        sync_type="full",
+    ),
+    TrackedEnqueueCase(
+        method="enqueue_immich_sync",
+        kwargs={
+            "user_id": 123,
+            "sync_type": "incremental",
+            "task_name": "sync_immich_albums",
+            "integration_source": "immich_album",
+        },
+        function="sync_immich_albums",
+        args=("123", "smart"),
+        queue_name=IMMICH_ARQ_QUEUE_NAME,
+        integration_source="immich_album",
+    ),
+]
 
 
 class TestTaskQueueService:
@@ -56,86 +138,6 @@ class TestTaskQueueService:
             settings=mock_settings,
             db_manager=mock_db_manager,
         )
-
-    @pytest.mark.asyncio
-    async def test_enqueue_google_sync_success(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test successful job enqueueing."""
-        # Mock ARQ job
-        mock_job = MagicMock()
-        mock_job.job_id = "test-job-123"
-        mock_redis_pool.enqueue_job.return_value = mock_job
-
-        # Mock database session and repository
-        mock_session = MagicMock()
-        mock_conn = AsyncMock()
-        mock_session.connection = AsyncMock(return_value=mock_conn)
-
-        # Create async context manager for session.begin()
-        mock_begin_ctx = MagicMock()
-        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
-        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
-
-        # Create async context manager for db_manager.get_session()
-        mock_get_session_ctx = MagicMock()
-        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock the db_manager's get_session method
-        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
-
-        with patch(
-            "app.core.integrations.task_queue_service.SyncJobRepository"
-        ) as mock_repo_class:
-            mock_repo = AsyncMock()
-            mock_repo_class.return_value = mock_repo
-
-            # Mock Redis operations for user-job association
-            mock_redis_pool.hset = AsyncMock()
-            mock_redis_pool.expire = AsyncMock()
-
-            # Enqueue job
-            job_id = await service.enqueue_google_sync(
-                google_account_email="test@example.com", user_id=123, sync_type="smart"
-            )
-
-            # Verify job was enqueued correctly
-            mock_redis_pool.enqueue_job.assert_called_once_with(
-                "sync_google_contacts",
-                "test@example.com",
-                123,
-                "smart",
-                otel_carrier=ANY,
-                _defer_until=None,
-                _queue_name=ARQ_QUEUE_NAME,
-            )
-
-            assert job_id == "test-job-123"
-
-            # Verify user-job association was stored
-            mock_redis_pool.hset.assert_called_once_with(
-                "user_jobs:123", "test-job-123", "enqueued"
-            )
-            mock_redis_pool.expire.assert_called_once_with("user_jobs:123", 86400)
-
-    @pytest.mark.asyncio
-    async def test_enqueue_google_sync_failure(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test job enqueueing failure."""
-        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
-
-        # Should raise exception
-        with pytest.raises(Exception) as exc_info:
-            await service.enqueue_google_sync(
-                google_account_email="test@example.com",
-                user_id=123,
-                sync_type="smart",
-            )
-
-        assert "Redis connection failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_job_status_completed(
@@ -421,138 +423,89 @@ class TestTaskQueueService:
         # Verify the exception message mentions authorization
         assert "not authorized" in str(exc_info.value).lower()
 
-    @pytest.mark.asyncio
-    async def test_enqueue_calendar_sync_success(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test successful calendar sync job enqueueing."""
-        mock_job = MagicMock()
-        mock_job.job_id = "cal-job-123"
-        mock_redis_pool.enqueue_job.return_value = mock_job
+    @pytest.fixture
+    def db_session(self, service: TaskQueueService) -> MagicMock:
+        """Stub the integration database session the tracked enqueue writes through."""
+        session = MagicMock()
+        session_ctx = MagicMock()
+        session_ctx.__aenter__ = AsyncMock(return_value=session)
+        session_ctx.__aexit__ = AsyncMock(return_value=None)
+        service.db_manager.get_session = MagicMock(return_value=session_ctx)  # type: ignore[method-assign]
+        return session
 
-        # Mock database session and repository
-        mock_session = MagicMock()
-        mock_conn = AsyncMock()
-        mock_session.connection = AsyncMock(return_value=mock_conn)
-
-        mock_begin_ctx = MagicMock()
-        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
-        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
-
-        mock_get_session_ctx = MagicMock()
-        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
-
-        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
-
+    @pytest.fixture
+    def tracked_enqueue(self, mock_redis_pool: AsyncMock) -> Iterator[AsyncMock]:
+        """Patch the shared row-first enqueue the service delegates to."""
+        mock_redis_pool.hset = AsyncMock()
+        mock_redis_pool.expire = AsyncMock()
         with patch(
-            "app.core.integrations.task_queue_service.SyncJobRepository"
-        ) as mock_repo_class:
-            mock_repo = AsyncMock()
-            mock_repo_class.return_value = mock_repo
-
-            mock_redis_pool.hset = AsyncMock()
-            mock_redis_pool.expire = AsyncMock()
-
-            job_id = await service.enqueue_calendar_sync(
-                google_account_email="test@example.com",
-                user_id=123,
-                sync_type="smart",
-            )
-
-            # Verify job targets sync_calendar_events (not sync_google_contacts)
-            mock_redis_pool.enqueue_job.assert_called_once_with(
-                "sync_calendar_events",
-                "test@example.com",
-                123,
-                "smart",
-                otel_carrier=ANY,
-                _defer_until=None,
-                _queue_name=ARQ_QUEUE_NAME,
-            )
-
-            assert job_id == "cal-job-123"
+            "app.core.integrations.task_queue_service.enqueue_tracked_job",
+            new_callable=AsyncMock,
+            return_value="tracked-job-1",
+        ) as mock:
+            yield mock
 
     @pytest.mark.asyncio
-    async def test_enqueue_calendar_sync_failure(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test calendar sync job enqueueing failure."""
-        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
+    @pytest.mark.parametrize("case", TRACKED_ENQUEUE_CASES, ids=lambda c: c.method)
+    async def test_tracked_enqueue_writes_row_through_shared_helper(
+        self,
+        case: TrackedEnqueueCase,
+        service: TaskQueueService,
+        mock_redis_pool: AsyncMock,
+        db_session: MagicMock,
+        tracked_enqueue: AsyncMock,
+    ) -> None:
+        """Each tracked sync commits its row before queueing, via the shared helper."""
+        job_id = await getattr(service, case.method)(**case.kwargs)
 
-        with pytest.raises(Exception) as exc_info:
-            await service.enqueue_calendar_sync(
-                google_account_email="test@example.com",
-                user_id=123,
-                sync_type="smart",
-            )
-
-        assert "Redis connection failed" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_enqueue_snipeit_sync_success(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test successful Snipe-IT sync job enqueueing."""
-        from core_shared.integration_constants import SNIPEIT_ARQ_QUEUE_NAME
-
-        mock_job = MagicMock()
-        mock_job.job_id = "snipeit-job-123"
-        mock_redis_pool.enqueue_job.return_value = mock_job
-
-        # Mock database session and repository
-        mock_session = MagicMock()
-        mock_conn = AsyncMock()
-        mock_session.connection = AsyncMock(return_value=mock_conn)
-
-        mock_begin_ctx = MagicMock()
-        mock_begin_ctx.__aenter__ = AsyncMock(return_value=None)
-        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session.begin = MagicMock(return_value=mock_begin_ctx)
-
-        mock_get_session_ctx = MagicMock()
-        mock_get_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_get_session_ctx.__aexit__ = AsyncMock(return_value=None)
-
-        service.db_manager.get_session = MagicMock(return_value=mock_get_session_ctx)  # type: ignore[method-assign]
-
-        with patch(
-            "app.core.integrations.task_queue_service.SyncJobRepository"
-        ) as mock_repo_class:
-            mock_repo = AsyncMock()
-            mock_repo_class.return_value = mock_repo
-
-            mock_redis_pool.hset = AsyncMock()
-            mock_redis_pool.expire = AsyncMock()
-
-            job_id = await service.enqueue_snipeit_sync(
-                user_id=123,
-                sync_type="full",
-            )
-
-            mock_redis_pool.enqueue_job.assert_called_once_with(
-                "sync_snipeit_assets",
-                "123",
-                "full",
-                otel_carrier=ANY,
-                _defer_until=None,
-                _queue_name=SNIPEIT_ARQ_QUEUE_NAME,
-            )
-
-            assert job_id == "snipeit-job-123"
+        assert job_id == "tracked-job-1"
+        tracked_enqueue.assert_awaited_once_with(
+            db_session,
+            mock_redis_pool,
+            case.function,
+            *case.args,
+            queue_name=case.queue_name,
+            user_id="123",
+            integration_source=case.integration_source,
+            sync_type=case.sync_type,
+            otel_carrier=ANY,
+            _defer_until=None,
+        )
+        mock_redis_pool.hset.assert_awaited_once_with(
+            "user_jobs:123", "tracked-job-1", "enqueued"
+        )
 
     @pytest.mark.asyncio
-    async def test_enqueue_snipeit_sync_failure(
-        self, service: TaskQueueService, mock_redis_pool: AsyncMock
-    ):
-        """Test Snipe-IT sync job enqueueing failure."""
-        mock_redis_pool.enqueue_job.side_effect = Exception("Redis connection failed")
+    async def test_job_not_enqueued_raises_job_enqueue_error(
+        self,
+        service: TaskQueueService,
+        mock_redis_pool: AsyncMock,
+        db_session: MagicMock,
+        tracked_enqueue: AsyncMock,
+    ) -> None:
+        """ARQ returning no job surfaces as JobEnqueueError, with no ownership stored."""
+        tracked_enqueue.side_effect = JobNotEnqueuedError("sync_strava_activities", "x")
 
-        with pytest.raises(Exception) as exc_info:
-            await service.enqueue_snipeit_sync(
-                user_id=123,
-                sync_type="full",
+        with pytest.raises(JobEnqueueError) as exc_info:
+            await service.enqueue_strava_sync(user_id=123)
+
+        assert exc_info.value.integration_source == "strava"
+        mock_redis_pool.hset.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_enqueue_error_propagates_without_storing_ownership(
+        self,
+        service: TaskQueueService,
+        mock_redis_pool: AsyncMock,
+        db_session: MagicMock,
+        tracked_enqueue: AsyncMock,
+    ) -> None:
+        """A failed enqueue is re-raised and the job is not associated with the user."""
+        tracked_enqueue.side_effect = ConnectionError("Redis connection failed")
+
+        with pytest.raises(ConnectionError, match="Redis connection failed"):
+            await service.enqueue_google_sync(
+                google_account_email="test@example.com", user_id=123
             )
 
-        assert "Redis connection failed" in str(exc_info.value)
+        mock_redis_pool.hset.assert_not_awaited()

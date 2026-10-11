@@ -96,8 +96,8 @@ Activity import is a **non-blocking fan-out** (ITER14-003). The orchestrator no
 longer holds a worker slot waiting on its children:
 
 1. `sync_strava_activities` first owns its parent `sync_jobs` row (its own
-   `job_id` — Strava creates this row idempotently since nothing enqueues one
-   ahead of it) and commits it as `running` **before draining**, so the dashboard
+   `job_id` — a backend-triggered sync commits this row before queueing the job;
+   the periodic sync does not, so Strava creates it idempotently when missing) and commits it as `running` **before draining**, so the dashboard
    shows an in-flight sync even if the drain defers on a rate limit. It then
    drains the activity-page generator, persists one linked child row per page
    (`parent_job_id` → orchestrator), sets the parent's `expected_children` to the

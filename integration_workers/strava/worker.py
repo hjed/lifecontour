@@ -249,8 +249,8 @@ def _create_api_client(
 # The worker-agnostic pieces (`persist_fanout_children`, `record_child_terminal`,
 # `is_final_attempt`) live in `core_shared.fanout` and are imported above. The
 # helpers below are Strava-specific: it owns its parent row up-front
-# (`_ensure_parent_row`) since nothing enqueues one ahead of the orchestrator,
-# and its batch sync manages its own per-activity transactions, so the child
+# (`_ensure_parent_row`) since the periodic sync enqueues none ahead of the
+# orchestrator (a backend-triggered sync commits one first), and its batch sync manages its own per-activity transactions, so the child
 # terminal updates run in their own committed unit of work.
 # ---------------------------------------------------------------------------
 
@@ -265,9 +265,9 @@ async def _ensure_parent_row(
 ) -> None:
     """Idempotently own the orchestrator's parent ``sync_jobs`` row.
 
-    The orchestrator's own ``job_id`` is the parent. On the first run no row
-    exists yet (nothing enqueues a row for Strava), so create it; on an ARQ
-    retry it already exists. Either way mark it ``running`` with ``started_at``
+    The orchestrator's own ``job_id`` is the parent. A backend-triggered sync
+    commits its row before queueing the job, but the periodic sync queues no
+    row, so create it when missing; on an ARQ retry it already exists. Either way mark it ``running`` with ``started_at``
     before the children are persisted.
     """
     existing = await repo.get_by_job_id(job_id)
