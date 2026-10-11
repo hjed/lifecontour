@@ -610,7 +610,7 @@ its callers. Every layer is deployable on its own.
 
 #### Phase 5: REST cross-user isolation suite for contacts ✅ DONE
 
-**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged, while the owner's identical request succeeds (70 tests); two reds fixed (avatar, relationship by-id).
+**Status:** ✅ DONE — every `{contact_id}` route answers 404 for another user's contact and leaves it unchanged, while the owner's identical request succeeds (71 tests); two reds fixed (avatar, relationship by-id).
 
 **PR Size:** ~350 lines estimated (test-heavy); ~900 delivered (see Decisions)
 
@@ -650,7 +650,10 @@ its callers. Every layer is deployable on its own.
 
 **Decisions (recorded during implementation):**
 - **Whole-table snapshots.** `UNCHANGED_ROWS` compares every row of each contact table, plus
-  `tags`, `field_history` and `sync_metadata`, not just the foreign contact's rows. A refused merge
+  `tags`, `field_history`, `sync_metadata`, the outbox and edit-event queues, and the journals and
+  tasks a merge re-points (each seeded with a link to the foreign contact), not just the foreign
+  contact's rows. Every table starts with rows and every `updated_at` is backdated, each guarded
+  by a test, so a moved row or a premature touch shows. A refused merge
   or relationship write must leave the caller's own contact unchanged too.
 - **The coverage guard scans every mounted path with `{contact_id}`**, as the journal guard does.
   The journal-contact PATCH/DELETE and task-contact DELETE routes are in `COVERED_ELSEWHERE`,

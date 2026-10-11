@@ -26,6 +26,7 @@ route carrying ``{contact_id}`` fails until it is listed here or recorded in
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -48,6 +49,11 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.contacts.value_objects import TagName
+from core_shared.models.journals import (
+    JournalContactRelationship,
+    JournalContactRelationshipType,
+)
+from core_shared.models.journals.attendee_status import AttendeeStatus
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -62,8 +68,17 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.models import FieldHistoryEntry
+from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
+    SqlJournalContactRelationshipRepository,
+)
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.main import create_app
 from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
+from tests.integration.tasks.task_seeding import (
+    create_journal,
+    create_task,
+    link_contact,
+)
 
 # The foreign contact's private text, every string seeded on it. Each is
 # asserted absent from every response body: a 404 that still echoed a name,
@@ -76,6 +91,8 @@ OTHER_STREET = "3 Stone Lane"
 OTHER_NOTE = "Keeps the spare key under the third stone."
 OTHER_SUMMARY = "Met at the hut; owes me a rope."
 OTHER_FORMER_NAME = "Dora Quince"
+OTHER_JOURNAL_TITLE = "Scrambled the north ridge"
+OTHER_TASK_TEXT = "Return the borrowed crampons"
 IMMICH_PERSON_ID = "person-theirs"
 OTHER_TEXT = (
     OTHER_FIRST_NAME,
@@ -86,6 +103,8 @@ OTHER_TEXT = (
     OTHER_NOTE,
     OTHER_SUMMARY,
     OTHER_FORMER_NAME,
+    OTHER_JOURNAL_TITLE,
+    OTHER_TASK_TEXT,
     IMMICH_PERSON_ID,
 )
 
@@ -119,7 +138,46 @@ UNCHANGED_ROWS = {
     "links": text("SELECT to_jsonb(t) FROM sync_metadata t"),
     "outbox": text("SELECT to_jsonb(t) FROM outbox_events t"),
     "edit_events": text("SELECT to_jsonb(t) FROM contact_edit_event t"),
+    # A merge re-points the contact's journal and task links.
+    "journals": text("SELECT to_jsonb(t) FROM journals t"),
+    "journal_links": text("SELECT to_jsonb(t) FROM journal_contact_relationships t"),
+    "tasks": text("SELECT to_jsonb(t) FROM tasks t"),
+    "task_links": text("SELECT to_jsonb(t) FROM task_contacts t"),
 }
+
+# Seeded rows carry a timestamp from before the request. Seeding and request
+# share one transaction, and now() is that transaction's start, so a refused
+# request that touched updated_at would otherwise write the value already there.
+SEEDED_LONG_AGO = datetime(2020, 1, 1, tzinfo=UTC)
+BACKDATE_SEEDED_ROWS = tuple(
+    text(statement)
+    for statement in (
+        "UPDATE contacts SET updated_at = :then",
+        "UPDATE contact_methods SET updated_at = :then",
+        "UPDATE contact_addresses SET updated_at = :then",
+        "UPDATE contact_notes SET updated_at = :then",
+        "UPDATE contact_important_dates SET updated_at = :then",
+        "UPDATE contact_relationships SET updated_at = :then",
+        "UPDATE contact_summaries SET updated_at = :then",
+        "UPDATE tags SET updated_at = :then",
+        "UPDATE sync_metadata SET updated_at = :then",
+        "UPDATE journals SET updated_at = :then",
+        "UPDATE tasks SET updated_at = :then",
+    )
+)
+_EVERY_UPDATED_AT = text(
+    """
+    SELECT updated_at FROM contacts UNION SELECT updated_at FROM contact_methods
+    UNION SELECT updated_at FROM contact_addresses
+    UNION SELECT updated_at FROM contact_notes
+    UNION SELECT updated_at FROM contact_important_dates
+    UNION SELECT updated_at FROM contact_relationships
+    UNION SELECT updated_at FROM contact_summaries
+    UNION SELECT updated_at FROM tags UNION SELECT updated_at FROM sync_metadata
+    UNION SELECT updated_at FROM journals UNION SELECT updated_at FROM tasks
+    """
+)
+
 # Queues that only an insert can disturb, so they may start empty. Every other
 # table holds seeded rows, or a refused request that moved or deleted one
 # would compare an empty table with an empty table.
@@ -536,10 +594,35 @@ async def foreign_contact(async_connection: AsyncConnection) -> ForeignContact:
         )
     )
 
+    journal_id = await create_journal(
+        SqlJournalRepository(async_connection),
+        title=OTHER_JOURNAL_TITLE,
+        user_id=OTHER_USER_ID,
+    )
+    await SqlJournalContactRelationshipRepository(async_connection).create(
+        JournalContactRelationship(
+            journal_id=journal_id,
+            contact_id=contact_id,
+            relationship_type=JournalContactRelationshipType.PARTICIPANT,
+            status=AttendeeStatus.NO_REPLY,
+        )
+    )
+    task_id = await create_task(
+        async_connection,
+        creating_journal_id=journal_id,
+        due_journal_id=journal_id,
+        text=OTHER_TASK_TEXT,
+        user_id=OTHER_USER_ID,
+    )
+    await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
     own_contact_id = await seed_contact(
         async_connection, first_name=OWN_FIRST_NAME, is_favourite=True
     )
     await repo.assign_tag(own_contact_id, tag_id)
+
+    for backdate in BACKDATE_SEEDED_ROWS:
+        await async_connection.execute(backdate, {"then": SEEDED_LONG_AGO})
 
     assert method.id is not None
     assert address.id is not None
@@ -638,6 +721,8 @@ class TestContactOwnershipIsEnforced:
             text("UPDATE contacts SET user_id = :me WHERE user_id = :them"),
             text("UPDATE sync_metadata SET user_id = :me WHERE user_id = :them"),
             text("UPDATE field_history SET user_id = :me WHERE user_id = :them"),
+            text("UPDATE journals SET user_id = :me WHERE user_id = :them"),
+            text("UPDATE tasks SET user_id = :me WHERE user_id = :them"),
         ):
             await async_connection.execute(
                 table, {"me": TEST_USER_ID, "them": OTHER_USER_ID}
@@ -663,6 +748,14 @@ class TestContactOwnershipIsEnforced:
         assert {
             name for name, rows in snapshot.items() if not rows
         } <= EMPTY_UNTIL_WRITTEN
+
+    async def test_seeded_rows_predate_the_request(
+        self, async_connection: AsyncConnection, foreign_contact: ForeignContact
+    ) -> None:
+        """A trigger that reset updated_at would hide a premature touch again."""
+        rows = (await async_connection.execute(_EVERY_UPDATED_AT)).scalars().all()
+
+        assert set(rows) == {SEEDED_LONG_AGO}
 
     async def test_merging_another_users_contact_into_your_own_is_refused(
         self,
