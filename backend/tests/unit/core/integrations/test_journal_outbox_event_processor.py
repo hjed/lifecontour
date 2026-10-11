@@ -56,6 +56,23 @@ def _unmatched_participant_repo() -> Iterator[MagicMock]:
         yield repo_class
 
 
+@pytest.fixture(autouse=True)
+def _no_merged_aliases() -> Iterator[MagicMock]:
+    """No event here was absorbed by a merge.
+
+    The alias lookup would otherwise read the scripted connection's next row as
+    an alias. Merged aliases are covered against a real database in
+    ``test_merged_alias_sync_processors.py``.
+    """
+    repo = AsyncMock()
+    repo.find_alias.return_value = None
+    with patch(
+        "app.core.integrations.journal_outbox_event_processor.MergedAliasRepository",
+        return_value=repo,
+    ) as repo_class:
+        yield repo_class
+
+
 def _mock(obj: object) -> AsyncMock:
     """View a mocked repository attribute as AsyncMock for configuration."""
     return cast(AsyncMock, obj)

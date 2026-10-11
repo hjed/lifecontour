@@ -35,6 +35,7 @@ from core_shared.models.outbox_events import ImmichAlbumSyncEventData
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
@@ -199,7 +200,29 @@ class ImmichAlbumOutboxEventProcessor:
         return await self.journal_repo.find_by_id(journal_id) is not None
 
     async def _apply_create(self, payload: ImmichAlbumSyncEventData) -> dict[str, Any]:
-        """Create a new PHOTO_ALBUM journal and its sync links."""
+        """Create a new PHOTO_ALBUM journal and its sync links.
+
+        Not for an album a merge absorbed into another journal: re-creating it
+        would undo the merge. Every path that creates goes through here.
+        """
+        merged_alias = await MergedAliasRepository(self.connection).find_alias(
+            user_id=_album_owner(payload),
+            payload_source=INTEGRATION_SOURCE,
+            external_id=payload.external_id,
+        )
+        if merged_alias is not None:
+            logger.info(
+                "Immich album skipped - a merge absorbed it",
+                album_id=payload.external_id,
+                merged_into_journal_id=merged_alias.journal_id,
+            )
+            return {
+                "status": "skipped",
+                "reason": "merged_alias",
+                "journal_id": merged_alias.journal_id,
+                "album_id": payload.external_id,
+            }
+
         journal = self._build_journal(payload.journal_data)
         created = await self.journal_service.create_journal(
             journal,
