@@ -1465,8 +1465,12 @@ the owner named by the event or contact, and nothing falls back to another user'
   `InboundEventConsumer._build_match_detector(connection, owner)` returns `None` for an event naming
   no owner (as it does without a Gemini key) instead of inventing a zone. Those events process as
   before. One helper replaces the two duplicated blocks.
-- **The owner is read leniently** (`.get` on `event_data`), not by validating the payload in the
-  consumer, so a malformed event still fails or skips in its processor exactly as before.
+- **Where the owner is read.** For `journal_event.*` it is read leniently (`journal_data.user_id`
+  when `journal_data` is a mapping); the processor still validates the payload as before. For
+  `journal_review.detect_matches` the consumer validates `MatchDetectionEventData` when Gemini is
+  configured and takes its required `user_id`: the processor skips (acks) any event that arrives
+  without a detector *before* validating it, so reading the owner leniently would have silently
+  dropped a malformed event that used to fail and dead-letter.
 - **Summary: `find_owner_id`, and skip a contact with none.** The consumer reuses Phase 4's
   `ContactRepository.find_owner_id` rather than loading the aggregate. `None` means the contact was
   deleted; the consumer logs and returns before building the generator (the assembler used to end

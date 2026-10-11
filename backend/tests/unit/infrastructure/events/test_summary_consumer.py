@@ -497,3 +497,4 @@ class TestSummaryConsumerOwnerTimezone:
 
         generator_cls.assert_not_called()
         get_timezone.assert_not_awaited()
+        mock_search_indexer.process_event.assert_called_once()

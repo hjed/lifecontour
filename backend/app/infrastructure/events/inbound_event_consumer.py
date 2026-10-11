@@ -275,11 +275,11 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
 
         # Optional detector gating Phase 2 emission. Only created/updated events
         # carry journal_data (and its owner); the status events have none and
-        # never consult the detector.
-        journal_data = event.event_data.get("journal_data") or {}
-        match_detector = await self._build_match_detector(
-            connection, journal_data.get("user_id")
-        )
+        # never consult the detector. The payload itself is validated by the
+        # processor.
+        journal_data = event.event_data.get("journal_data")
+        owner = journal_data.get("user_id") if isinstance(journal_data, dict) else None
+        match_detector = await self._build_match_detector(connection, owner)
 
         from app.core.contacts.adapters.sql.contact_repository import (
             SqlContactRepository,
@@ -380,6 +380,8 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             event: Adapted OutboxEvent
             connection: Database connection for transaction
         """
+        from core_shared.models.outbox_events import MatchDetectionEventData
+
         from app.core.integrations.match_detection_event_processor import (
             MatchDetectionEventProcessor,
         )
@@ -388,10 +390,15 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         )
 
         review_item_repo = SqlReviewItemRepository(connection)
-        match_detector = await self._build_match_detector(
-            connection,
-            event.event_data.get("user_id"),
+        # The payload requires its owner. Validating it here (only when there is
+        # a detector to build) fails a malformed event as the processor would,
+        # rather than skipping it for want of a detector.
+        owner = (
+            MatchDetectionEventData.model_validate(event.event_data).user_id
+            if self._settings.gemini_api_key
+            else None
         )
+        match_detector = await self._build_match_detector(connection, owner)
 
         processor = MatchDetectionEventProcessor(
             connection=connection,

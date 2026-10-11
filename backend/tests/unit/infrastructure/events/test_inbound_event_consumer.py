@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from core_shared.stream_client import StreamClient, StreamEvent
+from pydantic import ValidationError
 
 from app.infrastructure.config import Settings
 from app.infrastructure.events.inbound_event_consumer import InboundEventConsumer
@@ -297,6 +298,7 @@ class TestInboundEventConsumerHandleEvent:
                 "journal_title": "Test Journal",
                 "event_date_range_start": "2024-01-01T10:00:00Z",
                 "event_date_range_end": "2024-01-01T11:00:00Z",
+                "created_at": "2024-01-01T11:30:00Z",
             },
         )
 
@@ -520,6 +522,7 @@ class TestInboundEventConsumerOwnerTimezone:
                 "journal_title": "Climb",
                 "event_date_range_start": "2024-01-01T10:00:00Z",
                 "event_date_range_end": "2024-01-01T11:00:00Z",
+                "created_at": "2024-01-01T11:30:00Z",
             },
         )
 
@@ -532,3 +535,32 @@ class TestInboundEventConsumerOwnerTimezone:
 
         get_timezone.assert_awaited_once_with("owner-1")
         assert assessor_cls.call_args.kwargs["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_detect_matches_without_owner_fails_validation(
+        self, consumer: InboundEventConsumer, mock_db_engine: MagicMock
+    ) -> None:
+        """A detect_matches event missing its owner fails, rather than being acked.
+
+        The payload requires user_id; skipping it for want of a detector would
+        drop a malformed event silently instead of leaving it to dead-letter.
+        """
+        event = _make_stream_event(
+            event_type="journal_review.detect_matches",
+            event_data={
+                "journal_id": 1,
+                "journal_title": "Climb",
+                "event_date_range_start": "2024-01-01T10:00:00Z",
+                "event_date_range_end": "2024-01-01T11:00:00Z",
+                "created_at": "2024-01-01T11:30:00Z",
+            },
+        )
+
+        with (
+            patch(
+                "app.infrastructure.events.inbound_event_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            pytest.raises(ValidationError, match="user_id"),
+        ):
+            await consumer._handle_event(event)

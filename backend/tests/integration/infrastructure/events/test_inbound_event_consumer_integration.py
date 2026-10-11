@@ -258,6 +258,7 @@ class TestInboundEventConsumerOwnerTimezone:
                 "journal_title": "Morning climb",
                 "event_date_range_start": "2024-01-01T10:00:00Z",
                 "event_date_range_end": "2024-01-01T11:00:00Z",
+                "created_at": "2024-01-01T11:30:00Z",
             },
             occurred_at="2024-01-01T12:00:00Z",
         )
