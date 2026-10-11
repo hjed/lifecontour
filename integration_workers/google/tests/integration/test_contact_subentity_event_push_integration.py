@@ -78,6 +78,30 @@ def _mock_google_client(groups: dict[str, str] | None = None) -> AsyncMock:
     return client
 
 
+async def _pushed_after_method_event(
+    db_session: AsyncSession, contact_id: int
+) -> dict[str, Any]:
+    """Push ``contact_id`` on a UI ``ContactMethodAdded``; return the person sent."""
+    mock_client = _mock_google_client()
+
+    with (
+        patch("worker.GoogleAuthService"),
+        patch("worker.GoogleAPIClient", return_value=mock_client),
+    ):
+        await process_contact_event(
+            ctx=_ctx(db_session),
+            event_type="ContactMethodAdded",
+            event_data={
+                "user_id": CONTACT_OWNER,
+                "contact_id": contact_id,
+                "source": "ui",
+            },
+        )
+
+    pushed: dict[str, Any] = mock_client.update_contact.call_args[1]["contact_data"]
+    return pushed
+
+
 def _pushed_membership_resources(client: AsyncMock) -> list[str]:
     """The contact-group resource names in the person the worker pushed."""
     pushed = client.update_contact.call_args[1]["contact_data"]
@@ -217,27 +241,27 @@ class TestSubEntityEventsReachGoogle:
 
         This is the reported symptom: an email change that never reached Google.
         """
-        contact_id = synced_contact["contact_id"]
-        mock_client = _mock_google_client()
+        pushed = await _pushed_after_method_event(
+            db_session, synced_contact["contact_id"]
+        )
 
-        with (
-            patch("worker.GoogleAuthService"),
-            patch("worker.GoogleAPIClient", return_value=mock_client),
-        ):
-            await process_contact_event(
-                ctx=_ctx(db_session),
-                event_type="ContactMethodAdded",
-                event_data={
-                    "user_id": CONTACT_OWNER,
-                    "contact_id": contact_id,
-                    "source": "ui",
-                },
-            )
-
-        pushed = mock_client.update_contact.call_args[1]["contact_data"]
         assert [entry["value"] for entry in pushed["emailAddresses"]] == [
             "renamed@example.com"
         ]
+
+    async def test_push_clears_a_nickname_unset_locally(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """A contact with no nickname is pushed with an empty ``nicknames``.
+
+        The field is in the update mask, so a nickname cleared locally is
+        cleared in Google rather than re-imported by the next pull.
+        """
+        pushed = await _pushed_after_method_event(
+            db_session, synced_contact["contact_id"]
+        )
+
+        assert pushed["nicknames"] == []
 
     async def test_push_advances_the_stored_etag(
         self, db_session: AsyncSession, synced_contact: dict[str, int]
