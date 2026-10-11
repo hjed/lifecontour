@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 import structlog
 from core_shared.models.journals.calendar_info import event_date_in_timezone
+from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy import text
 
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
@@ -1566,6 +1567,24 @@ class SnipeItSyncService:
                     )
                     link_row = link_result.fetchone()
                     existing_journal_id = link_row.journal_id if link_row else None
+
+                # A record a journal merge absorbed has no link of its own and
+                # reads like an import whose journal is gone; importing it
+                # again would undo the merge. The backend refuses that create
+                # anyway, so this only spares sending it.
+                if existing_journal_id is None and (
+                    await MergedAliasRepository(session).find_alias(
+                        user_id=self._user_id,
+                        payload_source=INBOUND_SYNC_CHANGED_BY,
+                        external_id=external_id,
+                    )
+                    is not None
+                ):
+                    logger.debug(
+                        "Skipping Snipe-IT maintenance a journal merge absorbed",
+                        maintenance_id=maintenance_id,
+                    )
+                    raise _MaintenanceSkipped
 
                 if (
                     existing_meta

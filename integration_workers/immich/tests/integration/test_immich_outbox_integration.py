@@ -25,6 +25,10 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.repositories.merged_alias_repository import (
+    ExternalRecord,
+    MergedAliasRepository,
+)
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 
@@ -297,3 +301,42 @@ class TestAlbumOutboxEmission:
         )
         assert len(rows) == 1
         assert rows[0].event_data["sync_action"] == "updated"
+
+
+class TestAMergedAwayAlbumIsLeftAlone:
+    """An album a journal merge absorbed is not sent to be created again.
+
+    A ``replace`` merge drops the rival album's link and keeps it as a merged
+    alias of the survivor, so it reads as never imported. The backend refuses
+    the create anyway; skipping it here spares sending one every sync.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_absorbed_album_emits_nothing(self, async_connection: Any) -> None:
+        album_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        survivor = await async_connection.execute(
+            text("""
+                INSERT INTO journals (user_id, title, content,
+                    event_date_range_start, event_date_range_end)
+                VALUES (:user_id, 'Trip', '', NOW(), NOW())
+                RETURNING id
+            """),
+            {"user_id": USER_ID},
+        )
+        await MergedAliasRepository(async_connection).record_aliases(
+            journal_id=int(survivor.scalar_one()),
+            user_id=USER_ID,
+            records=[
+                ExternalRecord(integration_source="immich_album", external_id=album_id)
+            ],
+        )
+        service = _album_sync_service(async_connection, _album(album_id, "Trip photos"))
+
+        result = await service.sync_albums_batch([album_id])
+
+        assert result.errors == 0, result.error_details
+        assert (result.created, result.skipped_merged) == (0, 1)
+        assert (
+            await _fetch_outbox_rows(async_connection, "immich_album.created", album_id)
+            == []
+        )

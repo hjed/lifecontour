@@ -18,6 +18,22 @@ from strava_models import StravaActivity, StravaStreamSet
 from strava_sync_service import StravaSyncService
 
 
+@pytest.fixture(autouse=True)
+def _no_merged_aliases():  # type: ignore[no-untyped-def]
+    """No activity here was absorbed by a journal merge.
+
+    The alias lookup would otherwise read the mocked session's result as an
+    alias. It is covered against a real database in
+    ``tests/integration/test_merged_alias_strava_integration.py``.
+    """
+    repo = AsyncMock()
+    repo.find_alias.return_value = None
+    with patch(
+        "strava_sync_service.MergedAliasRepository", return_value=repo
+    ) as repo_class:
+        yield repo_class
+
+
 def _make_activity(
     activity_id: int = 12345,
     name: str = "Morning Run",

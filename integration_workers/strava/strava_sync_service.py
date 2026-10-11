@@ -20,6 +20,7 @@ import httpx
 import structlog
 from core_shared.models.journals import JournalType
 from core_shared.models.outbox import OutboxEvent
+from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,6 +128,10 @@ class StravaSyncService:
         existing_journal_id = await self._find_existing_journal_id(
             str(activity.id), session
         )
+        if existing_journal_id is None and await self._is_merged_away(
+            str(activity.id), session
+        ):
+            return []
 
         # Fetch streams for GPS-equipped activities
         streams: StravaStreamSet | None = None
@@ -282,6 +287,10 @@ class StravaSyncService:
                     stored_hash = await self._find_stored_version_hash(
                         str(activity_id), dedup_session
                     )
+                    if existing_jid is None and await self._is_merged_away(
+                        str(activity_id), dedup_session
+                    ):
+                        raise _ActivitySkipped
 
                 if existing_jid is not None and stored_hash is not None:
                     # Activity is imported AND has a valid version hash —
@@ -416,6 +425,29 @@ class StravaSyncService:
         return event
 
     # ── Internal helpers ────────────────────────────────────────────────
+
+    async def _is_merged_away(
+        self, strava_activity_id: str, session: AsyncSession
+    ) -> bool:
+        """Whether a journal merge absorbed this activity into another journal.
+
+        A ``replace`` merge drops the rival activity's links and keeps it as a
+        merged alias of the survivor, so it reads as unimported. Importing it
+        again would undo the merge; the backend refuses that create anyway, so
+        this only spares sending it.
+        """
+        alias = await MergedAliasRepository(session).find_alias(
+            user_id=self._user_id,
+            payload_source="strava",
+            external_id=strava_activity_id,
+        )
+        if alias is not None:
+            logger.info(
+                "Skipping Strava activity a journal merge absorbed",
+                strava_activity_id=strava_activity_id,
+                journal_id=alias.journal_id,
+            )
+        return alias is not None
 
     async def _find_existing_journal_id(
         self, strava_activity_id: str, session: AsyncSession

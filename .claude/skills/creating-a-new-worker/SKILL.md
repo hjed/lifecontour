@@ -468,6 +468,34 @@ exclusively through events:
 
 Never `INSERT`/`UPDATE` journals or contacts from the worker — only outbox events.
 
+### Survive journal merges: register the link store, check merged aliases
+
+A user can merge two journals your worker imported. The merge deletes one of them, and
+any of its links the survivor cannot hold go with it — so to your worker the absorbed
+record now looks never imported, and the next sync would create it again, undoing the
+merge. The platform prevents that if the worker plays its part:
+
+1. **Register the link store** in `JOURNAL_LINK_SOURCES`
+   (`backend/app/core/integrations/link_sources.py`). Each `JournalLinkStore` must declare
+   an `alias_policy`: `AliasPolicy.INBOUND` for records imported *from* the integration
+   (a merge keeps an absorbed one as a merged alias), `NOT_ALIASABLE` for records the app
+   only pushes *to* it.
+2. **Map the payload name** in `core_shared/core_shared/merged_alias_keys.py` if your
+   outbox payload's `integration_source` or id format differs from the link store's
+   (e.g. `google` → `google_calendar`, `strava:<id>` → `<id>`).
+3. **Check before emitting a create.** When your own lookup finds no journal for a
+   record, ask `MergedAliasRepository(session).find_alias(user_id=..., payload_source=...,
+   external_id=..., external_identity=...)` from `core_shared.repositories`; on a hit,
+   skip the record (and count it). The backend processor enforces the same rule, so this
+   is an optimisation — but never dedupe with your own SQL against
+   `journal_merged_aliases`: the repository is its only reader.
+4. **Add a guard seeder** to `SEEDERS` in
+   `backend/tests/integration/core/integrations/test_merged_alias_guard.py` (or list the
+   source in `OUTBOUND_ONLY_SOURCES`). That test fails for any registered source without
+   one, and proves a replace merge of two of your journals is never re-imported.
+
+See [Integration Architecture → Merged Aliases](../../../docs/architecture/integration-architecture.md#merged-aliases-a-sync-never-undoes-a-merge).
+
 ---
 
 ## (c) Add the canonical Dockerfile

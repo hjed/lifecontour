@@ -37,6 +37,7 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -87,6 +88,7 @@ class AlbumSyncResult:
         created: New PHOTO_ALBUM journals emitted.
         updated: Albums whose metadata changed since the last sync.
         unchanged: Albums already up-to-date (no event emitted).
+        skipped_merged: Albums a journal merge absorbed (no event emitted).
         errors: Albums that failed to sync.
         error_details: Per-album error messages.
     """
@@ -94,6 +96,7 @@ class AlbumSyncResult:
     created: int = 0
     updated: int = 0
     unchanged: int = 0
+    skipped_merged: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
 
@@ -248,6 +251,7 @@ class ImmichSyncService:
             created=result.created,
             updated=result.updated,
             unchanged=result.unchanged,
+            skipped_merged=result.skipped_merged,
             errors=result.errors,
         )
         return result
@@ -269,6 +273,21 @@ class ImmichSyncService:
             album, shared_link_url=shared_link_url
         )
         existing = await self._find_album_sync_metadata(album.id)
+
+        # A replace merge drops the rival album's link and keeps it as a merged
+        # alias of the survivor, so it reads as never imported. Creating it
+        # again would undo the merge; the backend refuses that create anyway,
+        # so this only spares sending it.
+        if existing is None and (
+            await MergedAliasRepository(self._conn).find_alias(
+                user_id=self._user_id,
+                payload_source=self._ALBUM_INTEGRATION_SOURCE,
+                external_id=album.id,
+            )
+            is not None
+        ):
+            result.skipped_merged += 1
+            return
 
         if existing is None:
             await self._emit_album_outbox_event(

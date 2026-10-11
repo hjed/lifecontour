@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -18,6 +19,10 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from core_shared.repositories.merged_alias_repository import (
+    ExternalRecord,
+    MergedAliasRepository,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -2962,3 +2967,72 @@ class TestUnsettledMaintenances:
             snipeit_sync_service, async_connection, (8, 51)
         ) == {8}
         assert await self._unsettled(snipeit_sync_service, async_connection) == set()
+
+
+async def _an_import_merged_away(
+    async_connection: AsyncConnection, *, maintenance_id: int, age_seconds: int
+) -> None:
+    """Leave the state merging two Snipe-IT imports leaves behind.
+
+    Both journals sit on the synthetic maintenance calendar, which holds one
+    link per journal, so the absorbed import's link goes with its journal and
+    the record is kept as a merged alias of the survivor instead. Its sync
+    row — hash, no journal id — looks just like an import whose journal was
+    deleted.
+    """
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    survivor = await _seed_maintenance_journal(
+        async_connection, gear_item_id=gear_item_id, title="Service", imported_from=16
+    )
+    absorbed = await _seed_maintenance_journal(
+        async_connection,
+        gear_item_id=gear_item_id,
+        title="Service",
+        imported_from=maintenance_id,
+    )
+    await _seed_import_record(
+        async_connection,
+        maintenance_id=maintenance_id,
+        version_hash="the-hash-it-was-imported-with",
+        age_seconds=age_seconds,
+    )
+    await MergedAliasRepository(async_connection).record_aliases(
+        journal_id=survivor,
+        user_id="user-123",
+        records=[
+            ExternalRecord(
+                integration_source="snipeit_maintenance",
+                external_id=f"snipeit_maint:{maintenance_id}",
+                calendar_id=uuid.UUID(_MAINTENANCE_CALENDAR_ID),
+            )
+        ],
+    )
+    await _delete_journal(async_connection, absorbed)
+
+
+class TestAMergedAwayImportStaysMerged:
+    """A record a journal merge absorbed is never imported again.
+
+    Without its own link it reads as an import whose journal is gone — which,
+    past the grace, is imported as a new journal: the merge undone by the sync.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("age_seconds", [0, 3600])
+    async def test_an_edited_merged_away_record_is_skipped(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        age_seconds: int,
+    ) -> None:
+        await _an_import_merged_away(
+            async_connection, maintenance_id=17, age_seconds=age_seconds
+        )
+
+        result = await _sync_the_edited_record(
+            snipeit_sync_service, mock_transport, async_connection, maintenance_id=17
+        )
+
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        assert await _journal_events(async_connection) == []

@@ -344,6 +344,11 @@ links, can reach it.
   `reason="merged_alias"`: no journal, no link written to the survivor (the link
   upsert would overwrite the survivor's own event), no edit. The workers' own checks
   are advisory, because a merge can land between a worker's read and this write.
+- **Workers skip them too.** After their own lookup misses, the Google
+  (`InboundSyncAction.SKIP_MERGED`), Snipe-IT, Strava and Immich workers ask
+  `MergedAliasRepository.find_alias` and skip an aliased record, counting it
+  (`events_skipped_merged`, `skipped_merged`), so a full sync does not send a create
+  for every record a merge ever absorbed.
 - **Read back as the survivor's.** The alias table is registered as a
   `MERGED_ALIAS` store on each source with inbound stores, so
   `get_journal_by_external_id` resolves an absorbed record, and a journal's
