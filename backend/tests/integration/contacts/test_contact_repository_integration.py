@@ -614,8 +614,10 @@ class TestContactRepositoryIntegration:
             Contact(user_id=TEST_USER_ID, first_name="Other", last_name="Contact")
         )
 
-        work_tag = await tag_repo.save(Tag(name=TagName("work")))
-        client_tag = await tag_repo.save(Tag(name=TagName("client")))
+        work_tag = await tag_repo.save(Tag(name=TagName("work")), user_id=TEST_USER_ID)
+        client_tag = await tag_repo.save(
+            Tag(name=TagName("client")), user_id=TEST_USER_ID
+        )
 
         await contact_repo.assign_tag(contact_with_both_tags.id, work_tag.id)
         await contact_repo.assign_tag(contact_with_both_tags.id, client_tag.id)

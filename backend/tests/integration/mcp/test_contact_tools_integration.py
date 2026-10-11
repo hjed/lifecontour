@@ -538,7 +538,7 @@ class TestContactToolsIntegration:
         # First, create an existing tag
 
         existing_tag = Tag(name=TagName("work"))
-        saved_existing_tag = await tag_repo.save(existing_tag)
+        saved_existing_tag = await tag_repo.save(existing_tag, user_id=TEST_USER_ID)
 
         # Now test the MCP tool pattern with both existing and new tags
         from core_shared.models.contacts.entities import (
@@ -581,7 +581,7 @@ class TestContactToolsIntegration:
             else:
                 # Create new tag
                 new_tag = Tag(name=TagName(tag_name))
-                saved_tag = await tag_repo.save(new_tag)
+                saved_tag = await tag_repo.save(new_tag, user_id=TEST_USER_ID)
                 contact.add_tag(saved_tag)
 
         # Create the contact using the service (same as MCP tool)
@@ -643,7 +643,7 @@ class TestContactToolsIntegration:
 
         # Create original tag
         original_tag = Tag(name=TagName("original"))
-        saved_original_tag = await tag_repo.save(original_tag)
+        saved_original_tag = await tag_repo.save(original_tag, user_id=TEST_USER_ID)
         if original_contact.tags is None:
             original_contact.tags = []
         original_contact.tags.append(saved_original_tag)
@@ -689,7 +689,7 @@ class TestContactToolsIntegration:
         # Update tags (replacement strategy) - mix of existing and new
         # Create a new tag for testing
         new_tag = Tag(name=TagName("updated"))
-        saved_new_tag = await tag_repo.save(new_tag)
+        saved_new_tag = await tag_repo.save(new_tag, user_id=TEST_USER_ID)
         if updated_contact.tags is None:
             updated_contact.tags = []
         updated_contact.tags.append(saved_new_tag)
@@ -733,8 +733,8 @@ class TestContactToolsIntegration:
         tag_repo,
     ):
         """Mounted MCP HTTP calls should resolve request-scoped dependencies."""
-        await tag_repo.save(Tag(name=TagName("friend")))
-        await tag_repo.save(Tag(name=TagName("colleague")))
+        await tag_repo.save(Tag(name=TagName("friend")), user_id=TEST_USER_ID)
+        await tag_repo.save(Tag(name=TagName("colleague")), user_id=TEST_USER_ID)
 
         async with authenticated_lifespan_client() as authenticated_client:
             payload = await call_mcp_tool(
@@ -755,8 +755,10 @@ class TestContactToolsIntegration:
         parent_id was previously emitted as a raw int while id was stringified,
         leaving the same tool internally inconsistent (issue #1139).
         """
-        parent = await tag_repo.save(Tag(name=TagName("work")))
-        child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
+        parent = await tag_repo.save(Tag(name=TagName("work")), user_id=TEST_USER_ID)
+        child = await tag_repo.save(
+            Tag(name=TagName("colleague"), parent_id=parent.id), user_id=TEST_USER_ID
+        )
 
         async with authenticated_lifespan_client() as authenticated_client:
             payload = await call_mcp_tool(
@@ -779,7 +781,9 @@ class TestContactToolsIntegration:
         tag_repo,
     ):
         """The update_contact_tag tool updates a tag and commits the write."""
-        tag = await tag_repo.save(Tag(name=TagName("friend"), color="#00FF00"))
+        tag = await tag_repo.save(
+            Tag(name=TagName("friend"), color="#00FF00"), user_id=TEST_USER_ID
+        )
 
         async with authenticated_lifespan_client() as authenticated_client:
             payload = await call_mcp_tool(
@@ -860,8 +864,10 @@ class TestContactToolsIntegration:
         tag_repo,
     ):
         """The tool can re-parent a tag and then move it back to the root."""
-        parent = await tag_repo.save(Tag(name=TagName("work")))
-        child = await tag_repo.save(Tag(name=TagName("colleague")))
+        parent = await tag_repo.save(Tag(name=TagName("work")), user_id=TEST_USER_ID)
+        child = await tag_repo.save(
+            Tag(name=TagName("colleague")), user_id=TEST_USER_ID
+        )
 
         await _update_contact_tag(
             authenticated_lifespan_client,
@@ -890,8 +896,10 @@ class TestContactToolsIntegration:
         A flat parent/clear precedence would treat the unchanged parent_id as
         "no parent supplied" and clear it instead.
         """
-        parent = await tag_repo.save(Tag(name=TagName("work")))
-        child = await tag_repo.save(Tag(name=TagName("colleague"), parent_id=parent.id))
+        parent = await tag_repo.save(Tag(name=TagName("work")), user_id=TEST_USER_ID)
+        child = await tag_repo.save(
+            Tag(name=TagName("colleague"), parent_id=parent.id), user_id=TEST_USER_ID
+        )
 
         response = await _update_contact_tag(
             authenticated_lifespan_client,
@@ -914,8 +922,10 @@ class TestContactToolsIntegration:
         tag_repo,
     ):
         """A name held by another tag is rejected and nothing is written."""
-        await tag_repo.save(Tag(name=TagName("friend")))
-        other = await tag_repo.save(Tag(name=TagName("colleague")))
+        await tag_repo.save(Tag(name=TagName("friend")), user_id=TEST_USER_ID)
+        other = await tag_repo.save(
+            Tag(name=TagName("colleague")), user_id=TEST_USER_ID
+        )
 
         response = await _update_contact_tag(
             authenticated_lifespan_client,
@@ -945,7 +955,7 @@ class TestContactToolsIntegration:
             Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
             clean_database,
         )
-        tag = await tag_repo.save(Tag(name=TagName("friend")))
+        tag = await tag_repo.save(Tag(name=TagName("friend")), user_id=TEST_USER_ID)
         await clean_database.execute(
             text(
                 "INSERT INTO contact_tags (contact_id, tag_id) "
@@ -1009,9 +1019,13 @@ class TestContactToolsIntegration:
             Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
             clean_database,
         )
-        source = await tag_repo.save(Tag(name=TagName("colleague")))
-        target = await tag_repo.save(Tag(name=TagName("work")))
-        child = await tag_repo.save(Tag(name=TagName("team"), parent_id=source.id))
+        source = await tag_repo.save(
+            Tag(name=TagName("colleague")), user_id=TEST_USER_ID
+        )
+        target = await tag_repo.save(Tag(name=TagName("work")), user_id=TEST_USER_ID)
+        child = await tag_repo.save(
+            Tag(name=TagName("team"), parent_id=source.id), user_id=TEST_USER_ID
+        )
         await clean_database.execute(
             text(
                 "INSERT INTO contact_tags (contact_id, tag_id) "
@@ -1352,9 +1366,9 @@ class TestMCPTagParity:
         on the contact should be fully replaced.
         """
         # Setup: create tags and contact with initial tags
-        tag_a = await tag_repo.save(Tag(name=TagName("alpha")))
-        tag_b = await tag_repo.save(Tag(name=TagName("bravo")))
-        tag_c = await tag_repo.save(Tag(name=TagName("charlie")))
+        tag_a = await tag_repo.save(Tag(name=TagName("alpha")), user_id=TEST_USER_ID)
+        tag_b = await tag_repo.save(Tag(name=TagName("bravo")), user_id=TEST_USER_ID)
+        tag_c = await tag_repo.save(Tag(name=TagName("charlie")), user_id=TEST_USER_ID)
 
         contact = Contact(
             user_id=TEST_USER_ID,
@@ -1408,7 +1422,9 @@ class TestMCPTagParity:
         they should be auto-created and assigned to the contact.
         """
         # Setup: create one existing tag
-        existing_tag = await tag_repo.save(Tag(name=TagName("existing")))
+        existing_tag = await tag_repo.save(
+            Tag(name=TagName("existing")), user_id=TEST_USER_ID
+        )
 
         contact = Contact(
             user_id=TEST_USER_ID,
@@ -1428,7 +1444,7 @@ class TestMCPTagParity:
                 resolved_tags.append(found)
             else:
                 new_tag = Tag(name=TagName(name))
-                saved_tag = await tag_repo.save(new_tag)
+                saved_tag = await tag_repo.save(new_tag, user_id=TEST_USER_ID)
                 resolved_tags.append(saved_tag)
 
         updated_contact = Contact(
@@ -1463,8 +1479,8 @@ class TestMCPTagParity:
     ):
         """Verify that providing an empty tag list clears all tags."""
         # Setup: contact with tags
-        tag_x = await tag_repo.save(Tag(name=TagName("x-ray")))
-        tag_y = await tag_repo.save(Tag(name=TagName("yankee")))
+        tag_x = await tag_repo.save(Tag(name=TagName("x-ray")), user_id=TEST_USER_ID)
+        tag_y = await tag_repo.save(Tag(name=TagName("yankee")), user_id=TEST_USER_ID)
 
         contact = Contact(
             user_id=TEST_USER_ID,
@@ -1515,8 +1531,12 @@ class TestMCPTagParity:
         if the same tags were assigned via the REST tag API.
         """
         # Setup via REST-equivalent: create tags
-        rest_tag_a = await tag_repo.save(Tag(name=TagName("rest-a")))
-        rest_tag_b = await tag_repo.save(Tag(name=TagName("rest-b")))
+        rest_tag_a = await tag_repo.save(
+            Tag(name=TagName("rest-a")), user_id=TEST_USER_ID
+        )
+        rest_tag_b = await tag_repo.save(
+            Tag(name=TagName("rest-b")), user_id=TEST_USER_ID
+        )
 
         # Create contact with tag-a (simulating REST assignment)
         contact = Contact(

@@ -201,8 +201,8 @@ async def _add_birthday(
 
 async def _make_tag(connection: AsyncConnection, name: str) -> int:
     result = await connection.execute(
-        text("INSERT INTO tags (name) VALUES (:name) RETURNING id"),
-        {"name": name},
+        text("INSERT INTO tags (name, user_id) VALUES (:name, :owner) RETURNING id"),
+        {"name": name, "owner": TEST_USER_ID},
     )
     tag_id = result.scalar()
     assert tag_id is not None

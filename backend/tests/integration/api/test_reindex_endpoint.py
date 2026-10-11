@@ -13,7 +13,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 
 @pytest.fixture
@@ -209,7 +209,11 @@ class TestReindexEndpoint:
 
         # Add a tag
         tag_result = await async_connection.execute(
-            text("INSERT INTO tags (name) VALUES ('engineering') RETURNING id")
+            text(
+                "INSERT INTO tags (name, user_id) VALUES ('engineering', :owner) "
+                "RETURNING id"
+            ),
+            {"owner": TEST_USER_ID},
         )
         tag_row = tag_result.fetchone()
         assert tag_row is not None

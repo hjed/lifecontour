@@ -82,6 +82,7 @@ async def create_tag(
         color=attrs.color,
         description=attrs.description,
         parent_id=attrs.parent_id,
+        user_id=user.id,
     )
 
     tag_resource = TagConverter.to_resource(created_tag, base_url)

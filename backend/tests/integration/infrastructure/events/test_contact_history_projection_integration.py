@@ -601,7 +601,7 @@ class TestContactProjectionEndToEnd:
         )
         assert created.id is not None
         tag = await self._tag_service(async_connection).create_tag(
-            "vip", async_connection
+            "vip", async_connection, user_id=TEST_USER_ID
         )
         assert tag.id is not None
         await service.assign_tag_to_contact(

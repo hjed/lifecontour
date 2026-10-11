@@ -97,7 +97,7 @@ class TestContactServiceIntegration:
     ):
         """create_contact with tag_names finds-or-creates tags and assigns them."""
         # One tag already exists; the other must be created.
-        await tag_repo.save(Tag(name=TagName("Friend")))
+        await tag_repo.save(Tag(name=TagName("Friend")), user_id=TEST_USER_ID)
 
         contact = Contact(
             user_id=TEST_USER_ID, first_name="Tag", last_name="Resolver", tags=[]
@@ -491,7 +491,7 @@ class TestContactServiceIntegration:
         saved_contact = await contact_service.create_contact(contact, clean_database)
 
         tag = Tag(name=TagName("work"))
-        saved_tag = await tag_repo.save(tag)
+        saved_tag = await tag_repo.save(tag, user_id=TEST_USER_ID)
 
         # Act
         await contact_service.assign_tag_to_contact(
@@ -581,8 +581,8 @@ class TestContactServiceIntegration:
         # Create and assign tags
         work_tag = Tag(name=TagName("work"))
         client_tag = Tag(name=TagName("client"))
-        saved_work_tag = await tag_repo.save(work_tag)
-        saved_client_tag = await tag_repo.save(client_tag)
+        saved_work_tag = await tag_repo.save(work_tag, user_id=TEST_USER_ID)
+        saved_client_tag = await tag_repo.save(client_tag, user_id=TEST_USER_ID)
 
         await contact_service.assign_tag_to_contact(
             saved_contact.id, saved_work_tag.id, clean_database, user_id=TEST_USER_ID
@@ -660,7 +660,7 @@ class TestContactServiceIntegration:
 
         # Create tag
         tag = Tag(name=TagName("test-tag"))
-        saved_tag = await tag_repo.save(tag)
+        saved_tag = await tag_repo.save(tag, user_id=TEST_USER_ID)
 
         # Assign tag
         await contact_service.assign_tag_to_contact(

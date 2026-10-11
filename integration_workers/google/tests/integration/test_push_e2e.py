@@ -83,7 +83,10 @@ class TestPushTagEndToEnd:
 
         # Create and assign a tag
         tag_result = await db_session.execute(
-            text("INSERT INTO tags (name) VALUES ('e2e-push-tag') RETURNING id")
+            text(
+                "INSERT INTO tags (name, user_id) VALUES ('e2e-push-tag', :owner) RETURNING id"
+            ),
+            {"owner": test_user},
         )
         tag_id = tag_result.scalar_one()
         await db_session.execute(

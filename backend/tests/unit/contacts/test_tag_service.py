@@ -11,6 +11,8 @@ from app.core.contacts.models.events import TagDeleted, TagUpdated
 from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
 from app.core.contacts.services.tag_service import TagService
 
+OWNER = "tag-owner"
+
 
 class DummyTagHierarchyService:
     def __init__(self):
@@ -53,11 +55,12 @@ class MockTagRepository:
                 return tag
         return None
 
-    async def save(self, tag: Tag) -> Tag:
+    async def save(self, tag: Tag, *, user_id: str) -> Tag:
         if self.raise_duplicate_on_save:
             raise DuplicateTagNameError(str(tag.name))
         if tag.id is None:
             tag.id = len(self.tags) + 1
+            tag.user_id = user_id
         assert tag.id is not None
         self.tags[tag.id] = tag
         return tag
@@ -107,6 +110,7 @@ async def test_create_tag_persists_and_returns(service, repo):
         transaction=None,
         color="#123456",
         description="desc",
+        user_id=OWNER,
     )
 
     assert created.id is not None
@@ -118,13 +122,11 @@ async def test_create_tag_persists_and_returns(service, repo):
 
 @pytest.mark.asyncio
 async def test_create_tag_with_existing_parent(service, repo):
-    parent = Tag(id=1, name=TagName("Parent"))
-    await repo.save(parent)
+    parent = Tag(id=1, name=TagName("Parent"), user_id=OWNER)
+    await repo.save(parent, user_id=OWNER)
 
     created = await service.create_tag(
-        name="Child",
-        transaction=None,
-        parent_id=1,
+        name="Child", transaction=None, parent_id=1, user_id=OWNER
     )
 
     assert created.parent_id == 1
@@ -133,19 +135,21 @@ async def test_create_tag_with_existing_parent(service, repo):
 @pytest.mark.asyncio
 async def test_create_tag_missing_parent_raises(service):
     with pytest.raises(TagNotFoundError):
-        await service.create_tag(name="Orphan", transaction=None, parent_id=99)
+        await service.create_tag(
+            name="Orphan", transaction=None, parent_id=99, user_id=OWNER
+        )
 
 
 @pytest.mark.asyncio
 async def test_create_tag_returns_existing_on_duplicate_name_race(service, repo):
     """A lost create-or-get race returns the winner's tag instead of erroring."""
     # The winner already created the tag.
-    winner = Tag(id=7, name=TagName("Work"))
-    await repo.save(winner)
+    winner = Tag(id=7, name=TagName("Work"), user_id=OWNER)
+    await repo.save(winner, user_id=OWNER)
     # Our insert loses the race: the unique-name constraint fires.
     repo.raise_duplicate_on_save = True
 
-    result = await service.create_tag(name="Work", transaction=None)
+    result = await service.create_tag(name="Work", transaction=None, user_id=OWNER)
 
     assert result is winner
 
@@ -157,13 +161,13 @@ async def test_create_tag_reraises_duplicate_when_no_existing(service, repo):
     # ...but find_by_name turns up nothing (e.g. the other writer rolled back).
 
     with pytest.raises(DuplicateTagNameError):
-        await service.create_tag(name="Ghost", transaction=None)
+        await service.create_tag(name="Ghost", transaction=None, user_id=OWNER)
 
 
 @pytest.mark.asyncio
 async def test_update_tag_basic(service, repo, publisher):
-    tag = Tag(id=1, name=TagName("Test"), color="#FFFFFF")
-    await repo.save(tag)
+    tag = Tag(id=1, name=TagName("Test"), color="#FFFFFF", user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
 
     updated = await service.update_tag(
         tag_id=1,
@@ -191,8 +195,8 @@ async def test_update_tag_not_found(service):
 
 @pytest.mark.asyncio
 async def test_update_tag_uniqueness_validation(service, repo, hierarchy_service):
-    tag = Tag(id=1, name=TagName("Test"))
-    await repo.save(tag)
+    tag = Tag(id=1, name=TagName("Test"), user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
 
     hierarchy_service.throw_uniqueness = True
     with pytest.raises(DuplicateTagNameError):
@@ -201,10 +205,10 @@ async def test_update_tag_uniqueness_validation(service, repo, hierarchy_service
 
 @pytest.mark.asyncio
 async def test_update_tag_reparenting_cycle(service, repo, hierarchy_service):
-    tag = Tag(id=1, name=TagName("Test"), parent_id=None)
-    await repo.save(tag)
-    parent_tag = Tag(id=2, name=TagName("Parent"))
-    await repo.save(parent_tag)
+    tag = Tag(id=1, name=TagName("Test"), parent_id=None, user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
+    parent_tag = Tag(id=2, name=TagName("Parent"), user_id=OWNER)
+    await repo.save(parent_tag, user_id=OWNER)
 
     hierarchy_service.throw_cycle = True
     with pytest.raises(ContactValidationError):
@@ -213,8 +217,8 @@ async def test_update_tag_reparenting_cycle(service, repo, hierarchy_service):
 
 @pytest.mark.asyncio
 async def test_update_tag_clear_parent(service, repo, publisher):
-    tag = Tag(id=1, name=TagName("Test"), parent_id=5)
-    await repo.save(tag)
+    tag = Tag(id=1, name=TagName("Test"), parent_id=5, user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
 
     updated = await service.update_tag(tag_id=1, transaction=None, set_parent_null=True)
     assert updated.parent_id is None
@@ -227,10 +231,10 @@ async def test_update_tag_clear_parent(service, repo, publisher):
 @pytest.mark.asyncio
 async def test_update_tag_explicit_parent_wins_over_clear(service, repo):
     """An explicit parent takes precedence over set_parent_null."""
-    tag = Tag(id=1, name=TagName("Test"), parent_id=None)
-    await repo.save(tag)
-    parent_tag = Tag(id=2, name=TagName("Parent"))
-    await repo.save(parent_tag)
+    tag = Tag(id=1, name=TagName("Test"), parent_id=None, user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
+    parent_tag = Tag(id=2, name=TagName("Parent"), user_id=OWNER)
+    await repo.save(parent_tag, user_id=OWNER)
 
     updated = await service.update_tag(
         tag_id=1, transaction=None, parent_id=2, set_parent_null=True
@@ -246,10 +250,10 @@ async def test_update_tag_unchanged_parent_is_not_cleared(service, repo):
     The no-change case is nested inside the parent_id branch; a flat
     ``elif set_parent_null`` would clear the parent here instead of keeping it.
     """
-    parent_tag = Tag(id=2, name=TagName("Parent"))
-    await repo.save(parent_tag)
-    tag = Tag(id=1, name=TagName("Test"), parent_id=2)
-    await repo.save(tag)
+    parent_tag = Tag(id=2, name=TagName("Parent"), user_id=OWNER)
+    await repo.save(parent_tag, user_id=OWNER)
+    tag = Tag(id=1, name=TagName("Test"), parent_id=2, user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
 
     updated = await service.update_tag(
         tag_id=1, transaction=None, parent_id=2, set_parent_null=True
@@ -260,8 +264,8 @@ async def test_update_tag_unchanged_parent_is_not_cleared(service, repo):
 
 @pytest.mark.asyncio
 async def test_delete_tag(service, repo, publisher):
-    tag = Tag(id=1, name=TagName("To_Delete"))
-    await repo.save(tag)
+    tag = Tag(id=1, name=TagName("To_Delete"), user_id=OWNER)
+    await repo.save(tag, user_id=OWNER)
 
     # A real connection stand-in: deleting a tag now also marks the contacts
     # that lose it, which is SQL this service issues itself.

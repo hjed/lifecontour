@@ -435,8 +435,8 @@ class TagRepository(ABC):
         pass
 
     @abstractmethod
-    async def save(self, tag: Tag) -> Tag:
-        """Save a tag (insert or update)."""
+    async def save(self, tag: Tag, *, user_id: str) -> Tag:
+        """Save a tag: an insert is owned by ``user_id``; an update never re-owns."""
         pass
 
     @abstractmethod

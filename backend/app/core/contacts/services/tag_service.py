@@ -21,6 +21,13 @@ def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
     return str(fallback_tag.name)
 
 
+def _owner(tag: Tag) -> str:
+    """The owner of a tag read from the database, which always carries one."""
+    if tag.user_id is None:
+        raise ValueError(f"Tag {tag.id} was read without its owner")
+    return tag.user_id
+
+
 class TagService:
     """
     Service for tag mutations and event publishing.
@@ -48,10 +55,12 @@ class TagService:
         color: str | None = None,
         description: str | None = None,
         parent_id: int | None = None,
+        *,
+        user_id: str,
     ) -> Tag:
         """
-        Create a tag (or return the existing one of the same name) as a
-        committed unit of work.
+        Create a tag owned by ``user_id`` (or return the existing one of the same
+        name) as a committed unit of work.
 
         Tag names are unique. To stay safe under a concurrent duplicate-name
         race (e.g. two requests that both look up a tag by name, find nothing,
@@ -85,7 +94,7 @@ class TagService:
         )
         try:
             async with savepoint(transaction):
-                return await self.tag_repo.save(tag)
+                return await self.tag_repo.save(tag, user_id=user_id)
         except DuplicateTagNameError:
             # Lost a create-or-get race: another writer already created this
             # name. The SAVEPOINT rolled the failed insert back, so the
@@ -148,7 +157,7 @@ class TagService:
         if changed_fields:
             # Re-trigger domain validation
             tag.__post_init__()
-            tag = await self.tag_repo.save(tag)
+            tag = await self.tag_repo.save(tag, user_id=_owner(tag))
 
         new_path_tags = await self.tag_hierarchy_service.get_tag_path(tag_id)
         new_path_str = _compute_path_string(new_path_tags, tag)

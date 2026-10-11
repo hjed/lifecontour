@@ -159,6 +159,8 @@ tags_table = Table(
     "tags",
     metadata,
     Column("id", Integer, primary_key=True),
+    # The owner: set when the tag is created, never changed.
+    Column("user_id", String(50), nullable=False),
     Column("name", String(100), nullable=False),
     Column(
         "parent_id", Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True
@@ -182,6 +184,8 @@ tags_table = Table(
         "name ~ '^[a-zA-Z0-9_&-]+(/[a-zA-Z0-9_&-]+)*$'", name="ck_tags_name_format"
     ),
 )
+
+Index("idx_tags_user_id", tags_table.c.user_id)
 
 # Contact tags table (many-to-many)
 contact_tags_table = Table(

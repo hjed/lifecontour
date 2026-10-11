@@ -291,8 +291,11 @@ class ContactService:
         contact: Contact,
         tag_names: list[str],
         transaction: AsyncConnection,
+        *,
+        owner: str,
     ) -> None:
         """Resolve tag names to existing-or-new tags and attach them to contact.
+        A missing tag is created for ``owner``.
 
         Each name is looked up; a missing name is created via the TagService
         (a race-safe create-or-get), so the tag write is owned by a
@@ -312,7 +315,9 @@ class ContactService:
             tag = (
                 existing
                 if existing is not None
-                else await self._tag_service.create_tag(name, transaction=transaction)
+                else await self._tag_service.create_tag(
+                    name, transaction=transaction, user_id=owner
+                )
             )
             contact.add_tag(tag)
 
@@ -364,7 +369,9 @@ class ContactService:
             # Resolve any tag names to existing-or-new tags inside this unit of
             # work, so tag creation and the contact write commit together.
             if tag_names:
-                await self._resolve_tag_names(contact, tag_names, transaction)
+                await self._resolve_tag_names(
+                    contact, tag_names, transaction, owner=contact.user_id
+                )
 
             # Validate and save basic contact fields
             saved_contact = await self._validate_and_save_contact_basic_fields(
@@ -490,7 +497,11 @@ class ContactService:
             if tag_names is not None:
                 contact.tags = []
                 if tag_names:
-                    await self._resolve_tag_names(contact, tag_names, transaction)
+                    # The acting user's tags, not whatever owner the caller's
+                    # entity names: its ownership is only checked below.
+                    await self._resolve_tag_names(
+                        contact, tag_names, transaction, owner=user_id
+                    )
 
             # Get current contact and calculate changes
             current_contact = await self._get_existing_contact(

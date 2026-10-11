@@ -221,10 +221,10 @@ class TestActivity:
         )
         await async_connection.execute(
             text("""
-                INSERT INTO tags (id, name, created_at, updated_at)
-                VALUES (14, 'friends', :now, :now)
+                INSERT INTO tags (id, user_id, name, created_at, updated_at)
+                VALUES (14, :owner, 'friends', :now, :now)
             """),
-            {"now": NOW},
+            {"owner": TEST_USER_ID, "now": NOW},
         )
         await async_connection.execute(
             text("""

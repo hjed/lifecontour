@@ -147,7 +147,10 @@ async def synced_contact(db_session: AsyncSession) -> dict[str, int]:
     )
 
     result = await db_session.execute(
-        text("INSERT INTO tags (name) VALUES ('Colleagues') RETURNING id")
+        text(
+            "INSERT INTO tags (name, user_id) VALUES ('Colleagues', :owner) RETURNING id"
+        ),
+        {"owner": CONTACT_OWNER},
     )
     tag_id = int(result.scalar_one())
     await db_session.execute(

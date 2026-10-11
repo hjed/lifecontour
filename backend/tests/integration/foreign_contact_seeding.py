@@ -258,7 +258,7 @@ async def _link_to_immich(connection: AsyncConnection, contact_id: int) -> None:
 
 
 async def _tag(repo: SqlTagRepository, name: str) -> int:
-    tag = await repo.save(Tag(name=TagName(name)))
+    tag = await repo.save(Tag(name=TagName(name)), user_id=OTHER_USER_ID)
     assert tag.id is not None
     return tag.id
 

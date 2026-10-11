@@ -56,7 +56,12 @@ class MethodType(Enum):
 
 @dataclass
 class Tag:
-    """Tag entity with hierarchical support."""
+    """Tag entity with hierarchical support.
+
+    ``user_id`` is the owner. Every tag read from the database carries it; a tag
+    parsed from a sync payload is a name only, and is owned by the contact it is
+    resolved for.
+    """
 
     name: TagName
     id: int | None = None
@@ -65,6 +70,7 @@ class Tag:
     description: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    user_id: str | None = None
 
     def __post_init__(self) -> None:
         """Validate tag properties."""

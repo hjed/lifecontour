@@ -191,7 +191,8 @@ class SqlContactRepository(ContactRepository):
         # Load contact tags
         tags_query = text(
             """
-            SELECT t.id, t.name, t.parent_id, t.color, t.description, t.created_at, t.updated_at
+            SELECT t.id, t.user_id, t.name, t.parent_id, t.color, t.description,
+                   t.created_at, t.updated_at
             FROM tags t
             JOIN contact_tags ct ON t.id = ct.tag_id
             WHERE ct.contact_id = :contact_id
@@ -202,6 +203,7 @@ class SqlContactRepository(ContactRepository):
         for tag_row in tags_result.fetchall():
             tag = Tag(
                 id=tag_row.id,
+                user_id=tag_row.user_id,
                 name=TagName(tag_row.name),
                 parent_id=tag_row.parent_id,
                 color=tag_row.color,
@@ -1756,7 +1758,7 @@ class SqlContactRepository(ContactRepository):
         # Batch load contact tags
         tags_query = text(
             """
-            SELECT ct.contact_id, t.id, t.name, t.parent_id, t.color, t.description,
+            SELECT ct.contact_id, t.id, t.user_id, t.name, t.parent_id, t.color, t.description,
                    t.created_at, t.updated_at
             FROM tags t
             JOIN contact_tags ct ON t.id = ct.tag_id
@@ -1768,6 +1770,7 @@ class SqlContactRepository(ContactRepository):
         for row in result:
             tag = Tag(
                 id=row.id,
+                user_id=row.user_id,
                 name=TagName(row.name),
                 parent_id=row.parent_id,
                 color=row.color,
