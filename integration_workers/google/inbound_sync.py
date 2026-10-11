@@ -20,6 +20,9 @@ class InboundSyncAction(StrEnum):
     SKIP_UNCHANGED = "skip_unchanged"
     SKIP_ONE_WAY = "skip_one_way"
     SKIP_CANCELLED = "skip_cancelled"
+    # A merge absorbed this event into another journal: acting on it would
+    # undo the merge.
+    SKIP_MERGED = "skip_merged"
 
 
 class ExternalEventLinkProtocol(Protocol):
@@ -56,6 +59,7 @@ class InboundSyncClassifier:
         google_event: GoogleEventProtocol,
         existing_link: ExternalEventLinkProtocol | None,
         has_series_links: bool = False,
+        is_merged_alias: bool = False,
     ) -> InboundSyncAction:
         """Classify what action to take for an inbound event.
 
@@ -66,10 +70,18 @@ class InboundSyncClassifier:
                 master ids (a cancelled, unlinked event id that instances point
                 at means the whole series was deleted upstream). Supplied by
                 the caller — the classifier stays DB-free.
+            is_merged_alias: Whether a journal merge absorbed this event, so
+                it has no link of its own (also supplied by the caller).
 
         Returns:
             The action to take for this event
         """
+        # An event a merge absorbed is the merged journal's, whatever it now
+        # says: creating it again, or cancelling the journal over it, would
+        # undo the merge. Its own link would make it an ordinary event again.
+        if existing_link is None and is_merged_alias:
+            return InboundSyncAction.SKIP_MERGED
+
         # Cancelled events: cancel linked journal, fan out a series
         # cancellation when the id is a recurring master, else skip
         if google_event.status == "cancelled":

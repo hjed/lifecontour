@@ -325,3 +325,43 @@ class TestInboundSyncClassifierSeriesCancellation:
             has_series_links=True,
         )
         assert result == InboundSyncAction.CANCEL_JOURNAL
+
+
+class TestInboundSyncClassifierMergedAliases:
+    """An event a merge absorbed into another journal is left alone.
+
+    Whatever it says — new, changed or cancelled — acting on it would undo
+    the merge: re-create the journal, or cancel the one that absorbed it.
+    """
+
+    @pytest.fixture
+    def classifier(self) -> InboundSyncClassifier:
+        return InboundSyncClassifier()
+
+    @pytest.mark.parametrize("status", ["confirmed", "tentative", "cancelled"])
+    def test_an_aliased_event_is_skipped_whatever_it_says(
+        self, classifier: InboundSyncClassifier, status: str
+    ) -> None:
+        event = GoogleEvent(  # type: ignore[call-arg]
+            id="dm1q_20260904T021500Z", status=status, etag='"e"'
+        )
+
+        result = classifier.classify_inbound_event(
+            google_event=event, existing_link=None, is_merged_alias=True
+        )
+
+        assert result == InboundSyncAction.SKIP_MERGED
+
+    def test_an_event_with_its_own_link_is_classified_as_usual(
+        self, classifier: InboundSyncClassifier
+    ) -> None:
+        """A live link always wins: the record is not absorbed, it is linked."""
+        event = GoogleEvent(id="evt", status="confirmed", etag='"new"')  # type: ignore[call-arg]
+
+        result = classifier.classify_inbound_event(
+            google_event=event,
+            existing_link=_make_link('"old"', "bidirectional"),
+            is_merged_alias=True,
+        )
+
+        assert result == InboundSyncAction.UPDATE_JOURNAL

@@ -10,6 +10,20 @@ from core_shared.testing import make_arq_ctx, make_mock_redis
 # We need to import after setting up env vars (conftest handles this)
 
 
+@pytest.fixture(autouse=True)
+def _no_merged_aliases():
+    """No event here was absorbed by a journal merge.
+
+    The alias lookup would otherwise read the scripted session's next result
+    as an alias. It is covered against a real database in
+    ``tests/integration/test_merged_alias_sync_integration.py``.
+    """
+    repo = AsyncMock()
+    repo.find_alias.return_value = None
+    with patch("worker.MergedAliasRepository", return_value=repo) as repo_class:
+        yield repo_class
+
+
 def _make_google_event(
     *,
     event_id: str = "google-event-1",
