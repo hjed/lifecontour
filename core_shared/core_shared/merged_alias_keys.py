@@ -56,3 +56,29 @@ def merged_alias_key(
     if prefix and normalised.startswith(prefix):
         normalised = normalised.removeprefix(prefix)
     return MergedAliasKey(integration_source=link_source, external_id=normalised)
+
+
+def merged_alias_lock_keys(
+    user_id: str,
+    payload_source: str | None,
+    external_id: str,
+    external_identity: str | None,
+) -> list[str]:
+    """Advisory-lock keys serialising a merge and a sync over one record.
+
+    Reading "no alias" and then creating a journal is check-then-act: a merge
+    committing between the two would leave the absorbed record re-imported.
+    Both sides take these keys first — by id, and by cross-calendar identity,
+    since another calendar's copy shares only that — so one waits for the
+    other. Returned sorted, so every holder takes them in the same order.
+    """
+    key = merged_alias_key(payload_source, external_id)
+    if key is None:
+        return []
+    keys = [f"merged_alias:{user_id}:{key.integration_source}:{key.external_id}"]
+    if external_identity:
+        keys.append(
+            f"merged_alias_identity:{user_id}:{key.integration_source}:"
+            f"{external_identity}"
+        )
+    return sorted(keys)

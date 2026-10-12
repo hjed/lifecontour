@@ -39,3 +39,37 @@ def test_sources_with_no_inbound_records_have_no_key(
 
 def test_a_blank_external_id_has_no_key() -> None:
     assert merged_alias_key("google", "  ") is None
+
+
+def test_a_record_locks_the_same_keys_in_either_vocabulary() -> None:
+    """The merge and a sync must contend for one lock per record.
+
+    The merge names a record as its link store does, the backend processor
+    as its payload does; serialising them only works if both reach the
+    same key.
+    """
+    from core_shared.merged_alias_keys import merged_alias_lock_keys
+
+    by_payload = merged_alias_lock_keys("u1", "strava", "strava:222", None)
+    by_store = merged_alias_lock_keys("u1", "strava", "222", None)
+
+    assert by_payload == by_store == ["merged_alias:u1:strava:222"]
+
+
+def test_an_identity_is_locked_too_and_keys_come_sorted() -> None:
+    """Another calendar's copy shares only the identity, so it is locked on."""
+    from core_shared.merged_alias_keys import merged_alias_lock_keys
+
+    keys = merged_alias_lock_keys("u1", "google", "evt-1", "token")
+
+    assert keys == sorted(keys)
+    assert set(keys) == {
+        "merged_alias:u1:google_calendar:evt-1",
+        "merged_alias_identity:u1:google_calendar:token",
+    }
+
+
+def test_an_unaliasable_record_locks_nothing() -> None:
+    from core_shared.merged_alias_keys import merged_alias_lock_keys
+
+    assert merged_alias_lock_keys("u1", "snipeit_checkout", "x", "t") == []

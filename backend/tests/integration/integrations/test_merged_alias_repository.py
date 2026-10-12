@@ -196,3 +196,39 @@ class TestMergedAliasRepository:
             )
             is None
         )
+
+
+@pytest.mark.integration
+class TestMergedAliasLocks:
+    async def test_a_merge_and_a_sync_can_both_hold_a_record_in_one_transaction(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        """The locks are transaction-scoped and re-entrant for their holder.
+
+        Contention between two transactions is PostgreSQL's to guarantee; what
+        this pins is that both sides' calls are valid SQL and that a holder
+        taking a key twice — a merge that is also syncing — does not block on
+        itself.
+        """
+        repo = MergedAliasRepository(clean_database)
+        record = ExternalRecord(
+            integration_source="google_calendar",
+            external_id="evt-1",
+            external_identity="token",
+        )
+
+        await repo.lock_records(user_id=USER_ID, records=[record, record])
+        await repo.lock_record(
+            user_id=USER_ID,
+            payload_source="google",
+            external_id="evt-1",
+            external_identity="token",
+        )
+
+        held = await clean_database.execute(
+            text(
+                "SELECT count(*) FROM pg_locks "
+                "WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
+            )
+        )
+        assert held.scalar_one() == 2

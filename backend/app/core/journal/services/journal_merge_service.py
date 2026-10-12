@@ -693,6 +693,9 @@ class JournalMergeService:
         ]
         if not lost:
             return
+        # Serialise with a sync about to create a journal for one of these:
+        # it either committed first, or reads the aliases once this commits.
+        await alias_repo.lock_records(user_id=owner_id, records=lost)
         await alias_repo.record_aliases(
             journal_id=target_id, user_id=owner_id, records=lost
         )

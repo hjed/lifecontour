@@ -21,7 +21,7 @@ from uuid import UUID
 from sqlalchemy import Row, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from core_shared.merged_alias_keys import merged_alias_key
+from core_shared.merged_alias_keys import merged_alias_key, merged_alias_lock_keys
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,53 @@ class MergedAliasRepository:
         )
         row = result.fetchone()
         return _to_alias(row) if row else None
+
+    async def lock_record(
+        self,
+        *,
+        user_id: str,
+        payload_source: str | None,
+        external_id: str,
+        external_identity: str | None = None,
+    ) -> None:
+        """Hold this record against a concurrent merge until the transaction ends.
+
+        Take it before the last :meth:`find_alias` that decides to create a
+        journal: a merge aliasing the record then either committed first, and
+        the read sees its alias, or waits until the journal exists.
+        """
+        await self._lock(
+            merged_alias_lock_keys(
+                user_id, payload_source, external_id, external_identity
+            )
+        )
+
+    async def lock_records(
+        self, *, user_id: str, records: Sequence[ExternalRecord]
+    ) -> None:
+        """The merge's side of :meth:`lock_record`, for every record it aliases."""
+        await self._lock(
+            sorted(
+                {
+                    key
+                    for record in records
+                    for key in merged_alias_lock_keys(
+                        user_id,
+                        record.integration_source,
+                        record.external_id,
+                        record.external_identity,
+                    )
+                }
+            )
+        )
+
+    async def _lock(self, keys: list[str]) -> None:
+        # One order for every holder, so two of them cannot deadlock.
+        for key in keys:
+            await self._conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": key},
+            )
 
     async def aliases_for_journal(self, journal_id: int) -> list[MergedAlias]:
         """Every alias a journal holds, oldest first."""
