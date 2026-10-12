@@ -7,7 +7,7 @@ from integration workers to create/update journals in the core system.
 """
 
 from datetime import UTC, datetime, time, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
@@ -77,6 +77,7 @@ from app.core.integrations.models.unmatched_participant import (
 from app.core.integrations.split_adoption import (
     SplitAdopter,
     adopted_journal_data,
+    find_split_predecessor,
 )
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
@@ -91,6 +92,9 @@ from app.core.journal.adapters.sql.review_item_repository import (
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.services.journal_service import JournalService
 from app.infrastructure.unit_of_work import savepoint
+
+if TYPE_CHECKING:
+    from app.core.journal.services.journal_date_resolver import JournalDateResolver
 
 logger = structlog.get_logger()
 
@@ -503,6 +507,22 @@ class JournalOutboxEventProcessor:
             return _skipped_as_merged(
                 EVENT_TYPE_JOURNAL_EVENT_CREATED, merged_alias, external_event_id
             )
+
+        # A recurrence split under an unrelated id whose halves arrived in
+        # different syncs: the old recurrence's cancellations left a cancelled
+        # journal on this day, which this instance adopts rather than doubles.
+        predecessor = await find_split_predecessor(
+            self.link_repo, self._date_resolver(), payload
+        )
+        if predecessor is not None:
+            logger.info(
+                "New recurrence instance adopts a cancelled journal it split from",
+                external_event_id=external_event_id,
+                existing_journal_id=predecessor.journal_id,
+            )
+            event.event_data["existing_journal_id"] = predecessor.journal_id
+            event.event_data["split_adopted_from"] = predecessor.adopted_from
+            return await self._process_journal_updated(event)
 
         # Build the journal entity
         journal = self._build_journal_from_data(journal_data)
@@ -953,6 +973,17 @@ class JournalOutboxEventProcessor:
             and current.external_event_id is not None
             and current.external_event_id != external_event_id
         )
+
+    def _date_resolver(self) -> JournalDateResolver:
+        """Local-day arithmetic in the user's zone, over this connection."""
+        from app.core.journal.services.journal_date_resolver import (
+            JournalDateResolver,
+        )
+        from app.core.settings.adapters.sql.user_settings_repository import (
+            SqlUserSettingsRepository,
+        )
+
+        return JournalDateResolver(SqlUserSettingsRepository(self.connection))
 
     async def _create_instead_of_adopting(self, event: OutboxEvent) -> dict[str, Any]:
         """Create the instance whose adoption target was deleted meanwhile.

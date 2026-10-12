@@ -168,6 +168,58 @@ class SqlJournalEventLinkRepository:
         row = result.fetchone()
         return _row_to_linked_journal(row) if row else None
 
+    async def find_split_candidates(
+        self,
+        *,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str,
+        title: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[SeriesLinkedJournal]:
+        """Cancelled journals a new recurrence's instance could be adopting.
+
+        Linked in this calendar with a cancelled link from a *different*
+        recurrence, starting inside the window, under the same title (trimmed,
+        ignoring case), and held live by no other calendar. Two rows at most:
+        the caller only adopts when there is exactly one.
+        """
+        query = text(
+            f"""
+            {_LINKED_JOURNAL_SELECT}
+            WHERE l.calendar_id = :calendar_id
+              AND l.sync_status = :cancelled
+              AND l.recurring_event_id IS NOT NULL
+              AND l.recurring_event_id <> :recurring_event_id
+              AND j.user_id = :user_id
+              AND lower(btrim(j.title)) = lower(btrim(:title))
+              AND j.event_date_range_start >= :window_start
+              AND j.event_date_range_start <= :window_end
+              AND NOT EXISTS (
+                  SELECT 1 FROM journal_external_event_links other
+                  WHERE other.journal_id = l.journal_id
+                    AND other.calendar_id <> l.calendar_id
+                    AND other.sync_status <> :cancelled
+              )
+            ORDER BY j.event_date_range_start, l.journal_id
+            LIMIT 2
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "calendar_id": calendar_id,
+                "cancelled": ExternalEventLinkSyncStatus.CANCELLED.value,
+                "recurring_event_id": recurring_event_id,
+                "user_id": user_id,
+                "title": title,
+                "window_start": window_start,
+                "window_end": window_end,
+            },
+        )
+        return [_row_to_linked_journal(row) for row in result.fetchall()]
+
     async def find_journals_for_series(
         self, calendar_id: UUID, recurring_event_id: str
     ) -> list[SeriesLinkedJournal]:

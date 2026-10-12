@@ -342,6 +342,15 @@ sends the new one as an update of the old journal carrying
 Adoption is an update, so it requests no duplicate detection. If the journal
 was deleted in the meantime, the instance is created instead.
 
+When the halves arrive in **different** syncs the worker cannot pair them: the
+cancellations land first and the keep-next rule leaves the old recurrence's
+kept "next one" (and any continuation the user added to). A create of a new
+recurrence's instance then adopts the one cancelled journal that has a link in
+the same calendar from a different recurrence, starts on the same local day
+(the event's zone, else the user's) and has the same title - but only when
+there is exactly one, and none still held live by another calendar. Dates the
+keep-next rule already deleted are created afresh, in the old series.
+
 Cancelled calendar events are never offered as duplicate candidates for a new
 journal: what is left of an occurrence that is off duplicates nothing.
 

@@ -14,6 +14,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from unittest.mock import call as mock_call
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from core_shared.models.history import Provenance
@@ -2484,6 +2485,13 @@ class _SeriesProcessorTestBase:
         proc.link_repo = AsyncMock()
         proc.series_repo = AsyncMock()
         proc.recurrence_tidier = AsyncMock()
+        # Cross-sync split adoption looks for a cancelled predecessor on every
+        # recurring create; with no candidate and no zone lookup it stays out
+        # of each test's scripted execute sequence.
+        _mock(proc.link_repo).find_split_candidates.return_value = []
+        resolver = AsyncMock()
+        resolver.timezone_for.return_value = ZoneInfo("UTC")
+        proc._date_resolver = MagicMock(return_value=resolver)  # type: ignore[method-assign]
         _mock(proc.recurrence_tidier).tidy.return_value = TidyOutcome(
             deleted=frozenset(), errors=0
         )
