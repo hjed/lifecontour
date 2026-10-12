@@ -35,6 +35,14 @@ from tests.integration.core.integrations.journal_sync_seeding import (
 NEW_MASTER = "9p7kac2r5m992mshlenq0j10pf"
 
 
+def _a_week_out_at_noon() -> datetime:
+    """Noon UTC (the test user has no zone): every offset these tests add to
+    it stays on the same local day, whatever time the suite runs."""
+    return (datetime.now(UTC) + timedelta(days=7)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+
+
 async def _seed_and_cancel(
     processor: JournalOutboxEventProcessor,
     calendar_id: str,
@@ -43,7 +51,7 @@ async def _seed_and_cancel(
     title: str = "Pilates",
 ) -> tuple[dict[int, int], dict[int, datetime]]:
     """An old recurrence whose every upcoming week was cancelled."""
-    first = datetime.now(UTC).replace(microsecond=0) + timedelta(days=7)
+    first = _a_week_out_at_noon()
     journals: dict[int, int] = {}
     starts: dict[int, datetime] = {}
     for week in range(1, weeks + 1):
@@ -154,7 +162,7 @@ class TestCrossSyncAdoption:
     ) -> None:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
-        first = datetime.now(UTC).replace(microsecond=0) + timedelta(days=7)
+        first = _a_week_out_at_noon()
         journals: dict[int, int] = {}
         for week in (1, 2):
             created = await processor.process_event(
@@ -268,7 +276,7 @@ class TestCrossSyncAdoptionRefusals:
         """Two cancelled "Pilates" from different recurrences on one day."""
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
-        start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=7)
+        start = _a_week_out_at_noon()
         candidates: list[int] = []
         for master, offset in ((MASTER_ID, 0), ("third-master", 5)):
             created = await processor.process_event(
@@ -304,7 +312,7 @@ class TestCrossSyncAdoptionRefusals:
     ) -> None:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
-        start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=7)
+        start = _a_week_out_at_noon()
         live = await processor.process_event(
             sync_event(
                 "journal_event.created",
@@ -319,6 +327,33 @@ class TestCrossSyncAdoptionRefusals:
         created = await _create_new_instance(processor, calendar_id, start, week=1)
 
         assert created != live["journal_id"]
+
+
+@pytest.mark.integration
+class TestAdoptionFromASecondCalendar:
+    async def test_only_the_display_calendars_link_is_a_candidate(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A journal shared with another calendar keys its series on the one it
+        is displayed in; adopting through the other would find no series."""
+        calendar_id = await create_calendar(async_connection)
+        other = await create_calendar(async_connection, name="Other")
+        processor = build_processor(async_connection)
+        journals, starts = await _seed_and_cancel(processor, calendar_id, weeks=1)
+        await async_connection.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id, recurring_event_id,
+                     sync_capability, sync_status, created_at, updated_at)
+                VALUES (:journal_id, :calendar_id, 'shared-copy', 'shared-master',
+                        'bidirectional', 'cancelled', now(), now())
+            """),
+            {"journal_id": journals[1], "calendar_id": other},
+        )
+
+        created = await _create_new_instance(processor, other, starts[1], week=1)
+
+        assert created != journals[1]
 
 
 @pytest.mark.integration

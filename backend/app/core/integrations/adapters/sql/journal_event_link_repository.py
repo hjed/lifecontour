@@ -182,13 +182,21 @@ class SqlJournalEventLinkRepository:
 
         Linked in this calendar with a cancelled link from a *different*
         recurrence, starting inside the window, under the same title (trimmed,
-        ignoring case), and held live by no other calendar. Two rows at most:
+        ignoring case), and held live by no other calendar. Only a journal
+        displayed in this calendar qualifies: its series is keyed on that
+        calendar, so adopting through another calendar's link would find no
+        series to fold the new recurrence into. Two rows at most:
         the caller only adopts when there is exactly one.
         """
         query = text(
             f"""
             {_LINKED_JOURNAL_SELECT}
             WHERE l.calendar_id = :calendar_id
+              AND EXISTS (
+                  SELECT 1 FROM journal_calendar_info ci
+                  WHERE ci.journal_id = l.journal_id
+                    AND ci.calendar_id = l.calendar_id
+              )
               AND l.sync_status = :cancelled
               AND l.recurring_event_id IS NOT NULL
               AND l.recurring_event_id <> :recurring_event_id

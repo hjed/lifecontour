@@ -351,6 +351,12 @@ the same calendar from a different recurrence, starts on the same local day
 there is exactly one, and none still held live by another calendar. Dates the
 keep-next rule already deleted are created afresh, in the old series.
 
+The backend sees creates one at a time, so it cannot apply the worker's
+"exactly one on each side" rule to the new recurrence: if the new recurrence has
+two same-title instances on that day, the first to arrive adopts the cancelled
+journal. The match is restricted to the calendar the journal is displayed in,
+where its series is keyed.
+
 Cancelled calendar events are never offered as duplicate candidates for a new
 journal: what is left of an occurrence that is off duplicates nothing.
 
