@@ -50,6 +50,6 @@ class TestDelete:
     @pytest.mark.asyncio
     async def test_delete_delegates_to_repo(self, service, mock_repo, mock_transaction):
         """delete delegates to the repo with the given id."""
-        await service.delete(7, transaction=mock_transaction)
+        await service.delete(7, transaction=mock_transaction, user_id="user-1")
 
-        mock_repo.delete.assert_awaited_once_with(7)
+        mock_repo.delete.assert_awaited_once_with(7, user_id="user-1")

@@ -34,6 +34,8 @@ class CustomDateTypeService:
         self,
         type_id: int,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
-        """Delete a custom date type as a committed unit."""
-        await self.custom_date_type_repo.delete(type_id)
+        """Delete ``user_id``'s custom date type as a committed unit."""
+        await self.custom_date_type_repo.delete(type_id, user_id=user_id)

@@ -321,9 +321,9 @@ custom_date_types_table = Table(
     "custom_date_types",
     metadata,
     Column("id", Integer, primary_key=True),
-    Column("name", String(100), nullable=False, unique=True),
-    # The type's owner (the OAuth subject); nullable until 0134 requires it.
-    Column("user_id", String(50), nullable=True),
+    Column("name", String(100), nullable=False),
+    # The type's owner (the OAuth subject); names are unique per owner.
+    Column("user_id", String(50), nullable=False),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -336,6 +336,7 @@ custom_date_types_table = Table(
         server_default=text("now()"),
         nullable=False,
     ),
+    UniqueConstraint("user_id", "name", name="uq_custom_date_types_user_id_name"),
 )
 
 Index("idx_custom_date_types_user_id", custom_date_types_table.c.user_id)

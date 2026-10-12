@@ -454,23 +454,23 @@ class CustomDateTypeRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_by_id(self, type_id: int) -> CustomDateType | None:
-        """Find a custom date type by ID."""
+    async def get_by_id(self, type_id: int, *, user_id: str) -> CustomDateType | None:
+        """Find ``user_id``'s custom date type by ID; another user's reads as missing."""
         pass
 
     @abstractmethod
-    async def get_by_name(self, name: str) -> CustomDateType | None:
-        """Find a custom date type by name."""
+    async def get_by_name(self, name: str, *, user_id: str) -> CustomDateType | None:
+        """Find ``user_id``'s custom date type by name."""
         pass
 
     @abstractmethod
-    async def list_all(self) -> list[CustomDateType]:
-        """Get all custom date types."""
+    async def list_all(self, *, user_id: str) -> list[CustomDateType]:
+        """Get every custom date type ``user_id`` owns."""
         pass
 
     @abstractmethod
-    async def delete(self, type_id: int) -> None:
-        """Delete a custom date type."""
+    async def delete(self, type_id: int, *, user_id: str) -> None:
+        """Delete ``user_id``'s custom date type; another user's is not found."""
         pass
 
 
