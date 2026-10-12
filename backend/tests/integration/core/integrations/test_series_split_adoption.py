@@ -307,6 +307,50 @@ class TestAStaleCancellationAfterAdoption:
 
 
 @pytest.mark.integration
+class TestARedeliveredAdoption:
+    async def test_it_does_not_undo_a_later_one(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Old -> new, then new -> newer; the first delivered again must not
+        move the journal back to the event the second moved it off."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals, starts = await _seed_old_recurrence(processor, calendar_id)
+        first = sync_event(
+            "journal_event.updated",
+            calendar_id=calendar_id,
+            external_event_id=f"{NEW_MASTER}_week2",
+            title="Pilates",
+            start=starts[2] + timedelta(minutes=10),
+            etag='"etag-new"',
+            existing_journal_id=journals[2],
+            recurring_event_id=NEW_MASTER,
+            series_recurring_event_id=NEW_MASTER,
+            split_adopted_from=MASTER_ID,
+        )
+        await processor.process_event(first)
+        await processor.process_event(
+            sync_event(
+                "journal_event.updated",
+                calendar_id=calendar_id,
+                external_event_id="newer-master_week2",
+                title="Pilates",
+                start=starts[2] + timedelta(minutes=20),
+                etag='"etag-newer"',
+                existing_journal_id=journals[2],
+                recurring_event_id="newer-master",
+                series_recurring_event_id="newer-master",
+                split_adopted_from=NEW_MASTER,
+            )
+        )
+
+        result = await processor.process_event(first)
+
+        assert result["status"] == "skipped"
+        assert (await _link(async_connection, journals[2]))[0] == "newer-master_week2"
+
+
+@pytest.mark.integration
 class TestAdoptionFallback:
     async def test_a_deleted_target_is_created_instead(
         self, async_connection: AsyncConnection

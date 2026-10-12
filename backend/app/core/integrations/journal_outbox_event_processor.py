@@ -659,6 +659,22 @@ class JournalOutboxEventProcessor:
         # A split-off recurrence adopting this journal (see ``split_adoption``)
         split_adoption = None
         if payload.split_adopted_from is not None:
+            if await self.split_adopter.is_superseded(
+                journal_id=existing_journal_id,
+                calendar_id=UUID(calendar_id),
+                payload=payload,
+            ):
+                logger.info(
+                    "Adoption skipped - the journal has since moved on",
+                    journal_id=existing_journal_id,
+                    external_event_id=external_event_id,
+                )
+                return {
+                    "status": "skipped",
+                    "event_type": EVENT_TYPE_JOURNAL_EVENT_UPDATED,
+                    "reason": "adoption_superseded",
+                    "journal_id": existing_journal_id,
+                }
             split_adoption = await self.split_adopter.begin(
                 journal=existing_journal,
                 calendar_id=UUID(calendar_id),
@@ -1099,6 +1115,17 @@ class JournalOutboxEventProcessor:
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
         )
+        recurring_event_id = payload.recurring_event_id or (
+            linked.recurring_event_id if linked else None
+        )
+        if recurring_event_id:
+            await self.link_repo.lock_recurrence(UUID(calendar_id), recurring_event_id)
+            # Read again under the lock: an adoption of this journal that was
+            # still uncommitted a moment ago has now landed or not.
+            linked = await self.link_repo.find_by_external_event(
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+            )
         if linked is None and await self._link_moved_on(
             existing_journal_id, UUID(calendar_id), external_event_id
         ):
@@ -1117,11 +1144,6 @@ class JournalOutboxEventProcessor:
                 "reason": "link_moved_on",
                 "journal_id": existing_journal_id,
             }
-        recurring_event_id = payload.recurring_event_id or (
-            linked.recurring_event_id if linked else None
-        )
-        if linked is not None and recurring_event_id:
-            await self.link_repo.lock_recurrence(UUID(calendar_id), recurring_event_id)
 
         await self._mark_journal_cancelled(
             journal_id=existing_journal_id,

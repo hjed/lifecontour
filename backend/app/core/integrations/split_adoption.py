@@ -32,6 +32,7 @@ from app.core.integrations.cancelled_recurrence_tidier import (
     CancelledRecurrenceTidier,
     TidyOutcome,
 )
+from app.core.integrations.recurrence_keys import root_recurring_event_id
 from app.core.journal.models.repositories import JournalSeriesRepository
 
 
@@ -71,6 +72,25 @@ class SplitAdopter:
         self.link_repo = link_repo
         self.series_repo = series_repo
         self.tidier = tidier
+
+    async def is_superseded(
+        self, *, journal_id: int, calendar_id: UUID, payload: JournalSyncEventData
+    ) -> bool:
+        """Whether a later adoption has already moved this journal on.
+
+        An adoption is delivered again after a newer one (the stream retries a
+        failed delivery after newer events): the journal's link then belongs
+        to neither the recurrence adopted from nor this event, and applying it
+        would move the journal back.
+        """
+        current = await self.link_repo.find_by_journal(journal_id, calendar_id)
+        if current is None or current.external_event_id == payload.external_event_id:
+            return False
+        if current.recurring_event_id is None:
+            return False
+        return root_recurring_event_id(current.recurring_event_id) != (
+            payload.split_adopted_from
+        )
 
     async def begin(
         self, *, journal: Journal, calendar_id: UUID, payload: JournalSyncEventData

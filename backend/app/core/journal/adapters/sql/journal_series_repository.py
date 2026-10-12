@@ -305,7 +305,9 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
 
         started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
         if started is not None:
-            return await self._fold_into(started, into, user_id, recurring_event_id)
+            return await self._fold_into(
+                started, into, user_id, recurring_event_id, into_recurring_event_id
+            )
 
         await self._lock_recurrence(calendar_id, recurring_event_id)
         if await self._find_by_key(user_id, calendar_id, recurring_event_id):
@@ -340,24 +342,44 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         into: JournalSeries,
         user_id: str,
         recurring_event_id: str,
+        into_recurring_event_id: str,
+        *,
+        retried: bool = False,
     ) -> UUID | None:
         """Merge the series started for a split-off recurrence into ``into``.
 
         Rows first, then keys, as ``JournalSeriesMergeService`` takes them. A
-        merge that absorbed ``started`` between its lookup and the row lock
-        leaves it out of the locked set: its recurrence then resolves through
-        the alias that merge wrote, which is followed rather than overwritten.
+        series missing from the locked set was merged away meanwhile: if it
+        was ``started``, its recurrence now resolves through the alias that
+        merge wrote, which is followed rather than overwritten; if it was
+        ``into``, the old recurrence's series is resolved again and the fold
+        retried once against where it went.
         """
         assert started.id is not None and into.id is not None
         if started.id == into.id:
             return into.id
         locked = await self.lock_for_merge([started.id, into.id], user_id)
-        if started.id not in locked or into.id not in locked:
+        if started.id not in locked:
             assert started.calendar_id is not None
             moved_to = await self._find_by_alias(
                 user_id, started.calendar_id, recurring_event_id
             )
             return moved_to.id if moved_to else None
+        if into.id not in locked:
+            assert started.calendar_id is not None
+            moved_into = await self._find_by_alias(
+                user_id, started.calendar_id, into_recurring_event_id
+            )
+            if retried or moved_into is None:
+                return None
+            return await self._fold_into(
+                started,
+                moved_into,
+                user_id,
+                recurring_event_id,
+                into_recurring_event_id,
+                retried=True,
+            )
         await self.alias_recurrences(started, into.id)
         await self.move_members(started.id, into.id)
         await self.delete(started.id, user_id)

@@ -861,3 +861,52 @@ class TestAdoptRecurrenceRaces:
         assert adopted_into is None
         lock_for_merge.assert_not_called()
         assert len(await series_repository.find_all(USER_ID)) == 2
+
+    async def test_an_old_series_merged_away_before_its_lock_is_followed(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        """The old recurrence's series is merged into a manual one between the
+        lookup and the row lock: fold into where it went."""
+        from unittest.mock import patch
+
+        calendar = await _create_calendar(calendar_repository)
+        old = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="old-master",
+            name="Pilates",
+        )
+        started = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            name="Pilates",
+        )
+        manual = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Pilates (all)")
+        )
+        real_lock = series_repository.lock_for_merge
+        merged = False
+
+        async def merged_meanwhile(
+            series_ids: list[uuid.UUID], user_id: str
+        ) -> set[uuid.UUID]:
+            nonlocal merged
+            if not merged:
+                merged = True
+                await series_repository.alias_recurrences(old, _sid(manual))
+                await series_repository.delete(_sid(old), USER_ID)
+            return await real_lock(series_ids, user_id)
+
+        with patch.object(series_repository, "lock_for_merge", merged_meanwhile):
+            adopted_into = await series_repository.adopt_recurrence(
+                user_id=USER_ID,
+                calendar_id=_cid(calendar),
+                recurring_event_id="new-master",
+                into_recurring_event_id="old-master",
+            )
+
+        assert adopted_into == manual.id
+        assert await series_repository.find_by_id(_sid(started), USER_ID) is None
