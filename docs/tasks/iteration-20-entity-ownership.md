@@ -910,9 +910,13 @@ shape). The realistic size is ~900 lines, not ~200: the migration tests alone ar
   `idx_custom_date_types_user_id`. `CustomDateType.user_id`; every read maps the owner;
   `CustomDateTypeRepository.create(name, *, user_id)` writes it and `POST /api/custom-date-types`
   stamps the session user. Reads and the name key still global.
-- **9b** — `0134`: owns stragglers, refuses a type used by another owner's contact, `NOT NULL`,
-  `UNIQUE(name)` → `uq_custom_date_types_user_id_name (user_id, name)`; `get_by_id`,
-  `get_by_name`, `list_all`, `delete` scoped in SQL; the service and the 3 routes pass the user.
+- **9b ✅ DONE** — `0134`: owns stragglers (as `0133`; evidence pinned at `0133`), refuses a type
+  a contact of another owner dates with, `NOT NULL`, `custom_date_types_name_key (name)` →
+  `uq_custom_date_types_user_id_name (user_id, name)` (downgrade refuses while two owners share a
+  name). `get_by_id`, `get_by_name`, `list_all`, `delete` take a keyword-only `user_id` and filter
+  on it in SQL; `GET` / `DELETE /api/custom-date-types` pass the session user (another user's type
+  is a 404 on delete). Duplicate-name and in-use errors are matched by constraint name; the old
+  in-use match (`fk_contact_important_dates_custom_type`) named a constraint that never existed.
 - **9c** — an important date's custom type must share its contact's owner, enforced in the
   `contact_important_dates` INSERT / UPDATE SQL (404 `CUSTOM_DATE_TYPE_NOT_FOUND` otherwise); REST
   isolation suite in `test_contact_ownership.py`; e2e; documentation.

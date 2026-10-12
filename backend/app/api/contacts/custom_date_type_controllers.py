@@ -33,14 +33,14 @@ router = APIRouter(
 async def list_custom_date_types(
     request: Request,
     repository: FromDishka[CustomDateTypeRepository],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> CustomDateTypeListResponse:
     """
-    List all custom date types.
+    List the session user's custom date types.
     """
     base_url = get_request_base_url(request)
 
-    types = await repository.list_all()
+    types = await repository.list_all(user_id=user.id)
 
     resources = [CustomDateTypeConverter.to_resource(t, base_url) for t in types]
 
@@ -78,9 +78,11 @@ async def delete_custom_date_type(
     type_id: int,
     service: FromDishka[CustomDateTypeService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
-    Delete a custom date type.
+    Delete one of the session user's custom date types.
+
+    Another user's type answers 404, exactly as a missing one does.
     """
-    await service.delete(type_id, transaction=connection)
+    await service.delete(type_id, transaction=connection, user_id=user.id)

@@ -15,6 +15,11 @@ from app.core.contacts.models.exceptions import (
 from app.core.contacts.models.repositories import CustomDateTypeRepository
 from app.infrastructure.contacts.contact_tables import custom_date_types_table
 
+# Named by migrations 0134 and 0044 (the latter left the FK to PostgreSQL's
+# default name), so the errors map on the constraint rather than on wording.
+_PER_USER_NAME_KEY = "uq_custom_date_types_user_id_name"
+_DATES_FOREIGN_KEY = "contact_important_dates_custom_date_type_id_fkey"
+
 
 def _to_entity(row: Any) -> CustomDateType:
     """Map a ``custom_date_types`` row, owner included, to the entity."""
@@ -47,48 +52,52 @@ class SqlCustomDateTypeRepository(CustomDateTypeRepository):
             if not row:
                 raise RuntimeError("Failed to create custom date type")
         except IntegrityError as e:
-            if "unique" in str(e).lower() and "name" in str(e).lower():
+            if _PER_USER_NAME_KEY in str(e):
                 raise DuplicateCustomDateTypeNameError(name) from e
             raise
 
         return _to_entity(row)
 
-    async def get_by_id(self, type_id: int) -> CustomDateType | None:
-        """Find a custom date type by ID."""
+    async def get_by_id(self, type_id: int, *, user_id: str) -> CustomDateType | None:
+        """Find ``user_id``'s custom date type by ID; another user's reads as missing."""
         stmt = select(custom_date_types_table).where(
-            custom_date_types_table.c.id == type_id
+            custom_date_types_table.c.id == type_id,
+            custom_date_types_table.c.user_id == user_id,
         )
         row = (await self.connection.execute(stmt)).first()
         return _to_entity(row) if row else None
 
-    async def get_by_name(self, name: str) -> CustomDateType | None:
-        """Find a custom date type by name."""
+    async def get_by_name(self, name: str, *, user_id: str) -> CustomDateType | None:
+        """Find ``user_id``'s custom date type by name."""
         stmt = select(custom_date_types_table).where(
-            custom_date_types_table.c.name == name
+            custom_date_types_table.c.name == name,
+            custom_date_types_table.c.user_id == user_id,
         )
         row = (await self.connection.execute(stmt)).first()
         return _to_entity(row) if row else None
 
-    async def list_all(self) -> list[CustomDateType]:
-        """Get all custom date types."""
-        stmt = select(custom_date_types_table).order_by(custom_date_types_table.c.name)
+    async def list_all(self, *, user_id: str) -> list[CustomDateType]:
+        """Get every custom date type ``user_id`` owns, by name."""
+        stmt = (
+            select(custom_date_types_table)
+            .where(custom_date_types_table.c.user_id == user_id)
+            .order_by(custom_date_types_table.c.name)
+        )
         result = await self.connection.execute(stmt)
 
         return [_to_entity(row) for row in result.all()]
 
-    async def delete(self, type_id: int) -> None:
-        """Delete a custom date type."""
+    async def delete(self, type_id: int, *, user_id: str) -> None:
+        """Delete ``user_id``'s custom date type; another user's is not found."""
         stmt = delete(custom_date_types_table).where(
-            custom_date_types_table.c.id == type_id
+            custom_date_types_table.c.id == type_id,
+            custom_date_types_table.c.user_id == user_id,
         )
         try:
             result = await self.connection.execute(stmt)
-            if result.rowcount == 0:
-                raise CustomDateTypeNotFoundError(type_id)
         except IntegrityError as e:
-            if (
-                "fk_contact_important_dates_custom_type" in str(e).lower()
-                or "foreign key" in str(e).lower()
-            ):
+            if _DATES_FOREIGN_KEY in str(e):
                 raise CustomDateTypeInUseError(type_id) from e
             raise
+        if result.rowcount == 0:
+            raise CustomDateTypeNotFoundError(type_id)

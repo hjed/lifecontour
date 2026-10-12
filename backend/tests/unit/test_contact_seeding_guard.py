@@ -34,6 +34,7 @@ ALLOWED = frozenset(
         "backend/tests/integration/contacts/test_add_user_id_to_contacts_migration.py",
         "backend/tests/integration/contacts/test_add_user_id_to_custom_date_types_migration.py",
         "backend/tests/integration/contacts/test_require_contacts_user_id_migration.py",
+        "backend/tests/integration/contacts/test_require_custom_date_types_user_id_migration.py",
         "backend/tests/integration/integrations/test_add_user_id_to_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_backfill_sync_metadata_migration.py",
         "backend/tests/integration/integrations/test_dedupe_bug_created_contacts_migration.py",

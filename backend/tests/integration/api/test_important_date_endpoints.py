@@ -4,6 +4,10 @@ Integration tests for ImportantDate and CustomDateType API endpoints.
 
 import pytest
 from httpx import AsyncClient, Response
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from tests.integration.contact_seeding import OTHER_USER_ID
 
 
 @pytest.fixture
@@ -49,6 +53,72 @@ async def test_create_custom_date_type(
 
     assert data["attributes"]["name"] == "Graduation"
     assert "id" in data
+
+
+async def _seed_their_type(connection: AsyncConnection, name: str) -> None:
+    await connection.execute(
+        text("INSERT INTO custom_date_types (name, user_id) VALUES (:name, :owner)"),
+        {"name": name, "owner": OTHER_USER_ID},
+    )
+
+
+def _create_type_payload(name: str) -> dict[str, object]:
+    return {"data": {"type": "custom_date_types", "attributes": {"name": name}}}
+
+
+@pytest.mark.asyncio
+async def test_the_list_holds_only_your_custom_date_types(
+    integration_api_client: AsyncClient,
+    async_connection: AsyncConnection,
+    setup_custom_date_type: int,
+) -> None:
+    """Another user's type is not listed, whatever its name."""
+    await _seed_their_type(async_connection, "Sobriety")
+
+    response = await integration_api_client.get("/api/custom-date-types")
+
+    assert response.status_code == 200
+    assert [d["attributes"]["name"] for d in response.json()["data"]] == ["Anniversary"]
+
+
+@pytest.mark.asyncio
+async def test_a_name_another_user_holds_is_free_to_create(
+    integration_api_client: AsyncClient, async_connection: AsyncConnection
+) -> None:
+    """Names are unique per owner, so theirs does not block yours."""
+    await _seed_their_type(async_connection, "Sobriety")
+
+    response = await integration_api_client.post(
+        "/api/custom-date-types", json=_create_type_payload("Sobriety")
+    )
+
+    assert response.status_code == 201, response.text[:400]
+    assert response.json()["data"]["attributes"]["name"] == "Sobriety"
+
+
+@pytest.mark.asyncio
+async def test_a_name_you_already_hold_is_a_conflict(
+    integration_api_client: AsyncClient, setup_custom_date_type: int
+) -> None:
+    response = await integration_api_client.post(
+        "/api/custom-date-types", json=_create_type_payload("Anniversary")
+    )
+
+    assert response.status_code == 409, response.text[:400]
+    assert _error_code(response) == "DUPLICATE_CUSTOM_DATE_TYPE_NAME"
+
+
+@pytest.mark.asyncio
+async def test_deleting_your_unused_type_removes_it(
+    integration_api_client: AsyncClient, setup_custom_date_type: int
+) -> None:
+    response = await integration_api_client.delete(
+        f"/api/custom-date-types/{setup_custom_date_type}"
+    )
+
+    assert response.status_code == 204, response.text[:400]
+    listed = await integration_api_client.get("/api/custom-date-types")
+    assert listed.json()["data"] == []
 
 
 @pytest.mark.asyncio
