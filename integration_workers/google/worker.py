@@ -51,6 +51,7 @@ from core_shared.repositories import (
     ActiveCalendarChannel,
     CalendarWatchRenewal,
     CalendarWatchRepository,
+    MergedAliasRepository,
     SyncJobRepository,
     UnmatchedParticipantRepository,
 )
@@ -4538,11 +4539,27 @@ async def sync_calendar_events(
                             )
                             has_series_links = series_links_result.scalar() is not None
 
+                        # An event with no link may be one a journal merge
+                        # absorbed. The backend refuses to re-import it anyway;
+                        # asking here keeps a full sync from sending a create
+                        # for every event a merge ever absorbed.
+                        is_merged_alias = (
+                            existing_link is None
+                            and await MergedAliasRepository(session).find_alias(
+                                user_id=str(user_id),
+                                payload_source="google",
+                                external_id=google_event.id,
+                                external_identity=build_event_identity(google_event),
+                            )
+                            is not None
+                        )
+
                         # Classify the event
                         action = classifier.classify_inbound_event(
                             google_event=google_event,
                             existing_link=existing_link,
                             has_series_links=has_series_links,
+                            is_merged_alias=is_merged_alias,
                         )
 
                         # Cross-calendar de-dupe. When one calendar invites
@@ -4623,6 +4640,12 @@ async def sync_calendar_events(
                             and existing_link.external_identity is None
                         ):
                             action = InboundSyncAction.UPDATE_JOURNAL
+
+                        if action == InboundSyncAction.SKIP_MERGED:
+                            metrics["events_skipped_merged"] = (
+                                metrics.get("events_skipped_merged", 0) + 1
+                            )
+                            continue
 
                         if action in (
                             InboundSyncAction.SKIP_UNCHANGED,

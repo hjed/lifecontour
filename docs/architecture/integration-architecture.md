@@ -237,7 +237,8 @@ dual-write has been removed: every writer now persists the canonical link (plus
   source's row too, so one journal ends up linked to **several** Strava
   activities — the unique key is `(user_id, integration_source, external_id)`,
   not `internal_id`, so many rows may share one journal. Any other merge keeps the
-  target's link and deletes the source's, as contact merge does. This is why
+  target's link and deletes the source's, as contact merge does; the source's record
+  is then kept as a [merged alias](#merged-aliases-a-sync-never-undoes-a-merge). This is why
   the Strava worker resolves journals through `sync_metadata` rather than
   `journal_fitness_data.strava_activity_id`, which holds only one id: see
   [Strava Integration → Fitness merge modes](../journal-system-specification.md#strava-integration).
@@ -304,6 +305,67 @@ Migration `0130_sync_metadata_user_scoped_unique_key` re-ran that assignment ove
 rows a not-yet-deployed writer left unowned, made the column `NOT NULL`, and dropped
 the global `(integration_source, external_id)` index; its downgrade refuses while
 two owners hold one external id.
+
+#### Merged Aliases: a Sync Never Undoes a Merge
+
+A journal merge deletes the source journal, and every external link the target
+cannot take over goes with it. `journal_external_event_links` holds one link per
+journal **per calendar**, so a second event in a calendar the target is already
+linked in has nowhere to go (Google, and Snipe-IT's and Strava's synthetic
+calendars); a `replace` fitness merge deletes the rival Strava activity or Immich
+album. A record that loses its link is one the next sync has never seen, so it was
+imported again as a new journal: the merge undone by the sync.
+
+The merge now keeps every such record as a **merged alias** of the survivor
+(`journal_merged_aliases`, migration `0132`). An alias is recognition only: nothing
+is ever pushed to it, and it is a table of its own so no outbound path, which reads
+links, can reach it.
+
+- **What counts.** Every `JournalLinkStore` in `JOURNAL_LINK_SOURCES`
+  (`backend/app/core/integrations/link_sources.py`) declares a required
+  `alias_policy`: `INBOUND` for records imported *from* the source, `NOT_ALIASABLE`
+  for records pushed *to* it (Snipe-IT assets, check-outs and pushed maintenance:
+  the source journal's own deletion undoes those upstream).
+- **How the merge finds them.** `merge_journals` reads the source's records from
+  every `INBOUND` store (`SqlExternalRecordRepository`) before anything moves, and,
+  after the type-data merge, records each one the target does not hold as an alias.
+  The source's own aliases move to the target. The merge never needs to know *why*
+  a link was lost, so a store is covered as soon as it is registered.
+- **One writer, one lookup.** `MergedAliasRepository` (`core_shared`) is the only code
+  that writes the table and the only way to ask "did a merge absorb this record?". Two
+  read-only joins also read it: the `MERGED_ALIAS` link stores (see below) and the
+  deletion identifiers in `JournalService.delete_journal`. `core_shared.merged_alias_keys` maps the names a payload
+  uses (`google`, `strava:<id>`) onto the link store's (`google_calendar`, `<id>`),
+  so a worker asks in its own terms. A lookup matches on the record's id, then on
+  its cross-calendar `external_identity` **from any calendar**.
+- **Enforced where journals are created.** `JournalOutboxEventProcessor` (created,
+  update-without-link, an update queued for the absorbed journal) and
+  `ImmichAlbumOutboxEventProcessor._apply_create` skip an aliased record with
+  `reason="merged_alias"`: no journal, no link written to the survivor (the link
+  upsert would overwrite the survivor's own event), no edit. The workers' own checks
+  are advisory, because a merge can land between a worker's read and this write.
+- **Workers skip them too.** After their own lookup misses, the Google
+  (`InboundSyncAction.SKIP_MERGED`), Snipe-IT, Strava and Immich workers ask
+  `MergedAliasRepository.find_alias` and skip an aliased record, counting it
+  (`events_skipped_merged`, `skipped_merged`), so a full sync does not send a create
+  for every record a merge ever absorbed.
+- **Read back as the survivor's.** The alias table is registered as a
+  `MERGED_ALIAS` store on each source with inbound stores, so
+  `get_journal_by_external_id` resolves an absorbed record, and a journal's
+  `external_links` list its aliases.
+- **Deleted with the survivor.** `JournalDeleted.external_identifiers` includes
+  every alias with a calendar, filed exactly like a link, so the Google and Snipe-IT
+  workers delete the absorbed record upstream too. Strava and Immich deletions do
+  not reach upstream for the journal's own record either.
+- **Guarded for new integrations.**
+  `backend/tests/integration/core/integrations/test_merged_alias_guard.py` runs once
+  per registered source: merge two journals in `replace` mode, replay the absorbed
+  record in the worker's payload shape, and delete the survivor. A source added to
+  the registry fails it until it has a seeder there or is listed as outbound-only.
+
+Known limits: a Google "this and following" edit mints new event ids (and usually a
+new iCalUID), so those instances are not recognised; and an absorbed event the app
+itself created stays in Google, un-updated, until the merged journal is deleted.
 
 #### Contact Sync Events Name the Owner
 

@@ -34,7 +34,13 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 )
 from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.contact_seeding import seed_contact
-from tests.integration.linked_calendar_seeding import USER_ID, seed_shared_event
+from tests.integration.linked_calendar_seeding import (
+    USER_ID,
+    create_calendar,
+    create_event_journal,
+    link_calendar,
+    seed_shared_event,
+)
 from tests.integration.mcp.http_helpers import call_mcp_tool
 
 pytestmark = pytest.mark.integration
@@ -162,6 +168,67 @@ class TestWriteToolsReportTheFullJournal:
 
         assert payload["id"] == target_id
         assert [s["name"] for s in payload["series"]] == ["Training block"]
+
+    async def test_merge_answers_as_get_journal_does_for_two_calendar_events(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+    ) -> None:
+        """The ticket's shape: two Pilates occurrences in one Work calendar.
+
+        The merge's answer used to come back with empty ``external_links``
+        while a ``get_journal`` straight after showed them, so an assistant
+        was told the merge had dropped links it had in fact kept.
+        """
+        work = await create_calendar(clean_database, "Work")
+        await clean_database.execute(
+            text(
+                "UPDATE calendars SET google_calendar_id = 'work@example.com'"
+                " WHERE id = :id"
+            ),
+            {"id": work},
+        )
+        target_id = await create_event_journal(
+            clean_database, title="Pilates", display_calendar_id=work
+        )
+        source_id = await create_event_journal(
+            clean_database, title="Pilates", display_calendar_id=work
+        )
+        await link_calendar(
+            clean_database,
+            journal_id=target_id,
+            calendar_id=work,
+            external_event_id="63goti",
+        )
+        await link_calendar(
+            clean_database,
+            journal_id=source_id,
+            calendar_id=work,
+            external_event_id="dm1q",
+        )
+        await _add_to_series(clean_database, target_id, "Pilates")
+
+        async with authenticated_lifespan_client() as client:
+            merged = await call_mcp_tool(
+                client,
+                "merge_journals",
+                {
+                    "target_journal_id": target_id,
+                    "merge_data": json.dumps({"source_journal_id": source_id}),
+                },
+            )
+            fetched = await call_mcp_tool(
+                client, "get_journal", {"journal_id": target_id}
+            )
+
+        assert sorted(link["external_id"] for link in merged["external_links"]) == [
+            "63goti",
+            "dm1q",
+        ]
+        for field in ("series", "calendar", "calendars", "external_links"):
+            assert merged[field] == fetched[field], field
+        assert [s["name"] for s in merged["series"]] == ["Pilates"]
+        assert merged["calendar"]["id"] == work
 
 
 class TestMergeCandidates:

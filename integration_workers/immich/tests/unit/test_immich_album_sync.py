@@ -8,9 +8,10 @@ drive ITER11-004 Phase 1 album import.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -30,6 +31,22 @@ _SERVER_URL = "https://immich.example.com"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_merged_aliases() -> Iterator[MagicMock]:
+    """No album here was absorbed by a journal merge.
+
+    The alias lookup would otherwise read the mocked connection's result as an
+    alias. It is covered against a real database in
+    ``tests/integration/test_immich_outbox_integration.py``.
+    """
+    repo = AsyncMock()
+    repo.find_alias.return_value = None
+    with patch(
+        "immich_sync_service.MergedAliasRepository", return_value=repo
+    ) as repo_class:
+        yield repo_class
 
 
 def _asset(

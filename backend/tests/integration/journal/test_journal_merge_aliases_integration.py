@@ -34,6 +34,9 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
     SqlFitnessDataRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
@@ -498,3 +501,107 @@ class TestMergeKeepsAbsorbedRecordsAsAliases:
             (survivor, "a"),
             (survivor, "b"),
         }
+
+
+class _NoImmichServer:
+    """The user has not connected Immich, so album links carry no server URL."""
+
+    async def get_server_url(self, user_id: str) -> None:  # noqa: ARG002
+        return None
+
+
+def _link_service(connection: AsyncConnection) -> JournalExternalLinkService:
+    return JournalExternalLinkService(
+        journal_repo=SqlJournalRepository(connection),
+        immich_token_service=_NoImmichServer(),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.integration
+class TestAnAbsorbedRecordReadsBackAsTheSurvivors:
+    """The survivor answers for an absorbed record wherever links are read."""
+
+    async def test_an_absorbed_google_event_is_listed_and_found_by_its_id(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        conn = clean_database
+        work = await _calendar(
+            conn, integration_source="google", google_calendar_id="work@example.com"
+        )
+        target = await _journal(conn, "Pilates")
+        source = await _journal(conn, "Pilates")
+        await _event_link(
+            conn, journal_id=target, calendar_id=work, external_event_id="63goti"
+        )
+        await _event_link(
+            conn, journal_id=source, calendar_id=work, external_event_id="dm1q"
+        )
+
+        await _merge_service(conn).merge_journals(target, source, conn)
+
+        links = await _link_service(conn).links_for_journal(target, USER_ID)
+        assert sorted(
+            link.external_id for link in links if link.source == "google_calendar"
+        ) == ["63goti", "dm1q"]
+        assert (
+            await SqlJournalRepository(conn).find_id_by_external_id(
+                USER_ID, "google_calendar", "dm1q"
+            )
+            == target
+        )
+
+    async def test_an_absorbed_strava_activity_is_listed_and_found_by_its_id(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        conn = clean_database
+        target = await _journal(conn, "Ride")
+        source = await _journal(conn, "Ride re-import")
+        await _sync_row(
+            conn,
+            journal_id=target,
+            integration_source="strava",
+            external_id="111",
+            external_entity_type="activity",
+        )
+        await _sync_row(
+            conn,
+            journal_id=source,
+            integration_source="strava",
+            external_id="222",
+            external_entity_type="activity",
+        )
+
+        await _merge_service(conn).merge_journals(target, source, conn)
+
+        links = await _link_service(conn).links_for_journal(target, USER_ID)
+        assert sorted(
+            link.external_id for link in links if link.source == "strava"
+        ) == ["111", "222"]
+        assert (
+            await SqlJournalRepository(conn).find_id_by_external_id(
+                USER_ID, "strava", "222"
+            )
+            == target
+        )
+
+    async def test_an_absorbed_immich_album_is_listed(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        conn = clean_database
+        target = await _journal(conn, "Trip")
+        source = await _journal(conn, "Trip photos")
+        for journal_id, album in ((target, "album-a"), (source, "album-b")):
+            await _sync_row(
+                conn,
+                journal_id=journal_id,
+                integration_source="immich_album",
+                external_id=album,
+                external_entity_type="album",
+            )
+
+        await _merge_service(conn).merge_journals(target, source, conn)
+
+        links = await _link_service(conn).links_for_journal(target, USER_ID)
+        assert sorted(
+            link.external_id for link in links if link.source == "immich_album"
+        ) == ["album-a", "album-b"]

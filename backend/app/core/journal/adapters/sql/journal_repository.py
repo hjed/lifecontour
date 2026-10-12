@@ -1177,11 +1177,18 @@ class SqlJournalRepository(JournalRepository):
 
     async def get_external_event_links(self, journal_id: int) -> list[dict[str, Any]]:
         """Get Google Calendar external event links for a journal."""
+        # A merged alias is an event the journal absorbed from another one.
         query = text(
             "SELECT l.external_event_id, c.google_calendar_id, l.calendar_id "
             "FROM journal_external_event_links l "
             "LEFT JOIN calendars c ON l.calendar_id = c.id "
-            "WHERE l.journal_id = :journal_id"
+            "WHERE l.journal_id = :journal_id "
+            "UNION ALL "
+            "SELECT a.external_id, c.google_calendar_id, a.calendar_id "
+            "FROM journal_merged_aliases a "
+            "LEFT JOIN calendars c ON a.calendar_id = c.id "
+            "WHERE a.journal_id = :journal_id "
+            "AND a.integration_source = 'google_calendar'"
         )
         result = await self.conn.execute(query, {"journal_id": journal_id})
         links = []
@@ -1250,6 +1257,12 @@ class SqlJournalRepository(JournalRepository):
                 WHERE m.internal_uuid = :journal_uuid
                 AND m.integration_source = 'snipeit_maintenance'
                 AND {SNIPEIT_MAINTENANCE_NOT_IMPORTED}
+                UNION ALL
+                SELECT 'snipeit_maintenance' AS integration_source, a.external_id, s.base_url
+                FROM journal_merged_aliases a
+                JOIN snipeit_settings s ON s.user_id = :user_id
+                WHERE a.journal_id = :journal_id
+                AND a.integration_source = 'snipeit_maintenance'
                 """  # noqa: S608 - interpolates only a module constant
             ),
             {
@@ -1326,6 +1339,11 @@ class SqlJournalRepository(JournalRepository):
                 FROM journal_fitness_data
                 WHERE journal_id = :journal_id
                   AND strava_activity_id IS NOT NULL
+                UNION
+                SELECT external_id, created_at
+                FROM journal_merged_aliases
+                WHERE journal_id = :journal_id
+                  AND integration_source = 'strava'
                 ORDER BY created_at, external_id
                 """
             ),
@@ -1353,4 +1371,17 @@ class SqlJournalRepository(JournalRepository):
             AlbumSyncReadRepository,
         )
 
-        return await AlbumSyncReadRepository(self.conn).find_external_links(journal_id)
+        links = await AlbumSyncReadRepository(self.conn).find_external_links(journal_id)
+        # Albums the journal absorbed by merging; an alias carries no share link.
+        aliases = await self.conn.execute(
+            text(
+                "SELECT external_id FROM journal_merged_aliases "
+                "WHERE journal_id = :journal_id "
+                "AND integration_source = 'immich_album' ORDER BY id"
+            ),
+            {"journal_id": journal_id},
+        )
+        return [
+            *links,
+            *({"album_id": row[0], "shared_link_url": None} for row in aliases),
+        ]

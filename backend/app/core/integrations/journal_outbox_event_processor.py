@@ -47,6 +47,10 @@ from core_shared.models.participant_email import (
 )
 from core_shared.models.route import Route
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
+from core_shared.repositories.merged_alias_repository import (
+    MergedAlias,
+    MergedAliasRepository,
+)
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -234,6 +238,25 @@ class ContactResolver:
         return row.id if row else None
 
 
+def _skipped_as_merged(
+    event_type: str, alias: MergedAlias, external_event_id: str
+) -> dict[str, Any]:
+    """The result for an event a merge absorbed: nothing was written."""
+    logger.info(
+        "Sync event skipped - a merge absorbed this record",
+        event_type=event_type,
+        external_event_id=external_event_id,
+        merged_into_journal_id=alias.journal_id,
+    )
+    return {
+        "status": "skipped",
+        "reason": "merged_alias",
+        "event_type": event_type,
+        "journal_id": alias.journal_id,
+        "external_event_id": external_event_id,
+    }
+
+
 class JournalOutboxEventProcessor:
     """
     Processes inbound journal sync events from integration workers.
@@ -276,6 +299,7 @@ class JournalOutboxEventProcessor:
         self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
             connection
         )
+        self.merged_alias_repo = MergedAliasRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -452,6 +476,27 @@ class JournalOutboxEventProcessor:
             event.event_data["existing_journal_id"] = journal_id_for_identity
             return await self._process_journal_updated(event)
 
+        # A merge absorbed this event into another journal. Creating it again
+        # would undo the merge; this is the last place that can stop it, since
+        # a merge can land between the worker's check and this write. Asked
+        # last, after every lookup that could still find a journal, so a merge
+        # committing between those lookups and here — taking the absorbed
+        # event's link with it — has already recorded the alias. The record's
+        # lock, which the merge also takes, closes the last gap: a merge
+        # aliasing it either committed before this read or waits until the
+        # journal below exists.
+        await self.merged_alias_repo.lock_record(
+            user_id=payload.journal_data["user_id"],
+            payload_source=payload.integration_source,
+            external_id=external_event_id,
+            external_identity=payload.external_identity,
+        )
+        merged_alias = await self._merged_alias_for(payload)
+        if merged_alias is not None:
+            return _skipped_as_merged(
+                EVENT_TYPE_JOURNAL_EVENT_CREATED, merged_alias, external_event_id
+            )
+
         # Build the journal entity
         journal = self._build_journal_from_data(journal_data)
 
@@ -548,6 +593,17 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
+    async def _merged_alias_for(
+        self, payload: JournalSyncEventData
+    ) -> MergedAlias | None:
+        """The alias of this event, if a merge absorbed it into another journal."""
+        return await self.merged_alias_repo.find_alias(
+            user_id=payload.journal_data["user_id"],
+            payload_source=payload.integration_source,
+            external_id=payload.external_event_id,
+            external_identity=payload.external_identity,
+        )
+
     async def _process_journal_updated(self, event: OutboxEvent) -> dict[str, Any]:
         """
         Process a journal_event.updated event.
@@ -581,6 +637,12 @@ class JournalOutboxEventProcessor:
         # Fetch existing journal
         existing_journal = await self._find_journal_by_id(existing_journal_id)
         if existing_journal is None:
+            # An update queued for a journal a merge has since absorbed.
+            merged_alias = await self._merged_alias_for(payload)
+            if merged_alias is not None:
+                return _skipped_as_merged(
+                    EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
+                )
             raise JournalOutboxEventProcessingError(
                 f"Journal {existing_journal_id} not found for update"
             )
@@ -658,6 +720,17 @@ class JournalOutboxEventProcessor:
                 "event_type": EVENT_TYPE_JOURNAL_EVENT_UPDATED,
                 "journal_id": existing_journal_id,
             }
+
+        # An event a merge absorbed has no link of its own, and must not be
+        # given one: the journal's one link in this calendar is the survivor's
+        # own event, which the link upsert below would overwrite. Nor may it
+        # edit the survivor.
+        if existing_link is None:
+            merged_alias = await self._merged_alias_for(payload)
+            if merged_alias is not None:
+                return _skipped_as_merged(
+                    EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
+                )
 
         # If no external link exists, create one to make ETag tracking
         # and idempotency work on subsequent runs

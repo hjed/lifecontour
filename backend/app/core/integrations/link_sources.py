@@ -10,6 +10,7 @@ external id). Adding a source is one entry in a registry below.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -42,6 +43,8 @@ class AliasPolicy(StrEnum):
     # Pushed to the source (or derived from such a push): the source journal's
     # deletion undoes it upstream, so there is nothing to recognise later.
     NOT_ALIASABLE = "not_aliasable"
+    # The alias table itself, read so lookups resolve an absorbed record.
+    MERGED_ALIAS = "merged_alias"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -231,6 +234,30 @@ JOURNAL_LINK_SOURCES: dict[str, JournalLinkSource] = {
             ),
         ),
     ),
+}
+
+
+def _with_merged_alias_store(source: JournalLinkSource) -> JournalLinkSource:
+    """Add the alias table to a source whose records a merge can absorb.
+
+    A record a merge kept as an alias of the survivor still resolves to the
+    survivor by its id, as it did to the journal it came from.
+    """
+    if not any(store.alias_policy is AliasPolicy.INBOUND for store in source.stores):
+        return source
+    alias_store = JournalLinkStore(
+        from_sql="journal_merged_aliases a JOIN journals j ON j.id = a.journal_id",
+        journal_id_sql="a.journal_id",
+        external_id_sql="a.external_id",
+        where_sql=f"a.integration_source = '{source.name}'",
+        alias_policy=AliasPolicy.MERGED_ALIAS,
+    )
+    return dataclasses.replace(source, stores=(*source.stores, alias_store))
+
+
+JOURNAL_LINK_SOURCES = {
+    name: _with_merged_alias_store(source)
+    for name, source in JOURNAL_LINK_SOURCES.items()
 }
 
 

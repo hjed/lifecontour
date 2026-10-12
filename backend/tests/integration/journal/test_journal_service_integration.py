@@ -1,6 +1,7 @@
 """Integration tests for JournalService with real database."""
 
 import json
+import uuid
 from datetime import datetime
 from typing import Any, NamedTuple
 
@@ -13,6 +14,10 @@ from core_shared.models.journals import (
     JournalNotFoundError,
     JournalType,
     JournalValidationError,
+)
+from core_shared.repositories.merged_alias_repository import (
+    ExternalRecord,
+    MergedAliasRepository,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -794,3 +799,48 @@ class TestDeletionIdentifiersAreFiledBySource:
             await _identifiers_of_deleting(journal_service, clean_database, journal_id)
             == {}
         )
+
+    @pytest.mark.asyncio
+    async def test_records_the_journal_absorbed_by_merging_go_with_it(
+        self, journal_service: JournalService, clean_database: AsyncConnection
+    ) -> None:
+        """A merged journal answers for what it absorbed, deletion included.
+
+        Left behind, the absorbed Google event or Snipe-IT record would be
+        imported again as soon as the journal and its aliases were gone. An
+        alias with no calendar (a Strava activity) has nothing upstream for a
+        deletion to reach, as with the journal's own Strava link.
+        """
+        journal_id = await _a_journal_reaching(
+            journal_service, clean_database, _GOOGLE, _SNIPEIT
+        )
+        absorbed_google = _GOOGLE._replace(external_event_id="google-event-absorbed")
+        absorbed_snipeit = _SNIPEIT._replace(external_event_id="snipeit_maint:18")
+        await MergedAliasRepository(clean_database).record_aliases(
+            journal_id=journal_id,
+            user_id="user123",
+            records=[
+                ExternalRecord(
+                    integration_source="google_calendar",
+                    external_id=absorbed_google.external_event_id,
+                    calendar_id=uuid.UUID(_GOOGLE_CALENDAR_ID),
+                ),
+                ExternalRecord(
+                    integration_source="snipeit_maintenance",
+                    external_id=absorbed_snipeit.external_event_id,
+                    calendar_id=uuid.UUID(_SNIPEIT_MAINTENANCE_CALENDAR_ID),
+                ),
+                ExternalRecord(integration_source="strava", external_id="222"),
+            ],
+        )
+
+        identifiers = await _identifiers_of_deleting(
+            journal_service, clean_database, journal_id
+        )
+
+        assert {key: sorted(v, key=str) for key, v in identifiers.items()} == {
+            "google": sorted([_entry(_GOOGLE), _entry(absorbed_google)], key=str),
+            "snipeit_maintenance": sorted(
+                [_entry(_SNIPEIT), _entry(absorbed_snipeit)], key=str
+            ),
+        }

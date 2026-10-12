@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.services.journal_enrichment_service import (
     JournalEnrichmentService,
 )
+from app.core.journal.services.journal_external_link_service import (
+    JournalExternalLinkService,
+)
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
@@ -42,6 +45,7 @@ from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
     get_journal_enrichment_service,
+    get_journal_external_link_service,
     get_outbox_event_publisher,
     mcp_depends,
 )
@@ -78,13 +82,20 @@ async def merge_journals(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
+    link_service: JournalExternalLinkService = mcp_depends(
+        get_journal_external_link_service
+    ),
 ) -> str:
     """
     Merge a source journal into a target journal.
 
     The source journal's content, tags, contacts, type data, routes,
     and child journals are absorbed into the target. The source is then
-    deleted. Use 'overrides' to resolve conflicts explicitly (title,
+    deleted. Every external record the source was synced from stays with the
+    target: one the target cannot hold as a link (a second event in the same
+    calendar, the rival activity of a 'replace' merge) is kept as a merged
+    alias, listed in external_links, so a later sync recognises it rather
+    than importing it again. Use 'overrides' to resolve conflicts explicitly (title,
     content, date range, or type-specific data).
 
     When both journals hold fitness data, 'fitness_merge_mode' decides how to
@@ -150,6 +161,7 @@ async def merge_journals(
         merged_journal,
         await enrichment_service.enrich(target_journal_id, user_id),
         parent=parent,
+        external_links=await link_service.links_for_journal(target_journal_id, user_id),
     )
 
     return MCPResponseBuilder.success_response(response)
