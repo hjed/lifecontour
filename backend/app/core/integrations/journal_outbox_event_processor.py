@@ -481,7 +481,16 @@ class JournalOutboxEventProcessor:
         # a merge can land between the worker's check and this write. Asked
         # last, after every lookup that could still find a journal, so a merge
         # committing between those lookups and here — taking the absorbed
-        # event's link with it — has already recorded the alias.
+        # event's link with it — has already recorded the alias. The record's
+        # lock, which the merge also takes, closes the last gap: a merge
+        # aliasing it either committed before this read or waits until the
+        # journal below exists.
+        await self.merged_alias_repo.lock_record(
+            user_id=payload.journal_data["user_id"],
+            payload_source=payload.integration_source,
+            external_id=external_event_id,
+            external_identity=payload.external_identity,
+        )
         merged_alias = await self._merged_alias_for(payload)
         if merged_alias is not None:
             return _skipped_as_merged(

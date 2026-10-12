@@ -284,3 +284,50 @@ class TestImmichAlbumProcessorLeavesAliasesAlone:
         assert result["reason"] == "merged_alias"
         assert result["journal_id"] == survivor
         assert await _journal_ids(async_connection) == [survivor]
+
+
+async def _advisory_locks_held(connection: AsyncConnection) -> int:
+    result = await connection.execute(
+        text(
+            "SELECT count(*) FROM pg_locks "
+            "WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
+        )
+    )
+    return int(result.scalar_one())
+
+
+class TestAProcessorHoldsTheRecordAgainstAMerge:
+    """The final alias read and the create happen under the record's lock.
+
+    Without it a merge committing between "no alias" and the insert still
+    left the absorbed record re-imported; the merge takes the same keys.
+    """
+
+    async def test_a_journal_create_locks_the_record_and_its_identity(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG002
+    ) -> None:
+        work = await create_calendar(async_connection, name="Work")
+
+        await build_processor(async_connection).process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=work,
+                external_event_id="brand-new",
+                external_identity="token-new",
+            )
+        )
+
+        assert await _advisory_locks_held(async_connection) == 2
+
+    async def test_an_album_create_locks_the_album(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG002
+    ) -> None:
+        await _album_processor(async_connection).process_event(
+            _album_event(EVENT_TYPE_IMMICH_ALBUM_CREATED, "album-new")
+        )
+
+        assert await _advisory_locks_held(async_connection) == 1

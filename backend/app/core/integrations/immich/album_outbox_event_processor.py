@@ -205,7 +205,14 @@ class ImmichAlbumOutboxEventProcessor:
         Not for an album a merge absorbed into another journal: re-creating it
         would undo the merge. Every path that creates goes through here.
         """
-        merged_alias = await MergedAliasRepository(self.connection).find_alias(
+        alias_repo = MergedAliasRepository(self.connection)
+        # Held against a merge aliasing this album until the journal exists.
+        await alias_repo.lock_record(
+            user_id=_album_owner(payload),
+            payload_source=INTEGRATION_SOURCE,
+            external_id=payload.external_id,
+        )
+        merged_alias = await alias_repo.find_alias(
             user_id=_album_owner(payload),
             payload_source=INTEGRATION_SOURCE,
             external_id=payload.external_id,
