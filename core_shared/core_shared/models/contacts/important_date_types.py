@@ -55,10 +55,16 @@ class ImportantDateType(Enum):
 
 @dataclass
 class CustomDateType:
-    """Entity representing a global custom date type."""
+    """Entity representing a user's custom date type.
+
+    ``user_id`` is the owner. Every type read from the database carries it;
+    it is optional only because a type built from a request name has no owner
+    until the repository stamps the acting user.
+    """
 
     name: str
     id: int | None = None
+    user_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

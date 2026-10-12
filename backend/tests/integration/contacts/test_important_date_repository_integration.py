@@ -85,7 +85,7 @@ async def test_important_dates_custom_type(
     sample_contact: Contact,
 ) -> None:
     """Test adding custom types."""
-    ctype = await custom_date_repo.create(name="Graduation")
+    ctype = await custom_date_repo.create(name="Graduation", user_id=TEST_USER_ID)
 
     assert sample_contact.id is not None
     assert ctype.id is not None
@@ -164,8 +164,8 @@ async def test_custom_date_type_repository_crud(
 ) -> None:
     """Test CRUD operations for custom date types."""
     # Create
-    ctype1 = await custom_date_repo.create(name="First Custom")
-    _ctype2 = await custom_date_repo.create(name="Another Custom")
+    ctype1 = await custom_date_repo.create(name="First Custom", user_id=TEST_USER_ID)
+    _ctype2 = await custom_date_repo.create(name="Another Custom", user_id=TEST_USER_ID)
 
     # Read by ID
     assert ctype1.id is not None
@@ -190,6 +190,24 @@ async def test_custom_date_type_repository_crud(
     await custom_date_repo.delete(ctype1.id)
     deleted_type = await custom_date_repo.get_by_id(ctype1.id)
     assert deleted_type is None
+
+
+@pytest.mark.asyncio
+async def test_create_stamps_the_owner_and_every_read_returns_it(
+    custom_date_repo: SqlCustomDateTypeRepository,
+) -> None:
+    """A created type belongs to the user who created it, on every read."""
+    created = await custom_date_repo.create(name="Sobriety", user_id=TEST_USER_ID)
+    assert created.id is not None
+
+    by_id = await custom_date_repo.get_by_id(created.id)
+    by_name = await custom_date_repo.get_by_name("Sobriety")
+    listed = await custom_date_repo.list_all()
+
+    assert created.user_id == TEST_USER_ID
+    assert by_id is not None and by_id.user_id == TEST_USER_ID
+    assert by_name is not None and by_name.user_id == TEST_USER_ID
+    assert [t.user_id for t in listed if t.id == created.id] == [TEST_USER_ID]
 
 
 @pytest.mark.asyncio
@@ -226,7 +244,7 @@ async def test_custom_date_type_in_use_error(
 ) -> None:
     """Test deleting an in-use custom date type raises CustomDateTypeInUseError."""
     assert sample_contact.id is not None
-    ctype = await custom_date_repo.create(name="Required Date")
+    ctype = await custom_date_repo.create(name="Required Date", user_id=TEST_USER_ID)
     assert ctype.id is not None
 
     date = ImportantDate(

@@ -449,8 +449,8 @@ class CustomDateTypeRepository(ABC):
     """Repository interface for custom date type operations."""
 
     @abstractmethod
-    async def create(self, name: str) -> CustomDateType:
-        """Create a new custom date type."""
+    async def create(self, name: str, *, user_id: str) -> CustomDateType:
+        """Create a new custom date type owned by ``user_id``."""
         pass
 
     @abstractmethod

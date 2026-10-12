@@ -322,6 +322,8 @@ custom_date_types_table = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("name", String(100), nullable=False, unique=True),
+    # The type's owner (the OAuth subject); nullable until 0134 requires it.
+    Column("user_id", String(50), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -335,6 +337,8 @@ custom_date_types_table = Table(
         nullable=False,
     ),
 )
+
+Index("idx_custom_date_types_user_id", custom_date_types_table.c.user_id)
 
 # Contact important dates table
 contact_important_dates_table = Table(
