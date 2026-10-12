@@ -241,7 +241,11 @@ class TestSplitAdoptionIntegration:
         from datetime import timedelta
 
         now = datetime.now(UTC)
-        start = (now + timedelta(days=7)).replace(second=0, microsecond=0)
+        # Noon UTC (the user has no zone set): ten minutes later is the same
+        # local day whatever time the test runs.
+        start = (now + timedelta(days=7)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
         calendar_uuid = str(uuid.uuid4())
         await db_session.execute(
             text("""

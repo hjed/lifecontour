@@ -1064,35 +1064,52 @@ class TestSyncRecurringSeries:
         assert result["events_skipped"] >= 1
 
     @staticmethod
-    def _split_batch() -> list[dict[str, Any]]:
-        """One sync of a "this and following" edit under an unrelated id."""
+    def _old_start():  # type: ignore[no-untyped-def]
+        """A week out, so the pairing never ages out from under the test."""
+        from datetime import UTC, datetime, timedelta
+
+        return (datetime.now(UTC) + timedelta(days=7)).replace(
+            hour=1, minute=10, second=0, microsecond=0
+        )
+
+    @classmethod
+    def _split_batch(cls, **new_event: Any) -> list[dict[str, Any]]:
+        """One sync of a "this and following" edit under an unrelated id.
+
+        The cancellation comes first, as Google may send it.
+        """
+        from datetime import timedelta
+
+        new_start = cls._old_start() + timedelta(minutes=10)
         return [
             {
-                "id": "old-1_20261016T011000Z",
+                "id": "old-1_old",
                 "status": "cancelled",
                 "etag": '"etag-cancelled"',
                 "recurringEventId": "old-1",
             },
             _make_google_event(
-                event_id="new-1_20261016T012000Z",
+                event_id="new-1_new",
                 summary="Pilates",
                 description="Studio 2",
-                start_dt="2026-10-16T01:20:00Z",
-                end_dt="2026-10-16T02:40:00Z",
+                start_dt=new_start.isoformat(),
+                end_dt=(new_start + timedelta(minutes=80)).isoformat(),
                 recurring_event_id="new-1",
+                **new_event,
             ),
         ]
 
-    @staticmethod
-    def _old_instance_row() -> MagicMock:
-        from datetime import UTC, datetime
+    @classmethod
+    def _old_instance_row(cls) -> MagicMock:
+        from datetime import timedelta
 
         row = MagicMock()
-        row.external_event_id = "old-1_20261016T011000Z"
+        row.external_event_id = "old-1_old"
         row.journal_id = 42
         row.sync_capability = "bidirectional"
         row.title = "Pilates"
-        row.event_date_range_start = datetime(2026, 10, 16, 1, 10, tzinfo=UTC)
+        row.event_date_range_start = cls._old_start()
+        row.event_date_range_end = cls._old_start() + timedelta(minutes=75)
         return row
 
     @pytest.mark.asyncio
@@ -1125,12 +1142,73 @@ class TestSyncRecurringSeries:
         assert outbox_event.event_type == "journal_event.updated"
         data = outbox_event.event_data
         assert data["existing_journal_id"] == 42
-        assert data["external_event_id"] == "new-1_20261016T012000Z"
+        assert data["external_event_id"] == "new-1_new"
         assert data["split_adopted_from"] == "old-1"
         # Carried so the backend can still create the journal if the old one
         # was deleted in the meantime; an adoption itself keeps the notes.
         assert data["journal_data"]["content"] == "Studio 2"
         assert result["events_split_adopted"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_new_half_deduped_elsewhere_leaves_the_old_cancellation(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """When the cross-calendar de-dupe sends the new instance to another
+        journal, the old journal is not adopted - so it must still be told
+        its event was cancelled, not left linked to a dead event."""
+        from datetime import UTC, datetime, timedelta
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        split_links = MagicMock()
+        split_links.fetchall.return_value = [self._old_instance_row()]
+        new_link = MagicMock()
+        new_link.fetchone.return_value = None
+        identity_hit = MagicMock()
+        identity_hit.fetchone.return_value = MagicMock(journal_id=77)
+        old_link = MagicMock()
+        old_link.fetchone.return_value = MagicMock(
+            journal_id=42,
+            external_version='"etag-old"',
+            sync_capability="bidirectional",
+            sync_status="synced",
+            recurring_event_id="old-1",
+            external_identity=None,
+        )
+        old_end = MagicMock()
+        old_end.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            split_links,  # the batch's links, for split pairing
+            new_link,  # the new instance's link lookup (live events first)
+            identity_hit,  # cross-calendar de-dupe finds journal 77
+            old_link,  # the old instance's link lookup
+            old_end,  # the old journal's end, for the past-event skip
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(
+            mock_ctx,
+            self._split_batch(
+                ical_uid="shared-uid@google.com",
+                original_start_dt=self._old_start().isoformat(),
+            ),
+        )
+
+        assert result["status"] == "success"
+        added = [call.args[0] for call in mock_session.add.call_args_list]
+        assert [e.event_type for e in added] == [
+            "journal_event.updated",
+            "journal_event.cancelled",
+        ]
+        assert added[0].event_data["existing_journal_id"] == 77
+        assert added[0].event_data["split_adopted_from"] is None
+        assert added[1].event_data["existing_journal_id"] == 42
+        assert result.get("events_split_adopted", 0) == 0
 
     @pytest.mark.asyncio
     async def test_an_unpaired_batch_costs_no_extra_query(

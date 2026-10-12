@@ -4495,6 +4495,15 @@ async def sync_calendar_events(
                 split_pairing = await find_split_pairing(
                     session, calendar_id, all_raw_events, user_timezone
                 )
+                # Old instances whose journal a new instance has adopted. Live
+                # events go first, so an old cancellation is only dropped once
+                # its partner really adopted the journal - not when the partner
+                # was sent elsewhere (the cross-calendar de-dupe, say).
+                adopted_old_event_ids: set[str] = set()
+                if split_pairing.targets:
+                    all_raw_events = sorted(
+                        all_raw_events, key=lambda e: e.get("status") == "cancelled"
+                    )
 
                 # Process each event
                 calendar_errors = 0
@@ -4502,10 +4511,9 @@ async def sync_calendar_events(
                     try:
                         google_event = GoogleEvent.from_api_response(raw_event)
 
-                        # The old half of a paired split: its journal is being
-                        # adopted by the new instance, so it must not be
-                        # cancelled under it.
-                        if google_event.id in split_pairing.skip_ids:
+                        # The old half of an adopted split: cancelling it would
+                        # cancel the journal its new instance now owns.
+                        if google_event.id in adopted_old_event_ids:
                             metrics["events_skipped"] += 1
                             continue
 
@@ -4630,6 +4638,7 @@ async def sync_calendar_events(
                         ):
                             deduped_journal_id = split_target.journal_id
                             action = InboundSyncAction.UPDATE_JOURNAL
+                            adopted_old_event_ids.add(split_target.old_event_id)
                             metrics["events_split_adopted"] = (
                                 metrics.get("events_split_adopted", 0) + 1
                             )

@@ -11,12 +11,13 @@ event nobody has journalled.
 Left alone that cancels the old journals and creates a duplicate for every
 date. Paired here instead, the new instance becomes an update of the old
 journal - new times, new event id, same journal and series - and the old
-instance's cancellation is dropped.
+instance's cancellation is dropped once that adoption has been sent.
 
 Two instances pair when all of these hold:
 
 - the old one is cancelled in this batch and linked to a journal in this
-  calendar that is not synced outbound-only and has not already happened;
+  calendar that is not synced outbound-only and has not already ended (the
+  sync's own past-cancellation skip, which reads the end);
 - the new one is live, an instance of a *different* recurrence, and not yet
   linked here;
 - they fall on the same local day (in the user's zone) and have the same
@@ -32,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
@@ -52,34 +53,54 @@ class LinkedInstance:
     journal_id: int
     title: str
     start: datetime
+    end: datetime | None
     sync_capability: str
 
 
 @dataclass(frozen=True)
 class SplitTarget:
-    """The journal a new instance adopts, and the series it adopts from."""
+    """The journal a new instance adopts, and the series it adopts from.
+
+    ``old_event_id`` is the old instance whose cancellation the adoption makes
+    redundant: it is dropped only once the new instance has adopted the
+    journal, never on the pairing alone.
+    """
 
     journal_id: int
     adopted_from: str
+    old_event_id: str
 
 
 @dataclass(frozen=True)
 class SplitPairing:
-    """New event id -> its target, and the old event ids whose cancel is dropped."""
+    """New event id -> the journal it adopts (and the old event it replaces)."""
 
     targets: Mapping[str, SplitTarget] = field(default_factory=dict)
-    skip_ids: frozenset[str] = frozenset()
 
 
 def _normalised(title: str | None) -> str:
     return (title or "").strip().casefold()
 
 
+def _event_zone(name: str | None) -> ZoneInfo | None:
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
 def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:
     if event.start is None:
         return None
     if event.start.date_time:
-        return datetime.fromisoformat(event.start.date_time).astimezone(zone).date()
+        moment = datetime.fromisoformat(event.start.date_time)
+        if moment.tzinfo is None:
+            # A bare local time is in the event's own zone (``timeZone``), not
+            # the worker's.
+            moment = moment.replace(tzinfo=_event_zone(event.start.time_zone) or zone)
+        return moment.astimezone(zone).date()
     if event.start.date:
         return date.fromisoformat(event.start.date)
     return None
@@ -108,7 +129,7 @@ def pair_split_instances(
             if (
                 link is not None
                 and link.sync_capability != "outbound"
-                and link.start >= now - _PAST_BUFFER
+                and (link.end or link.start) >= now - _PAST_BUFFER
             ):
                 key = (link.start.astimezone(zone).date(), _normalised(link.title))
                 old_by_key[key].append((event, link))
@@ -118,7 +139,6 @@ def pair_split_instances(
                 new_by_key[(day, _normalised(event.summary))].append(event)
 
     targets: dict[str, SplitTarget] = {}
-    skip_ids: set[str] = set()
     for key, olds in old_by_key.items():
         news = new_by_key.get(key, [])
         if len(olds) != 1 or len(news) != 1:
@@ -130,10 +150,11 @@ def pair_split_instances(
         if adopted_from is None:  # pragma: no cover - filtered above
             continue
         targets[new_event.id] = SplitTarget(
-            journal_id=old_link.journal_id, adopted_from=adopted_from
+            journal_id=old_link.journal_id,
+            adopted_from=adopted_from,
+            old_event_id=old_event.id,
         )
-        skip_ids.add(old_event.id)
-    return SplitPairing(targets=targets, skip_ids=frozenset(skip_ids))
+    return SplitPairing(targets=targets)
 
 
 def _has_both_halves(events: Sequence[GoogleEvent]) -> bool:
@@ -171,7 +192,7 @@ async def find_split_pairing(
     result = await session.execute(
         text("""
             SELECT l.external_event_id, l.journal_id, l.sync_capability,
-                   j.title, j.event_date_range_start
+                   j.title, j.event_date_range_start, j.event_date_range_end
             FROM journal_external_event_links l
             JOIN journals j ON j.id = l.journal_id
             WHERE l.calendar_id = :calendar_id
@@ -188,6 +209,7 @@ async def find_split_pairing(
             journal_id=row.journal_id,
             title=row.title,
             start=row.event_date_range_start,
+            end=row.event_date_range_end,
             sync_capability=row.sync_capability,
         )
         for row in result.fetchall()

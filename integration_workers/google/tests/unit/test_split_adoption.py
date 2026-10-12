@@ -59,6 +59,7 @@ def _link(
     journal_id: int,
     start: datetime,
     *,
+    end: datetime | None = None,
     title: str = "Pilates",
     sync_capability: str = "bidirectional",
 ) -> tuple[str, LinkedInstance]:
@@ -68,6 +69,7 @@ def _link(
         journal_id=journal_id,
         title=title,
         start=start,
+        end=end or start + timedelta(minutes=75),
         sync_capability=sync_capability,
     )
 
@@ -85,9 +87,12 @@ class TestPairSplitInstances:
         pairing = pair_split_instances(events, links, SYDNEY, NOW)
 
         assert pairing.targets == {
-            f"{NEW}_{NEW_START}": SplitTarget(journal_id=224578, adopted_from=OLD)
+            f"{NEW}_{NEW_START}": SplitTarget(
+                journal_id=224578,
+                adopted_from=OLD,
+                old_event_id=f"{OLD}_20261016T011000Z",
+            )
         }
-        assert pairing.skip_ids == frozenset({f"{OLD}_20261016T011000Z"})
 
     def test_titles_match_ignoring_case_and_surrounding_space(self) -> None:
         events = [_cancelled("20261016T011000Z"), _live(NEW_START, summary=" pilates ")]
@@ -115,7 +120,6 @@ class TestPairSplitInstances:
         pairing = pair_split_instances(events, links, SYDNEY, NOW)
 
         assert not pairing.targets
-        assert not pairing.skip_ids
 
     def test_a_different_day_does_not_pair(self) -> None:
         events = [_cancelled("20261016T011000Z"), _live("2026-10-17T12:20:00+11:00")]
@@ -162,6 +166,7 @@ class TestPairSplitInstances:
             journal_id=2,
             title="Pilates",
             start=OLD_START,
+            end=OLD_START,
             sync_capability="bidirectional",
         )
 
@@ -205,13 +210,18 @@ class TestPairSplitInstances:
                 journal_id=7,
                 title="Pilates",
                 start=OLD_START,
+                end=OLD_START,
                 sync_capability="bidirectional",
             )
         }
 
         [target] = pair_split_instances(events, links, SYDNEY, NOW).targets.values()
 
-        assert target == SplitTarget(journal_id=7, adopted_from=OLD)
+        assert target == SplitTarget(
+            journal_id=7,
+            adopted_from=OLD,
+            old_event_id=f"{old_split}_20261016T011000Z",
+        )
 
     def test_an_all_day_split_pairs_on_its_date(self) -> None:
         old_start = datetime(2026, 10, 15, 13, 0, tzinfo=UTC)  # 16 Oct, local midnight
@@ -229,5 +239,44 @@ class TestPairSplitInstances:
         links = dict([_link("20261016", 3, old_start)])
 
         assert pair_split_instances(events, links, SYDNEY, NOW).targets == {
-            new_event.id: SplitTarget(journal_id=3, adopted_from=OLD)
+            new_event.id: SplitTarget(
+                journal_id=3, adopted_from=OLD, old_event_id=f"{OLD}_20261016"
+            )
         }
+
+    def test_an_offset_free_time_is_read_in_the_events_own_zone(self) -> None:
+        """Google may send a bare local time with ``start.timeZone``: 22:00 on
+        the 16th in Sydney, not 22:00 UTC (the 17th in Sydney)."""
+        old_start = datetime(2026, 10, 16, 11, 10, tzinfo=UTC)  # 22:10 Sydney
+        new_event = GoogleEvent.from_api_response(
+            {
+                "id": f"{NEW}_bare",
+                "status": "confirmed",
+                "summary": "Pilates",
+                "start": {
+                    "dateTime": "2026-10-16T22:00:00",
+                    "timeZone": "Australia/Sydney",
+                },
+                "end": {
+                    "dateTime": "2026-10-16T23:00:00",
+                    "timeZone": "Australia/Sydney",
+                },
+                "recurringEventId": NEW,
+            }
+        )
+        events = [_cancelled("20261016T111000Z"), new_event]
+        links = dict([_link("20261016T111000Z", 5, old_start)])
+
+        assert pair_split_instances(events, links, SYDNEY, NOW).targets
+
+    def test_an_occurrence_still_under_way_is_eligible(self) -> None:
+        """Eligibility follows the sync's past-cancellation skip, which reads
+        the end: a multi-day occurrence that began days ago is not over."""
+        began = NOW - timedelta(days=3)
+        events = [
+            _cancelled("multiday"),
+            _live(began.astimezone(SYDNEY).isoformat()),
+        ]
+        links = dict([_link("multiday", 6, began, end=NOW + timedelta(days=1))])
+
+        assert pair_split_instances(events, links, SYDNEY, NOW).targets
