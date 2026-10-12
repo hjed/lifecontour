@@ -418,6 +418,11 @@ Outbound pushes go to that owner only:
   outbound call. Immich (which has no remote delete) unlinks only the source contact's own
   orphaned `sync_metadata` row (`internal_id` = the merged-away contact), never a row for the same
   person id that points at any other contact.
+- **Tag renames and deletes.** `TagUpdated` / `TagDeleted` carry the tag's owner, and Google
+  `process_tag_event` renames or deletes the contact group only in that owner's account(s); an
+  event without an owner is skipped as above. Contact tags are per user, so another user's group
+  of the same name is a different group. Inbound, a Google group name resolves (or is created)
+  among the event owner's tags only.
 - **Per-user reads.** The Google push before each account's pull reads that account's user's
   contacts only (`find_contacts_to_push(session, user_id=…)`), and the Immich name-match
   auto-link considers only the syncing user's contacts as candidates.

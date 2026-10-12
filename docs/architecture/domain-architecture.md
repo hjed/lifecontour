@@ -152,6 +152,16 @@ See [Journal System Specification](../journal-system-specification.md) for compr
     contact holds is recorded as an unmatched participant
   - Integration conflict resolution
   - Route tracking and reuse
+  - **Contact tags are owned** the same way. A `Tag` read from the database carries its owner
+    (`Tag.user_id`; a tag parsed from a sync payload is a name only, owned by the contact it is
+    resolved for). Every `TagRepository` method takes the acting user and filters in SQL, the
+    descendant walk at every level; `TagService` and `TagHierarchyService` act for one user, so
+    another user's tag, parent or merge target is `TagNotFoundError` (404), exactly as a missing
+    one is. `save` never re-owns, `delete` and `merge_into` report whether they wrote, and
+    `ContactRepository.assign_tag` writes only when the tag and the contact share an owner. Tag
+    names given on contact create/update, and inbound Google group names, resolve among the
+    contact's (event's) owner's tags; a foreign tag id in the contact tag filter is kept, so it
+    matches nothing. `TagUpdated` / `TagDeleted` carry the owner.
   - **Journal tags are owned.** A tag (`JournalTag.user_id`) belongs to one user and names are
     unique per owner, case-insensitively. Every `JournalTagRepository` read of the tag namespace
     takes the acting user and filters in SQL; another user's tag is `JournalTagNotFoundError`

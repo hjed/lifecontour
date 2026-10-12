@@ -675,7 +675,8 @@ its callers. Every layer is deployable on its own.
 - **Search and the dashboard are not asserted here:** Phase 7 and Phases 4/6 respectively.
 - **Tags are still global** until Phase 8, so the foreign and own contacts share one tag and the
   `tags` snapshot covers the global table. The tag-filter test proves the *contact* owner filter;
-  tag ownership gets its own suite with Phase 8.
+  tag ownership gets its own suite with Phase 8. *(Phase 8 gave the own contact its own tag and
+  added the tag suite.)*
 - **PR size.** About 900 changed lines, most of them the 760-line suite (the journal suite is 739).
   The table cannot shrink without dropping routes, so the phase ships as one PR.
 
@@ -875,56 +876,73 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 **Acceptance Criteria (task-level):**
 - [ ] `tags`, `custom_date_types`, `journal_tags` carry `user_id NOT NULL` and `UNIQUE(user_id, name)`; existing rows assigned per the `0106` derivation.
 - [ ] Two users can each own a tag / date type of the same name; a foreign tag answers 404 everywhere; assignment requires the tag and the entity to share an owner.
-- [ ] Inbound Google group→tag sync matches and creates tags only within the owner's tags.
+- [x] Inbound Google group→tag sync matches and creates tags only within the owner's tags. (Phase 8)
 
 ---
 
-#### Phase 8: Contact tags
+#### Phase 8: Contact tags ✅ DONE
 
-**PR Size:** ~450 lines
+**Status:** ✅ DONE — contact tags are owned, named per owner (case-insensitively) and scoped in SQL on every read and write, across REST, MCP, contact tag names and filters, the inbound Google sync and the Google tag push. Whole suite green on the stack top: backend unit 5109, backend integration 3772 (7 pre-existing skips), Google worker 749, `core_shared` 692, frontend jest 2976, e2e as below.
+
+**PR Size:** ~450 lines estimated; delivered as a five-layer stack of ~3,300 changed lines.
+8a (~1,120) and 8c (~1,060) exceed the 500-line rule: most of each is mechanical `user_id=`
+churn at test call sites that mypy requires once the port takes the owner (8a: the `NOT NULL`
+column and `save(…, user_id=)` touch ~80 saves and 12 raw inserts; 8c: ~60 scoped reads), and a
+port half-scoped would leave the namespace inconsistent. 8b ~170, 8d ~490, 8e ~450.
 
 > **Migration numbers:** `0135_add_user_id_to_tags.py` (column, assignment, `NOT NULL`, index) and
 > `0136` (per-owner names, with the scoped reads). `main` had reached `0134`
 > (`0132_create_journal_merged_aliases` and Phase 9's `0133` / `0134` landed while this stack
 > was open).
 
-- [ ] Migration `0122`: `tags.user_id` (same derivation as `0121`, `-x tags_owner`), `NOT NULL`,
-  drop `UNIQUE(name)`, add `uq_tags_user_id_name (user_id, name)`, index on `user_id`. Downgrade
-  reverses (refusing if two users now hold the same name).
-- [ ] `tags_table`; `Tag` entity `user_id: str`; `TagRepository` port and `SqlTagRepository`:
+- [x] Migrations `0135` / `0136` (numbered `0122` when planned): `tags.user_id` (the `0127`
+  derivation, `-x tags_owner`), `NOT NULL`, index on `user_id`; `uq_tags_name_lower` replaced by
+  `uq_tags_user_id_name_lower (user_id, LOWER(name))`. The downgrade refuses while two users hold
+  the same name.
+- [x] `tags_table`; `Tag` entity `user_id` (`str | None`, see *Decisions*); `TagRepository` port and `SqlTagRepository`:
   `find_by_id`, `find_by_name`, `find_by_names`, `get_all`, `get_children`,
   `get_descendants_for_tags`, `get_root_tags`, `search`, `save`, `delete` take `user_id`; a
   `parent_id` must reference a tag of the same owner (checked in `TagService`).
-- [ ] `TagService`, `TagHierarchyService`; `api/tags/controllers.py` (6 routes) and the tag
+- [x] `TagService`, `TagHierarchyService`; `api/tags/controllers.py` (6 routes) and the tag
   operations inside `ContactService.update_contact` / MCP `update_contact`, `list_contact_tags`,
   `update_contact_tag`, `delete_contact_tag`, `merge_contact_tags` pass the acting user.
-- [ ] Inbound `_get_or_create_tag` and `_resolve_contact_tags` (`outbox_event_processor.py:443, 525`)
+- [x] Inbound `_get_or_create_tag` and `_resolve_contact_tags` (`outbox_event_processor.py:443, 525`)
   resolve within the event's owner.
-- [ ] `TagUpdated` and `TagDeleted` (`core/contacts/models/events.py`) carry the tag's `user_id`, and
+- [x] `TagUpdated` and `TagDeleted` (`core/contacts/models/events.py`) carry the tag's `user_id`, and
   Google `process_tag_event` (`google/worker.py:3071`) is scoped **in this phase, not Phase 13**:
   it renames or deletes the contact group only in `user_google_auth WHERE user_id = :user_id`, and
   skips with a warning when the event names no owner. From this phase two users can hold a tag of
   the same name, so the every-account loop would start renaming or deleting another user's group
   the moment the migration lands; the fix cannot trail the schema change.
-- [ ] Search indexer tag-change handling unchanged (it re-fetches the contact, which now carries the
+- [x] Search indexer tag-change handling unchanged (it re-fetches the contact, which now carries the
   owner).
 
 **Required Test Coverage:**
-- [ ] **Integration (migration):** rows assigned; per-user uniqueness (two users, same name, both
+- [x] **Integration (migration):** rows assigned; per-user uniqueness (two users, same name, both
   saved); downgrade with a collision refuses.
-- [ ] **Integration (repository, first):** foreign tag invisible to every scoped method; hierarchy
+- [x] **Integration (repository, first):** foreign tag invisible to every scoped method; hierarchy
   cannot cross owners.
-- [ ] **Integration (REST):** tag routes added to `test_contact_ownership.py`'s
-  `CROSS_USER_REQUESTS`; assigning a foreign tag to an owned contact is 404.
-- [ ] **Integration (MCP):** tag tools added to `test_mcp_contact_ownership.py`.
-- [ ] **Unit:** processor creates the tag for the event's owner and never matches another user's
+- [x] **Integration (REST):** tag routes added to `test_contact_ownership.py` as their own
+  `CROSS_USER_TAG_REQUESTS` (with a `{tag_id}` coverage guard, as journal tags); assigning a
+  foreign tag to an owned contact is 404.
+- [x] **Integration (MCP):** tag tools added to `test_mcp_contact_ownership.py`
+  (`TestMcpContactTagsAreTheActingUsers`; the tag tools take no contact id, so its coverage
+  guard does not list them).
+- [x] **Unit:** processor creates the tag for the event's owner and never matches another user's
   tag of the same name; Google `process_tag_event` with two `user_google_auth` rows and a
-  `TagUpdated` / `TagDeleted` owned by one → exactly one account touched; no owner → no API call.
+  `TagUpdated` / `TagDeleted` owned by one → exactly one account touched; no owner → no API call
+  (the two-account cases run against real `user_google_auth` rows in
+  `test_process_tag_event_owner_integration.py`, stronger than a mocked query).
 
-**E2E:** regression — contact tag management specs stay green.
+**E2E:** regression — contact tag management specs stay green (`contact-tag-editing`,
+`contacts-tag-filtering`, `contacts`, `contact-activity-feed`, `contacts-merge`,
+`contacts-merge-api`, `sidebar-tag-management`: firefox 45 passed, Mobile Chrome 43 passed and 1
+desktop-only test skipped by design).
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/database-design.md` — Tags Table section.
+- [x] `docs/architecture/database-design.md` — Tags Table and Contact Tags sections; also
+  `domain-architecture.md` (the contact tag ownership rule), `api-design.md` /
+  `testing-strategy.md` (the tag suite), `integration-architecture.md` (the Google tag push).
 
 **Delivery:** a stack, each layer deployable on its own (the Phase 10 shape):
 - **8a ✅ DONE** — `0135`: `tags.user_id`, each tag given its carriers' owner (`contact_tags` →
@@ -960,7 +978,16 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   inserts only when the tag and the contact share an owner. `TagService` raises not-found when a
   delete or merge wrote nothing, so the unit of work rolls back instead of publishing
   `TagDeleted` for a change that never happened (the Phase 10c3 lesson).
-- **8e** — REST and MCP cross-user isolation suites for tags.
+- **8e ✅ DONE** — the cross-user suites. REST (`test_contact_ownership.py`):
+  `CROSS_USER_TAG_REQUESTS` over every `/api/tags/{tag_id}` route (GET, PATCH, DELETE, merge)
+  with its owner replay and its own `{tag_id}` coverage guard; merging your tag into theirs,
+  assigning their tag to your contact and creating a tag under theirs are 404 and change
+  nothing; `GET /api/tags` lists only yours; their tag's name is free for you; filtering your
+  contacts by their tag id lists nothing. MCP (`test_mcp_contact_ownership.py`): `list_contact_tags`
+  shows only yours; `update_contact_tag`, `delete_contact_tag` and `merge_contact_tags` (their
+  tag as source or target) answer exactly as a missing id and leave the rows unchanged;
+  `update_contact` with their tag's name gives your contact your own tag. Mutation-checked:
+  dropping the owner filter from `find_by_id` / `get_all` fails the REST and MCP suites.
 
 **Decisions (recorded during implementation):**
 - **One migration for the column and the contract.** Contacts already have a required owner, so
@@ -973,6 +1000,15 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 - **Per-owner names stay case-insensitive.** The live index is `uq_tags_name_lower` on
   `LOWER(name)` (migration `0048`), so `0136` makes it `(user_id, LOWER(name))`, not the
   `(user_id, name)` listed above.
+- **Tag events queued before 8b are skipped.** A `TagUpdated` / `TagDeleted` still in the stream
+  from before the deploy names no owner, so the Google worker skips it as `no_owner` (Phase 13's
+  rule for contact events) and that group rename or delete never reaches Google. Accepted: the
+  window is the stream backlog at deploy time.
+- **`scripts/fix_google_tags.py` is scoped too.** The one-off hex-tag repair works on the tags
+  of the Google account's owner only (found by the closing review).
+- **Assigning reports whether it held.** `ContactRepository.assign_tag` returns whether the
+  contact holds the tag afterwards, and `ContactService` raises not-found rather than publishing
+  `TagAssigned` when the SQL refused it (closing review, the Phase 10c3 lesson again).
 - **Inbound tags match across owners until 8c.** The processor creates a missing tag for the
   event's owner from 8a, but its name lookup (and the duplicate-name fallback) stays global
   under the global index until the scoped reads land. Production has one owner, and the stack
