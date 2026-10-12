@@ -322,6 +322,12 @@ Known limits: history is projected asynchronously, so an edit made seconds
 before a cancellation can be missed, and protection is checked when the
 cancellation arrives rather than again later.
 
+Recurrences cancelled before this rule existed were tidied once by migration
+0136. It queued a `journal_event.recurrence_tidy` event for each (calendar,
+recurrence) that still had a cancelled, not-yet-started linked journal, and the
+processor applies the same rule to the whole recurrence when it consumes the
+event. Links that never recorded a recurring id are left as they were.
+
 #### Split recurrences under a new id
 
 Google can answer a "this and following" edit by ending the old recurrence and

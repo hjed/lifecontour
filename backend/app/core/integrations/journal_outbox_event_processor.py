@@ -36,6 +36,7 @@ from core_shared.models.journals.review_item import ReviewItem, ReviewReason
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     FitnessDurationCorrectedData,
+    JournalRecurrenceTidyEventData,
     JournalSeriesCancelledEventData,
     JournalStatusEventData,
     JournalSyncEventData,
@@ -104,6 +105,7 @@ EVENT_TYPE_JOURNAL_EVENT_UPDATED = "journal_event.updated"
 EVENT_TYPE_JOURNAL_EVENT_CONFLICTED = "journal_event.conflicted"
 EVENT_TYPE_JOURNAL_EVENT_CANCELLED = "journal_event.cancelled"
 EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED = "journal_event.series_cancelled"
+EVENT_TYPE_JOURNAL_EVENT_RECURRENCE_TIDY = "journal_event.recurrence_tidy"
 EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED = (
     "journal_event.fitness_duration_corrected"
 )
@@ -353,6 +355,8 @@ class JournalOutboxEventProcessor:
             return await self._process_journal_cancelled(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_SERIES_CANCELLED:
             return await self._process_journal_series_cancelled(event)
+        if event.event_type == EVENT_TYPE_JOURNAL_EVENT_RECURRENCE_TIDY:
+            return await self._process_journal_recurrence_tidy(event)
         if event.event_type == EVENT_TYPE_JOURNAL_EVENT_FITNESS_DURATION_CORRECTED:
             return await self._process_fitness_duration_corrected(event)
 
@@ -1316,6 +1320,46 @@ class JournalOutboxEventProcessor:
             "cancelled": cancelled,
             "skipped_past": skipped_past,
             "errors": errors,
+        }
+
+    async def _process_journal_recurrence_tidy(
+        self, event: OutboxEvent
+    ) -> dict[str, Any]:
+        """Process a journal_event.recurrence_tidy event.
+
+        Queued by migration 0136 for recurrences cancelled before the
+        keep-next rule existed, whose every upcoming occurrence was left behind
+        as a cancelled journal. Applies the rule to the whole recurrence. The
+        links are already marked, so nothing else is written first; the lock
+        is still taken before the tidy reads, as every writer of a recurrence
+        takes it.
+        """
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        payload = JournalRecurrenceTidyEventData.model_validate(event_data)
+        calendar_id = UUID(payload.calendar_id)
+        await self.link_repo.lock_recurrence(calendar_id, payload.recurring_event_id)
+        outcome = await self.recurrence_tidier.tidy(
+            calendar_id=calendar_id,
+            recurring_event_id=payload.recurring_event_id,
+            source=_provenance_for_source(payload.integration_source),
+            changed_by=payload.integration_source,
+        )
+        logger.info(
+            "Tidied a cancelled recurrence",
+            calendar_id=payload.calendar_id,
+            recurring_event_id=payload.recurring_event_id,
+            deleted=len(outcome.deleted),
+            errors=outcome.errors,
+        )
+        if outcome.errors:
+            raise JournalOutboxEventProcessingError(
+                f"Tidying recurrence {payload.recurring_event_id}: "
+                f"{outcome.errors} deletions failed; failing the event for retry"
+            )
+        return {
+            "status": "success",
+            "event_type": EVENT_TYPE_JOURNAL_EVENT_RECURRENCE_TIDY,
+            "deleted": len(outcome.deleted),
         }
 
     async def _invalidate_summary_for_journal(self, journal_id: int) -> None:

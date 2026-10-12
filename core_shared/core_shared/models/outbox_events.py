@@ -213,6 +213,22 @@ class JournalSeriesCancelledEventData(BaseModel):
     )
 
 
+class JournalRecurrenceTidyEventData(BaseModel):
+    """Payload for ``journal_event.recurrence_tidy``.
+
+    Queued by migration 0136 for each recurrence still holding cancelled,
+    not-yet-started journals from before the keep-next rule. The backend
+    applies the rule to the whole recurrence: the first occurrence of each
+    cancelled run stays, later ones nobody added to are deleted.
+    """
+
+    integration_source: str = Field(description="Source integration (e.g., 'google')")
+    calendar_id: str = Field(description="Internal calendar UUID")
+    recurring_event_id: str = Field(
+        description="The recurring event id the journals' links record"
+    )
+
+
 # ── Immich Album Sync ────────────────────────────────────────────────
 
 
@@ -327,6 +343,7 @@ OutboxEventData = (
     | JournalSyncEventData
     | JournalStatusEventData
     | JournalSeriesCancelledEventData
+    | JournalRecurrenceTidyEventData
     | ImmichAlbumSyncEventData
     | MatchDetectionEventData
     | FitnessDurationCorrectedData
@@ -343,6 +360,7 @@ _EVENT_TYPE_DISPATCH: list[tuple[str, type[BaseModel]]] = [
     ("journal_event.updated", JournalSyncEventData),
     ("journal_event.conflicted", JournalStatusEventData),
     ("journal_event.series_cancelled", JournalSeriesCancelledEventData),
+    ("journal_event.recurrence_tidy", JournalRecurrenceTidyEventData),
     ("journal_event.cancelled", JournalStatusEventData),
     ("journal_event.fitness_duration_corrected", FitnessDurationCorrectedData),
     ("immich_album.", ImmichAlbumSyncEventData),
