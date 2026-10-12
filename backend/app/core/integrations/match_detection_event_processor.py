@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 from core_shared.models.journals import ReviewItem
+from core_shared.models.journals.event_state import EventState
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import MatchDetectionEventData
 from sqlalchemy import text
@@ -93,22 +94,28 @@ class MatchDetectionEventProcessor:
 
         day_end = day_start + timedelta(days=1)
 
-        # Query same-day journals for the user (excluding the source journal)
+        # Query same-day journals for the user (excluding the source journal).
+        # A cancelled calendar event is no one's duplicate - it is what is left
+        # of an occurrence that is off - so it is never a candidate. Journals
+        # without calendar info (notes and the like) still are.
         same_day_rows = await self.connection.execute(
             text("""
                 SELECT j.id, j.title, j.content,
                        j.event_date_range_start, j.event_date_range_end
                 FROM journals j
+                LEFT JOIN journal_calendar_info ci ON ci.journal_id = j.id
                 WHERE j.user_id = :user_id
                   AND j.id != :journal_id
                   AND j.event_date_range_start >= :day_start
                   AND j.event_date_range_start < :day_end
+                  AND ci.event_state IS DISTINCT FROM :cancelled
             """),
             {
                 "user_id": user_id,
                 "journal_id": journal_id,
                 "day_start": day_start,
                 "day_end": day_end,
+                "cancelled": EventState.CANCELLED.value,
             },
         )
         rows = same_day_rows.fetchall()

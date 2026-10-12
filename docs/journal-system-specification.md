@@ -342,6 +342,9 @@ sends the new one as an update of the old journal carrying
 Adoption is an update, so it requests no duplicate detection. If the journal
 was deleted in the meantime, the instance is created instead.
 
+Cancelled calendar events are never offered as duplicate candidates for a new
+journal: what is left of an occurrence that is off duplicates nothing.
+
 ## Type-Specific Data Models
 
 ### Calendar Info (EVENT type)
