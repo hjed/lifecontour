@@ -67,6 +67,31 @@ unlinked and both create it, leaving two Google contacts for one local contact.
 `push_local_contacts_to_google` remains as a standalone ARQ task over the same
 helper, for pushing an account on demand without a pull.
 
+### Recurrences split under a new id
+
+A "this and following" edit sometimes gives the rest of a recurrence an
+`<old>_R<time>` id, which `recurrence.root_recurring_event_id` folds into the
+old series. Sometimes Google starts the rest under an **unrelated** id. In one
+sync that reads as each upcoming instance of the old recurrence arriving
+cancelled, alongside new instances nobody has journalled.
+
+Before the event loop, `split_adoption.find_split_pairing` pairs them:
+- the old half must be cancelled in the batch and linked here, not outbound-only
+  and not already over;
+- the new half must be a live instance of a different recurrence with no link
+  yet;
+- the two must share a local day (in the user's zone) and a title, trimmed and
+  ignoring case, and each must be the only candidate for that day and title.
+
+The new instance is then sent as an update of the old journal, carrying
+`split_adopted_from` (the old recurrence's series key), and the old instance's
+cancellation is dropped. The backend re-points the journal, keeps its title and
+notes, and folds the new recurrence into the old series. A batch without both
+halves costs no extra query.
+
+Halves that arrive in different syncs are not paired here. The cancellations
+apply the backend's keep-next rule instead.
+
 ### What the outbound journal push declines to do
 
 `_process_journal_upsert_event` pushes an EVENT journal to Google Calendar. Two

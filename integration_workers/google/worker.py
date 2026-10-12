@@ -4356,6 +4356,7 @@ async def sync_calendar_events(
     from event_transformer import GoogleEventTransformer
     from inbound_sync import InboundSyncAction, InboundSyncClassifier
     from recurrence import root_recurring_event_id
+    from split_adoption import find_split_pairing
 
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
@@ -4487,11 +4488,26 @@ async def sync_calendar_events(
                     else:
                         raise
 
+                # A "this and following" edit under an unrelated id cancels
+                # the old recurrence's instances and starts a new recurrence in
+                # the same batch. Paired here, each new instance updates the
+                # old journal instead of duplicating it (``split_adoption``).
+                split_pairing = await find_split_pairing(
+                    session, calendar_id, all_raw_events, user_timezone
+                )
+
                 # Process each event
                 calendar_errors = 0
                 for raw_event in all_raw_events:
                     try:
                         google_event = GoogleEvent.from_api_response(raw_event)
+
+                        # The old half of a paired split: its journal is being
+                        # adopted by the new instance, so it must not be
+                        # cancelled under it.
+                        if google_event.id in split_pairing.skip_ids:
+                            metrics["events_skipped"] += 1
+                            continue
 
                         # Lookup existing link
                         link_stmt = text("""
@@ -4606,6 +4622,23 @@ async def sync_calendar_events(
                                 metrics["events_deduplicated"] = (
                                     metrics.get("events_deduplicated", 0) + 1
                                 )
+
+                        split_target = split_pairing.targets.get(google_event.id)
+                        if (
+                            action == InboundSyncAction.CREATE_JOURNAL
+                            and split_target is not None
+                        ):
+                            deduped_journal_id = split_target.journal_id
+                            action = InboundSyncAction.UPDATE_JOURNAL
+                            metrics["events_split_adopted"] = (
+                                metrics.get("events_split_adopted", 0) + 1
+                            )
+                        split_adopted_from = (
+                            split_target.adopted_from
+                            if split_target is not None
+                            and deduped_journal_id == split_target.journal_id
+                            else None
+                        )
 
                         # An unchanged event is skipped on its ETag, so its
                         # participants are re-synced once when that would
@@ -4767,7 +4800,13 @@ async def sync_calendar_events(
                             "event_date_range_end": journal.event_date_range.end.isoformat(),
                             "user_id": str(user_id),
                         }
-                        if action == InboundSyncAction.CREATE_JOURNAL:
+                        # An adoption carries the content too, for the
+                        # backend's fallback when the adopted journal has
+                        # gone; it never overwrites the journal's notes.
+                        if (
+                            action == InboundSyncAction.CREATE_JOURNAL
+                            or split_adopted_from is not None
+                        ):
                             journal_data["content"] = journal.content
                         calendar_info_data = {
                             "calendar_id": str(calendar_id),
@@ -4823,6 +4862,7 @@ async def sync_calendar_events(
                             series_recurring_event_id=root_recurring_event_id(
                                 google_event.recurring_event_id
                             ),
+                            split_adopted_from=split_adopted_from,
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1

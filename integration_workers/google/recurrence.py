@@ -13,6 +13,10 @@ followed by a date can only be a split marker, never part of an id.
 
 The per-split id stays on each external event link: a split deleted upstream
 must cancel its own instances and no other split's.
+
+``_R`` is not the only form a split takes: Google can also start the new
+recurrence under an unrelated id. No id says those two belong together, so
+``split_adoption`` pairs their instances by day and title within a sync.
 """
 
 import re

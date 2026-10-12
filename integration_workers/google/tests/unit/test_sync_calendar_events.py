@@ -1063,6 +1063,101 @@ class TestSyncRecurringSeries:
         mock_session.add.assert_not_called()
         assert result["events_skipped"] >= 1
 
+    @staticmethod
+    def _split_batch() -> list[dict[str, Any]]:
+        """One sync of a "this and following" edit under an unrelated id."""
+        return [
+            {
+                "id": "old-1_20261016T011000Z",
+                "status": "cancelled",
+                "etag": '"etag-cancelled"',
+                "recurringEventId": "old-1",
+            },
+            _make_google_event(
+                event_id="new-1_20261016T012000Z",
+                summary="Pilates",
+                description="Studio 2",
+                start_dt="2026-10-16T01:20:00Z",
+                end_dt="2026-10-16T02:40:00Z",
+                recurring_event_id="new-1",
+            ),
+        ]
+
+    @staticmethod
+    def _old_instance_row() -> MagicMock:
+        from datetime import UTC, datetime
+
+        row = MagicMock()
+        row.external_event_id = "old-1_20261016T011000Z"
+        row.journal_id = 42
+        row.sync_capability = "bidirectional"
+        row.title = "Pilates"
+        row.event_date_range_start = datetime(2026, 10, 16, 1, 10, tzinfo=UTC)
+        return row
+
+    @pytest.mark.asyncio
+    async def test_a_split_in_one_sync_adopts_the_old_journal(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """The new instance updates the old journal; its cancellation is dropped."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        split_links = MagicMock()
+        split_links.fetchall.return_value = [self._old_instance_row()]
+        new_link = MagicMock()
+        new_link.fetchone.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,  # calendar query
+            token_result,  # sync token query
+            split_links,  # the batch's links, for split pairing
+            new_link,  # the new instance's link lookup
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._run_sync_with_events(mock_ctx, self._split_batch())
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.updated"
+        data = outbox_event.event_data
+        assert data["existing_journal_id"] == 42
+        assert data["external_event_id"] == "new-1_20261016T012000Z"
+        assert data["split_adopted_from"] == "old-1"
+        # Carried so the backend can still create the journal if the old one
+        # was deleted in the meantime; an adoption itself keeps the notes.
+        assert data["journal_data"]["content"] == "Studio 2"
+        assert result["events_split_adopted"] == 1
+
+    @pytest.mark.asyncio
+    async def test_an_unpaired_batch_costs_no_extra_query(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A batch without both halves of a split is synced as before."""
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            link_result,
+            MagicMock(),
+        ]
+
+        result = await self._run_sync_with_events(mock_ctx, self._split_batch()[1:])
+
+        assert result["status"] == "success"
+        outbox_event = mock_session.add.call_args[0][0]
+        assert outbox_event.event_type == "journal_event.created"
+        assert outbox_event.event_data["split_adopted_from"] is None
+
 
 class TestMasterCancellationLegacyLinks:
     """Audit fix: legacy links (no backfilled recurring id) must still gate
