@@ -261,7 +261,12 @@ class TestSummaryConsumerHandleDueEvent:
                 return_value=mock_generator,
             ),
             patch(
-                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                "app.core.contacts.adapters.sql.contact_repository.SqlContactRepository.find_owner_id",
+                new_callable=AsyncMock,
+                return_value="owner-1",
+            ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
                 new_callable=AsyncMock,
                 return_value="UTC",
             ),
@@ -304,7 +309,12 @@ class TestSummaryConsumerHandleDueEvent:
                 return_value=mock_generator,
             ),
             patch(
-                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_default_timezone",
+                "app.core.contacts.adapters.sql.contact_repository.SqlContactRepository.find_owner_id",
+                new_callable=AsyncMock,
+                return_value="owner-1",
+            ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
                 new_callable=AsyncMock,
                 return_value="UTC",
             ),
@@ -389,4 +399,102 @@ class TestSummaryConsumerHandleDueEvent:
             await consumer._handle_event(event)
 
         # Search indexer should still be called to update index
+        mock_search_indexer.process_event.assert_called_once()
+
+
+class TestSummaryConsumerOwnerTimezone:
+    """A summary is generated in its contact owner's timezone, never another user's."""
+
+    OWNER_ZONES = {"owner-1": "Australia/Sydney", "other-1": "Pacific/Auckland"}
+
+    @pytest.fixture
+    def consumer(self, mock_stream_client: MagicMock) -> SummaryConsumer:
+        """Create a SummaryConsumer with mocks."""
+        return SummaryConsumer(
+            stream_client=mock_stream_client,
+            stream_name="pms:domain-events",
+            container=make_mock_container(),
+        )
+
+    async def _handle_due_event(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        settings: MagicMock,
+        owner: str | None,
+    ) -> tuple[MagicMock, AsyncMock]:
+        """Handle a due event whose contact belongs to ``owner``.
+
+        Returns the patched ``SummaryGenerator`` class and ``get_timezone``.
+        """
+        mock_generator = MagicMock()
+        mock_generator.generate = AsyncMock(return_value=None)
+
+        async def zone_of(user_id: str) -> str:
+            return self.OWNER_ZONES[user_id]
+
+        with (
+            patch(
+                "app.infrastructure.events.summary_consumer.get_async_database_engine",
+                return_value=mock_db_engine,
+            ),
+            patch(
+                "app.infrastructure.events.summary_consumer.get_settings",
+                return_value=settings,
+            ),
+            patch(
+                "app.core.contacts.services.summary_generation_service.SummaryGenerator",
+                return_value=mock_generator,
+            ) as generator_cls,
+            patch(
+                "app.core.contacts.adapters.sql.contact_repository.SqlContactRepository.find_owner_id",
+                new_callable=AsyncMock,
+                return_value=owner,
+            ),
+            patch(
+                "app.core.settings.adapters.sql.user_settings_repository.SqlUserSettingsRepository.get_timezone",
+                new_callable=AsyncMock,
+                side_effect=zone_of,
+            ) as get_timezone,
+            patch(
+                "app.infrastructure.events.summary_consumer.SearchIndexer",
+                return_value=mock_search_indexer,
+            ),
+        ):
+            await consumer._handle_event(_make_due_event(contact_id=42))
+
+        return generator_cls, get_timezone
+
+    @pytest.mark.asyncio
+    async def test_due_event_generator_uses_contact_owner_timezone(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        _mock_settings: MagicMock,
+    ) -> None:
+        """The generator renders in the contact owner's zone, not the other user's."""
+        generator_cls, get_timezone = await self._handle_due_event(
+            consumer, mock_db_engine, mock_search_indexer, _mock_settings, "owner-1"
+        )
+
+        get_timezone.assert_awaited_once_with("owner-1")
+        assert generator_cls.call_args.kwargs["timezone"] == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_due_event_for_missing_contact_skips_generation(
+        self,
+        consumer: SummaryConsumer,
+        mock_db_engine: MagicMock,
+        mock_search_indexer: MagicMock,
+        _mock_settings: MagicMock,
+    ) -> None:
+        """A contact with no owner (deleted) is skipped; no timezone is invented."""
+        generator_cls, get_timezone = await self._handle_due_event(
+            consumer, mock_db_engine, mock_search_indexer, _mock_settings, None
+        )
+
+        generator_cls.assert_not_called()
+        get_timezone.assert_not_awaited()
         mock_search_indexer.process_event.assert_called_once()

@@ -37,12 +37,3 @@ class UserSettingsRepository(Protocol):
     async def get_timezone(self, user_id: str) -> str:
         """Return the user's stored timezone, or the default if unset."""
         ...
-
-    async def get_default_timezone(self) -> str:
-        """Return a timezone for contexts without a user (single-user fallback).
-
-        Background workers (e.g. contact-summary generation) have no request
-        user. In this single-user system, return the sole stored timezone, or
-        the default when none is configured.
-        """
-        ...

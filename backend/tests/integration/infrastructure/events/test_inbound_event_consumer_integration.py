@@ -15,8 +15,14 @@ from core_shared.stream_client import StreamClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 from app.infrastructure.config import Settings
 from app.infrastructure.events.inbound_event_consumer import InboundEventConsumer
+from tests.integration.contact_seeding import TEST_USER_ID
+from tests.integration.infrastructure.events.user_settings_rows import (
+    save_newer_timezone_for_other_user,
+    save_timezone,
+)
 
 
 @pytest.fixture
@@ -222,3 +228,112 @@ class TestInboundEventConsumerIntegration:
         # And it acknowledged the event without processing
         pending_info = await redis_client.xpending(test_stream_name, GROUP_NAME)
         assert pending_info["pending"] == 0
+
+
+class TestInboundEventConsumerOwnerTimezone:
+    """Match detection renders times in the event owner's stored timezone.
+
+    Another user always holds the most recently updated settings row, which is
+    what a lookup without a user would have picked.
+    """
+
+    async def _assessor_timezone(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> str:
+        """Consume a detect_matches event owned by TEST_USER_ID.
+
+        Returns the timezone the title-similarity assessor was built with.
+        """
+        await stream_client.publish(
+            stream_name=test_stream_name,
+            event_id=f"evt-{uuid.uuid4().hex[:8]}",
+            event_type="journal_review.detect_matches",
+            aggregate_id=1,
+            event_data={
+                "journal_id": 1,
+                "user_id": TEST_USER_ID,
+                "journal_title": "Morning climb",
+                "event_date_range_start": "2024-01-01T10:00:00Z",
+                "event_date_range_end": "2024-01-01T11:00:00Z",
+                "created_at": "2024-01-01T11:30:00Z",
+            },
+            occurred_at="2024-01-01T12:00:00Z",
+        )
+
+        settings = MagicMock(spec=Settings)
+        settings.gemini_api_key = "fake-key-for-test"
+        settings.gemini_model = "gemini-3.5-flash-lite"
+        consumer = InboundEventConsumer(
+            stream_client=stream_client,
+            container=MagicMock(),
+            settings=settings,
+            stream_name=test_stream_name,
+            consumer_name="test-inbound-timezone",
+            block_ms=100,
+        )
+        await stream_client.ensure_consumer_group(test_stream_name, GROUP_NAME)
+
+        mock_engine = MagicMock()
+
+        @asynccontextmanager
+        async def mock_connect():
+            yield async_connection
+
+        mock_engine.connect = mock_connect
+
+        mock_processor = AsyncMock()
+        mock_processor.process_event = AsyncMock(return_value={"status": "success"})
+
+        with (
+            patch(
+                "app.infrastructure.events.inbound_event_consumer.get_async_database_engine",
+                return_value=mock_engine,
+            ),
+            patch(
+                "app.core.integrations.match_detection_event_processor.MatchDetectionEventProcessor",
+                return_value=mock_processor,
+            ),
+            patch(
+                "app.core.journal.services.title_similarity_assessor.GeminiTitleSimilarityAssessor"
+            ) as assessor_cls,
+        ):
+            assert await consumer._process_batch() == 1
+
+        mock_processor.process_event.assert_called_once()
+        return str(assessor_cls.call_args.kwargs["timezone"])
+
+    @pytest.mark.asyncio
+    async def test_detect_matches_uses_event_owner_timezone(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """The owner's configured zone is used, not the other user's newer one."""
+        await save_timezone(async_connection, TEST_USER_ID, "Australia/Sydney")
+        await save_newer_timezone_for_other_user(async_connection)
+
+        zone = await self._assessor_timezone(
+            test_stream_name, async_connection, stream_client
+        )
+
+        assert zone == "Australia/Sydney"
+
+    @pytest.mark.asyncio
+    async def test_detect_matches_owner_without_settings_gets_default_timezone(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """An owner who never configured a zone gets the default, not another user's."""
+        await save_newer_timezone_for_other_user(async_connection)
+
+        zone = await self._assessor_timezone(
+            test_stream_name, async_connection, stream_client
+        )
+
+        assert zone == DEFAULT_TIMEZONE
