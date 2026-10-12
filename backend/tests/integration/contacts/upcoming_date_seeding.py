@@ -112,12 +112,17 @@ async def seed_custom_date_type(
     *,
     now: datetime,
     name: str = "Sobriety",
+    user_id: str = contact_seeding.TEST_USER_ID,
 ) -> None:
-    """A user-named date type, so its name can travel with the row."""
+    """A user-named date type owned by ``user_id``, so its name can travel with the row.
+
+    Seed it for the owner of the contacts whose dates use it: a date may only
+    carry its own contact's owner's type.
+    """
     await connection.execute(
         text("""
-            INSERT INTO custom_date_types (id, name, created_at, updated_at)
-            VALUES (:id, :name, :now, :now)
+            INSERT INTO custom_date_types (id, name, user_id, created_at, updated_at)
+            VALUES (:id, :name, :user_id, :now, :now)
         """),
-        {"id": type_id, "name": name, "now": now},
+        {"id": type_id, "name": name, "user_id": user_id, "now": now},
     )

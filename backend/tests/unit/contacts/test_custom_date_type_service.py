@@ -36,10 +36,12 @@ class TestCreate:
         created = object()
         mock_repo.create.return_value = created
 
-        result = await service.create("Anniversary", transaction=mock_transaction)
+        result = await service.create(
+            "Anniversary", transaction=mock_transaction, user_id="user-1"
+        )
 
         assert result is created
-        mock_repo.create.assert_awaited_once_with("Anniversary")
+        mock_repo.create.assert_awaited_once_with("Anniversary", user_id="user-1")
 
 
 class TestDelete:

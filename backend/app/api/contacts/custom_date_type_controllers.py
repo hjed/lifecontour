@@ -54,16 +54,18 @@ async def create_custom_date_type(
     type_request: CustomDateTypeCreateRequest,
     service: FromDishka[CustomDateTypeService],
     connection: FromDishka[AsyncConnection],
-    _user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> CustomDateTypeResponse:
     """
-    Create a new custom date type.
+    Create a new custom date type owned by the session user.
     """
     base_url = get_request_base_url(request)
 
     date_type = CustomDateTypeRequestConverter.from_create_request(type_request.data)
 
-    created_type = await service.create(date_type.name, transaction=connection)
+    created_type = await service.create(
+        date_type.name, transaction=connection, user_id=user.id
+    )
 
     resource = CustomDateTypeConverter.to_resource(created_type, base_url)
 

@@ -166,6 +166,13 @@ def test_custom_date_type_validation():
     assert ctype.name == "Graduation"
 
 
+def test_custom_date_type_carries_its_owner():
+    """A type read for a user keeps that user as its owner."""
+    ctype = CustomDateType(name="Graduation", user_id=TEST_USER_ID)
+
+    assert ctype.user_id == TEST_USER_ID
+
+
 def test_contact_get_birthday():
     """Test helper method to get birthday."""
     contact = Contact(user_id=TEST_USER_ID, first_name="John")

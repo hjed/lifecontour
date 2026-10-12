@@ -868,7 +868,9 @@ class TestImportantDateRepositoryIntegration:
             ),
         )
         assert contact.id is not None
-        custom_type = await custom_date_type_repo.create("Adoption Day")
+        custom_type = await custom_date_type_repo.create(
+            "Adoption Day", user_id=contact.user_id
+        )
 
         # Act
         saved_date.date_type = ImportantDateType.CUSTOM

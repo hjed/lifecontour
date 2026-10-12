@@ -23,9 +23,11 @@ class CustomDateTypeService:
         self,
         name: str,
         transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> CustomDateType:
-        """Create a new custom date type and return it as a committed unit."""
-        return await self.custom_date_type_repo.create(name)
+        """Create ``user_id``'s new custom date type as a committed unit."""
+        return await self.custom_date_type_repo.create(name, user_id=user_id)
 
     @transactional
     async def delete(

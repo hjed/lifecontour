@@ -901,6 +901,37 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 **Required Documentation Updates:**
 - [ ] `docs/architecture/database-design.md` — custom date types.
 
+**Delivery:** a stack, each layer deployable on its own (the Phase 8 / 10 expand → contract
+shape). The realistic size is ~900 lines, not ~200: the migration tests alone are ~400.
+- **9a ✅ DONE** — `0133`: nullable `custom_date_types.user_id`, each type given the owner of the
+  contacts whose dates use it (`contact_important_dates` → `contacts`), an unused one the site's
+  one user (`derive_owner`, `-x custom_date_types_owner`, evidence = every table holding `user_id`
+  at `0132`, pinned by the test); refuses a type used by two owners' contacts; then
+  `idx_custom_date_types_user_id`. `CustomDateType.user_id`; every read maps the owner;
+  `CustomDateTypeRepository.create(name, *, user_id)` writes it and `POST /api/custom-date-types`
+  stamps the session user. Reads and the name key still global.
+- **9b** — `0134`: owns stragglers, refuses a type used by another owner's contact, `NOT NULL`,
+  `UNIQUE(name)` → `uq_custom_date_types_user_id_name (user_id, name)`; `get_by_id`,
+  `get_by_name`, `list_all`, `delete` scoped in SQL; the service and the 3 routes pass the user.
+- **9c** — an important date's custom type must share its contact's owner, enforced in the
+  `contact_important_dates` INSERT / UPDATE SQL (404 `CUSTOM_DATE_TYPE_NOT_FOUND` otherwise); REST
+  isolation suite in `test_contact_ownership.py`; e2e; documentation.
+
+**Decisions (recorded during implementation):**
+- **Migration numbers:** `0133` (column) and `0134` (contract + per-owner names). `main` had
+  reached `0132`; the open Phase 8 stack also wants the next numbers, so whichever stack merges
+  second renumbers.
+- **The `NOT NULL` contract trails the column by a layer**, unlike Phase 8a: a pod still running
+  pre-9a code during the rollout inserts types without an owner, which `0134` then owns.
+- **`CustomDateType.user_id` is `str | None`** (the Phase 8 `Tag` decision): a type built from a
+  request name has no owner until the repository stamps one. The port's keyword-only `user_id` and
+  "every read carries the owner" are what the type system and the tests hold.
+- **Names stay case-sensitive** — `UNIQUE(user_id, name)` as the spec says, matching today's
+  `custom_date_types_name_key`. Making them case-insensitive could make `0134` fail on existing
+  `Sobriety` / `sobriety` pairs; the editor already reuses an existing type case-insensitively.
+- **MCP parity needs no tool change:** no MCP tool lists, creates or assigns a custom date type,
+  and the important-date tools reject `date_type=custom`.
+
 ---
 
 #### Phase 10: Journal tags ✅ DONE
