@@ -1239,6 +1239,7 @@ class TestJournalOutboxEventProcessorCancelled:
         # the legacy mark-cancelled behaviour is what's under test here.
         proc.link_repo = AsyncMock()
         _mock(proc.link_repo).find_by_external_event.return_value = None
+        _mock(proc.link_repo).find_by_journal.return_value = None
         return proc
 
     @pytest.mark.asyncio
@@ -2487,6 +2488,7 @@ class _SeriesProcessorTestBase:
             deleted=frozenset(), errors=0
         )
         _mock(proc.link_repo).find_by_external_event.return_value = None
+        _mock(proc.link_repo).find_by_journal.return_value = None
         series = MagicMock()
         series.id = SERIES_ID
         _mock(proc.series_repo).get_or_create_by_recurrence.return_value = series
@@ -2909,6 +2911,30 @@ class TestSeriesCancelledFanOutRobustness(_SeriesProcessorTestBase):
         assert result["deleted"] == 0
         assert result["cancelled"] == 0
         mock_journal_service.delete_journal.assert_not_called()
+        mock_connection.execute.assert_not_called()
+
+
+class TestStaleCancellationAfterAdoption(_SeriesProcessorTestBase):
+    """A cancellation for an event the journal no longer links to is stale."""
+
+    @pytest.mark.asyncio
+    async def test_it_is_skipped_without_writing(
+        self, processor: JournalOutboxEventProcessor, mock_connection: AsyncMock
+    ) -> None:
+        _mock(processor.link_repo).find_by_journal.return_value = _make_linked_journal(
+            external_event_id="new-1_20261016T012000Z"
+        )
+
+        result = await processor.process_event(
+            _make_outbox_event(
+                event_type="journal_event.cancelled",
+                sync_action="cancelled",
+                existing_journal_id=42,
+                recurring_event_id="master-1",
+            )
+        )
+
+        assert result["reason"] == "link_moved_on"
         mock_connection.execute.assert_not_called()
 
 

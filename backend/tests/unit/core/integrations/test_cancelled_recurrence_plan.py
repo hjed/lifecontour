@@ -122,24 +122,35 @@ class TestAffectedByCancel:
 
 
 class TestNextUpcomingAfter:
-    """The occurrence whose verdict changes when one leaves the recurrence."""
+    """The occurrence whose verdict changes when one leaves the recurrence.
 
-    def test_the_first_upcoming_occurrence_after_a_start(self) -> None:
+    The slot is the leaver's ``(start, journal_id)``, ordered the way the
+    planner orders occurrences, so a successor starting at the same moment is
+    still found.
+    """
+
+    def test_the_first_upcoming_occurrence_after_a_slot(self) -> None:
         instances = weekly(4)
 
-        assert next_upcoming_after(instances, instances[1].start, NOW) == 3
+        assert next_upcoming_after(instances, (instances[1].start, 2), NOW) == 3
 
-    def test_a_start_between_occurrences_finds_the_next(self) -> None:
+    def test_a_slot_between_occurrences_finds_the_next(self) -> None:
         instances = weekly(3)
 
-        after = instances[0].start + timedelta(days=1)
+        slot = (instances[0].start + timedelta(days=1), 99)
 
-        assert next_upcoming_after(instances, after, NOW) == 2
+        assert next_upcoming_after(instances, slot, NOW) == 2
 
     def test_nothing_after_the_last(self) -> None:
         instances = weekly(2)
 
-        assert next_upcoming_after(instances, instances[1].start, NOW) is None
+        assert next_upcoming_after(instances, (instances[1].start, 2), NOW) is None
+
+    def test_a_successor_starting_at_the_same_moment_is_found(self) -> None:
+        start = NOW + timedelta(days=3)
+        instances = [RecurrenceInstance(8, start, cancelled=True)]
+
+        assert next_upcoming_after(instances, (start, 5), NOW) == 8
 
     def test_started_occurrences_are_skipped(self) -> None:
         instances = [
@@ -147,7 +158,7 @@ class TestNextUpcomingAfter:
             RecurrenceInstance(2, NOW + timedelta(days=7), cancelled=False),
         ]
 
-        assert next_upcoming_after(instances, NOW - timedelta(days=1), NOW) == 2
+        assert next_upcoming_after(instances, (NOW - timedelta(days=1), 0), NOW) == 2
 
 
 def _cancel_one_at_a_time(

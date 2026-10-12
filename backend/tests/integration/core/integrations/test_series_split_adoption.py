@@ -278,6 +278,35 @@ class TestTheOldRecurrenceAfterAdoption:
 
 
 @pytest.mark.integration
+class TestAStaleCancellationAfterAdoption:
+    async def test_it_does_not_cancel_the_adopted_event(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The old instance's cancellation, retried after the adoption, names
+        an event the journal no longer links to: it is stale, not news."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals, starts = await _seed_old_recurrence(processor, calendar_id)
+        await _adopt(
+            processor, calendar_id, journal_id=journals[2], start=starts[2], week=2
+        )
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.cancelled",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_week2",
+                existing_journal_id=journals[2],
+                recurring_event_id=MASTER_ID,
+            )
+        )
+
+        assert result["status"] == "skipped"
+        assert await event_state(async_connection, journals[2]) == "confirmed"
+        assert (await _link(async_connection, journals[2]))[2] == "synced"
+
+
+@pytest.mark.integration
 class TestAdoptionFallback:
     async def test_a_deleted_target_is_created_instead(
         self, async_connection: AsyncConnection
@@ -302,6 +331,29 @@ class TestAdoptionFallback:
             text("SELECT content FROM journals WHERE id = :id"), {"id": created}
         )
         assert content.scalar_one() == "Synced from Google Calendar"
+
+    async def test_the_created_instance_joins_the_old_series(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The payload still names the old series, so it is not abandoned."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals, starts = await _seed_old_recurrence(processor, calendar_id)
+        series_repo = SqlJournalSeriesRepository(async_connection)
+        [old_series] = await series_repo.get_series_for_journal(journals[1], USER_ID)
+        await async_connection.execute(
+            text("DELETE FROM journals WHERE id = :id"), {"id": journals[2]}
+        )
+
+        result = await _adopt(
+            processor, calendar_id, journal_id=journals[2], start=starts[2], week=2
+        )
+
+        created = int(result["journal_id"])  # type: ignore[call-overload]
+        assert [
+            s.id for s in await series_repo.get_series_for_journal(created, USER_ID)
+        ] == [old_series.id]
+        assert len(await series_repo.find_all(USER_ID)) == 1
 
 
 @pytest.mark.integration

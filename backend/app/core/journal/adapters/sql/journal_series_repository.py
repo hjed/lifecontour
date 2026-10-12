@@ -292,11 +292,10 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
 
         Resolved by recurrence key or alias, never by a journal's membership:
         a journal can sit in manual series too. A series already started for
-        the new recurrence is merged in as a series merge would - rows locked
-        first, then its keys aliased, its members moved and the series deleted
-        - so the lock order matches ``JournalSeriesMergeService``. Otherwise the
-        new recurrence is aliased under its key lock, which orders it against
-        ``get_or_create_by_recurrence`` creating a series for it meanwhile.
+        the new recurrence is merged in as a series merge would (``_fold_into``).
+        Otherwise the new recurrence is aliased under its key lock, which
+        orders it against ``get_or_create_by_recurrence`` creating a series for
+        it meanwhile; if one appeared while waiting, nothing is folded.
         """
         into = await self._find_by_alias(
             user_id, calendar_id, into_recurring_event_id
@@ -305,16 +304,16 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
             return None
 
         started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
-        if started is None:
-            await self._lock_recurrence(calendar_id, recurring_event_id)
-            started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
-        if started is not None and started.id is not None:
-            if started.id != into.id:
-                await self.lock_for_merge([started.id, into.id], user_id)
-                await self.alias_recurrences(started, into.id)
-                await self.move_members(started.id, into.id)
-                await self.delete(started.id, user_id)
-            return into.id
+        if started is not None:
+            return await self._fold_into(started, into, user_id, recurring_event_id)
+
+        await self._lock_recurrence(calendar_id, recurring_event_id)
+        if await self._find_by_key(user_id, calendar_id, recurring_event_id):
+            # A sync keyed a series on the new recurrence while this waited for
+            # its key. Folding it now would take series row locks *after* this
+            # key lock - the reverse of a series merge's order, and a deadlock
+            # with one. Leave both series; the user can merge them.
+            return None
 
         await self.conn.execute(
             text(
@@ -333,6 +332,35 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 "user_id": user_id,
             },
         )
+        return into.id
+
+    async def _fold_into(
+        self,
+        started: JournalSeries,
+        into: JournalSeries,
+        user_id: str,
+        recurring_event_id: str,
+    ) -> UUID | None:
+        """Merge the series started for a split-off recurrence into ``into``.
+
+        Rows first, then keys, as ``JournalSeriesMergeService`` takes them. A
+        merge that absorbed ``started`` between its lookup and the row lock
+        leaves it out of the locked set: its recurrence then resolves through
+        the alias that merge wrote, which is followed rather than overwritten.
+        """
+        assert started.id is not None and into.id is not None
+        if started.id == into.id:
+            return into.id
+        locked = await self.lock_for_merge([started.id, into.id], user_id)
+        if started.id not in locked or into.id not in locked:
+            assert started.calendar_id is not None
+            moved_to = await self._find_by_alias(
+                user_id, started.calendar_id, recurring_event_id
+            )
+            return moved_to.id if moved_to else None
+        await self.alias_recurrences(started, into.id)
+        await self.move_members(started.id, into.id)
+        await self.delete(started.id, user_id)
         return into.id
 
     async def _find_by_key(

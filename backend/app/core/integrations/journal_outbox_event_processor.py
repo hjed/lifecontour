@@ -927,6 +927,17 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
+    async def _link_moved_on(
+        self, journal_id: int, calendar_id: UUID, external_event_id: str
+    ) -> bool:
+        """Whether the journal's link in this calendar names another event."""
+        current = await self.link_repo.find_by_journal(journal_id, calendar_id)
+        return (
+            current is not None
+            and current.external_event_id is not None
+            and current.external_event_id != external_event_id
+        )
+
     async def _create_instead_of_adopting(self, event: OutboxEvent) -> dict[str, Any]:
         """Create the instance whose adoption target was deleted meanwhile.
 
@@ -935,6 +946,17 @@ class JournalOutboxEventProcessor:
         it had there been nothing to adopt.
         """
         event_data: dict[str, Any] = dict(event.event_data)
+        payload = JournalSyncEventData.model_validate(event_data)
+        new_key = payload.series_recurring_event_id or payload.recurring_event_id
+        if new_key and payload.split_adopted_from:
+            # The old series survives the deleted journal: the new recurrence
+            # still belongs in it.
+            await self.series_repo.adopt_recurrence(
+                user_id=str(payload.journal_data["user_id"]),
+                calendar_id=UUID(payload.calendar_id),
+                recurring_event_id=new_key,
+                into_recurring_event_id=payload.split_adopted_from,
+            )
         event_data.update(
             existing_journal_id=None,
             split_adopted_from=None,
@@ -1077,6 +1099,24 @@ class JournalOutboxEventProcessor:
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
         )
+        if linked is None and await self._link_moved_on(
+            existing_journal_id, UUID(calendar_id), external_event_id
+        ):
+            # The journal's link in this calendar now names another event: a
+            # split's new recurrence adopted it after this cancellation was
+            # queued. Marking by journal and calendar would cancel the adopted,
+            # live event.
+            logger.info(
+                "Stale cancellation skipped - the journal now links another event",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "reason": "link_moved_on",
+                "journal_id": existing_journal_id,
+            }
         recurring_event_id = payload.recurring_event_id or (
             linked.recurring_event_id if linked else None
         )

@@ -97,15 +97,23 @@ def affected_by_cancel(
 
 
 def next_upcoming_after(
-    instances: Iterable[RecurrenceInstance], after: datetime, now: datetime
+    instances: Iterable[RecurrenceInstance],
+    slot: tuple[datetime, int],
+    now: datetime,
 ) -> int | None:
-    """The first not-yet-started occurrence starting after ``after``.
+    """The first not-yet-started occurrence after ``slot``.
 
-    Used when an occurrence leaves the recurrence altogether (a split's new
-    recurrence adopted its journal): the one after the slot it left is the
-    only verdict its going can change.
+    ``slot`` is the ``(start, journal_id)`` of an occurrence that has left the
+    recurrence altogether (a split's new recurrence adopted its journal), in
+    the planner's order, so a successor starting at the same moment counts.
+    The occurrence after the slot it left is the only verdict its going can
+    change.
     """
     return next(
-        (i.journal_id for i in _upcoming_in_order(instances, now) if i.start > after),
+        (
+            i.journal_id
+            for i in _upcoming_in_order(instances, now)
+            if (i.start, i.journal_id) > slot
+        ),
         None,
     )

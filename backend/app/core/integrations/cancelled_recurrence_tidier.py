@@ -89,15 +89,15 @@ class CancelledRecurrenceTidier:
         source: Provenance,
         changed_by: str,
         cancelled_journal_id: int | None = None,
-        left_slot_at: datetime | None = None,
+        left_slot: tuple[datetime, int] | None = None,
     ) -> TidyOutcome:
         """Apply the keep-next rule to one recurrence on one calendar.
 
         Given ``cancelled_journal_id``, only that occurrence and its successor
         are considered - the only two one cancellation can change. Given
-        ``left_slot_at``, the start of an occurrence that has left the
-        recurrence (adopted by a split's new one), only the next occurrence
-        after it is. Without either (a whole series cancelled, or a backfill),
+        ``left_slot``, the ``(start, journal_id)`` of an occurrence that has
+        left the recurrence (adopted by a split's new one), only the next
+        occurrence after it is. Without either (a whole series cancelled, or a backfill),
         every continuation is. Call it after the cancellations have been
         marked on the links.
         """
@@ -117,8 +117,8 @@ class CancelledRecurrenceTidier:
         candidates: tuple[int, ...]
         if cancelled_journal_id is not None:
             candidates = affected_by_cancel(instances, cancelled_journal_id, now)
-        elif left_slot_at is not None:
-            successor = next_upcoming_after(instances, left_slot_at, now)
+        elif left_slot is not None:
+            successor = next_upcoming_after(instances, left_slot, now)
             candidates = () if successor is None else (successor,)
         else:
             candidates = tuple(verdicts)

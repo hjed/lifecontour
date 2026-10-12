@@ -39,6 +39,7 @@ from app.core.journal.models.repositories import JournalSeriesRepository
 class SplitAdoption:
     """Where the adopted journal sat in the old recurrence."""
 
+    journal_id: int
     calendar_id: UUID
     old_recurring_event_id: str | None
     old_start: datetime | None
@@ -96,6 +97,7 @@ class SplitAdopter:
                 into_recurring_event_id=into_key,
             )
         return SplitAdoption(
+            journal_id=journal.id,
             calendar_id=calendar_id,
             old_recurring_event_id=old_link.recurring_event_id if old_link else None,
             old_start=old_link.event_date_range_start if old_link else None,
@@ -112,5 +114,5 @@ class SplitAdopter:
             recurring_event_id=adoption.old_recurring_event_id,
             source=source,
             changed_by=changed_by,
-            left_slot_at=adoption.old_start,
+            left_slot=(adoption.old_start, adoption.journal_id),
         )
