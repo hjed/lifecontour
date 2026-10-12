@@ -11,8 +11,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from core_shared.models.history import Provenance
+from core_shared.models.journal_external_event_link import (
+    ExternalEventLinkSyncStatus,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+# History sources that mean a person changed the journal. Everything else is a
+# sync or the system acting on its own (a journal merge included).
+_USER_PROVENANCES: tuple[str, ...] = (Provenance.UI.value, Provenance.MCP.value)
 
 
 @dataclass(frozen=True)
@@ -233,6 +241,84 @@ class SqlJournalEventLinkRepository:
             has_manual_contact_relationships=row.has_manual_contact_relationships,
             has_type_data=row.has_type_data,
             has_routes=row.has_routes,
+        )
+
+    async def has_other_live_links(self, journal_id: int, calendar_id: UUID) -> bool:
+        """Whether a calendar *other than this one* still holds the event.
+
+        A de-duplicated event is one journal several calendars link to, so one
+        calendar dropping it says nothing about the others.
+        """
+        query = text(
+            """
+            SELECT 1
+            FROM journal_external_event_links
+            WHERE journal_id = :journal_id
+              AND calendar_id <> :calendar_id
+              AND sync_status <> :cancelled
+            LIMIT 1
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {
+                "journal_id": journal_id,
+                "calendar_id": calendar_id,
+                "cancelled": ExternalEventLinkSyncStatus.CANCELLED.value,
+            },
+        )
+        return result.fetchone() is not None
+
+    async def has_user_history(self, journal_id: int) -> bool:
+        """Whether a person has ever changed this journal, in the app or via MCP.
+
+        Read from the journal's change history, whose provenance says who made
+        each change. Sync and system writes don't count: a journal merge, for
+        one, rewrites ``updated_at`` without anyone adding to the journal.
+        """
+        query = text(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM field_history
+                WHERE entity_type = 'journal'
+                  AND entity_id = :journal_id
+                  AND source = ANY(:sources)
+            )
+            """
+        )
+        result = await self.conn.execute(
+            query,
+            {"journal_id": journal_id, "sources": list(_USER_PROVENANCES)},
+        )
+        return bool(result.scalar())
+
+    async def backfill_recurring_event_id(
+        self, calendar_id: UUID, recurring_event_id: str, journal_ids: list[int]
+    ) -> None:
+        """Record the recurring id on links matched only by their id prefix.
+
+        Links synced before the recurring id was stored are found through the
+        prefix fallback; giving them the id lets later cancellations plan them
+        by the column alone.
+        """
+        if not journal_ids:
+            return
+        query = text(
+            """
+            UPDATE journal_external_event_links
+            SET recurring_event_id = :recurring_event_id
+            WHERE calendar_id = :calendar_id
+              AND journal_id = ANY(:journal_ids)
+              AND recurring_event_id IS NULL
+            """
+        )
+        await self.conn.execute(
+            query,
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "journal_ids": journal_ids,
+            },
         )
 
     async def delete_links_for_journal(self, journal_id: int) -> None:
