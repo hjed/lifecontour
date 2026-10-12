@@ -551,12 +551,16 @@ class TestContactListsHoldOnlyYourContacts:
             OWN_FIRST_NAME
         ]
 
-    async def test_the_tag_filter_holds_only_your_contacts(
+    async def test_filtering_by_another_users_tag_lists_nothing(
         self, integration_api_client: AsyncClient, foreign_contact: ForeignContact
     ) -> None:
-        assert await _listed_first_names(
-            integration_api_client, tag_ids=foreign_contact.tag_id
-        ) == [OWN_FIRST_NAME]
+        """A contact only holds its owner's tags, so theirs matches none of yours."""
+        assert (
+            await _listed_first_names(
+                integration_api_client, tag_ids=foreign_contact.tag_id
+            )
+            == []
+        )
 
     async def test_cleanup_leaves_another_users_contacts(
         self,

@@ -401,7 +401,13 @@ async def seed_foreign_contact(async_connection: AsyncConnection) -> ForeignCont
     own_contact_id = await seed_contact(
         async_connection, first_name=OWN_FIRST_NAME, is_favourite=True
     )
-    await repo.assign_tag(own_contact_id, tag_id)
+    # The caller's own tag: a contact only ever holds its owner's tags. (Its
+    # name differs so the owner replay can hand the foreign tags over.)
+    own_tag = await tag_repo.save(
+        Tag(name=TagName(f"own-{TAG_NAME}")), user_id=TEST_USER_ID
+    )
+    assert own_tag.id is not None
+    await repo.assign_tag(own_contact_id, own_tag.id)
 
     for backdate in BACKDATE_SEEDED_ROWS:
         await async_connection.execute(backdate, {"then": SEEDED_LONG_AGO})

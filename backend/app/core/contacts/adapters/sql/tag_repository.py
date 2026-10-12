@@ -217,7 +217,7 @@ class SqlTagRepository(TagRepository):
                     UPDATE tags
                     SET name = :name, parent_id = :parent_id, color = :color,
                         description = :description, updated_at = NOW()
-                    WHERE id = :id
+                    WHERE id = :id AND user_id = :user_id
                     RETURNING updated_at
                 """
                 )
@@ -225,6 +225,7 @@ class SqlTagRepository(TagRepository):
                     query,
                     {
                         "id": tag.id,
+                        "user_id": user_id,
                         "name": str(tag.name),
                         "parent_id": tag.parent_id,
                         "color": tag.color,
@@ -233,7 +234,8 @@ class SqlTagRepository(TagRepository):
                 )
                 row = result.fetchone()
                 if row is None:
-                    raise RuntimeError("Failed to update tag")
+                    # Missing, or another user's: either way not this user's tag.
+                    raise TagNotFoundError(tag.id)
                 tag.updated_at = row.updated_at
 
             return tag
@@ -243,10 +245,61 @@ class SqlTagRepository(TagRepository):
                 raise DuplicateTagNameError(str(tag.name)) from e
             raise
 
-    async def delete(self, tag_id: int) -> None:
-        """Delete a tag."""
-        query = text("DELETE FROM tags WHERE id = :tag_id")
-        result = await self.conn.execute(query, {"tag_id": tag_id})
+    async def delete(self, tag_id: int, *, user_id: str) -> bool:
+        """Delete ``user_id``'s tag; return whether one was deleted."""
+        result = await self.conn.execute(
+            text("DELETE FROM tags WHERE id = :tag_id AND user_id = :user_id"),
+            {"tag_id": tag_id, "user_id": user_id},
+        )
+        return bool(result.rowcount)
 
-        if result.rowcount == 0:
-            raise TagNotFoundError(tag_id)
+    async def merge_into(self, source_id: int, target_id: int, *, user_id: str) -> bool:
+        """Move the user's source tag's contacts and children onto their target.
+
+        The source itself is left for the caller to delete. Nothing moves unless
+        the user owns both tags, so another user's assignments and hierarchy are
+        never rewritten; returns whether it moved them.
+        """
+        owned = await self.conn.execute(
+            text(
+                "SELECT count(*) FROM tags "
+                "WHERE id IN (:source_id, :target_id) AND user_id = :user_id"
+            ),
+            {"source_id": source_id, "target_id": target_id, "user_id": user_id},
+        )
+        if source_id == target_id or owned.scalar_one() != 2:
+            return False
+
+        params = {"source_id": source_id, "target_id": target_id}
+        # 1. Drop source assignments a contact already holds for the target, so
+        #    the re-point below cannot violate the composite primary key.
+        await self.conn.execute(
+            text(
+                """
+                DELETE FROM contact_tags ct
+                WHERE ct.tag_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_tags ct2
+                    WHERE ct2.contact_id = ct.contact_id
+                    AND ct2.tag_id = :target_id
+                )
+                """
+            ),
+            params,
+        )
+        # 2. Re-point the remaining assignments onto the target.
+        await self.conn.execute(
+            text(
+                "UPDATE contact_tags SET tag_id = :target_id WHERE tag_id = :source_id"
+            ),
+            params,
+        )
+        # 3. The target adopts the source's children (the user's only).
+        await self.conn.execute(
+            text(
+                "UPDATE tags SET parent_id = :target_id "
+                "WHERE parent_id = :source_id AND user_id = :user_id"
+            ),
+            {**params, "user_id": user_id},
+        )
+        return True

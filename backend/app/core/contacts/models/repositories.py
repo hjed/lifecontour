@@ -300,8 +300,11 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def assign_tag(self, contact_id: int, tag_id: int) -> None:
-        """Assign a tag to a contact."""
+    async def assign_tag(self, contact_id: int, tag_id: int) -> bool:
+        """Assign a tag to a contact; return whether the contact now holds it.
+
+        A tag of another owner is never assigned (``False``).
+        """
         pass
 
     @abstractmethod
@@ -442,8 +445,16 @@ class TagRepository(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, tag_id: int) -> None:
-        """Delete a tag."""
+    async def delete(self, tag_id: int, *, user_id: str) -> bool:
+        """Delete ``user_id``'s tag; return whether one was deleted."""
+        pass
+
+    @abstractmethod
+    async def merge_into(self, source_id: int, target_id: int, *, user_id: str) -> bool:
+        """Move the user's source tag's contacts and children onto their target.
+
+        Moves nothing, returning ``False``, unless the user owns both tags.
+        """
         pass
 
 

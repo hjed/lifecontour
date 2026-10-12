@@ -41,6 +41,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
     PrimaryAddressConflictError,
     PrimaryMethodConflictError,
+    TagNotFoundError,
 )
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
@@ -294,8 +295,8 @@ class ContactService:
         *,
         owner: str,
     ) -> None:
-        """Resolve tag names to existing-or-new tags and attach them to contact.
-        A missing tag is created for ``owner``.
+        """Resolve tag names among ``owner``'s tags (creating missing ones for
+        them) and attach them to contact.
 
         Each name is looked up; a missing name is created via the TagService
         (a race-safe create-or-get), so the tag write is owned by a
@@ -1717,8 +1718,9 @@ class ContactService:
             if tag.id is None:
                 raise ContactValidationError("id", "Tag ID is required for assignment")
 
-            # Assign tag to contact
-            await self.contact_repo.assign_tag(contact_id, tag.id)
+            # Assign tag to contact; the SQL refuses another owner's tag.
+            if not await self.contact_repo.assign_tag(contact_id, tag.id):
+                raise TagNotFoundError(tag.id)
             saved_tags.append(tag)
 
             # Publish tag assigned event
@@ -1875,12 +1877,11 @@ class ContactService:
             # The tag must be the contact owner's: another user's is not found.
             tag = await self.tag_repo.find_by_id(tag_id, user_id=contact.user_id)
             if not tag:
-                from app.core.contacts.models.exceptions import TagNotFoundError
-
                 raise TagNotFoundError(tag_id)
 
-            # Assign tag
-            await self.contact_repo.assign_tag(contact_id, tag_id)
+            # Assign tag; the SQL refuses another owner's tag.
+            if not await self.contact_repo.assign_tag(contact_id, tag_id):
+                raise TagNotFoundError(tag_id)
 
             # Publish event; the history projection records the tag assignment.
             event = TagAssigned(
@@ -1924,8 +1925,6 @@ class ContactService:
             # Get tag for event
             tag = await self.tag_repo.find_by_id(tag_id, user_id=contact.user_id)
             if not tag:
-                from app.core.contacts.models.exceptions import TagNotFoundError
-
                 raise TagNotFoundError(tag_id)
 
             # Remove tag

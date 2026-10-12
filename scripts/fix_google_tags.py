@@ -5,6 +5,11 @@ Google API sometimes returns tags as 16-character hexadecimal hashes
 (e.g., 130928a58fa27eeb) instead of their human-readable names.
 This script finds those tags in the database, fetches the correct names
 from Google Contacts API, and updates them.
+
+Contact tags are per user, so it works on the tags of the user who owns the
+given Google account only: another user's tags, even of the same name, are
+never read, renamed or merged into. When several users have connected the same
+Google account, it refuses unless ``--user-id`` names which one.
 """
 
 import argparse
@@ -37,7 +42,9 @@ except ImportError as e:
     sys.exit(1)
 
 
-async def fix_google_tags(db_url: str, google_account_email: str) -> None:
+async def fix_google_tags(
+    db_url: str, google_account_email: str, user_id: str | None = None
+) -> None:
     """Find and fix tags with 16-character hex hash names."""
     print("Connecting to database...")
 
@@ -45,17 +52,38 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
     conn = await asyncpg.connect(db_url)
 
     try:
-        # Find all tags that look like 16-character hex hashes
+        auth_rows = await conn.fetch(
+            "SELECT user_id, encrypted_access_token FROM user_google_auth "
+            "WHERE google_account_email = $1 AND ($2::text IS NULL OR user_id = $2)",
+            google_account_email,
+            user_id,
+        )
+        if not auth_rows:
+            print(
+                f"Error: Could not find Google credentials for {google_account_email} in database."
+            )
+            return
+        if len(auth_rows) > 1:
+            owners = ", ".join(sorted(str(row["user_id"]) for row in auth_rows))
+            print(
+                f"Error: {google_account_email} is connected by several users "
+                f"({owners}). Pass --user-id to choose whose tags to repair."
+            )
+            return
+        auth_row = auth_rows[0]
+        owner = auth_row["user_id"]
+
+        # Find the owner's tags that look like 16-character hex hashes
         # Regex for 16 exactly lowercase hex chars
         hex_pattern = "^[0-9a-f]{16}$"
 
         tags_query = """
             SELECT id, name
             FROM tags
-            WHERE name ~ $1
+            WHERE name ~ $1 AND user_id = $2
         """
 
-        bad_tags = await conn.fetch(tags_query, hex_pattern)
+        bad_tags = await conn.fetch(tags_query, hex_pattern, owner)
 
         if not bad_tags:
             print(
@@ -76,14 +104,7 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
             print("Set it using: export ENCRYPTION_KEY=...")
             return
 
-        query = "SELECT encrypted_access_token FROM user_google_auth WHERE google_account_email = $1 LIMIT 1"
-        encrypted_token = await conn.fetchval(query, google_account_email)
-
-        if not encrypted_token:
-            print(
-                f"Error: Could not find Google credentials for {google_account_email} in database."
-            )
-            return
+        encrypted_token = auth_row["encrypted_access_token"]
 
         from cryptography.fernet import Fernet
 
@@ -149,8 +170,10 @@ async def fix_google_tags(db_url: str, google_account_email: str) -> None:
                 print(f"Translating tag ID {tag_id}: '{hash_name}' -> '{correct_name}'")
 
                 # Check if a tag with the correct name already exists to avoid unique constraint violations
-                check_query = "SELECT id FROM tags WHERE name = $1"
-                existing = await conn.fetchval(check_query, correct_name)
+                check_query = (
+                    "SELECT id FROM tags WHERE LOWER(name) = LOWER($1) AND user_id = $2"
+                )
+                existing = await conn.fetchval(check_query, correct_name, owner)
 
                 if existing:
                     print(
@@ -233,10 +256,15 @@ def main() -> None:
         required=True,
         help="Google account email address to fetch contact groups for",
     )
+    parser.add_argument(
+        "--user-id",
+        default=None,
+        help="Owner whose tags to repair, when several users connect the same email",
+    )
 
     args = parser.parse_args()
 
-    asyncio.run(fix_google_tags(args.db_url, args.email))
+    asyncio.run(fix_google_tags(args.db_url, args.email, args.user_id))
 
 
 if __name__ == "__main__":

@@ -953,7 +953,13 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   LOWER(name))`; its downgrade refuses while two owners share a name. The `0129` name-scope
   migration test is parametrised over both tag tables
   (`tests/integration/test_scope_tag_names_to_owner_migrations.py`) instead of copied.
-- **8d** — owner-scoped writes in SQL (update, delete, merge, re-parent, assign).
+- **8d ✅ DONE** — owner-scoped writes in SQL: `save`'s UPDATE is keyed by the owner (another
+  user's tag raises `TagNotFoundError`); `delete` and the new `merge_into` (the merge SQL moved
+  out of `TagService`) report whether they wrote and change nothing unless the user owns every
+  tag named, and a merge adopts only the user's children; `ContactRepository.assign_tag`
+  inserts only when the tag and the contact share an owner. `TagService` raises not-found when a
+  delete or merge wrote nothing, so the unit of work rolls back instead of publishing
+  `TagDeleted` for a change that never happened (the Phase 10c3 lesson).
 - **8e** — REST and MCP cross-user isolation suites for tags.
 
 **Decisions (recorded during implementation):**
