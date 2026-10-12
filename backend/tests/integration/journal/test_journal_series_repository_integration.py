@@ -910,3 +910,44 @@ class TestAdoptRecurrenceRaces:
 
         assert adopted_into == manual.id
         assert await series_repository.find_by_id(_sid(started), USER_ID) is None
+
+
+@pytest.mark.integration
+class TestAdoptRecurrenceFromASplit:
+    async def test_a_split_merged_elsewhere_adopts_into_where_it_went(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        """The old link's recurrence was itself a split the user merged into
+        another series; its root still has its own. Resolve as
+        ``get_or_create_by_recurrence`` does: the split's alias first."""
+        calendar = await _create_calendar(calendar_repository)
+        root = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="old-master",
+            name="Pilates",
+        )
+        elsewhere = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Evening classes")
+        )
+        split_series = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="old-master_R20260801T090000",
+            name="Pilates",
+        )
+        await series_repository.alias_recurrences(split_series, _sid(elsewhere))
+        await series_repository.delete(_sid(split_series), USER_ID)
+
+        adopted_into = await series_repository.adopt_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            into_recurring_event_id="old-master",
+            into_split_recurring_event_id="old-master_R20260801T090000",
+        )
+
+        assert adopted_into == elsewhere.id
+        assert adopted_into != root.id

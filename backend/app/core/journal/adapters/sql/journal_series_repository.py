@@ -287,6 +287,7 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         calendar_id: UUID,
         recurring_event_id: str,
         into_recurring_event_id: str,
+        into_split_recurring_event_id: str | None = None,
     ) -> UUID | None:
         """Fold a split-off recurrence into the old recurrence's series.
 
@@ -297,16 +298,15 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         orders it against ``get_or_create_by_recurrence`` creating a series for
         it meanwhile; if one appeared while waiting, nothing is folded.
         """
-        into = await self._find_by_alias(
-            user_id, calendar_id, into_recurring_event_id
-        ) or await self._find_by_key(user_id, calendar_id, into_recurring_event_id)
+        into_keys = (into_split_recurring_event_id, into_recurring_event_id)
+        into = await self._resolve_recurrence(user_id, calendar_id, into_keys)
         if into is None or into.id is None:
             return None
 
         started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
         if started is not None:
             return await self._fold_into(
-                started, into, user_id, recurring_event_id, into_recurring_event_id
+                started, into, user_id, recurring_event_id, into_keys
             )
 
         await self._lock_recurrence(calendar_id, recurring_event_id)
@@ -342,7 +342,7 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
         into: JournalSeries,
         user_id: str,
         recurring_event_id: str,
-        into_recurring_event_id: str,
+        into_keys: tuple[str | None, str],
         *,
         retried: bool = False,
     ) -> UUID | None:
@@ -367,8 +367,8 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
             return moved_to.id if moved_to else None
         if into.id not in locked:
             assert started.calendar_id is not None
-            moved_into = await self._find_by_alias(
-                user_id, started.calendar_id, into_recurring_event_id
+            moved_into = await self._resolve_recurrence(
+                user_id, started.calendar_id, into_keys
             )
             if retried or moved_into is None:
                 return None
@@ -377,13 +377,34 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 moved_into,
                 user_id,
                 recurring_event_id,
-                into_recurring_event_id,
+                into_keys,
                 retried=True,
             )
         await self.alias_recurrences(started, into.id)
         await self.move_members(started.id, into.id)
         await self.delete(started.id, user_id)
         return into.id
+
+    async def _resolve_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        keys: tuple[str | None, str],
+    ) -> JournalSeries | None:
+        """The series a recurrence resolves to, as a sync of it would join.
+
+        ``keys`` is ``(split id, series key)``, checked in the order
+        ``get_or_create_by_recurrence`` uses: an alias on the split's own id
+        first (the user merged that split somewhere), then one on the series
+        key, then the series keyed on it.
+        """
+        split_key, series_key = keys
+        for key in (split_key, series_key):
+            if key:
+                aliased = await self._find_by_alias(user_id, calendar_id, key)
+                if aliased is not None:
+                    return aliased
+        return await self._find_by_key(user_id, calendar_id, series_key)
 
     async def _find_by_key(
         self, user_id: str, calendar_id: UUID, recurring_event_id: str

@@ -115,6 +115,9 @@ class SplitAdopter:
                 calendar_id=calendar_id,
                 recurring_event_id=new_key,
                 into_recurring_event_id=into_key,
+                into_split_recurring_event_id=(
+                    old_link.recurring_event_id if old_link else None
+                ),
             )
         return SplitAdoption(
             journal_id=journal.id,
