@@ -80,10 +80,11 @@ class SourceSeeder:
 
     link: Callable[[AsyncConnection, int, str], Awaitable[None]]
     replay: Callable[[AsyncConnection, str], Awaitable[dict[str, Any]]]
-    # Whether deleting a journal deletes its own record of this source
-    # upstream: the absorbed record must follow, and the test must fail if
-    # neither is sent rather than pass on "both missing".
-    deleted_upstream: bool
+    # The JournalDeleted key whose worker deletes this source's records
+    # upstream, or None when nothing does: the absorbed record must be filed
+    # exactly where the survivor's own is, and the test must fail if neither
+    # is sent rather than pass on "both missing".
+    delete_key: str | None
     payload_id: Callable[[str], str] = lambda record_id: record_id
     # (survivor's record, absorbed record), in the shape the source issues.
     record_ids: tuple[str, str] = ("rec-own", "rec-absorbed")
@@ -245,27 +246,27 @@ SEEDERS: dict[str, SourceSeeder] = {
     "google_calendar": SourceSeeder(
         link=_link_google,
         replay=_calendar_event_replay("google", "google", "work@example.com"),
-        deleted_upstream=True,
+        delete_key="google",
     ),
     "snipeit_maintenance": SourceSeeder(
         link=_link_snipeit_import,
         replay=_calendar_event_replay(
             "snipeit_maintenance", "snipeit_maintenance", version_hash=_snipeit_hash
         ),
-        deleted_upstream=True,
+        delete_key="snipeit_maintenance",
         record_ids=("snipeit_maint:41", "snipeit_maint:42"),
     ),
     "strava": SourceSeeder(
         link=_link_strava,
         replay=_calendar_event_replay("strava", "strava"),
-        deleted_upstream=False,
+        delete_key=None,
         payload_id=lambda record_id: f"strava:{record_id}",
         record_ids=("111", "222"),
     ),
     "immich_album": SourceSeeder(
         link=_link_immich_album,
         replay=_replay_immich_album,
-        deleted_upstream=False,
+        delete_key=None,
     ),
 }
 
@@ -295,8 +296,14 @@ async def _journal(connection: AsyncConnection, title: str) -> int:
     return int(result.scalar_one())
 
 
-async def _deletion_ids(connection: AsyncConnection, journal_id: int) -> set[str]:
-    """Event ids a worker is told to delete upstream when the journal goes."""
+async def _deletion_ids(
+    connection: AsyncConnection, journal_id: int
+) -> dict[str, set[str]]:
+    """Event ids each worker is told to delete upstream when the journal goes.
+
+    Keyed by the worker's ``JournalDeleted`` key, and only the keys a worker
+    acts on: an id filed under another worker's key is one nobody deletes.
+    """
     await JournalService(
         journal_repo=SqlJournalRepository(connection),
         event_publisher=OutboxEventPublisher(connection),
@@ -315,10 +322,9 @@ async def _deletion_ids(connection: AsyncConnection, journal_id: int) -> set[str
     if isinstance(event_data, str):
         event_data = json.loads(event_data)
     return {
-        entry["external_event_id"]
+        key: {entry["external_event_id"] for entry in entries}
         for key, entries in event_data["external_identifiers"].items()
         if key in DELETE_KEYS_A_WORKER_CONSUMES
-        for entry in entries
     }
 
 
@@ -367,5 +373,14 @@ async def test_a_replace_merge_never_lets_the_absorbed_record_back_in(
 
     # 5. Deleting the survivor treats the absorbed record as its own.
     deleted = await _deletion_ids(conn, survivor)
-    assert (seeder.payload_id(own) in deleted) is seeder.deleted_upstream
-    assert (seeder.payload_id(absorbed_record) in deleted) is seeder.deleted_upstream
+    expected = (
+        {
+            seeder.delete_key: {
+                seeder.payload_id(own),
+                seeder.payload_id(absorbed_record),
+            }
+        }
+        if seeder.delete_key is not None
+        else {}
+    )
+    assert deleted == expected
