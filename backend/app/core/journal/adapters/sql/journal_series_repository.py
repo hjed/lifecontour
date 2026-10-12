@@ -186,30 +186,13 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 "recurring_event_id": recurring_event_id,
             },
         )
-        select_query = text(
-            f"""
-            SELECT {_SERIES_COLUMNS}
-            FROM journal_series
-            WHERE calendar_id = :calendar_id
-              AND recurring_event_id = :recurring_event_id
-              AND user_id = :user_id
-            """
-        )
-        result = await self.conn.execute(
-            select_query,
-            {
-                "calendar_id": calendar_id,
-                "recurring_event_id": recurring_event_id,
-                "user_id": user_id,
-            },
-        )
-        row = result.fetchone()
-        if row is None:  # pragma: no cover - defensive; the insert guarantees a row
+        series = await self._find_by_key(user_id, calendar_id, recurring_event_id)
+        if series is None:  # pragma: no cover - defensive; the insert guarantees a row
             raise RuntimeError(
                 "journal_series get_or_create failed for "
                 f"calendar={calendar_id} recurring_event_id={recurring_event_id}"
             )
-        return _row_to_series(row)
+        return series
 
     async def lock_for_merge(
         self, series_ids: Sequence[UUID], user_id: str
@@ -297,6 +280,83 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 "user_id": absorbed.user_id,
             },
         )
+
+    async def adopt_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str,
+        into_recurring_event_id: str,
+    ) -> UUID | None:
+        """Fold a split-off recurrence into the old recurrence's series.
+
+        Resolved by recurrence key or alias, never by a journal's membership:
+        a journal can sit in manual series too. A series already started for
+        the new recurrence is merged in as a series merge would - rows locked
+        first, then its keys aliased, its members moved and the series deleted
+        - so the lock order matches ``JournalSeriesMergeService``. Otherwise the
+        new recurrence is aliased under its key lock, which orders it against
+        ``get_or_create_by_recurrence`` creating a series for it meanwhile.
+        """
+        into = await self._find_by_alias(
+            user_id, calendar_id, into_recurring_event_id
+        ) or await self._find_by_key(user_id, calendar_id, into_recurring_event_id)
+        if into is None or into.id is None:
+            return None
+
+        started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
+        if started is None:
+            await self._lock_recurrence(calendar_id, recurring_event_id)
+            started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
+        if started is not None and started.id is not None:
+            if started.id != into.id:
+                await self.lock_for_merge([started.id, into.id], user_id)
+                await self.alias_recurrences(started, into.id)
+                await self.move_members(started.id, into.id)
+                await self.delete(started.id, user_id)
+            return into.id
+
+        await self.conn.execute(
+            text(
+                """
+                INSERT INTO journal_series_recurrence_aliases
+                    (calendar_id, recurring_event_id, series_id, user_id)
+                VALUES
+                    (:calendar_id, :recurring_event_id, :series_id, :user_id)
+                ON CONFLICT (calendar_id, recurring_event_id) DO NOTHING
+                """
+            ),
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "series_id": into.id,
+                "user_id": user_id,
+            },
+        )
+        return into.id
+
+    async def _find_by_key(
+        self, user_id: str, calendar_id: UUID, recurring_event_id: str
+    ) -> JournalSeries | None:
+        """The series auto-created for a recurrence, if there is one."""
+        result = await self.conn.execute(
+            text(
+                f"""
+                SELECT {_SERIES_COLUMNS}
+                FROM journal_series
+                WHERE calendar_id = :calendar_id
+                  AND recurring_event_id = :recurring_event_id
+                  AND user_id = :user_id
+                """
+            ),
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "user_id": user_id,
+            },
+        )
+        row = result.fetchone()
+        return _row_to_series(row) if row else None
 
     async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
         """Move every member of one series into another (shared members dedupe)."""

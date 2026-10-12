@@ -640,3 +640,113 @@ class TestRecurrenceAliases:
 
         assert other.id != destination.id
         assert other.user_id == OTHER_USER_ID
+
+
+@pytest.mark.integration
+class TestAdoptRecurrence:
+    """A recurrence Google split off under an unrelated id joins the old series."""
+
+    async def _old_series(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar: Calendar,
+    ) -> JournalSeries:
+        return await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="old-master",
+            name="Pilates",
+        )
+
+    async def test_later_instances_of_the_new_recurrence_join_the_old_series(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        old = await self._old_series(series_repository, calendar)
+
+        adopted_into = await series_repository.adopt_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            into_recurring_event_id="old-master",
+        )
+
+        assert adopted_into == old.id
+        resolved = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            name="Pilates (new)",
+        )
+        assert resolved.id == old.id
+        assert [s.id for s in await series_repository.find_all(USER_ID)] == [old.id]
+
+    async def test_a_series_already_started_for_the_new_recurrence_is_folded_in(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+        old = await self._old_series(series_repository, calendar)
+        started = await series_repository.get_or_create_by_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            name="Pilates",
+        )
+        member = await _create_journal(journal_repository)
+        assert member.id is not None
+        await series_repository.add_member(_sid(started), member.id)
+
+        await series_repository.adopt_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            into_recurring_event_id="old-master",
+        )
+
+        assert await series_repository.find_by_id(_sid(started), USER_ID) is None
+        assert await series_repository.get_member_journal_ids(_sid(old)) == [member.id]
+
+    async def test_the_old_series_is_found_through_its_merge(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        """The old recurrence was merged into a manual series: adopt into that."""
+        calendar = await _create_calendar(calendar_repository)
+        old = await self._old_series(series_repository, calendar)
+        manual = await series_repository.save(
+            JournalSeries(user_id=USER_ID, name="Pilates (all)")
+        )
+        await series_repository.alias_recurrences(old, _sid(manual))
+        await series_repository.delete(_sid(old), USER_ID)
+
+        adopted_into = await series_repository.adopt_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            into_recurring_event_id="old-master",
+        )
+
+        assert adopted_into == manual.id
+
+    async def test_no_old_series_adopts_nothing(
+        self,
+        series_repository: SqlJournalSeriesRepository,
+        calendar_repository: SqlCalendarRepository,
+    ) -> None:
+        calendar = await _create_calendar(calendar_repository)
+
+        adopted_into = await series_repository.adopt_recurrence(
+            user_id=USER_ID,
+            calendar_id=_cid(calendar),
+            recurring_event_id="new-master",
+            into_recurring_event_id="old-master",
+        )
+
+        assert adopted_into is None
+        assert await series_repository.find_all(USER_ID) == []

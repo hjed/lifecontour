@@ -322,6 +322,26 @@ Known limits: history is projected asynchronously, so an edit made seconds
 before a cancellation can be missed, and protection is checked when the
 cancellation arrives rather than again later.
 
+#### Split recurrences under a new id
+
+Google can answer a "this and following" edit by ending the old recurrence and
+starting a new one under an id unrelated to the old one (not `<old>_R<time>`).
+When both halves arrive in one sync, the Google worker pairs each cancelled old
+instance with the new instance on the same local day under the same title, and
+sends the new one as an update of the old journal carrying
+`split_adopted_from`. The backend then (`split_adoption.py`):
+
+- folds the new recurrence into the old one's series
+  (`JournalSeriesRepository.adopt_recurrence`), merging in any series already
+  started for it, so later instances join the old series;
+- re-points the journal's link at the new event and takes the new times,
+  keeping the user's title and notes;
+- re-plans the old recurrence around the slot the journal left, under the same
+  recurrence lock the cancellations take.
+
+Adoption is an update, so it requests no duplicate detection. If the journal
+was deleted in the meantime, the instance is created instead.
+
 ## Type-Specific Data Models
 
 ### Calendar Info (EVENT type)

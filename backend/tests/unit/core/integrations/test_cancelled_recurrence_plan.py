@@ -19,6 +19,7 @@ from app.core.integrations.cancelled_recurrence import (
     CancelledInstanceVerdict,
     RecurrenceInstance,
     affected_by_cancel,
+    next_upcoming_after,
     plan_cancelled_recurrence,
 )
 
@@ -118,6 +119,35 @@ class TestAffectedByCancel:
         ]
 
         assert affected_by_cancel(instances, 1, NOW) == (1, 3)
+
+
+class TestNextUpcomingAfter:
+    """The occurrence whose verdict changes when one leaves the recurrence."""
+
+    def test_the_first_upcoming_occurrence_after_a_start(self) -> None:
+        instances = weekly(4)
+
+        assert next_upcoming_after(instances, instances[1].start, NOW) == 3
+
+    def test_a_start_between_occurrences_finds_the_next(self) -> None:
+        instances = weekly(3)
+
+        after = instances[0].start + timedelta(days=1)
+
+        assert next_upcoming_after(instances, after, NOW) == 2
+
+    def test_nothing_after_the_last(self) -> None:
+        instances = weekly(2)
+
+        assert next_upcoming_after(instances, instances[1].start, NOW) is None
+
+    def test_started_occurrences_are_skipped(self) -> None:
+        instances = [
+            RecurrenceInstance(1, NOW - timedelta(hours=2), cancelled=False),
+            RecurrenceInstance(2, NOW + timedelta(days=7), cancelled=False),
+        ]
+
+        assert next_upcoming_after(instances, NOW - timedelta(days=1), NOW) == 2
 
 
 def _cancel_one_at_a_time(

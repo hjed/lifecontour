@@ -74,6 +74,10 @@ from app.core.integrations.cancelled_recurrence_tidier import (
 from app.core.integrations.models.unmatched_participant import (
     UnmatchedParticipantEmail,
 )
+from app.core.integrations.split_adoption import (
+    SplitAdopter,
+    adopted_journal_data,
+)
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
     SqlGearMaintenanceDataRepository,
@@ -295,6 +299,9 @@ class JournalOutboxEventProcessor:
             connection, self.link_repo, journal_service
         )
         self.series_repo = SqlJournalSeriesRepository(connection)
+        self.split_adopter = SplitAdopter(
+            self.link_repo, self.series_repo, self.recurrence_tidier
+        )
         self.review_item_repo = SqlReviewItemRepository(connection)
         self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
             connection
@@ -643,9 +650,21 @@ class JournalOutboxEventProcessor:
                 return _skipped_as_merged(
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
+            if payload.split_adopted_from is not None:
+                return await self._create_instead_of_adopting(event)
             raise JournalOutboxEventProcessingError(
                 f"Journal {existing_journal_id} not found for update"
             )
+
+        # A split-off recurrence adopting this journal (see ``split_adoption``)
+        split_adoption = None
+        if payload.split_adopted_from is not None:
+            split_adoption = await self.split_adopter.begin(
+                journal=existing_journal,
+                calendar_id=UUID(calendar_id),
+                payload=payload,
+            )
+            journal_data = adopted_journal_data(journal_data, existing_journal)
 
         # ETag idempotency check — only skip when etag is non-null
         existing_link = await self._find_external_event_link(
@@ -881,6 +900,19 @@ class JournalOutboxEventProcessor:
         if not fields_changed:
             await self._invalidate_summary_for_journal(existing_journal_id)
 
+        if split_adoption is not None:
+            tidied = await self.split_adopter.finish(
+                split_adoption,
+                source=_provenance_for_source(payload.integration_source),
+                changed_by=payload.integration_source or "system",
+            )
+            if tidied is not None and tidied.errors:
+                # Retried whole: adoption and tidy are both idempotent.
+                raise JournalOutboxEventProcessingError(
+                    f"Re-planning the recurrence journal {existing_journal_id} "
+                    "left failed; failing for retry"
+                )
+
         logger.info(
             "Updated journal from inbound sync event",
             journal_id=saved_journal.id,
@@ -894,6 +926,31 @@ class JournalOutboxEventProcessor:
             "journal_id": saved_journal.id,
             "external_event_id": external_event_id,
         }
+
+    async def _create_instead_of_adopting(self, event: OutboxEvent) -> dict[str, Any]:
+        """Create the instance whose adoption target was deleted meanwhile.
+
+        The worker has already moved past this event, so failing it would lose
+        the occurrence for good; it is created as the worker would have sent
+        it had there been nothing to adopt.
+        """
+        event_data: dict[str, Any] = dict(event.event_data)
+        event_data.update(
+            existing_journal_id=None,
+            split_adopted_from=None,
+            sync_action="created",
+        )
+        logger.info(
+            "Adoption target gone, creating the instance instead",
+            external_event_id=event_data.get("external_event_id"),
+        )
+        return await self._process_journal_created(
+            OutboxEvent(
+                event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
+                event_data=event_data,
+                aggregate_id=0,
+            )
+        )
 
     async def _process_journal_conflicted(self, event: OutboxEvent) -> dict[str, Any]:
         """

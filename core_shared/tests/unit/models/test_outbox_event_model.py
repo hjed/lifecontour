@@ -194,3 +194,31 @@ class TestCreateJournalSyncEventRecurring:
         )
 
         assert event.event_data["series_recurring_event_id"] is None
+
+    def test_split_adopted_from_in_payload(self) -> None:
+        """An adopting update names the series of the recurrence it adopts from."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="new-1_20261016T012000Z",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="updated",
+            existing_journal_id=7,
+            recurring_event_id="new-1",
+            split_adopted_from="old-1",
+        )
+
+        assert event.event_data["split_adopted_from"] == "old-1"
+
+    def test_split_adopted_from_defaults_to_none(self) -> None:
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-2",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="updated",
+        )
+
+        assert event.event_data["split_adopted_from"] is None
