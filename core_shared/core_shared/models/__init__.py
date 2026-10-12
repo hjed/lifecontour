@@ -11,6 +11,7 @@ from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncStatus,
     JournalExternalEventLink,
 )
+from core_shared.models.journal_merged_alias import JournalMergedAlias
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ContactSyncEventData,
@@ -37,6 +38,7 @@ __all__ = [
     "SyncJobStatus",
     "SyncType",
     "JournalExternalEventLink",
+    "JournalMergedAlias",
     "ExternalEventLinkSyncCapability",
     "ExternalEventLinkSyncStatus",
     "ImmichAlbumSyncEventData",

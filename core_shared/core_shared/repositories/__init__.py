@@ -14,6 +14,11 @@ from core_shared.repositories.calendar_watch_repository import (
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from core_shared.repositories.merged_alias_repository import (
+    ExternalRecord,
+    MergedAlias,
+    MergedAliasRepository,
+)
 from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.repositories.unmatched_participant_repository import (
     UnmatchedParticipantRepository,
@@ -23,7 +28,10 @@ __all__ = [
     "ActiveCalendarChannel",
     "CalendarWatchRenewal",
     "CalendarWatchRepository",
+    "ExternalRecord",
     "IntegrationLinkRepository",
+    "MergedAlias",
+    "MergedAliasRepository",
     "SyncJobRepository",
     "UnmatchedParticipantRepository",
 ]
