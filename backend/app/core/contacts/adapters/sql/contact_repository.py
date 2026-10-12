@@ -1391,12 +1391,25 @@ class SqlContactRepository(ContactRepository):
     async def add_important_date(
         self, contact_id: int, date: ImportantDate
     ) -> ImportantDate:
-        """Add an important date to a contact."""
+        """Add an important date to a contact.
+
+        A custom type must belong to the contact's owner: the insert writes
+        nothing otherwise, and a foreign type reads as a missing one.
+        """
         query = text(
             """
             INSERT INTO contact_important_dates
             (contact_id, date_type, precision, year, month, day, custom_date_type_id)
-            VALUES (:contact_id, :date_type, :precision, :year, :month, :day, :custom_date_type_id)
+            SELECT :contact_id, :date_type, :precision, :year, :month, :day,
+                   CAST(:custom_date_type_id AS INTEGER)
+            WHERE CAST(:custom_date_type_id AS INTEGER) IS NULL
+               OR EXISTS (
+                   SELECT 1
+                   FROM custom_date_types t
+                   JOIN contacts c ON c.user_id = t.user_id
+                   WHERE t.id = CAST(:custom_date_type_id AS INTEGER)
+                     AND c.id = :contact_id
+               )
             RETURNING id, created_at, updated_at
         """
         )
@@ -1423,7 +1436,7 @@ class SqlContactRepository(ContactRepository):
 
         row = result.fetchone()
         if row is None:
-            raise RuntimeError("Failed to insert contact important date")
+            raise CustomDateTypeNotFoundError(date.custom_date_type_id)  # type: ignore[arg-type]
 
         date.id = row.id
         date.contact_id = contact_id
@@ -1439,15 +1452,29 @@ class SqlContactRepository(ContactRepository):
         same date. ``uq_contact_birthday`` is a partial unique index on
         ``contact_id``, so re-typing a *second* date as the birthday collides
         while editing the existing birthday does not.
+
+        A custom type must belong to the date's contact's owner; the update
+        writes nothing otherwise, and a foreign type reads as a missing one.
         """
         query = text(
             """
-            UPDATE contact_important_dates
+            UPDATE contact_important_dates d
             SET date_type = :date_type, precision = :precision,
                 year = :year, month = :month, day = :day,
-                custom_date_type_id = :custom_date_type_id, updated_at = NOW()
-            WHERE id = :id
-            RETURNING updated_at
+                custom_date_type_id = CAST(:custom_date_type_id AS INTEGER),
+                updated_at = NOW()
+            WHERE d.id = :id
+              AND (
+                  CAST(:custom_date_type_id AS INTEGER) IS NULL
+                  OR EXISTS (
+                      SELECT 1
+                      FROM custom_date_types t
+                      JOIN contacts c ON c.user_id = t.user_id
+                      WHERE t.id = CAST(:custom_date_type_id AS INTEGER)
+                        AND c.id = d.contact_id
+                  )
+              )
+            RETURNING d.updated_at
         """
         )
         try:
@@ -1473,7 +1500,13 @@ class SqlContactRepository(ContactRepository):
 
         row = result.fetchone()
         if row is None:
-            raise ImportantDateNotFoundError(date.id)  # type: ignore[arg-type]
+            exists = await self.conn.execute(
+                text("SELECT 1 FROM contact_important_dates WHERE id = :id"),
+                {"id": date.id},
+            )
+            if exists.first() is None:
+                raise ImportantDateNotFoundError(date.id)  # type: ignore[arg-type]
+            raise CustomDateTypeNotFoundError(date.custom_date_type_id)  # type: ignore[arg-type]
 
         date.updated_at = row.updated_at
         return date

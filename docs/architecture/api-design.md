@@ -1085,6 +1085,11 @@ DELETE /api/contacts/{contact_id}/important-dates/{date_id}
   field-at-a-time sequence passes through a state both layers reject, so the
   edit would be impossible to express rather than merely awkward. `PUT` rather
   than `PATCH` because the body is always the date's complete attributes.
+- **A custom type must be the contact owner's own.** `custom_date_type_id`
+  naming another user's type answers 404 `CUSTOM_DATE_TYPE_NOT_FOUND`, exactly
+  as a missing type does, here and on the whole-contact `POST` / `PUT`; nothing
+  is written. `/api/custom-date-types` lists, creates and deletes only the
+  session user's types.
 - **The path id wins over the body id.** `ImportantDateUpdateData` accepts an
   optional `id` so the request reads as a JSON:API resource, but the converter
   takes the id from the URL. A body id that disagreed with the path would

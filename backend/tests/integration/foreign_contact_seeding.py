@@ -40,6 +40,7 @@ from app.core.contacts.adapters.sql import (
     SqlContactRelationshipRepository,
     SqlContactRepository,
     SqlContactSummaryRepository,
+    SqlCustomDateTypeRepository,
     SqlTagRepository,
 )
 from app.core.history.adapters.sql.field_history_repository import (
@@ -71,6 +72,10 @@ OTHER_FORMER_NAME = "Dora Quince"
 OTHER_JOURNAL_TITLE = "Scrambled the north ridge"
 OTHER_TASK_TEXT = "Return the borrowed crampons"
 IMMICH_PERSON_ID = "person-theirs"
+# Their custom date types: one dates the contact, one is unused (so it can be
+# deleted in an owner replay).
+OTHER_DATE_TYPE_NAME = "Avalanche survival day"
+OTHER_UNUSED_DATE_TYPE_NAME = "Ridge first ascent"
 OTHER_TEXT = (
     OTHER_FIRST_NAME,
     OTHER_LAST_NAME,
@@ -83,6 +88,8 @@ OTHER_TEXT = (
     OTHER_JOURNAL_TITLE,
     OTHER_TASK_TEXT,
     IMMICH_PERSON_ID,
+    OTHER_DATE_TYPE_NAME,
+    OTHER_UNUSED_DATE_TYPE_NAME,
 )
 
 # The caller's own contact: the legitimate other half of a merge or a
@@ -106,6 +113,7 @@ UNCHANGED_ROWS: dict[str, TextClause] = {
     "addresses": text("SELECT to_jsonb(t) FROM contact_addresses t"),
     "notes": text("SELECT to_jsonb(t) FROM contact_notes t"),
     "important_dates": text("SELECT to_jsonb(t) FROM contact_important_dates t"),
+    "date_types": text("SELECT to_jsonb(t) FROM custom_date_types t"),
     "tag_assignments": text("SELECT to_jsonb(t) FROM contact_tags t"),
     "tags": text("SELECT to_jsonb(t) FROM tags t"),
     "relationships": text("SELECT to_jsonb(t) FROM contact_relationships t"),
@@ -133,6 +141,7 @@ BACKDATE_SEEDED_ROWS = tuple(
         "UPDATE contact_addresses SET updated_at = :then",
         "UPDATE contact_notes SET updated_at = :then",
         "UPDATE contact_important_dates SET updated_at = :then",
+        "UPDATE custom_date_types SET updated_at = :then",
         "UPDATE contact_relationships SET updated_at = :then",
         "UPDATE contact_summaries SET updated_at = :then",
         "UPDATE tags SET updated_at = :then",
@@ -147,6 +156,7 @@ EVERY_UPDATED_AT = text(
     UNION SELECT updated_at FROM contact_addresses
     UNION SELECT updated_at FROM contact_notes
     UNION SELECT updated_at FROM contact_important_dates
+    UNION SELECT updated_at FROM custom_date_types
     UNION SELECT updated_at FROM contact_relationships
     UNION SELECT updated_at FROM contact_summaries
     UNION SELECT updated_at FROM tags UNION SELECT updated_at FROM sync_metadata
@@ -166,6 +176,7 @@ _OWNED_TABLES = (
     text("UPDATE field_history SET user_id = :me WHERE user_id = :them"),
     text("UPDATE journals SET user_id = :me WHERE user_id = :them"),
     text("UPDATE tasks SET user_id = :me WHERE user_id = :them"),
+    text("UPDATE custom_date_types SET user_id = :me WHERE user_id = :them"),
 )
 
 
@@ -184,6 +195,9 @@ class ForeignContact:
     address_id: int
     note_id: int
     date_id: int
+    custom_date_id: int
+    date_type_id: int
+    unused_date_type_id: int
     tag_id: int
     unassigned_tag_id: int
     relationship_id: int
@@ -197,6 +211,11 @@ class ForeignContact:
             "address_id": str(self.address_id),
             "note_id": str(self.note_id),
             "date_id": str(self.date_id),
+            "custom_date_id": str(self.custom_date_id),
+            "date_type_id": str(self.date_type_id),
+            # The custom-date-type routes name their id ``type_id``; the
+            # unused type, so the owner's replay of a delete can succeed.
+            "type_id": str(self.unused_date_type_id),
             "tag_id": str(self.tag_id),
             "unassigned_tag_id": str(self.unassigned_tag_id),
             "relationship_id": str(self.relationship_id),
@@ -311,6 +330,24 @@ async def seed_foreign_contact(async_connection: AsyncConnection) -> ForeignCont
         ),
     )
 
+    date_types = SqlCustomDateTypeRepository(async_connection)
+    date_type = await date_types.create(OTHER_DATE_TYPE_NAME, user_id=OTHER_USER_ID)
+    unused_date_type = await date_types.create(
+        OTHER_UNUSED_DATE_TYPE_NAME, user_id=OTHER_USER_ID
+    )
+    assert date_type.id is not None and unused_date_type.id is not None
+    custom_date = await repo.add_important_date(
+        contact_id,
+        ImportantDate(
+            contact_id=contact_id,
+            date_type=ImportantDateType.CUSTOM,
+            precision=DatePrecision.DAY_MONTH,
+            month=8,
+            day=2,
+            custom_date_type_id=date_type.id,
+        ),
+    )
+
     tag_repo = SqlTagRepository(async_connection)
     tag_id = await _tag(tag_repo, TAG_NAME)
     unassigned_tag_id = await _tag(tag_repo, UNASSIGNED_TAG_NAME)
@@ -372,6 +409,7 @@ async def seed_foreign_contact(async_connection: AsyncConnection) -> ForeignCont
     assert address.id is not None
     assert note.id is not None
     assert important_date.id is not None
+    assert custom_date.id is not None
     assert relationship.id is not None
     return ForeignContact(
         contact_id=contact_id,
@@ -380,6 +418,9 @@ async def seed_foreign_contact(async_connection: AsyncConnection) -> ForeignCont
         address_id=address.id,
         note_id=note.id,
         date_id=important_date.id,
+        custom_date_id=custom_date.id,
+        date_type_id=date_type.id,
+        unused_date_type_id=unused_date_type.id,
         tag_id=tag_id,
         unassigned_tag_id=unassigned_tag_id,
         relationship_id=relationship.id,

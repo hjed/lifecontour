@@ -32,10 +32,19 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 import respx
+from core_shared.models.contacts.entities import ImportantDate
+from core_shared.models.contacts.important_date_types import (
+    DatePrecision,
+    ImportantDateType,
+)
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql import (
+    SqlContactRepository,
+    SqlCustomDateTypeRepository,
+)
 from app.main import create_app
 from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.foreign_contact_seeding import (
@@ -605,3 +614,259 @@ class TestOwnershipCoverageIsComplete:
 
         assert not stale_requests, f"no longer served: {sorted(stale_requests)}"
         assert not stale_exemptions, f"no longer served: {sorted(stale_exemptions)}"
+
+
+# Custom date types are owned too. Their one by-id route is keyed by the type
+# rather than a contact, so the guard above never sees it; ``{type_id}`` names
+# the foreign contact's *unused* type, so the owner's replay of the delete is
+# not refused as in use.
+DATE_TYPE_ROUTE = "/api/custom-date-types/{type_id}"
+
+CROSS_USER_DATE_TYPE_REQUESTS: tuple[CrossUserRequest, ...] = (
+    CrossUserRequest("DELETE", DATE_TYPE_ROUTE),
+)
+
+
+def _mounted_date_type_id_routes(app: Any) -> set[tuple[str, str]]:
+    """Every ``(method, path)`` under ``/api/custom-date-types`` naming a type."""
+    return {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        if path.startswith("/api/custom-date-types/") and "{type_id}" in path
+        for method in operations
+        if method.upper() not in {"HEAD", "OPTIONS"}
+    }
+
+
+@pytest.mark.integration
+class TestCustomDateTypeOwnershipIsEnforced:
+    """Another user's custom date type refuses, as a missing one does."""
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_DATE_TYPE_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_another_users_type_reads_as_an_absent_one(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.request(
+            request_spec.method, request_spec.path(foreign_contact)
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert_nothing_leaked(response.text)
+        assert await snapshot(async_connection) == before
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_DATE_TYPE_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_the_same_request_succeeds_for_the_owner(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        """Each refusal above is the ownership check, not a bad request."""
+        await hand_foreign_rows_to_caller(async_connection)
+
+        response = await integration_api_client.request(
+            request_spec.method, request_spec.path(foreign_contact)
+        )
+
+        assert response.is_success, response.text[:400]
+
+    async def test_their_types_are_not_listed(
+        self,
+        integration_api_client: AsyncClient,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        response = await integration_api_client.get("/api/custom-date-types")
+
+        assert response.status_code == 200, response.text[:400]
+        assert response.json()["data"] == []
+        assert_nothing_leaked(response.text)
+
+    def test_every_type_id_route_is_covered(self, test_settings: Any) -> None:
+        mounted = _mounted_date_type_id_routes(create_app(settings=test_settings))
+        tested = {(spec.method, spec.route) for spec in CROSS_USER_DATE_TYPE_REQUESTS}
+
+        assert mounted == tested, (
+            f"untested: {sorted(mounted - tested)}; "
+            f"no longer served: {sorted(tested - mounted)}"
+        )
+
+
+def _custom_date_attributes(type_id: int) -> dict[str, Any]:
+    return {
+        "date_type": "custom",
+        "precision": "day_month",
+        "month": 8,
+        "day": 2,
+        "custom_date_type_id": type_id,
+    }
+
+
+@dataclass(frozen=True)
+class DatedWith:
+    """A write that dates one of the caller's contacts with a custom type."""
+
+    name: str
+    method: str
+    path: str
+    body: dict[str, Any]
+
+
+def _writes_dating_with(
+    type_id: int, own_contact_id: int, own_date_id: int
+) -> list[DatedWith]:
+    """Every surface that stores a custom type on an important date."""
+    dated = {"attributes": _custom_date_attributes(type_id)}
+    return [
+        DatedWith(
+            "add a date",
+            "POST",
+            f"/api/contacts/{own_contact_id}/important-dates",
+            {"data": {"type": "contact_important_dates", **dated}},
+        ),
+        DatedWith(
+            "edit a date",
+            "PUT",
+            f"/api/contacts/{own_contact_id}/important-dates/{own_date_id}",
+            {
+                "data": {
+                    "type": "contact_important_dates",
+                    "id": str(own_date_id),
+                    **dated,
+                }
+            },
+        ),
+        DatedWith(
+            "save the whole contact",
+            "PUT",
+            f"/api/contacts/{own_contact_id}",
+            {
+                "data": {
+                    "type": "contacts",
+                    "id": str(own_contact_id),
+                    "attributes": {
+                        "first_name": OWN_FIRST_NAME,
+                        "important_dates": [dated],
+                    },
+                }
+            },
+        ),
+        DatedWith(
+            "create a contact",
+            "POST",
+            "/api/contacts",
+            {
+                "data": {
+                    "type": "contacts",
+                    "attributes": {
+                        "first_name": "Newcomer",
+                        "important_dates": [dated],
+                    },
+                }
+            },
+        ),
+    ]
+
+
+_WRITE_NAMES = [write.name for write in _writes_dating_with(0, 0, 0)]
+
+
+@pytest.fixture
+async def own_date_id(
+    async_connection: AsyncConnection, foreign_contact: ForeignContact
+) -> int:
+    """A date on the caller's own contact, seeded as long ago as the rest."""
+    saved = await SqlContactRepository(async_connection).add_important_date(
+        foreign_contact.own_contact_id,
+        ImportantDate(
+            contact_id=foreign_contact.own_contact_id,
+            date_type=ImportantDateType.FIRST_MET,
+            precision=DatePrecision.YEAR,
+            year=2015,
+        ),
+    )
+    assert saved.id is not None
+    await async_connection.execute(
+        text("UPDATE contact_important_dates SET updated_at = :then WHERE id = :id"),
+        {"then": SEEDED_LONG_AGO, "id": saved.id},
+    )
+    return saved.id
+
+
+def _write(
+    name: str, type_id: int, foreign_contact: ForeignContact, own_date_id: int
+) -> DatedWith:
+    writes = _writes_dating_with(type_id, foreign_contact.own_contact_id, own_date_id)
+    return next(write for write in writes if write.name == name)
+
+
+@pytest.mark.integration
+class TestAnImportantDateUsesOnlyYourCustomTypes:
+    """A date's custom type must belong to its contact's owner, on every surface."""
+
+    @pytest.mark.parametrize("write_name", _WRITE_NAMES)
+    async def test_their_type_is_not_found_and_nothing_is_written(
+        self,
+        write_name: str,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+        own_date_id: int,
+    ) -> None:
+        write = _write(
+            write_name, foreign_contact.date_type_id, foreign_contact, own_date_id
+        )
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.request(
+            write.method, write.path, json=write.body
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert response.json()["errors"][0]["code"] == "CUSTOM_DATE_TYPE_NOT_FOUND"
+        assert_nothing_leaked(response.text)
+        assert await snapshot(async_connection) == before
+
+    @pytest.mark.parametrize("write_name", _WRITE_NAMES)
+    async def test_your_own_type_is_stored(
+        self,
+        write_name: str,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+        own_date_id: int,
+    ) -> None:
+        """The same write with the caller's own type goes through."""
+        own_type = await SqlCustomDateTypeRepository(async_connection).create(
+            "Rope day", user_id=TEST_USER_ID
+        )
+        assert own_type.id is not None
+        write = _write(write_name, own_type.id, foreign_contact, own_date_id)
+
+        response = await integration_api_client.request(
+            write.method, write.path, json=write.body
+        )
+
+        assert response.is_success, response.text[:400]
+        stored = await async_connection.execute(
+            text(
+                "SELECT count(*) FROM contact_important_dates"
+                " WHERE custom_date_type_id = :type_id"
+            ),
+            {"type_id": own_type.id},
+        )
+        assert stored.scalar_one() == 1

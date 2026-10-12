@@ -95,6 +95,14 @@ domain/
   a task's contacts and a journal's people all belong to the acting user; another user's contact is
   `ContactNotFoundError` and nothing is written. `ContactHistoryService` proves the contact is the
   reader's before either history read, so neither REST nor MCP can read a foreign contact's history
+- **Custom date types are owned.** A type (`CustomDateType.user_id`) belongs to one user and
+  names are unique per owner (case-sensitive). Every `CustomDateTypeRepository` method takes the
+  acting user and filters in SQL, so another user's type is absent from the list and
+  `CustomDateTypeNotFoundError` (404) on delete. An important date may carry only a type its
+  contact's owner owns: `add_important_date` / `update_important_date` check it in the write SQL
+  and write nothing otherwise, so a foreign type is `CUSTOM_DATE_TYPE_NOT_FOUND` on every surface
+  that stores a date (add, edit, whole-contact create and update). Reads that join a date to its
+  type's name stay keyed by the date, which that rule keeps within one owner
 - **Business Rules**:
   - Contact name validation (first_name required)
   - Email uniqueness validation: the service checks within the owner's contacts; the
