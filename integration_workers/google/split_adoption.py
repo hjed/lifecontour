@@ -92,17 +92,28 @@ def _event_zone(name: str | None) -> ZoneInfo | None:
 
 
 def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:
+    """The event's local start day, or ``None`` when it has none we can read.
+
+    Runs before the sync loop's per-event error boundary, so a malformed
+    start must not raise: the event is simply not a split half, and the loop
+    rejects it on its own.
+    """
     if event.start is None:
         return None
-    if event.start.date_time:
-        moment = datetime.fromisoformat(event.start.date_time)
-        if moment.tzinfo is None:
-            # A bare local time is in the event's own zone (``timeZone``), not
-            # the worker's.
-            moment = moment.replace(tzinfo=_event_zone(event.start.time_zone) or zone)
-        return moment.astimezone(zone).date()
-    if event.start.date:
-        return date.fromisoformat(event.start.date)
+    try:
+        if event.start.date_time:
+            moment = datetime.fromisoformat(event.start.date_time)
+            if moment.tzinfo is None:
+                # A bare local time is in the event's own zone (``timeZone``),
+                # not the worker's.
+                moment = moment.replace(
+                    tzinfo=_event_zone(event.start.time_zone) or zone
+                )
+            return moment.astimezone(zone).date()
+        if event.start.date:
+            return date.fromisoformat(event.start.date)
+    except ValueError:
+        return None
     return None
 
 

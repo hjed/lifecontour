@@ -280,3 +280,31 @@ class TestPairSplitInstances:
         links = dict([_link("multiday", 6, began, end=NOW + timedelta(days=1))])
 
         assert pair_split_instances(events, links, SYDNEY, NOW).targets
+
+    def test_an_unparseable_start_pairs_nothing_and_raises_nothing(self) -> None:
+        """A malformed event is the sync loop's to reject, one event at a time;
+        the pairing pass runs before that boundary, so it must not throw."""
+        events = [
+            _cancelled("20261016T011000Z"),
+            GoogleEvent.from_api_response(
+                {
+                    "id": f"{NEW}_bad",
+                    "status": "confirmed",
+                    "summary": "Pilates",
+                    "start": {"dateTime": "not-a-time"},
+                    "recurringEventId": NEW,
+                }
+            ),
+            GoogleEvent.from_api_response(
+                {
+                    "id": f"{NEW}_bad_date",
+                    "status": "confirmed",
+                    "summary": "Pilates",
+                    "start": {"date": "16/10/2026"},
+                    "recurringEventId": NEW,
+                }
+            ),
+        ]
+        links = dict([_link("20261016T011000Z", 1, OLD_START)])
+
+        assert not pair_split_instances(events, links, SYDNEY, NOW).targets

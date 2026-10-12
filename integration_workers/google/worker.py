@@ -4638,7 +4638,6 @@ async def sync_calendar_events(
                         ):
                             deduped_journal_id = split_target.journal_id
                             action = InboundSyncAction.UPDATE_JOURNAL
-                            adopted_old_event_ids.add(split_target.old_event_id)
                             metrics["events_split_adopted"] = (
                                 metrics.get("events_split_adopted", 0) + 1
                             )
@@ -4875,6 +4874,10 @@ async def sync_calendar_events(
                         )
                         session.add(outbox_event)
                         metrics["events_processed"] += 1
+                        # Only an adoption actually sent makes the old
+                        # instance's cancellation redundant.
+                        if split_target is not None and split_adopted_from:
+                            adopted_old_event_ids.add(split_target.old_event_id)
 
                     except Exception as e:  # noqa: BLE001
                         logger.error(

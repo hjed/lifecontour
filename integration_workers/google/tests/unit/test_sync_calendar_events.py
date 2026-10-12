@@ -1211,6 +1211,54 @@ class TestSyncRecurringSeries:
         assert result.get("events_split_adopted", 0) == 0
 
     @pytest.mark.asyncio
+    async def test_a_replacement_the_transformer_rejects_leaves_the_cancellation(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """No adoption was sent, so the old journal must still be cancelled."""
+        from datetime import UTC, datetime, timedelta
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        split_links = MagicMock()
+        split_links.fetchall.return_value = [self._old_instance_row()]
+        new_link = MagicMock()
+        new_link.fetchone.return_value = None
+        old_link = MagicMock()
+        old_link.fetchone.return_value = MagicMock(
+            journal_id=42,
+            external_version='"etag-old"',
+            sync_capability="bidirectional",
+            sync_status="synced",
+            recurring_event_id="old-1",
+            external_identity=None,
+        )
+        old_end = MagicMock()
+        old_end.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            split_links,
+            new_link,
+            old_link,
+            old_end,
+            MagicMock(),
+        ]
+
+        with patch(
+            "event_transformer.GoogleEventTransformer.transform_event",
+            return_value=None,
+        ):
+            result = await self._run_sync_with_events(mock_ctx, self._split_batch())
+
+        assert result["status"] == "success"
+        added = [call.args[0] for call in mock_session.add.call_args_list]
+        assert [e.event_type for e in added] == ["journal_event.cancelled"]
+        assert added[0].event_data["existing_journal_id"] == 42
+
+    @pytest.mark.asyncio
     async def test_an_unpaired_batch_costs_no_extra_query(
         self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
