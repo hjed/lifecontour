@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
+from core_shared.merged_alias_keys import merged_alias_key
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     EventDateRange,
@@ -17,9 +18,16 @@ from core_shared.models.journals.exceptions import (
     GearUsageDataValidationError,
     JournalMergeConflictError,
 )
+from core_shared.repositories.merged_alias_repository import (
+    ExternalRecord,
+    MergedAliasRepository,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.external_record_repository import (
+    SqlExternalRecordRepository,
+)
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
     SyncMetadataRepository,
 )
@@ -113,6 +121,44 @@ def _merged_gear_usage_item(
             )
             if source_wins
             else target
+        )
+
+
+async def _drop_event_links_to(
+    journal_id: int, records: list[ExternalRecord], transaction: AsyncConnection
+) -> None:
+    """Remove the journal's calendar links that name an aliased record.
+
+    A record is the survivor's live or as an alias, never both. A link the
+    registry does not list — Strava's synthetic-calendar ``strava:<id>`` —
+    can move across while the record's canonical link is dropped as a rival;
+    left in place, it would route the absorbed record's next sync to the
+    survivor and apply it there.
+    """
+    aliased = {(r.integration_source, r.external_id) for r in records}
+    result = await transaction.execute(
+        text("""
+            SELECT l.calendar_id, l.external_event_id,
+                   COALESCE(
+                       c.integration_source,
+                       CASE WHEN c.google_calendar_id IS NOT NULL THEN 'google' END
+                   ) AS integration_source
+            FROM journal_external_event_links l
+            JOIN calendars c ON c.id = l.calendar_id
+            WHERE l.journal_id = :journal_id AND l.external_event_id IS NOT NULL
+        """),
+        {"journal_id": journal_id},
+    )
+    for row in result.fetchall():
+        key = merged_alias_key(row.integration_source, row.external_event_id)
+        if key is None or (key.integration_source, key.external_id) not in aliased:
+            continue
+        await transaction.execute(
+            text("""
+                DELETE FROM journal_external_event_links
+                WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+            """),
+            {"journal_id": journal_id, "calendar_id": row.calendar_id},
         )
 
 
@@ -247,6 +293,15 @@ class JournalMergeService:
             changed_by=changed_by,
         )
 
+        # What the source was imported from, read before anything moves: the
+        # moves below drop whatever link the target cannot take over, and the
+        # records they drop are the ones step 9 keeps as merged aliases. Read
+        # under the locks step 0 took, so a merge into the source that commits
+        # first is in it.
+        absorbed_records = await SqlExternalRecordRepository(
+            transaction
+        ).external_records_for_journal(source_id)
+
         # Determine default base survivor based on manual journal precedence
         default_survivor, default_loser = await self._determine_precedence(
             target_id, source_id, target, source_journal, transaction
@@ -301,12 +356,19 @@ class JournalMergeService:
             transaction,
         )
 
-        # 9. Resolve related Review Items
+        # 9. Keep every absorbed record the target did not take over as a
+        # merged alias, so the next sync recognises it instead of importing it
+        # again as a new journal.
+        await self._keep_absorbed_records_as_aliases(
+            target_id, source_id, target.user_id, absorbed_records, transaction
+        )
+
+        # 10. Resolve related Review Items
         await self._resolve_review_items(
             target_id, source_id, target.user_id, transaction
         )
 
-        # 10. Publish Events & Cleanup Source
+        # 11. Publish Events & Cleanup Source
         await self._publish_events_and_cleanup(
             target_id,
             source_id,
@@ -579,19 +641,78 @@ class JournalMergeService:
                     WHERE journal_id = :source_id
                     RETURNING calendar_id, external_event_id, external_version,
                             sync_capability, sync_status, external_identity,
-                            created_at, updated_at
+                            recurring_event_id, created_at, updated_at
                 )
                 INSERT INTO journal_external_event_links
                     (journal_id, calendar_id, external_event_id, external_version,
                      sync_capability, sync_status, external_identity,
-                     created_at, updated_at)
+                     recurring_event_id, created_at, updated_at)
                 SELECT :target_id, calendar_id, external_event_id, external_version,
                        sync_capability, sync_status, external_identity,
-                       created_at, updated_at
+                       recurring_event_id, created_at, updated_at
                 FROM removed
                 ON CONFLICT (journal_id, calendar_id) DO NOTHING
             """),
             {"target_id": target_id, "source_id": source_id},
+        )
+
+    @staticmethod
+    async def _keep_absorbed_records_as_aliases(
+        target_id: int,
+        source_id: int,
+        owner_id: str,
+        absorbed_records: list[ExternalRecord],
+        transaction: AsyncConnection,
+    ) -> None:
+        """Alias each of the source's inbound records the target does not hold.
+
+        A record is lost whenever its link could not move — one link per
+        calendar, a replace merge's rival activity — and the reason does not
+        matter here: comparing what the source held with what the target now
+        holds catches every store the registry knows, including ones added
+        after this was written. The source's own aliases come along too, so a
+        merged journal merged again keeps answering for everything it absorbed.
+        """
+        alias_repo = MergedAliasRepository(transaction)
+        await alias_repo.repoint_aliases(
+            source_journal_id=source_id, target_journal_id=target_id
+        )
+
+        target_records = await SqlExternalRecordRepository(
+            transaction
+        ).external_records_for_journal(target_id)
+        live = {
+            (record.integration_source, record.external_id) for record in target_records
+        }
+        # An identity the target still holds live already resolves to it, and
+        # live wins: copied onto an alias as well, it would have another
+        # calendar's copy of that event skipped as absorbed instead of linked.
+        live_identities = {
+            record.external_identity
+            for record in target_records
+            if record.external_identity is not None
+        }
+        lost = [
+            dataclasses.replace(record, external_identity=None)
+            if record.external_identity in live_identities
+            else record
+            for record in absorbed_records
+            if (record.integration_source, record.external_id) not in live
+        ]
+        if not lost:
+            return
+        # Serialise with a sync about to create a journal for one of these:
+        # it either committed first, or reads the aliases once this commits.
+        await alias_repo.lock_records(user_id=owner_id, records=lost)
+        await alias_repo.record_aliases(
+            journal_id=target_id, user_id=owner_id, records=lost
+        )
+        await _drop_event_links_to(target_id, lost, transaction)
+        logger.info(
+            "Merge kept absorbed records as aliases",
+            target_id=target_id,
+            source_id=source_id,
+            aliases=[(r.integration_source, r.external_id) for r in lost],
         )
 
     async def _move_series_memberships(

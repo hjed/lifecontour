@@ -1,10 +1,15 @@
 """The integration-source registry drives every link query and source name."""
 
 import pytest
+from core_shared.merged_alias_keys import merged_alias_key
 
+from app.core.integrations.adapters.sql.external_record_repository import (
+    external_records_sql,
+)
 from app.core.integrations.link_sources import (
     CONTACT_LINK_SOURCES,
     JOURNAL_LINK_SOURCES,
+    AliasPolicy,
     contact_source_names,
     journal_source_names,
     resolve_contact_source,
@@ -51,3 +56,63 @@ def test_displayed_immich_shared_link_resolves_to_the_album_store() -> None:
     """`immich_shared` is how a shared album link is displayed; it is an alias."""
     assert resolve_journal_source("immich_shared") == "immich_album"
     assert "immich_shared" in journal_source_names()
+
+
+# --- Merged aliases ---------------------------------------------------------
+#
+# A merge keeps an absorbed *inbound* record as an alias of the survivor, so
+# the next sync does not import it again. Which stores hold inbound records is
+# declared on each store; these tests fix the current answers and make a new
+# store's answer something someone has to write down.
+
+# Every store, as (source, position in its stores tuple), that holds records
+# imported from the source rather than pushed to it.
+EXPECTED_INBOUND_STORES = {
+    ("strava", 0),  # sync_metadata
+    ("strava", 1),  # journal_fitness_data
+    ("google_calendar", 0),
+    ("immich_album", 0),
+    ("snipeit_maintenance", 1),  # the import link on the synthetic calendar
+}
+
+
+def test_inbound_stores_are_exactly_the_imported_records() -> None:
+    """Snipe-IT assets, check-outs and pushed maintenance are outbound.
+
+    The source's own deletion undoes those upstream, so aliasing them would
+    keep a record that no longer exists; and an asset belongs to no single
+    journal, so an alias of one would swallow unrelated check-outs.
+    """
+    inbound = {
+        (name, position)
+        for name, source in JOURNAL_LINK_SOURCES.items()
+        for position, store in enumerate(source.stores)
+        if store.alias_policy is AliasPolicy.INBOUND
+    }
+    assert inbound == EXPECTED_INBOUND_STORES
+
+
+@pytest.mark.parametrize(
+    "source",
+    sorted(
+        {
+            name
+            for name, source in JOURNAL_LINK_SOURCES.items()
+            if any(s.alias_policy is AliasPolicy.INBOUND for s in source.stores)
+        }
+    ),
+)
+def test_every_inbound_source_has_an_alias_key(source: str) -> None:
+    """A worker naming the source must reach the alias the merge recorded."""
+    key = merged_alias_key(source, "some-id")
+    assert key is not None
+    assert key.integration_source == source
+
+
+def test_the_external_record_snapshot_reads_only_inbound_stores() -> None:
+    sql = external_records_sql()
+    branches = sql.split(" UNION ALL ")
+    assert len(branches) == len(EXPECTED_INBOUND_STORES)
+    for branch in branches:
+        assert ":journal_id" in branch
+    assert "snipeit_checkout" not in sql
