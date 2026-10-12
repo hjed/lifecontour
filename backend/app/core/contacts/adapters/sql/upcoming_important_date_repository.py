@@ -22,10 +22,8 @@ one; and precision is ``resolve_occurrence``'s authority, checked once there. A
 second rule here that had to agree with that one is the defect shape ITER18-004
 Phase 9 rejected for date types, and it would be no better applied to precision.
 
-**Not scoped by user**, because ``contacts`` has no owner column in this schema
-and every other contacts repository is likewise unscoped — the divergence
-ITER18-004 Phase 10 recorded for the importance read, carried forward rather
-than solved for one query.
+**Scoped to the acting user** in SQL, by the join on ``contacts.user_id``:
+another user's contact's dates are never candidates.
 """
 
 from __future__ import annotations

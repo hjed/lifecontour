@@ -1140,6 +1140,24 @@ class TestContactToolsIntegration:
                 get1_after_update["relationships"][0]["relationship_type"] == "friend"
             )
 
+            # An asymmetric type set from the to-contact is stored inverted
+            await call_mcp(
+                "update_contact_relationship",
+                {
+                    "request": {
+                        "contact_id": c2.id,
+                        "relationship_id": rel_id,
+                        "relationship_type": "child",
+                    }
+                },
+            )
+            get1_after_inverse = await call_mcp(
+                "get_contact_relationships", {"contact_id": c1.id}
+            )
+            assert (
+                get1_after_inverse["relationships"][0]["relationship_type"] == "parent"
+            )
+
             # 5. Remove relationship
             await call_mcp(
                 "remove_contact_relationship",
