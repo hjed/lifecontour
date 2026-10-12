@@ -76,6 +76,17 @@ class InboundSyncClassifier:
         Returns:
             The action to take for this event
         """
+        # A whole-series deletion fans out over the series' *linked* instances
+        # only, never the journal that absorbed an event by merging, so it
+        # still applies when the master id is also an absorbed one-off that
+        # was later made recurring.
+        if (
+            google_event.status == "cancelled"
+            and existing_link is None
+            and has_series_links
+        ):
+            return InboundSyncAction.CANCEL_SERIES
+
         # An event a merge absorbed is the merged journal's, whatever it now
         # says: creating it again, or cancelling the journal over it, would
         # undo the merge. Its own link would make it an ordinary event again.

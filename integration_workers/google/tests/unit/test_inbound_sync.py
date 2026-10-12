@@ -352,6 +352,26 @@ class TestInboundSyncClassifierMergedAliases:
 
         assert result == InboundSyncAction.SKIP_MERGED
 
+    def test_a_deleted_series_whose_master_was_absorbed_still_fans_out(
+        self, classifier: InboundSyncClassifier
+    ) -> None:
+        """An absorbed one-off made recurring keeps its id as the master id.
+
+        Its instances arrived as new events and are linked, so deleting the
+        series upstream has to cancel them. The fan-out reaches only linked
+        instances, never the journal that absorbed the original event.
+        """
+        master = GoogleEvent(id="dm1q", status="cancelled", etag='"e"')  # type: ignore[call-arg]
+
+        result = classifier.classify_inbound_event(
+            google_event=master,
+            existing_link=None,
+            has_series_links=True,
+            is_merged_alias=True,
+        )
+
+        assert result == InboundSyncAction.CANCEL_SERIES
+
     def test_an_event_with_its_own_link_is_classified_as_usual(
         self, classifier: InboundSyncClassifier
     ) -> None:
