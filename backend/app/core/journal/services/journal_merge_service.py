@@ -670,14 +670,24 @@ class JournalMergeService:
             source_journal_id=source_id, target_journal_id=target_id
         )
 
+        target_records = await SqlExternalRecordRepository(
+            transaction
+        ).external_records_for_journal(target_id)
         live = {
-            (record.integration_source, record.external_id)
-            for record in await SqlExternalRecordRepository(
-                transaction
-            ).external_records_for_journal(target_id)
+            (record.integration_source, record.external_id) for record in target_records
+        }
+        # An identity the target still holds live already resolves to it, and
+        # live wins: copied onto an alias as well, it would have another
+        # calendar's copy of that event skipped as absorbed instead of linked.
+        live_identities = {
+            record.external_identity
+            for record in target_records
+            if record.external_identity is not None
         }
         lost = [
-            record
+            dataclasses.replace(record, external_identity=None)
+            if record.external_identity in live_identities
+            else record
             for record in absorbed_records
             if (record.integration_source, record.external_id) not in live
         ]

@@ -237,6 +237,49 @@ class TestMergeKeepsAbsorbedRecordsAsAliases:
         )
         assert [row[0] for row in live.fetchall()] == ["63goti_20260904T021000Z"]
 
+    async def test_an_alias_does_not_claim_an_identity_the_survivor_holds_live(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        """One event in two calendars: one copy moves, the other is aliased.
+
+        The moved copy keeps the event's identity live on the survivor, so the
+        alias must not carry it too: a third calendar's copy, found only by
+        identity, has to resolve to the live link and be linked, not be
+        skipped as an absorbed record.
+        """
+        conn = clean_database
+        work = await _calendar(
+            conn, integration_source="google", google_calendar_id="work@example.com"
+        )
+        personal = await _calendar(
+            conn, integration_source="google", google_calendar_id="me@example.com"
+        )
+        target = await _journal(conn, "Physio")
+        source = await _journal(conn, "Physio")
+        await _event_link(
+            conn, journal_id=target, calendar_id=work, external_event_id="w-own"
+        )
+        await _event_link(
+            conn,
+            journal_id=source,
+            calendar_id=work,
+            external_event_id="w-copy",
+            external_identity="token-physio",
+        )
+        await _event_link(
+            conn,
+            journal_id=source,
+            calendar_id=personal,
+            external_event_id="p-copy",
+            external_identity="token-physio",
+        )
+
+        await _merge_service(conn).merge_journals(target, source, conn)
+
+        assert await _aliases(conn) == [
+            (target, "google_calendar", "w-copy", work, None, None)
+        ]
+
     async def test_a_link_in_another_calendar_moves_live_with_its_series_id(
         self, clean_database: AsyncConnection
     ) -> None:
