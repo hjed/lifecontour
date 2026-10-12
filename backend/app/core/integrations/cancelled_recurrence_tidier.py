@@ -14,7 +14,9 @@ What counts as "added to":
 - a task anchored to the journal, which the delete guard refuses.
 
 Each deletion runs in its own SAVEPOINT, so one that fails takes back only
-its own writes and the rest of the recurrence is still tidied.
+its own writes and the rest of the recurrence is still tidied. The recurrence
+is locked for the rest of the transaction before it is read, so concurrent
+cancellations of one recurrence are planned one after the other.
 """
 
 from dataclasses import dataclass
@@ -94,6 +96,7 @@ class CancelledRecurrenceTidier:
         (a whole series cancelled, or a backfill), every continuation is.
         Call it after the cancellations have been marked on the links.
         """
+        await self.link_repo.lock_recurrence(calendar_id, recurring_event_id)
         linked = await self.link_repo.find_journals_for_series(
             calendar_id=calendar_id, recurring_event_id=recurring_event_id
         )

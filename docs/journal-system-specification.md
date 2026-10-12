@@ -310,8 +310,13 @@ it:
 - a task anchored to it;
 - a change in its history made in the app or through MCP.
 
-A journal merge alone doesn't count: it records no history of its own, and
-what it carries over (tags, contacts, tasks, notes) is already covered.
+A journal merge counts when it changed the journal's title or notes: the merge
+records those in the history as the merger's change. A merge that only folded
+in another synced copy of the event changes neither, so it doesn't count.
+
+The recurrence is locked for the rest of the transaction before it is read,
+so cancellations of adjacent occurrences processed at once are planned one
+after the other rather than each reading the other as still live.
 
 Known limits: history is projected asynchronously, so an edit made seconds
 before a cancellation can be missed, and protection is checked when the

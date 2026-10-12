@@ -13,12 +13,25 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from core_shared.models.history import Provenance
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.services.history_service import HistoryService
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessor,
 )
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
+)
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.events.outbox_repository import OutboxRepository
 from tests.integration.core.integrations.journal_sync_seeding import (
     MASTER_ID,
     USER_ID,
@@ -374,6 +387,107 @@ class TestLegacyInstanceCancellation:
         )
 
         for week in (3, 2):
+            await _cancel(processor, calendar_id, journals, week)
+
+        assert await _surviving_weeks(async_connection, journals) == [1, 2]
+
+
+async def _merge_as_mcp(
+    connection: AsyncConnection, *, target_id: int, source_id: int
+) -> None:
+    """Merge over MCP, then project the outbox into history as the consumer does."""
+    publisher = OutboxEventPublisher(connection)
+    merge_service = JournalMergeService(
+        journal_repo=SqlJournalRepository(connection),
+        event_publisher=publisher,
+        task_merge_service=TaskJournalMergeService(
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
+            event_publisher=publisher,
+        ),
+    )
+    await merge_service.merge_journals(
+        target_id=target_id,
+        source_id=source_id,
+        transaction=connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    history_repo = SqlFieldHistoryRepository(connection)
+    projector = HistoryService()
+    for event in await OutboxRepository(connection).get_unrelayed_events(limit=1000):
+        for entry in projector.project_event(event):
+            await history_repo.record_change(entry)
+
+
+async def _note_on_the_day_of(connection: AsyncConnection, journal_id: int) -> int:
+    note_id: int = (
+        await connection.execute(
+            text("""
+                INSERT INTO journals
+                    (user_id, title, content,
+                     event_date_range_start, event_date_range_end)
+                SELECT user_id, title, 'Bring a mat',
+                       event_date_range_start, event_date_range_end
+                FROM journals WHERE id = :id
+                RETURNING id
+            """),
+            {"id": journal_id},
+        )
+    ).scalar_one()
+    return note_id
+
+
+@pytest.mark.integration
+class TestMergedContinuations:
+    async def test_notes_a_merge_folded_in_keep_a_continuation(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """A merge records the notes it folds in as the merger's change."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals = await _seed_weekly(processor, calendar_id, weeks=3)
+        note_id = await _note_on_the_day_of(async_connection, journals[3])
+        await _merge_as_mcp(async_connection, target_id=journals[3], source_id=note_id)
+
+        for week in (2, 3):
+            await _cancel(processor, calendar_id, journals, week)
+
+        assert await _surviving_weeks(async_connection, journals) == [1, 2, 3]
+
+    async def test_merging_two_synced_copies_does_not_keep_a_continuation(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The Pilates clean-up: a merge that added nothing protects nothing."""
+        calendar_id = await create_calendar(async_connection)
+        other_calendar = await create_calendar(async_connection, name="Other")
+        processor = build_processor(async_connection)
+        journals = await _seed_weekly(processor, calendar_id, weeks=3)
+        copy = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=other_calendar,
+                external_event_id="copy-of-week-3",
+                start=datetime.now(UTC) + timedelta(days=60),
+            )
+        )
+        await async_connection.execute(
+            text("""
+                UPDATE journals SET event_date_range_start = j.event_date_range_start,
+                                    event_date_range_end = j.event_date_range_end,
+                                    content = j.content
+                FROM journals j WHERE j.id = :week3 AND journals.id = :copy
+            """),
+            {"week3": journals[3], "copy": copy["journal_id"]},
+        )
+        await async_connection.execute(
+            text("DELETE FROM journal_external_event_links WHERE journal_id = :copy"),
+            {"copy": copy["journal_id"]},
+        )
+        await _merge_as_mcp(
+            async_connection, target_id=journals[3], source_id=copy["journal_id"]
+        )
+
+        for week in (2, 3):
             await _cancel(processor, calendar_id, journals, week)
 
         assert await _surviving_weeks(async_connection, journals) == [1, 2]

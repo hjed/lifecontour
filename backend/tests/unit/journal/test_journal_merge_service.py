@@ -829,6 +829,83 @@ def _fitness_update_params(mock_transaction) -> dict[str, Any]:
     return params
 
 
+class TestWhatAMergeAnnounces:
+    """The merge's JournalUpdated says what changed, and who changed it.
+
+    The history projection turns only ``(old, new)`` pairs into history rows,
+    and stamps them with the event's provenance. A merge that folds a user's
+    notes into the survivor must leave that trace: it is what tells a calendar
+    sync tidying a cancelled recurrence that a person added to the journal.
+    """
+
+    @staticmethod
+    def _published_changes(mock_event_publisher: AsyncMock) -> dict[str, Any]:
+        [event] = [
+            call.args[0]
+            for call in mock_event_publisher.publish.call_args_list
+            if call.args[0].event_type == "JournalUpdated"
+        ]
+        return dict(event.event_data)
+
+    @pytest.mark.asyncio
+    async def test_merged_content_is_announced_as_a_pair(
+        self, merge_service, mock_journal_repo, mock_transaction, mock_event_publisher
+    ):
+        target = create_test_journal(id=1, title="Pilates", content="")
+        source = create_test_journal(id=2, title="Pilates", content="Bring a mat")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        await merge_service.merge_journals(
+            1, 2, mock_transaction, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        data = self._published_changes(mock_event_publisher)
+        assert data["changed_fields"]["content"] == ("", "Bring a mat")
+        assert data["source"] == Provenance.MCP.value
+        assert data["changed_by"] == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_title_override_is_announced_as_a_pair(
+        self, merge_service, mock_journal_repo, mock_transaction, mock_event_publisher
+    ):
+        target = create_test_journal(id=1, title="Pilates")
+        source = create_test_journal(id=2, title="Pilates class")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        await merge_service.merge_journals(
+            1, 2, mock_transaction, overrides={"title": "Pilates (studio 2)"}
+        )
+
+        data = self._published_changes(mock_event_publisher)
+        assert data["changed_fields"]["title"] == ("Pilates", "Pilates (studio 2)")
+
+    @pytest.mark.asyncio
+    async def test_a_merge_that_changed_nothing_records_no_field(
+        self, merge_service, mock_journal_repo, mock_transaction, mock_event_publisher
+    ):
+        """Merging two synced copies of one event adds nothing to the journal."""
+        target = create_test_journal(id=1, title="Pilates", content="")
+        source = create_test_journal(id=2, title="Pilates", content="")
+        mock_journal_repo.find_by_id.side_effect = lambda j_id: (
+            target if j_id == 1 else source
+        )
+        mock_journal_repo.save.return_value = target
+
+        await merge_service.merge_journals(
+            1, 2, mock_transaction, overrides={"title": "Pilates"}
+        )
+
+        data = self._published_changes(mock_event_publisher)
+        assert "title" not in data["changed_fields"]
+        assert "content" not in data["changed_fields"]
+
+
 class TestAdditiveFitnessMerge:
     """Additive mode treats two fitness rows as two parts of one outing."""
 
