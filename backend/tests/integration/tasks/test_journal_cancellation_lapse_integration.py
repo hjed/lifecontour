@@ -19,12 +19,12 @@ separately because no one of them is evidence for the others:
   editor's status to "Cancelled", which is a plain type-data edit and shares no
   code with the two above.
 
-The two sync routes converge on the same fallback for a journal a task is
-anchored to: the processor prefers to *delete* an untouched far-future
-instance, the Phase 1 delete guard refuses because deleting it would destroy a
-commitment, and the processor marks it cancelled instead. A task's due journal
-is future-dated by invariant, so that is the ordinary path rather than an edge
-of it.
+The two sync routes both leave a journal a task is anchored to in place,
+marked cancelled. A lone cancelled occurrence is the kept "next one" of its
+run anyway; a later one would be deleted, but the Phase 1 delete guard refuses
+because deleting it would destroy a commitment, so it is kept the same way. A
+task's due journal is future-dated by invariant, so that is the ordinary path
+rather than an edge of it.
 
 **Every journal a task is *due* in is ten days out**, well clear of any day
 boundary, which is the point: the date cause demonstrably cannot be what fired,

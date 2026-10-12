@@ -185,7 +185,9 @@ class JournalMergeService:
 
         ``source`` and ``changed_by`` say who is merging. They reach the **task**
         events step 0 publishes, so a merge performed in the browser and one
-        performed over MCP are distinguishable on the tasks they moved. Every
+        performed over MCP are distinguishable on the tasks they moved, and the
+        survivor's ``JournalUpdated``, so the title and notes a merge folded in
+        are recorded in its history as the merger's change. Every
         surface passes a real actor; the defaults exist because the alternative
         is a required argument on a method whose callers are three layers away
         from the question.
@@ -306,7 +308,13 @@ class JournalMergeService:
 
         # 10. Publish Events & Cleanup Source
         await self._publish_events_and_cleanup(
-            target_id, source_id, source_journal, changed_fields, transaction
+            target_id,
+            source_id,
+            source_journal,
+            changed_fields,
+            transaction,
+            provenance=source,
+            changed_by=changed_by,
         )
 
         logger.info(
@@ -401,15 +409,14 @@ class JournalMergeService:
         new_title: Any,
         changed_fields: dict[str, Any],
     ) -> None:
+        was = target.title
         if new_title:
             if target.title != new_title:
                 target.title = new_title
-                changed_fields["title"] = new_title
         else:
             if source.title and target.title and source.title != target.title:
                 if target.title != default_survivor.title:
                     target.title = default_survivor.title
-                    changed_fields["title"] = default_survivor.title
                 logger.debug(
                     "Merge title conflict resolved",
                     kept=target.title,
@@ -417,7 +424,8 @@ class JournalMergeService:
                 )
             elif source.title and not target.title:
                 target.title = source.title
-                changed_fields["title"] = source.title
+        if target.title != was:
+            changed_fields["title"] = (was, target.title)
 
     def _apply_date_range_override(
         self,
@@ -477,17 +485,17 @@ class JournalMergeService:
         new_content: Any,
         changed_fields: dict[str, Any],
     ) -> None:
+        was = target.content
         if new_content:
             if target.content != new_content:
                 target.content = new_content
-                changed_fields["content"] = new_content
         else:
             if source.content and target.content and source.content != target.content:
                 target.content = f"{target.content}\n\n---\n\n{source.content}"
-                changed_fields["content"] = target.content
             elif source.content and not target.content:
                 target.content = source.content
-                changed_fields["content"] = target.content
+        if target.content != was:
+            changed_fields["content"] = (was, target.content)
 
     async def _reparent_hierarchy(
         self, target_id: int, source_id: int, transaction: AsyncConnection
@@ -1178,17 +1186,19 @@ class JournalMergeService:
         source: Journal,
         changed_fields: dict[str, Any],
         transaction: AsyncConnection,
+        *,
+        provenance: Provenance,
+        changed_by: str,
     ) -> None:
-        if changed_fields:
-            await self.event_publisher.publish(
-                JournalUpdated(target_id, changed_fields, transaction=transaction)
+        await self.event_publisher.publish(
+            JournalUpdated(
+                target_id,
+                changed_fields or {"relationships_merged": True},
+                source=provenance,
+                changed_by=changed_by,
+                transaction=transaction,
             )
-        else:
-            await self.event_publisher.publish(
-                JournalUpdated(
-                    target_id, {"relationships_merged": True}, transaction=transaction
-                )
-            )
+        )
 
         await self.journal_repo.delete(source_id)
 

@@ -21,7 +21,6 @@ from core_shared.models.journals import (
     EventDateRange,
     FitnessData,
     Journal,
-    JournalHasAnchoredTasksError,
 )
 from core_shared.models.journals.event_state import EventState
 from core_shared.models.journals.exceptions import GearMaintenanceDataValidationError
@@ -54,7 +53,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.integrations.adapters.sql.journal_event_link_repository import (
-    SeriesLinkedJournal,
     SqlJournalEventLinkRepository,
 )
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
@@ -65,6 +63,9 @@ from app.core.integrations.adapters.sql.sync_metadata_repository import (
 )
 from app.core.integrations.adapters.sql.unmatched_participant_email_repository import (
     SqlUnmatchedParticipantEmailRepository,
+)
+from app.core.integrations.cancelled_recurrence_tidier import (
+    CancelledRecurrenceTidier,
 )
 from app.core.integrations.models.unmatched_participant import (
     UnmatchedParticipantEmail,
@@ -267,6 +268,9 @@ class JournalOutboxEventProcessor:
         self.contact_resolver = ContactResolver(connection)
         self.match_candidate_detector = match_candidate_detector
         self.link_repo = SqlJournalEventLinkRepository(connection)
+        self.recurrence_tidier = CancelledRecurrenceTidier(
+            connection, self.link_repo, journal_service
+        )
         self.series_repo = SqlJournalSeriesRepository(connection)
         self.review_item_repo = SqlReviewItemRepository(connection)
         self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
@@ -911,11 +915,11 @@ class JournalOutboxEventProcessor:
         """
         Process a journal_event.cancelled event.
 
-        Far-future instances of a recurring series are deleted outright when
-        untouched locally (unbounded series shouldn't leave stale journals
-        behind). Everything else keeps the cancellation-first approach per AC2:
-        the link is marked cancelled and the journal's event_state set to
-        'cancelled' without deleting the journal.
+        The link is marked cancelled, and the journal's event_state with it
+        once no calendar still holds the event. A recurring instance then has
+        the keep-next rule applied to its recurrence (see
+        ``cancelled_recurrence``): the first upcoming occurrence of a cancelled
+        run stays, and later ones the user hasn't added to are deleted.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
         payload = JournalStatusEventData.model_validate(event_data)
@@ -934,9 +938,11 @@ class JournalOutboxEventProcessor:
                 "reason": "no_existing_journal_id",
             }
 
-        # Recurring-instance deletion path: the payload's recurring id (new
-        # worker) or the backfilled link column (old payloads) marks the
-        # instance as part of a series.
+        # A recurring instance has the keep-next rule applied to its recurrence.
+        # The payload's recurring id (new worker) or the link column (old
+        # payloads) names it. The recurrence is locked before the mark below
+        # row-locks this link, so concurrent cancellations of one recurrence
+        # take their locks in the same order and cannot deadlock.
         linked = await self.link_repo.find_by_external_event(
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
@@ -944,32 +950,29 @@ class JournalOutboxEventProcessor:
         recurring_event_id = payload.recurring_event_id or (
             linked.recurring_event_id if linked else None
         )
-        if (
-            linked is not None
-            and recurring_event_id
-            and await self._should_delete_cancelled_instance(linked)
-        ):
-            # A task anchored to the instance refuses the deletion. Falling
-            # through to the marking below is the right answer and not a
-            # failure — it is what an instance the protection facts protect
-            # already gets, and failing here would retry the event forever over
-            # a state that is not going to change. The SAVEPOINT takes back the
-            # external links the attempt removed on its way.
-            deleted = True
-            try:
-                async with savepoint(self.connection):
-                    await self._delete_cancelled_instance(
-                        linked, integration_source=payload.integration_source
-                    )
-            except JournalHasAnchoredTasksError:
-                deleted = False
-                logger.info(
-                    "Cancelled instance kept: tasks are anchored to it",
-                    journal_id=existing_journal_id,
-                    external_event_id=external_event_id,
-                )
+        if linked is not None and recurring_event_id:
+            await self.link_repo.lock_recurrence(UUID(calendar_id), recurring_event_id)
 
-            if deleted:
+        await self._mark_journal_cancelled(
+            journal_id=existing_journal_id,
+            calendar_id=UUID(calendar_id),
+        )
+
+        if linked is not None and recurring_event_id:
+            outcome = await self.recurrence_tidier.tidy(
+                calendar_id=UUID(calendar_id),
+                recurring_event_id=recurring_event_id,
+                source=_provenance_for_source(payload.integration_source),
+                changed_by=payload.integration_source or "system",
+                cancelled_journal_id=existing_journal_id,
+            )
+            if outcome.errors:
+                # Retried whole: the mark and the tidy are both idempotent.
+                raise JournalOutboxEventProcessingError(
+                    f"Tidying recurrence {recurring_event_id} after cancelling "
+                    f"journal {existing_journal_id} failed; failing for retry"
+                )
+            if existing_journal_id in outcome.deleted:
                 return {
                     "status": "success",
                     "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
@@ -977,11 +980,6 @@ class JournalOutboxEventProcessor:
                     "external_event_id": external_event_id,
                     "action": "deleted",
                 }
-
-        await self._mark_journal_cancelled(
-            journal_id=existing_journal_id,
-            calendar_id=UUID(calendar_id),
-        )
 
         logger.info(
             "Processed journal cancellation",
@@ -1004,61 +1002,35 @@ class JournalOutboxEventProcessor:
         Process a journal_event.series_cancelled event.
 
         Emitted when a whole recurring series is deleted upstream (Google
-        reports a single cancelled event carrying the master id). Fans out
-        over every journal linked to the series: far-future untouched
-        instances are deleted, near/current ones are marked cancelled, and
-        already-finished ones are left alone. One failing journal doesn't
-        poison the rest.
+        reports a single cancelled event carrying the master id). Every
+        journal linked to the series is marked cancelled except those already
+        finished, then the keep-next rule deletes every continuation, keeping
+        the earliest upcoming occurrence. One failing journal doesn't poison
+        the rest.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
         payload = JournalSeriesCancelledEventData.model_validate(event_data)
         calendar_id = UUID(payload.calendar_id)
         now = datetime.now(UTC)
 
+        # Locked before any link is marked: see _process_journal_cancelled.
+        await self.link_repo.lock_recurrence(calendar_id, payload.recurring_event_id)
         linked_journals = await self.link_repo.find_journals_for_series(
             calendar_id=calendar_id,
             recurring_event_id=payload.recurring_event_id,
         )
 
-        deleted = 0
         cancelled = 0
         skipped_past = 0
         errors = 0
         for linked in linked_journals:
+            # Already happened — mirrors the worker's past-event skip.
+            # Falls back to the start when the end date is missing.
+            range_end = linked.event_date_range_end or linked.event_date_range_start
+            if range_end is not None and range_end < now - _SERIES_DELETION_BUFFER:
+                skipped_past += 1
+                continue
             try:
-                # Already happened — mirrors the worker's past-event skip.
-                # Falls back to the start when the end date is missing.
-                range_end = linked.event_date_range_end or linked.event_date_range_start
-                if range_end is not None and range_end < now - _SERIES_DELETION_BUFFER:
-                    skipped_past += 1
-                    continue
-                # SAVEPOINT per item so a failure mid-item (e.g. after the
-                # link deletion but before the journal delete) rolls back
-                # cleanly and the loop continues with the rest.
-                async with savepoint(self.connection):
-                    if await self._should_delete_cancelled_instance(linked):
-                        await self._delete_cancelled_instance(
-                            linked, integration_source=payload.integration_source
-                        )
-                        deleted += 1
-                    else:
-                        await self._mark_journal_cancelled(
-                            journal_id=linked.journal_id,
-                            calendar_id=calendar_id,
-                        )
-                        cancelled += 1
-            except JournalHasAnchoredTasksError:
-                # A far-future instance is exactly the profile of a task's due
-                # journal, and a user's commitment outranks a sync tidy-up. The
-                # instance is marked cancelled instead — the same outcome as a
-                # journal the deletion heuristics protect, and the very escape
-                # hatch the delete guard steers users toward. The savepoint
-                # rolled the attempt back, so its external links are intact.
-                logger.info(
-                    "Series-cancelled instance kept: tasks are anchored to it",
-                    journal_id=linked.journal_id,
-                    recurring_event_id=payload.recurring_event_id,
-                )
                 async with savepoint(self.connection):
                     await self._mark_journal_cancelled(
                         journal_id=linked.journal_id,
@@ -1072,6 +1044,16 @@ class JournalOutboxEventProcessor:
                     journal_id=linked.journal_id,
                     recurring_event_id=payload.recurring_event_id,
                 )
+
+        outcome = await self.recurrence_tidier.tidy(
+            calendar_id=calendar_id,
+            recurring_event_id=payload.recurring_event_id,
+            source=_provenance_for_source(payload.integration_source),
+            changed_by=payload.integration_source or "system",
+        )
+        deleted = len(outcome.deleted)
+        cancelled -= deleted
+        errors += outcome.errors
 
         logger.info(
             "Processed series cancellation",
@@ -1102,65 +1084,6 @@ class JournalOutboxEventProcessor:
             "skipped_past": skipped_past,
             "errors": errors,
         }
-
-    async def _should_delete_cancelled_instance(
-        self, linked: SeriesLinkedJournal
-    ) -> bool:
-        """Whether a cancelled recurring instance should be deleted outright.
-
-        Only instances starting more than a day ahead qualify, and any local
-        additions (edits after the last sync, children, tags, type data,
-        routes, or non-invitee contact links) protect the journal — it falls
-        back to mark-cancelled.
-
-        A link already marked cancelled keeps its earlier keep decision:
-        _mark_journal_cancelled bumps the link's updated_at, erasing the
-        edit-protection signal, so re-evaluating on event redelivery (or a
-        repeated upstream cancellation) could delete a journal that was
-        protected the first time.
-        """
-        if linked.link_sync_status == ExternalEventLinkSyncStatus.CANCELLED.value:
-            return False
-        # A de-duplicated event is one journal several calendars link to.
-        # Deleting it because one calendar dropped the instance would take
-        # the other calendars' links with it (ON DELETE CASCADE) and lose an
-        # event they still hold.
-        if await self._has_other_live_links(linked.journal_id, linked.calendar_id):
-            return False
-        if linked.event_date_range_start is None:
-            return False
-        if linked.event_date_range_start <= datetime.now(UTC) + _SERIES_DELETION_BUFFER:
-            return False
-        if linked.link_updated_at is None or linked.journal_updated_at is None:
-            return False
-        if linked.journal_updated_at > linked.link_updated_at:
-            return False
-        facts = await self.link_repo.get_deletion_protection_facts(linked.journal_id)
-        return not facts.is_protected
-
-    async def _delete_cancelled_instance(
-        self,
-        linked: SeriesLinkedJournal,
-        integration_source: str | None,
-    ) -> None:
-        """Delete a far-future recurring instance whose series was cancelled.
-
-        The external event links are removed first so the JournalDeleted event
-        carries no external identifiers — the upstream event is already gone,
-        and an outbound deletion attempt would only fail.
-        """
-        await self.link_repo.delete_links_for_journal(linked.journal_id)
-        await self.journal_service.delete_journal(
-            linked.journal_id,
-            self.connection,
-            changed_by=integration_source or "system",
-            source=_provenance_for_source(integration_source),
-        )
-        logger.info(
-            "Deleted far-future recurring instance from cancelled series",
-            journal_id=linked.journal_id,
-            external_event_id=linked.external_event_id,
-        )
 
     async def _invalidate_summary_for_journal(self, journal_id: int) -> None:
         """Mark the journal's days stale, for a change that publishes nothing.
@@ -1241,11 +1164,9 @@ class JournalOutboxEventProcessor:
         - ``event_state`` is what ``find_cancelled_journal_ids`` matches on, so
           a drifted write would un-lapse every task whose due journal was
           cancelled, silently.
-        - ``sync_status`` is what ``_should_delete_cancelled_instance`` checks
-          first — a link already ``cancelled`` keeps its earlier keep decision,
-          because this method bumps ``updated_at`` and erases the
-          edit-protection signal. A drifted write would let a redelivered
-          cancellation delete a journal that was protected on the first pass.
+        - ``sync_status`` is what the keep-next rule reads to tell a cancelled
+          occurrence from a live one, so a drifted write would end every
+          cancelled run early and leave its continuations behind.
 
         The ``'synced'`` writes elsewhere in this processor are still literals;
         converting those is a tidy-up of its own and no cancellation decision
@@ -1300,29 +1221,6 @@ class JournalOutboxEventProcessor:
         # dropping it (**W18**), so the day's prose is wrong until the summary
         # is regenerated — and this write publishes nothing.
         await self._invalidate_summary_for_journal(journal_id)
-
-    async def _has_other_live_links(self, journal_id: int, calendar_id: UUID) -> bool:
-        """Whether a calendar *other than this one* still holds the event.
-
-        Asked before the cancelled link has been marked, so this one is
-        excluded explicitly rather than by its status.
-        """
-        result = await self.connection.execute(
-            text("""
-                SELECT 1
-                FROM journal_external_event_links
-                WHERE journal_id = :journal_id
-                  AND calendar_id <> :calendar_id
-                  AND sync_status <> :cancelled
-                LIMIT 1
-            """),
-            {
-                "journal_id": journal_id,
-                "calendar_id": calendar_id,
-                "cancelled": ExternalEventLinkSyncStatus.CANCELLED.value,
-            },
-        )
-        return result.fetchone() is not None
 
     async def _has_live_links(self, journal_id: int) -> bool:
         """Whether any calendar still holds this event.

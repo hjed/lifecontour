@@ -1,9 +1,10 @@
 """Integration tests for recurring-series sync in JournalOutboxEventProcessor.
 
 Covers series auto-linking on create, recurring-id backfill on update,
-whole-series cancellation fan-out (delete far-future, cancel near, skip past),
-local-edit protection, and the external-event-id prefix fallback for links
-synced before the recurring id was recorded.
+whole-series cancellation fan-out (keep the next occurrence, delete the rest,
+skip past), what protects a continuation, and the external-event-id prefix
+fallback for links synced before the recurring id was recorded. The keep-next
+rule itself is covered in ``test_cancelled_recurrence_keep_next``.
 
 The harness that builds the processor and its outbox payloads lives in
 ``journal_sync_seeding``, because the task-cancellation tests drive the same
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessingError,
+    JournalOutboxEventProcessor,
 )
 from app.core.journal.adapters.sql.journal_series_repository import (
     SqlJournalSeriesRepository,
@@ -38,6 +40,37 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     sync_event,
 )
 from tests.integration.tasks.task_seeding import create_task
+
+
+async def _cancelled_predecessor(
+    processor: JournalOutboxEventProcessor, calendar_id: str
+) -> int:
+    """An earlier occurrence, already cancelled: the run's kept "next one".
+
+    The keep-next rule keeps the first upcoming occurrence of a cancelled run
+    whatever it holds, so a test about what protects a *continuation* needs one
+    in front of it.
+    """
+    external_event_id = f"{MASTER_ID}_predecessor"
+    created = await processor.process_event(
+        sync_event(
+            "journal_event.created",
+            calendar_id=calendar_id,
+            external_event_id=external_event_id,
+            start=datetime.now(UTC) + timedelta(days=3),
+            recurring_event_id=MASTER_ID,
+        )
+    )
+    await processor.process_event(
+        sync_event(
+            "journal_event.cancelled",
+            calendar_id=calendar_id,
+            external_event_id=external_event_id,
+            existing_journal_id=created["journal_id"],
+            recurring_event_id=MASTER_ID,
+        )
+    )
+    return int(created["journal_id"])
 
 
 @pytest.mark.integration
@@ -180,8 +213,9 @@ class TestSplitRecurrence:
             series_cancelled_event(calendar_id, master_id=self.SPLIT_ID)
         )
 
-        assert result["deleted"] == 1
-        assert not await journal_exists(async_connection, after["journal_id"])
+        # The split's only occurrence is its kept "next one".
+        assert result["cancelled"] == 1
+        assert await event_state(async_connection, after["journal_id"]) == "cancelled"
         assert await journal_exists(async_connection, before["journal_id"])
         assert await event_state(async_connection, before["journal_id"]) != (
             "cancelled"
@@ -308,60 +342,33 @@ class TestSeriesCancelledFanOut:
         assert await journal_exists(async_connection, journals["past"])
         assert await event_state(async_connection, journals["past"]) != "cancelled"
 
-    async def test_edited_future_journal_preserved_as_cancelled(
-        self, async_connection: AsyncConnection
-    ) -> None:
-        calendar_id = await create_calendar(async_connection)
-        processor = build_processor(async_connection)
-
-        created = await processor.process_event(
-            sync_event(
-                "journal_event.created",
-                calendar_id=calendar_id,
-                external_event_id=f"{MASTER_ID}_edited",
-                recurring_event_id=MASTER_ID,
-            )
-        )
-        journal_id = created["journal_id"]
-
-        # Local edit after the sync: journal updated_at newer than the link's.
-        await async_connection.execute(
-            text(
-                "UPDATE journals SET content = 'my notes', updated_at = :ts"
-                " WHERE id = :id"
-            ),
-            {"ts": datetime.now(UTC) + timedelta(seconds=30), "id": journal_id},
-        )
-
-        result = await processor.process_event(series_cancelled_event(calendar_id))
-
-        assert result["deleted"] == 0
-        assert result["cancelled"] == 1
-        assert await journal_exists(async_connection, journal_id)
-        assert await event_state(async_connection, journal_id) == "cancelled"
-
     async def test_prefix_fallback_matches_unbackfilled_links(
         self, async_connection: AsyncConnection
     ) -> None:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        now = datetime.now(UTC)
 
-        # Link synced before the series feature: no recurring id stored, but
+        # Links synced before the series feature: no recurring id stored, but
         # the Google instance id embeds the master id as a prefix.
-        created = await processor.process_event(
-            sync_event(
-                "journal_event.created",
-                calendar_id=calendar_id,
-                external_event_id=f"{MASTER_ID}_20260901T090000Z",
+        journal_ids = []
+        for day, instance in ((7, "20260901T090000Z"), (14, "20260908T090000Z")):
+            created = await processor.process_event(
+                sync_event(
+                    "journal_event.created",
+                    calendar_id=calendar_id,
+                    external_event_id=f"{MASTER_ID}_{instance}",
+                    start=now + timedelta(days=day),
+                )
             )
-        )
-        journal_id = created["journal_id"]
-        assert await link_recurring_id(async_connection, journal_id) is None
+            journal_ids.append(created["journal_id"])
+        assert await link_recurring_id(async_connection, journal_ids[0]) is None
 
         result = await processor.process_event(series_cancelled_event(calendar_id))
 
         assert result["deleted"] == 1
-        assert not await journal_exists(async_connection, journal_id)
+        assert await event_state(async_connection, journal_ids[0]) == "cancelled"
+        assert not await journal_exists(async_connection, journal_ids[1])
 
     async def test_no_links_is_noop_success(
         self, async_connection: AsyncConnection
@@ -380,11 +387,12 @@ class TestSeriesCancelledFanOut:
 
 @pytest.mark.integration
 class TestRecurringInstanceCancellation:
-    async def test_cancelled_future_instance_is_deleted(
+    async def test_cancelled_continuation_is_deleted(
         self, async_connection: AsyncConnection
     ) -> None:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
         external_event_id = f"{MASTER_ID}_instance1"
 
         created = await processor.process_event(
@@ -415,6 +423,7 @@ class TestRecurringInstanceCancellation:
     ) -> None:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
         external_event_id = f"{MASTER_ID}_instance2"
 
         created = await processor.process_event(
@@ -470,6 +479,7 @@ class TestRecurringInstanceCancellation:
         """
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
         external_event_id = f"{MASTER_ID}_anchored_instance"
 
         created = await processor.process_event(
@@ -526,6 +536,7 @@ class TestSeriesCancelledWithAnchoredTasks:
         """
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
 
         created = await processor.process_event(
             sync_event(
@@ -546,7 +557,7 @@ class TestSeriesCancelledWithAnchoredTasks:
         result = await processor.process_event(series_cancelled_event(calendar_id))
 
         assert result["deleted"] == 0
-        assert result["cancelled"] == 1
+        assert result["cancelled"] == 2
         assert await journal_exists(async_connection, journal_id)
         assert await event_state(async_connection, journal_id) == "cancelled"
         # The task is untouched — cancelling a journal changes no task links.
@@ -608,6 +619,7 @@ class TestSeriesCancelledPerItemSavepoints:
         SAVEPOINT restores them; other items still process."""
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
 
         journals: dict[str, int] = {}
         for key in ("fails", "succeeds"):
@@ -634,7 +646,7 @@ class TestSeriesCancelledPerItemSavepoints:
                 "delete_journal",
                 new=failing_delete,
             ),
-            pytest.raises(JournalOutboxEventProcessingError, match="1 of 2"),
+            pytest.raises(JournalOutboxEventProcessingError, match="1 of 3"),
         ):
             await processor.process_event(series_cancelled_event(calendar_id))
 
@@ -730,8 +742,10 @@ class TestPrefixFallbackScoping:
 
         result = await processor.process_event(series_cancelled_event(calendar_id))
 
-        assert result["deleted"] == 1
-        assert not await journal_exists(async_connection, legacy["journal_id"])
+        # Only the legacy link matched: it is the series' kept occurrence.
+        assert result["cancelled"] == 1
+        assert result["deleted"] == 0
+        assert await event_state(async_connection, legacy["journal_id"]) == "cancelled"
         assert await journal_exists(async_connection, successor_form["journal_id"])
         assert (
             await event_state(async_connection, successor_form["journal_id"])
@@ -748,6 +762,7 @@ class TestDeletionGuardUserData:
         """A user-attached GPS route protects a far-future instance."""
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
 
         created = await processor.process_event(
             sync_event(
@@ -769,7 +784,7 @@ class TestDeletionGuardUserData:
         result = await processor.process_event(series_cancelled_event(calendar_id))
 
         assert result["deleted"] == 0
-        assert result["cancelled"] == 1
+        assert result["cancelled"] == 2
         assert await journal_exists(async_connection, journal_id)
         assert await event_state(async_connection, journal_id) == "cancelled"
 
@@ -779,6 +794,7 @@ class TestDeletionGuardUserData:
         """User-added type data (e.g. mood) protects a far-future instance."""
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
+        await _cancelled_predecessor(processor, calendar_id)
 
         created = await processor.process_event(
             sync_event(
@@ -800,50 +816,6 @@ class TestDeletionGuardUserData:
         result = await processor.process_event(series_cancelled_event(calendar_id))
 
         assert result["deleted"] == 0
-        assert result["cancelled"] == 1
-        assert await journal_exists(async_connection, journal_id)
-        assert await event_state(async_connection, journal_id) == "cancelled"
-
-
-@pytest.mark.integration
-class TestStickyCancellationOnRedelivery:
-    async def test_edited_journal_survives_repeated_series_cancellation(
-        self, async_connection: AsyncConnection
-    ) -> None:
-        """Marking a journal cancelled bumps the link timestamp and erases the
-        edit signal; a redelivered/repeated series_cancelled event must not
-        delete the previously-protected journal."""
-        calendar_id = await create_calendar(async_connection)
-        processor = build_processor(async_connection)
-
-        created = await processor.process_event(
-            sync_event(
-                "journal_event.created",
-                calendar_id=calendar_id,
-                external_event_id=f"{MASTER_ID}_sticky",
-                recurring_event_id=MASTER_ID,
-            )
-        )
-        journal_id = created["journal_id"]
-
-        # Local edit -> protected on the first pass.
-        await async_connection.execute(
-            text(
-                "UPDATE journals SET content = 'my notes', updated_at = :ts"
-                " WHERE id = :id"
-            ),
-            {"ts": datetime.now(UTC) + timedelta(seconds=30), "id": journal_id},
-        )
-
-        first = await processor.process_event(series_cancelled_event(calendar_id))
-        assert first["cancelled"] == 1
-        assert first["deleted"] == 0
-
-        # Redelivery / repeated upstream cancellation: the link timestamp was
-        # bumped by the first pass, so the edit signal is gone — the sticky
-        # cancelled status must protect the journal instead.
-        second = await processor.process_event(series_cancelled_event(calendar_id))
-
-        assert second["deleted"] == 0
+        assert result["cancelled"] == 2
         assert await journal_exists(async_connection, journal_id)
         assert await event_state(async_connection, journal_id) == "cancelled"

@@ -285,6 +285,43 @@ drop out of any series only the source belonged to.
 > instance of S's recurrence that syncs in afterwards joins D as a separate
 > journal, even on a day D already has one. It can be merged individually.
 
+#### Cancelled recurrences
+
+Google never says "this recurrence now ends". A recurrence that is truncated
+or deleted arrives as one cancellation per upcoming occurrence (or, for a
+deleted series, one cancelled master), in whatever order the sync delivers
+them. Each cancellation marks its occurrence cancelled, then applies the
+**keep-next rule** to the whole recurrence on that calendar
+(`cancelled_recurrence.py`, `CancelledRecurrenceTidier`):
+
+- Within each unbroken run of cancelled, not-yet-started occurrences, the
+  **first** stays, marked cancelled, so the user sees the next session is off.
+- Every later occurrence of the run is **deleted**, with its review items.
+- A live occurrence ends a run. Occurrences that have started are never deleted.
+
+The result does not depend on arrival order: a far-future cancellation that
+arrives first is deleted once the cancellations in front of it join its run.
+
+A continuation is **kept**, still marked cancelled, when the user has added to
+it:
+
+- children, tags, manual contacts, type data or a route;
+- another calendar that still holds the event;
+- a task anchored to it;
+- a change in its history made in the app or through MCP.
+
+A journal merge counts when it changed the journal's title or notes: the merge
+records those in the history as the merger's change. A merge that only folded
+in another synced copy of the event changes neither, so it doesn't count.
+
+The recurrence is locked for the rest of the transaction before it is read,
+so cancellations of adjacent occurrences processed at once are planned one
+after the other rather than each reading the other as still live.
+
+Known limits: history is projected asynchronously, so an edit made seconds
+before a cancellation can be missed, and protection is checked when the
+cancellation arrives rather than again later.
+
 ## Type-Specific Data Models
 
 ### Calendar Info (EVENT type)

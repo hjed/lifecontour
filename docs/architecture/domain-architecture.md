@@ -905,11 +905,12 @@ converge on the same write:
 - **Calendar sync, one instance** — `journal_event.cancelled`.
 - **Calendar sync, a whole series** — the `journal_event.series_cancelled` fan-out.
 
-Both sync routes prefer to *delete* an untouched far-future instance and fall back to
-`JournalOutboxEventProcessor._mark_journal_cancelled` when the
-[delete guard](#the-journal-delete-guard) refuses — which for a task's due journal is the ordinary
-path rather than an edge of it: a due journal is future-dated by invariant, so it is always a
-deletion candidate and always anchored.
+Both sync routes mark the instance cancelled with
+`JournalOutboxEventProcessor._mark_journal_cancelled`, then apply the keep-next rule to its
+recurrence (see the specification's *Cancelled recurrences*): later occurrences of a cancelled run
+are deleted unless the [delete guard](#the-journal-delete-guard) refuses — which for a task's due
+journal is the ordinary path rather than an edge of it: a due journal is future-dated by invariant,
+so it is always anchored, and it stays marked cancelled.
 
 That makes the write and the read **one contract**, and both ends bind `EventState.CANCELLED.value`
 rather than typing the string. A literal that drifted on the write side would leave every task whose
@@ -1396,8 +1397,8 @@ reported as a task conflict. The savepoint is load-bearing rather than defensive
 poisons its transaction, so without it PostgreSQL would refuse the re-read and the caller would get an
 aborted transaction instead of an explanation.
 
-`JournalOutboxEventProcessor` catches the error when a cancelled calendar series would delete a
-far-future instance — exactly the profile of a task's due journal — and marks the instance cancelled
+`CancelledRecurrenceTidier` catches the error when a cancelled calendar recurrence would delete an
+upcoming occurrence — exactly the profile of a task's due journal — and leaves it marked cancelled
 instead. Cancellation is the escape hatch the guard steers users toward, and a user's commitment outranks
 a sync tidy-up.
 
