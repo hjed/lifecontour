@@ -938,14 +938,11 @@ class JournalOutboxEventProcessor:
                 "reason": "no_existing_journal_id",
             }
 
-        await self._mark_journal_cancelled(
-            journal_id=existing_journal_id,
-            calendar_id=UUID(calendar_id),
-        )
-
-        # A recurring instance: apply the keep-next rule to its recurrence. The
-        # payload's recurring id (new worker) or the link column (old payloads)
-        # names it.
+        # A recurring instance has the keep-next rule applied to its recurrence.
+        # The payload's recurring id (new worker) or the link column (old
+        # payloads) names it. The recurrence is locked before the mark below
+        # row-locks this link, so concurrent cancellations of one recurrence
+        # take their locks in the same order and cannot deadlock.
         linked = await self.link_repo.find_by_external_event(
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
@@ -953,6 +950,14 @@ class JournalOutboxEventProcessor:
         recurring_event_id = payload.recurring_event_id or (
             linked.recurring_event_id if linked else None
         )
+        if linked is not None and recurring_event_id:
+            await self.link_repo.lock_recurrence(UUID(calendar_id), recurring_event_id)
+
+        await self._mark_journal_cancelled(
+            journal_id=existing_journal_id,
+            calendar_id=UUID(calendar_id),
+        )
+
         if linked is not None and recurring_event_id:
             outcome = await self.recurrence_tidier.tidy(
                 calendar_id=UUID(calendar_id),
@@ -1008,6 +1013,8 @@ class JournalOutboxEventProcessor:
         calendar_id = UUID(payload.calendar_id)
         now = datetime.now(UTC)
 
+        # Locked before any link is marked: see _process_journal_cancelled.
+        await self.link_repo.lock_recurrence(calendar_id, payload.recurring_event_id)
         linked_journals = await self.link_repo.find_journals_for_series(
             calendar_id=calendar_id,
             recurring_event_id=payload.recurring_event_id,

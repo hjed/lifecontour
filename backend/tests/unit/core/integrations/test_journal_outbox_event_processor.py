@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import call as mock_call
 from uuid import UUID, uuid4
 
 import pytest
@@ -2892,6 +2893,58 @@ class TestSeriesCancelledFanOutRobustness(_SeriesProcessorTestBase):
         assert result["cancelled"] == 0
         mock_journal_service.delete_journal.assert_not_called()
         mock_connection.execute.assert_not_called()
+
+
+class TestCancellationsLockTheRecurrenceFirst(_SeriesProcessorTestBase):
+    """The recurrence is locked before the handler writes anything.
+
+    Marking an occurrence cancelled row-locks its link. Were the recurrence
+    lock taken only afterwards, two handlers cancelling adjacent occurrences
+    could each hold their own link while waiting for the lock the other holds
+    - the one with the lock blocks on the other's link when it deletes or
+    backfills it - and PostgreSQL would abort one as a deadlock.
+    """
+
+    @staticmethod
+    def _order(processor: JournalOutboxEventProcessor, mock_connection: AsyncMock):
+        calls = MagicMock()
+        calls.attach_mock(_mock(processor.link_repo).lock_recurrence, "lock")
+        calls.attach_mock(mock_connection.execute, "write")
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_an_instance_cancellation_locks_before_marking(
+        self, processor: JournalOutboxEventProcessor, mock_connection: AsyncMock
+    ) -> None:
+        _mock(
+            processor.link_repo
+        ).find_by_external_event.return_value = _make_linked_journal()
+        calls = self._order(processor, mock_connection)
+
+        await processor.process_event(
+            _make_outbox_event(
+                event_type="journal_event.cancelled",
+                sync_action="cancelled",
+                existing_journal_id=42,
+                recurring_event_id="master-1",
+            )
+        )
+
+        assert [c[0] for c in calls.mock_calls][:2] == ["lock", "write"]
+        assert calls.mock_calls[0] == mock_call.lock(UUID(CALENDAR_ID), "master-1")
+
+    @pytest.mark.asyncio
+    async def test_a_series_cancellation_locks_before_marking(
+        self, processor: JournalOutboxEventProcessor, mock_connection: AsyncMock
+    ) -> None:
+        _mock(processor.link_repo).find_journals_for_series.return_value = [
+            _make_linked_journal(journal_id=1, days_until_start=10),
+        ]
+        calls = self._order(processor, mock_connection)
+
+        await processor.process_event(_make_series_cancelled_event())
+
+        assert [c[0] for c in calls.mock_calls][:2] == ["lock", "write"]
 
 
 class TestSeriesCancelledFanOutSavepoints(_SeriesProcessorTestBase):

@@ -246,10 +246,12 @@ class SqlJournalEventLinkRepository:
     async def lock_recurrence(self, calendar_id: UUID, recurring_event_id: str) -> None:
         """Serialise work on one recurrence's cancellations until commit.
 
-        Each cancellation marks its own occurrence before planning the
-        recurrence, so two of them for adjacent occurrences, processed at once,
-        would each read the other as live and both keep their own. Holding this
-        lock while reading makes the second wait for the first's mark.
+        Take it before writing any of the recurrence's rows. Two cancellations
+        of adjacent occurrences processed at once would otherwise each read
+        the other as live and both keep their own; and a handler that had
+        already row-locked its own link before waiting here could deadlock
+        with the holder, which deletes or backfills that link. Re-entrant
+        within a transaction, so taking it again later is harmless.
         """
         await self.conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
