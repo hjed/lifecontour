@@ -444,6 +444,50 @@ class TestOutboxEventProcessor:
         mock_contact_service.update_contact.assert_not_called()
         mock_sync_metadata_repo.upsert.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_a_tag_created_by_contact_created_belongs_to_the_event_owner(
+        self,
+        processor: OutboxEventProcessor,
+        contact_created_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_tag_repo: AsyncMock,
+    ):
+        contact_created_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+        mock_contact_service.get_contact_by_email.return_value = None
+        mock_contact_service.create_contact.return_value = Contact(
+            user_id=SYNC_OWNER, id=123, first_name="John"
+        )
+        mock_tag_repo.save.return_value = Tag(
+            id=7, name=TagName("VIP"), user_id=SYNC_OWNER
+        )
+
+        await processor.process_event(contact_created_event)
+
+        mock_tag_repo.save.assert_awaited_once()
+        assert mock_tag_repo.save.await_args.kwargs == {"user_id": SYNC_OWNER}
+
+    @pytest.mark.asyncio
+    async def test_a_tag_created_by_contact_updated_belongs_to_the_event_owner(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_link_repo: AsyncMock,
+        mock_tag_repo: AsyncMock,
+    ):
+        contact_updated_event.event_data["contact_data"]["tags"] = [{"name": "VIP"}]
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service, mock_link_repo, {}
+        )
+        mock_tag_repo.save.return_value = Tag(
+            id=7, name=TagName("VIP"), user_id=SYNC_OWNER
+        )
+
+        await processor.process_event(contact_updated_event)
+
+        mock_tag_repo.save.assert_awaited_once()
+        assert mock_tag_repo.save.await_args.kwargs == {"user_id": SYNC_OWNER}
+
     def _setup_contact_and_reference_mocks(
         self,
         mock_contact_service: AsyncMock,
@@ -995,6 +1039,7 @@ class TestOutboxEventProcessor:
             contact_data={"first_name": "Test"},
             existing_reference_data=None,
             existing_contact_tags=[],
+            user_id=SYNC_OWNER,
         )
         assert result is None
 
@@ -1013,6 +1058,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": [{"name": "incoming"}]},
             existing_reference_data='{"synced_tags": ["old_incoming"]}',
             existing_contact_tags=[Tag(id=2, name=TagName("local"))],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1039,6 +1085,7 @@ class TestOutboxEventProcessor:
                 Tag(id=2, name=TagName("local")),
                 Tag(id=3, name=TagName("removed_incoming")),
             ],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1058,8 +1105,8 @@ class TestOutboxEventProcessor:
         # Distinct ids per save, like the real DB's serial primary key
         next_id = iter([99, 100])
 
-        def mock_save(tag: Tag) -> Tag:
-            return Tag(id=next(next_id), name=tag.name)
+        def mock_save(tag: Tag, *, user_id: str) -> Tag:
+            return Tag(id=next(next_id), name=tag.name, user_id=user_id)
 
         mock_tag_repo.save.side_effect = mock_save
 
@@ -1067,6 +1114,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": [{"name": "missing1"}, {"name": "missing2"}]},
             existing_reference_data=None,
             existing_contact_tags=[],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1101,6 +1149,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": [{"name": "incoming"}]},
             existing_reference_data=legacy_ref_data,
             existing_contact_tags=existing_tags,
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1127,6 +1176,7 @@ class TestOutboxEventProcessor:
                 Tag(id=2, name=TagName("local_tag1")),
                 Tag(id=3, name=TagName("synced_tag1")),
             ],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1155,6 +1205,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": [{"name": "Scouts"}, {"name": "scouts"}]},
             existing_reference_data=None,
             existing_contact_tags=[],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1178,6 +1229,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": [{"name": "scouts"}]},
             existing_reference_data='{"synced_tags": ["scouts"]}',
             existing_contact_tags=[scouts],
+            user_id=SYNC_OWNER,
         )
 
         assert result is not None
@@ -1196,6 +1248,7 @@ class TestOutboxEventProcessor:
             contact_data={"tags": []},
             existing_reference_data='{"synced_tags": ["scouts"]}',
             existing_contact_tags=[Tag(id=1, name=TagName("Scouts"))],
+            user_id=SYNC_OWNER,
         )
 
         assert result == []

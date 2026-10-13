@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.adapters.sql import SqlContactEventPublisher, SqlTagRepository
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 from app.core.contacts.services.tag_service import TagService
+from tests.integration.contact_seeding import TEST_USER_ID
 
 
 @pytest.mark.integration
@@ -40,16 +41,22 @@ class TestTagServiceCreateOrGetIntegration:
         transaction. The savepoint rolls back just the failed insert so the
         service can look the existing tag up and return it.
         """
-        first = await service.create_tag(name="Work", transaction=clean_database)
+        first = await service.create_tag(
+            name="Work", transaction=clean_database, user_id=TEST_USER_ID
+        )
         assert first.id is not None
 
-        second = await service.create_tag(name="Work", transaction=clean_database)
+        second = await service.create_tag(
+            name="Work", transaction=clean_database, user_id=TEST_USER_ID
+        )
 
         # Same row returned, no DuplicateTagNameError surfaced to the caller.
         assert second.id == first.id
 
         # Case-insensitive match: the constraint is on LOWER(name).
-        third = await service.create_tag(name="WORK", transaction=clean_database)
+        third = await service.create_tag(
+            name="WORK", transaction=clean_database, user_id=TEST_USER_ID
+        )
         assert third.id == first.id
 
     @pytest.mark.asyncio
@@ -61,10 +68,16 @@ class TestTagServiceCreateOrGetIntegration:
         Proves the unit of work was not poisoned by the failed insert: a
         subsequent, unrelated create succeeds on the same connection.
         """
-        await service.create_tag(name="Work", transaction=clean_database)
-        await service.create_tag(name="Work", transaction=clean_database)  # duplicate
+        await service.create_tag(
+            name="Work", transaction=clean_database, user_id=TEST_USER_ID
+        )
+        await service.create_tag(
+            name="Work", transaction=clean_database, user_id=TEST_USER_ID
+        )  # duplicate
 
-        other = await service.create_tag(name="Personal", transaction=clean_database)
+        other = await service.create_tag(
+            name="Personal", transaction=clean_database, user_id=TEST_USER_ID
+        )
         assert other.id is not None
 
         repo = SqlTagRepository(clean_database)

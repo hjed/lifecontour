@@ -47,7 +47,10 @@ async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[t
 
     # Create and assign a tag
     tag_result = await db_session.execute(
-        text("INSERT INTO tags (name) VALUES ('push-tag') RETURNING id")
+        text(
+            "INSERT INTO tags (name, user_id) VALUES ('push-tag', :owner) RETURNING id"
+        ),
+        {"owner": CONTACT_OWNER},
     )
     tag_id = tag_result.scalar_one()
     await db_session.execute(

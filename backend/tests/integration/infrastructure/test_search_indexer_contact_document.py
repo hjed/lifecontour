@@ -27,7 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.infrastructure.search.search_indexer import SearchIndexer
-from tests.integration.contact_seeding import seed_contact
+from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 pytestmark = pytest.mark.asyncio
 
@@ -128,10 +128,10 @@ async def _seed_full_contact(connection: AsyncConnection, *, now: datetime) -> N
     for tag_id, name in ((1, "colleagues"), (2, "analytical")):
         await connection.execute(
             text("""
-                INSERT INTO tags (id, name, created_at, updated_at)
-                VALUES (:id, :name, :now, :now)
+                INSERT INTO tags (id, user_id, name, created_at, updated_at)
+                VALUES (:id, :owner, :name, :now, :now)
             """),
-            {"id": tag_id, "name": name, "now": now},
+            {"id": tag_id, "owner": TEST_USER_ID, "name": name, "now": now},
         )
         await connection.execute(
             text("""

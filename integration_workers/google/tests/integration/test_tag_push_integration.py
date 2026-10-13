@@ -39,20 +39,22 @@ async def contact_with_tags(db_session: AsyncSession) -> dict[str, int]:
     result = await db_session.execute(
         text(
             """
-            INSERT INTO tags (name) VALUES ('work')
+            INSERT INTO tags (name, user_id) VALUES ('work', :owner)
             RETURNING id
             """
-        )
+        ),
+        {"owner": CONTACT_OWNER},
     )
     work_tag_id = result.scalar_one()
 
     result = await db_session.execute(
         text(
             """
-            INSERT INTO tags (name) VALUES ('friend')
+            INSERT INTO tags (name, user_id) VALUES ('friend', :owner)
             RETURNING id
             """
-        )
+        ),
+        {"owner": CONTACT_OWNER},
     )
     friend_tag_id = result.scalar_one()
 
@@ -122,8 +124,10 @@ class TestLoadTagNamesForContactIntegration:
         # Create tags in non-alphabetical order
         for tag_name in ["zebra", "alpha", "middle"]:
             tag_result = await db_session.execute(
-                text("INSERT INTO tags (name) VALUES (:name) RETURNING id"),
-                {"name": tag_name},
+                text(
+                    "INSERT INTO tags (name, user_id) VALUES (:name, :owner) RETURNING id"
+                ),
+                {"name": tag_name, "owner": CONTACT_OWNER},
             )
             tag_id = tag_result.scalar_one()
             await db_session.execute(
@@ -199,7 +203,10 @@ class TestLoadFullContactIntegration:
 
         # Add tag
         tag_result = await db_session.execute(
-            text("INSERT INTO tags (name) VALUES ('loaded') RETURNING id")
+            text(
+                "INSERT INTO tags (name, user_id) VALUES ('loaded', :owner) RETURNING id"
+            ),
+            {"owner": CONTACT_OWNER},
         )
         tag_id = tag_result.scalar_one()
         await db_session.execute(
@@ -253,12 +260,18 @@ class TestLoadTagNamesForContactsBatchIntegration:
         # Create tags
         t1 = (
             await db_session.execute(
-                text("INSERT INTO tags (name) VALUES ('alpha') RETURNING id")
+                text(
+                    "INSERT INTO tags (name, user_id) VALUES ('alpha', :owner) RETURNING id"
+                ),
+                {"owner": CONTACT_OWNER},
             )
         ).scalar_one()
         t2 = (
             await db_session.execute(
-                text("INSERT INTO tags (name) VALUES ('beta') RETURNING id")
+                text(
+                    "INSERT INTO tags (name, user_id) VALUES ('beta', :owner) RETURNING id"
+                ),
+                {"owner": CONTACT_OWNER},
             )
         ).scalar_one()
 

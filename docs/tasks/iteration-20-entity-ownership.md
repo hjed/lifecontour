@@ -836,7 +836,10 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 **PR Size:** ~450 lines
 
-> **Migration number:** indicative `0122_add_user_id_to_tags.py`.
+> **Migration numbers:** `0135_add_user_id_to_tags.py` (column, assignment, `NOT NULL`, index) and
+> `0136` (per-owner names, with the scoped reads). `main` had reached `0134`
+> (`0132_create_journal_merged_aliases` and Phase 9's `0133` / `0134` landed while this stack
+> was open).
 
 - [ ] Migration `0122`: `tags.user_id` (same derivation as `0121`, `-x tags_owner`), `NOT NULL`,
   drop `UNIQUE(name)`, add `uq_tags_user_id_name (user_id, name)`, index on `user_id`. Downgrade
@@ -875,6 +878,37 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 **Required Documentation Updates:**
 - [ ] `docs/architecture/database-design.md` — Tags Table section.
+
+**Delivery:** a stack, each layer deployable on its own (the Phase 10 shape):
+- **8a ✅ DONE** — `0135`: `tags.user_id`, each tag given its carriers' owner (`contact_tags` →
+  `contacts`), an uncarried tag the site's one user (`derive_owner`, `-x tags_owner`, evidence =
+  every table holding `user_id` at `0134`, pinned by the test); refuses a tag carried by two
+  owners or a tag under another owner's tag; then `NOT NULL` and `idx_tags_user_id`.
+  `Tag.user_id`; every tag read (the tag repository and the contact repository's tag joins)
+  returns the owner; `TagRepository.save(tag, *, user_id)` writes it on INSERT only. REST
+  `POST /tags` stamps the session user, `ContactService._resolve_tag_names` the contact's owner,
+  and the inbound processor the event's owner. Reads and the name index still global.
+- **8b** — `TagUpdated` / `TagDeleted` carry the owner; Google `process_tag_event` scoped.
+- **8c** — owner-scoped reads through repository, services, REST, MCP and the inbound
+  processor; `0136` per-owner names.
+- **8d** — owner-scoped writes in SQL (update, delete, merge, re-parent, assign).
+- **8e** — REST and MCP cross-user isolation suites for tags.
+
+**Decisions (recorded during implementation):**
+- **One migration for the column and the contract.** Contacts already have a required owner, so
+  every tag is derivable at migration time and there is no nullable window to protect; journal
+  tags split `0127` / `0128` only to keep each PR small.
+- **`Tag.user_id` is `str | None`, not `str`.** `Tag` lives in `core_shared` and is built from
+  names alone by the Google transformer and the sync-payload deserialiser; its owner is the
+  contact it is resolved for. The type safety sits on the port instead: every `TagRepository`
+  method takes a keyword-only `user_id`, and every tag read from the database carries one.
+- **Per-owner names stay case-insensitive.** The live index is `uq_tags_name_lower` on
+  `LOWER(name)` (migration `0048`), so `0136` makes it `(user_id, LOWER(name))`, not the
+  `(user_id, name)` listed above.
+- **Inbound tags match across owners until 8c.** The processor creates a missing tag for the
+  event's owner from 8a, but its name lookup (and the duplicate-name fallback) stays global
+  under the global index until the scoped reads land. Production has one owner, and the stack
+  ships together.
 
 ---
 

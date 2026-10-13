@@ -1,13 +1,28 @@
 """SQL implementation of TagRepository."""
 
+from typing import Any
+
 from core_shared.models.contacts.entities import Tag
 from core_shared.models.contacts.value_objects import TagName
-from sqlalchemy import text
+from sqlalchemy import Row, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import DuplicateTagNameError, TagNotFoundError
 from app.core.contacts.models.repositories import TagRepository
+
+
+def _row_to_tag(row: Row[Any]) -> Tag:
+    return Tag(
+        id=row.id,
+        user_id=row.user_id,
+        name=TagName(row.name),
+        parent_id=row.parent_id,
+        color=row.color,
+        description=row.description,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 class SqlTagRepository(TagRepository):
@@ -20,7 +35,7 @@ class SqlTagRepository(TagRepository):
         """Find a tag by ID."""
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags WHERE id = :tag_id
         """
         )
@@ -30,21 +45,13 @@ class SqlTagRepository(TagRepository):
         if not row:
             return None
 
-        return Tag(
-            id=row.id,
-            name=TagName(row.name),
-            parent_id=row.parent_id,
-            color=row.color,
-            description=row.description,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _row_to_tag(row)
 
     async def find_by_name(self, name: str) -> Tag | None:
         """Find a tag by name."""
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags WHERE LOWER(name) = LOWER(:name)
         """
         )
@@ -54,15 +61,7 @@ class SqlTagRepository(TagRepository):
         if not row:
             return None
 
-        return Tag(
-            id=row.id,
-            name=TagName(row.name),
-            parent_id=row.parent_id,
-            color=row.color,
-            description=row.description,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return _row_to_tag(row)
 
     async def find_by_names(self, names: list[str]) -> dict[str, Tag]:
         """Find multiple tags by their names, returned as a dict keyed by tag name."""
@@ -72,7 +71,7 @@ class SqlTagRepository(TagRepository):
         lower_names = [n.lower() for n in names]
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags WHERE LOWER(name) = ANY(:names)
         """
         )
@@ -80,15 +79,7 @@ class SqlTagRepository(TagRepository):
 
         lower_to_tag = {}
         for row in result:
-            lower_to_tag[row.name.lower()] = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
+            lower_to_tag[row.name.lower()] = _row_to_tag(row)
 
         tags_dict = {}
         for name in names:
@@ -102,51 +93,25 @@ class SqlTagRepository(TagRepository):
         """Get all tags."""
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags ORDER BY name
         """
         )
         result = await self.conn.execute(query)
 
-        tags = []
-        for row in result.fetchall():
-            tag = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            tags.append(tag)
-
-        return tags
+        return [_row_to_tag(row) for row in result.fetchall()]
 
     async def get_children(self, parent_id: int) -> list[Tag]:
         """Get child tags of a parent tag."""
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags WHERE parent_id = :parent_id ORDER BY name
         """
         )
         result = await self.conn.execute(query, {"parent_id": parent_id})
 
-        tags = []
-        for row in result.fetchall():
-            tag = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            tags.append(tag)
-
-        return tags
+        return [_row_to_tag(row) for row in result.fetchall()]
 
     async def get_descendants_for_tags(self, tag_ids: list[int]) -> list[Tag]:
         """Get all descendant tags (recursive) for a list of tag IDs."""
@@ -156,68 +121,42 @@ class SqlTagRepository(TagRepository):
         query = text(
             """
             WITH RECURSIVE descendants AS (
-                SELECT id, name, parent_id, color, description, created_at, updated_at
+                SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
                 FROM tags
                 WHERE parent_id = ANY(:tag_ids)
 
                 UNION ALL
 
-                SELECT t.id, t.name, t.parent_id, t.color, t.description, t.created_at, t.updated_at
+                SELECT t.id, t.user_id, t.name, t.parent_id, t.color, t.description, t.created_at, t.updated_at
                 FROM tags t
                 INNER JOIN descendants d ON t.parent_id = d.id
             )
-            SELECT DISTINCT id, name, parent_id, color, description, created_at, updated_at
+            SELECT DISTINCT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM descendants
             ORDER BY name
             """
         )
         result = await self.conn.execute(query, {"tag_ids": tag_ids})
 
-        tags = []
-        for row in result.fetchall():
-            tag = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            tags.append(tag)
-
-        return tags
+        return [_row_to_tag(row) for row in result.fetchall()]
 
     async def get_root_tags(self) -> list[Tag]:
         """Get all root tags (no parent)."""
         query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags WHERE parent_id IS NULL ORDER BY name
         """
         )
         result = await self.conn.execute(query)
 
-        tags = []
-        for row in result.fetchall():
-            tag = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            tags.append(tag)
-
-        return tags
+        return [_row_to_tag(row) for row in result.fetchall()]
 
     async def search(self, query: str, limit: int = 50) -> list[Tag]:
         """Search tags by name pattern."""
         search_query = text(
             """
-            SELECT id, name, parent_id, color, description, created_at, updated_at
+            SELECT id, user_id, name, parent_id, color, description, created_at, updated_at
             FROM tags
             WHERE name ILIKE :pattern
             ORDER BY name
@@ -228,36 +167,24 @@ class SqlTagRepository(TagRepository):
             search_query, {"pattern": f"%{query}%", "limit": limit}
         )
 
-        tags = []
-        for row in result.fetchall():
-            tag = Tag(
-                id=row.id,
-                name=TagName(row.name),
-                parent_id=row.parent_id,
-                color=row.color,
-                description=row.description,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            tags.append(tag)
+        return [_row_to_tag(row) for row in result.fetchall()]
 
-        return tags
-
-    async def save(self, tag: Tag) -> Tag:
-        """Save a tag (insert or update)."""
+    async def save(self, tag: Tag, *, user_id: str) -> Tag:
+        """Save a tag: an insert is owned by ``user_id``; an update never re-owns."""
         try:
             if tag.id is None:
                 # Insert new tag
                 query = text(
                     """
-                    INSERT INTO tags (name, parent_id, color, description)
-                    VALUES (:name, :parent_id, :color, :description)
-                    RETURNING id, created_at, updated_at
+                    INSERT INTO tags (user_id, name, parent_id, color, description)
+                    VALUES (:user_id, :name, :parent_id, :color, :description)
+                    RETURNING id, user_id, created_at, updated_at
                 """
                 )
                 result = await self.conn.execute(
                     query,
                     {
+                        "user_id": user_id,
                         "name": str(tag.name),
                         "parent_id": tag.parent_id,
                         "color": tag.color,
@@ -268,6 +195,7 @@ class SqlTagRepository(TagRepository):
                 if row is None:
                     raise RuntimeError("Failed to insert tag")
                 tag.id = row.id
+                tag.user_id = row.user_id
                 tag.created_at = row.created_at
                 tag.updated_at = row.updated_at
             else:

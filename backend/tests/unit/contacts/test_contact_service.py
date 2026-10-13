@@ -133,14 +133,14 @@ class TestContactService:
 
         contact = Contact(user_id=TEST_USER_ID, first_name="A", last_name="B", tags=[])
         await contact_service_with_tags._resolve_tag_names(
-            contact, ["Friend", "Work"], mock_transaction
+            contact, ["Friend", "Work"], mock_transaction, owner=TEST_USER_ID
         )
 
         assert existing in (contact.tags or [])
         assert created in (contact.tags or [])
         # Only the missing name is created; the existing one is not.
         mock_tag_service.create_tag.assert_awaited_once_with(
-            "Work", transaction=mock_transaction
+            "Work", transaction=mock_transaction, user_id=TEST_USER_ID
         )
 
     @pytest.mark.asyncio
@@ -150,7 +150,9 @@ class TestContactService:
         """A service built without a TagService can't create tags by name."""
         contact = Contact(user_id=TEST_USER_ID, first_name="A", last_name="B", tags=[])
         with pytest.raises(ContactValidationError):
-            await contact_service._resolve_tag_names(contact, ["X"], mock_transaction)
+            await contact_service._resolve_tag_names(
+                contact, ["X"], mock_transaction, owner=TEST_USER_ID
+            )
 
     # Phase 2 Tests: Favourite functionality
     @pytest.mark.asyncio
@@ -827,6 +829,36 @@ class TestContactService:
 
         assert result == saved_contact
         assert updated_contact.tags == []  # cleared
+
+    @pytest.mark.asyncio
+    async def test_update_contact_creates_named_tags_for_the_acting_user(
+        self,
+        contact_service_with_tags,
+        mock_contact_repo,
+        mock_tag_repo,
+        mock_tag_service,
+        mock_transaction,
+    ):
+        """A new tag name belongs to the acting user, whatever owner the incoming
+        entity names: that owner is only checked, and restored, afterwards."""
+        stored = Contact(user_id=TEST_USER_ID, first_name="John", id=1)
+        mock_contact_repo.find_by_id.return_value = stored
+        mock_contact_repo.save.return_value = stored
+        mock_tag_repo.find_by_name.return_value = None
+        mock_tag_service.create_tag.return_value = Tag(
+            id=9, name=TagName("New"), user_id=TEST_USER_ID
+        )
+
+        await contact_service_with_tags.update_contact(
+            Contact(user_id="someone-else", first_name="John", id=1),
+            mock_transaction,
+            tag_names=["New"],
+            user_id=TEST_USER_ID,
+        )
+
+        mock_tag_service.create_tag.assert_awaited_once_with(
+            "New", transaction=mock_transaction, user_id=TEST_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_update_contact_no_id_raises_error(

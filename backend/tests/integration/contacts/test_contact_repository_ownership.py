@@ -86,7 +86,9 @@ class TestContactRepositoryOwnership:
 
     @pytest.fixture
     async def tag(self, clean_database: AsyncConnection) -> Tag:
-        return await SqlTagRepository(clean_database).save(Tag(name=TagName("crew")))
+        return await SqlTagRepository(clean_database).save(
+            Tag(name=TagName("crew")), user_id=TEST_USER_ID
+        )
 
     @pytest.fixture
     async def own_id(self, repo: SqlContactRepository, tag: Tag) -> int:

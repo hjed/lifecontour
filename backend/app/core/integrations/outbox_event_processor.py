@@ -487,9 +487,9 @@ class OutboxEventProcessor:
         return ordered
 
     async def _get_or_create_tag(
-        self, tag_name: str, found_tags_dict: dict[str, Tag]
+        self, tag_name: str, found_tags_dict: dict[str, Tag], *, user_id: str
     ) -> Tag:
-        """Return the already-found tag for ``tag_name`` or create it.
+        """Return the already-found tag for ``tag_name`` or create it for ``user_id``.
 
         Creation happens outside the contact update transaction, but is safe:
         tags are reusable shared entities, creation is idempotent
@@ -504,7 +504,7 @@ class OutboxEventProcessor:
         new_tag = Tag(name=TagName(tag_name))
         try:
             async with self.connection.begin_nested():
-                return await self.tag_repo.save(new_tag)
+                return await self.tag_repo.save(new_tag, user_id=user_id)
         except DuplicateTagNameError:
             # Race condition: another worker created the same tag
             found_tag = await self.tag_repo.find_by_name(tag_name)
@@ -513,7 +513,11 @@ class OutboxEventProcessor:
             return found_tag
 
     async def _apply_tag_hierarchy(
-        self, parent_name_map: dict[str, str], resolved_by_name: dict[str, Tag]
+        self,
+        parent_name_map: dict[str, str],
+        resolved_by_name: dict[str, Tag],
+        *,
+        user_id: str,
     ) -> None:
         """Set parent_id on child tags based on inbound parent_name metadata.
 
@@ -534,7 +538,7 @@ class OutboxEventProcessor:
                 )
                 continue
             child_tag.parent_id = parent_tag.id
-            await self.tag_repo.save(child_tag)
+            await self.tag_repo.save(child_tag, user_id=user_id)
 
     async def _resolve_contact_tags(
         self,
@@ -542,9 +546,12 @@ class OutboxEventProcessor:
         existing_reference_data: str | None = None,
         existing_reference_id: int | None = None,
         existing_contact_tags: list[Tag] | None = None,
+        *,
+        user_id: str,
     ) -> list[Tag] | None:
         """
         Merge inbound tags with existing local tags based on sync history.
+        A missing tag is created for ``user_id``, the event's owner.
         Preserves locally created tags that were never synced by the integration.
 
         Also resolves parent→child hierarchy from inbound `parent_name` metadata
@@ -585,7 +592,9 @@ class OutboxEventProcessor:
         seen_tag_ids: set[int] = set()
         resolved_by_name: dict[str, Tag] = {}
         for tag_name in final_tag_names_ordered:
-            tag = await self._get_or_create_tag(tag_name, found_tags_dict)
+            tag = await self._get_or_create_tag(
+                tag_name, found_tags_dict, user_id=user_id
+            )
             # Safety net: never attach the same tag row twice, even if two
             # requested names resolved to it (case-insensitive lookup).
             if tag.id is not None:
@@ -595,7 +604,9 @@ class OutboxEventProcessor:
             resolved_tags.append(tag)
             resolved_by_name[tag_name.lower()] = tag
 
-        await self._apply_tag_hierarchy(parent_name_map, resolved_by_name)
+        await self._apply_tag_hierarchy(
+            parent_name_map, resolved_by_name, user_id=user_id
+        )
 
         return resolved_tags
 
@@ -680,12 +691,15 @@ class OutboxEventProcessor:
         updated_contact_data: Contact,
         existing_reference_data: str | None,
         existing_tags: list[Tag],
+        *,
+        user_id: str,
     ) -> None:
         if "tags" in contact_data and contact_data["tags"] is not None:
             resolved_tags = await self._resolve_contact_tags(
                 contact_data,
                 existing_reference_data=existing_reference_data,
                 existing_contact_tags=existing_tags,
+                user_id=user_id,
             )
             updated_contact_data.tags = resolved_tags
         else:
@@ -758,6 +772,7 @@ class OutboxEventProcessor:
                 existing_reference_data=None,
                 existing_reference_id=None,
                 existing_contact_tags=None,
+                user_id=payload.user_id,
             )
             contact.tags = resolved_tags
 
@@ -1089,6 +1104,7 @@ class OutboxEventProcessor:
                 updated_contact_data,
                 existing_reference_data,
                 existing_tags,
+                user_id=payload.user_id,
             )
             if full_existing_contact is not None:
                 apply_sync_scope(
