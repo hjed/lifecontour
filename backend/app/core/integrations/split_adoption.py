@@ -63,6 +63,7 @@ class SplitPredecessor:
 
     journal_id: int
     adopted_from: str
+    old_recurring_event_id: str
 
 
 def _zone(name: object) -> ZoneInfo | None:
@@ -111,6 +112,7 @@ async def find_split_predecessor(
     return SplitPredecessor(
         journal_id=candidate.journal_id,
         adopted_from=root_recurring_event_id(candidate.recurring_event_id),
+        old_recurring_event_id=candidate.recurring_event_id,
     )
 
 

@@ -515,6 +515,16 @@ class JournalOutboxEventProcessor:
             self.link_repo, self._date_resolver(), payload
         )
         if predecessor is not None:
+            # Lock the old recurrence and look again: another create may have
+            # adopted this journal between the lookup and the lock, and adopting
+            # it twice would re-point its link away from that event.
+            await self.link_repo.lock_recurrence(
+                UUID(calendar_id), predecessor.old_recurring_event_id
+            )
+            predecessor = await find_split_predecessor(
+                self.link_repo, self._date_resolver(), payload
+            )
+        if predecessor is not None:
             logger.info(
                 "New recurrence instance adopts a cancelled journal it split from",
                 external_event_id=external_event_id,

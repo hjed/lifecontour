@@ -391,3 +391,156 @@ class TestPilatesSplitAcrossSyncs:
             {"user_id": USER_ID},
         )
         assert cancelled.scalar_one() == 0
+
+
+@pytest.mark.integration
+class TestCrossSyncLocalDay:
+    """The day is the instance's local day: its event's zone, else the user's.
+
+    The old occurrence is at 23:30 UTC - 10:30 the next day in Sydney - so
+    UTC and Sydney disagree on which day it falls.
+    """
+
+    @staticmethod
+    def _old_start() -> datetime:
+        return (datetime.now(UTC) + timedelta(days=8)).replace(
+            hour=23, minute=30, second=0, microsecond=0
+        )
+
+    async def _old_cancelled(
+        self, processor: JournalOutboxEventProcessor, calendar_id: str
+    ) -> int:
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_local",
+                title="Pilates",
+                start=self._old_start(),
+                recurring_event_id=MASTER_ID,
+                series_recurring_event_id=MASTER_ID,
+            )
+        )
+        await processor.process_event(
+            sync_event(
+                "journal_event.cancelled",
+                calendar_id=calendar_id,
+                external_event_id=f"{MASTER_ID}_local",
+                existing_journal_id=created["journal_id"],
+                recurring_event_id=MASTER_ID,
+            )
+        )
+        return int(created["journal_id"])
+
+    async def _new(
+        self,
+        processor: JournalOutboxEventProcessor,
+        calendar_id: str,
+        start: datetime,
+        *,
+        timezone: str | None,
+    ) -> int:
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id=f"{NEW_MASTER}_local",
+                title="Pilates",
+                start=start,
+                recurring_event_id=NEW_MASTER,
+                series_recurring_event_id=NEW_MASTER,
+                timezone=timezone,
+            )
+        )
+        return int(created["journal_id"])
+
+    async def test_the_events_zone_decides_the_day(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """00:10 UTC the next day is 11:10 in Sydney: the same local day."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        old = await self._old_cancelled(processor, calendar_id)
+
+        new = await self._new(
+            processor,
+            calendar_id,
+            self._old_start() + timedelta(minutes=40),
+            timezone="Australia/Sydney",
+        )
+
+        assert new == old
+
+    async def test_the_users_zone_decides_when_the_event_has_none(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        await async_connection.execute(
+            text(
+                "INSERT INTO user_settings (user_id, timezone)"
+                " VALUES (:user_id, 'Australia/Sydney')"
+                " ON CONFLICT (user_id) DO UPDATE SET timezone = EXCLUDED.timezone"
+            ),
+            {"user_id": USER_ID},
+        )
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        old = await self._old_cancelled(processor, calendar_id)
+
+        new = await self._new(
+            processor,
+            calendar_id,
+            self._old_start() + timedelta(minutes=40),
+            timezone=None,
+        )
+
+        assert new == old
+
+    async def test_the_same_utc_day_but_the_previous_local_day_is_refused(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """12:50 UTC is 23:50 the day before in Sydney: adjacent, not the same."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        old = await self._old_cancelled(processor, calendar_id)
+
+        new = await self._new(
+            processor,
+            calendar_id,
+            self._old_start() - timedelta(hours=10, minutes=40),
+            timezone="Australia/Sydney",
+        )
+
+        assert new != old
+
+
+@pytest.mark.integration
+class TestCrossSyncCandidateRecheck:
+    async def test_a_candidate_taken_meanwhile_is_not_adopted(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Another create adopted the cancelled journal between this one's
+        lookup and its lock: the re-check under the lock finds nothing, and
+        the instance is created as it would have been."""
+        from unittest.mock import patch
+
+        from app.core.integrations import journal_outbox_event_processor as proc
+
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals, starts = await _seed_and_cancel(processor, calendar_id, weeks=1)
+        real_lookup = proc.find_split_predecessor
+        lookups = 0
+
+        async def taken_after_first_look(*args: object, **kwargs: object) -> object:
+            nonlocal lookups
+            lookups += 1
+            return await real_lookup(*args, **kwargs) if lookups == 1 else None  # type: ignore[arg-type]
+
+        with patch.object(proc, "find_split_predecessor", taken_after_first_look):
+            created = await _create_new_instance(
+                processor, calendar_id, starts[1], week=1
+            )
+
+        assert lookups == 2
+        assert created != journals[1]
+        assert await event_state(async_connection, journals[1]) == "cancelled"
