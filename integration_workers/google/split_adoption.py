@@ -21,7 +21,7 @@ Two instances pair when all of these hold:
   outbound-only and has not already ended (the sync's own past-cancellation
   skip, which reads the end);
 - the new one is live, an instance of a *different* recurrence, and not yet
-  linked here;
+  linked here at all (a shared copy displayed elsewhere is still journalled);
 - they fall on the same local day (in the user's zone) and have the same
   title, trimmed and ignoring case - a cancelled instance carries no title,
   so the old one's is the journal's;
@@ -57,6 +57,7 @@ class LinkedInstance:
     start: datetime
     end: datetime | None
     sync_capability: str
+    displayed_here: bool
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ def pair_split_instances(
         if event.status == "cancelled":
             if (
                 link is not None
+                and link.displayed_here
                 and link.sync_capability != "outbound"
                 and (link.end or link.start) >= now - _PAST_BUFFER
             ):
@@ -205,16 +207,16 @@ async def find_split_pairing(
     result = await session.execute(
         text("""
             SELECT l.external_event_id, l.journal_id, l.sync_capability,
-                   j.title, j.event_date_range_start, j.event_date_range_end
+                   j.title, j.event_date_range_start, j.event_date_range_end,
+                   EXISTS (
+                       SELECT 1 FROM journal_calendar_info ci
+                       WHERE ci.journal_id = l.journal_id
+                         AND ci.calendar_id = l.calendar_id
+                   ) AS displayed_here
             FROM journal_external_event_links l
             JOIN journals j ON j.id = l.journal_id
             WHERE l.calendar_id = :calendar_id
               AND l.external_event_id = ANY(:event_ids)
-              AND EXISTS (
-                  SELECT 1 FROM journal_calendar_info ci
-                  WHERE ci.journal_id = l.journal_id
-                    AND ci.calendar_id = l.calendar_id
-              )
         """),
         {
             "calendar_id": calendar_id,
@@ -229,6 +231,7 @@ async def find_split_pairing(
             start=row.event_date_range_start,
             end=row.event_date_range_end,
             sync_capability=row.sync_capability,
+            displayed_here=bool(row.displayed_here),
         )
         for row in result.fetchall()
         if row.event_date_range_start is not None

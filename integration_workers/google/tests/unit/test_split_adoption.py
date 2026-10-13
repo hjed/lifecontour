@@ -62,6 +62,7 @@ def _link(
     end: datetime | None = None,
     title: str = "Pilates",
     sync_capability: str = "bidirectional",
+    displayed_here: bool = True,
 ) -> tuple[str, LinkedInstance]:
     external_event_id = f"{OLD}_{instance}"
     return external_event_id, LinkedInstance(
@@ -71,6 +72,7 @@ def _link(
         start=start,
         end=end or start + timedelta(minutes=75),
         sync_capability=sync_capability,
+        displayed_here=displayed_here,
     )
 
 
@@ -168,6 +170,7 @@ class TestPairSplitInstances:
             start=OLD_START,
             end=OLD_START,
             sync_capability="bidirectional",
+            displayed_here=True,
         )
 
         assert not pair_split_instances(events, links, SYDNEY, NOW).targets
@@ -212,6 +215,7 @@ class TestPairSplitInstances:
                 start=OLD_START,
                 end=OLD_START,
                 sync_capability="bidirectional",
+                displayed_here=True,
             )
         }
 
@@ -308,3 +312,30 @@ class TestPairSplitInstances:
         links = dict([_link("20261016T011000Z", 1, OLD_START)])
 
         assert not pair_split_instances(events, links, SYDNEY, NOW).targets
+
+    def test_a_cancelled_copy_shown_in_another_calendar_does_not_pair(self) -> None:
+        """Its series is keyed on the calendar it is displayed in."""
+        events = [_cancelled("20261016T011000Z"), _live(NEW_START)]
+        links = dict([_link("20261016T011000Z", 1, OLD_START, displayed_here=False)])
+
+        assert not pair_split_instances(events, links, SYDNEY, NOW).targets
+
+    def test_a_live_shared_copy_is_still_journalled_not_a_new_candidate(
+        self,
+    ) -> None:
+        """A live event linked here, though displayed elsewhere, is already
+        journalled: it must not count as a second new instance that day."""
+        shared = _live("2026-10-16T18:00:00+11:00", event_id="shared-copy")
+        events = [_cancelled("20261016T011000Z"), _live(NEW_START), shared]
+        links = dict([_link("20261016T011000Z", 1, OLD_START)])
+        links[shared.id] = LinkedInstance(
+            external_event_id=shared.id,
+            journal_id=9,
+            title="Pilates",
+            start=OLD_START,
+            end=OLD_START,
+            sync_capability="bidirectional",
+            displayed_here=False,
+        )
+
+        assert pair_split_instances(events, links, SYDNEY, NOW).targets
