@@ -893,6 +893,43 @@ class TestGoogleAPIClient:
             assert retry_body["etag"] == "fresh_etag_999"
 
     @pytest.mark.asyncio
+    async def test_update_contact_conflict_rebuilds_the_payload_on_the_refetch(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """A payload merged with an older read is rebuilt from the refetched one.
+
+        Resending the first payload with only a fresh etag would revert
+        whatever Google gained between the push's read and its write (#1789).
+        """
+        mock_google_service.people().updateContact().execute.side_effect = [
+            self._http_error(400, "Request etag is different", "FAILED_PRECONDITION"),
+            {"resourceName": "people/c1", "etag": "after_retry"},
+        ]
+        fresh = {"resourceName": "people/c1", "etag": "fresh_etag"}
+        mock_google_service.people().get().execute.return_value = fresh
+        client = self._client(mock_auth_service)
+        rebuilt_from: list[dict[str, Any]] = []
+
+        def rebase(current: dict[str, Any]) -> dict[str, Any]:
+            rebuilt_from.append(current)
+            return {"names": [{"givenName": "Rebuilt"}]}
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            mock_google_service.people().updateContact.reset_mock()
+            await client.update_contact(
+                resource_name="people/c1",
+                contact_data={"names": [{"givenName": "First"}]},
+                etag="read_etag",
+                rebase=rebase,
+            )
+
+        assert rebuilt_from == [fresh]
+        retry_body = mock_google_service.people().updateContact.call_args.kwargs["body"]
+        assert retry_body == {"names": [{"givenName": "Rebuilt"}], "etag": "fresh_etag"}
+
+    @pytest.mark.asyncio
     async def test_update_contact_conflict_retry_exhausted_raises(
         self, mock_auth_service, mock_google_service
     ):
@@ -1121,6 +1158,28 @@ class TestGoogleAPIClient:
                 )
 
         assert exc_info.value.resp.status == 500
+
+    @pytest.mark.asyncio
+    async def test_get_person_404_raises_contact_not_found(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """The push reads the person first, so its 404 must be typed too."""
+        from google_client import GoogleContactNotFoundError
+
+        not_found = self._http_error(
+            404, "Requested entity was not found.", "NOT_FOUND"
+        )
+        mock_google_service.people().get().execute.side_effect = not_found
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            with pytest.raises(GoogleContactNotFoundError) as exc_info:
+                await client.get_person("people/cGONE")
+
+        assert exc_info.value.resource_name == "people/cGONE"
+        assert exc_info.value.__cause__ is not_found
 
     @pytest.mark.asyncio
     async def test_update_contact_empty_fields_raises_error(
@@ -1461,8 +1520,12 @@ class TestPushSyncLogic:
 
     @pytest.fixture
     def mock_google_client(self):
-        """Mock Google Contacts API client."""
+        """Mock Google Contacts API client.
+
+        An update reads the person before writing; it holds nothing to merge.
+        """
         mock_client = AsyncMock()
+        mock_client.get_person.return_value = {}
         return mock_client
 
     @pytest.mark.asyncio

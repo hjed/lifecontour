@@ -79,6 +79,8 @@ class TestContactPushLock:
 
 def _mock_google_client() -> AsyncMock:
     client = AsyncMock()
+    # An update reads the person first; it holds nothing to merge.
+    client.get_person.return_value = {}
     client.create_contact.return_value = {
         "resourceName": "people/c-created-twice",
         "etag": "etag-created",

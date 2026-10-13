@@ -76,6 +76,7 @@ from google_client import (
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_translator import GoogleGroupNameTranslator
+from person_merge import merge_with_current_person
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
@@ -1094,14 +1095,23 @@ async def _update_or_recreate_contact_in_google(
     new resource name alone would leave the dead row beside it — two links for
     one contact. The caller then upserts the returned person's etag onto it.
 
+    The update replaces every field the payload names, so the person is read
+    first and the payload merged into it: Google values the local model cannot
+    represent (honorifics, custom events, other organizations) survive the
+    push. The update goes out against the etag of the version merged with, and
+    a conflict retry merges again into the person the client refetches, so a
+    Google edit landing between the read and the write is not reverted.
+
     Returns:
         The Google person, and whether it was recreated rather than updated.
     """
     try:
+        current = await client.get_person(external_id)
         result = await client.update_contact(
             resource_name=external_id,
-            contact_data=person_data,
-            etag=etag,
+            contact_data=merge_with_current_person(person_data, current),
+            etag=current.get("etag") or etag,
+            rebase=lambda fresh: merge_with_current_person(person_data, fresh),
         )
         return result, False
     except GoogleContactNotFoundError:

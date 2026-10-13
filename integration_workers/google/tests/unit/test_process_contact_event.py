@@ -614,6 +614,7 @@ class TestPushContactToGoogleForEvent:
         mock_session.execute.return_value = mock_base_result
 
         mock_client = AsyncMock()
+        mock_client.get_person.return_value = {}
         mock_client.update_contact.return_value = {
             "resourceName": "people/c123",
             "etag": "updated-etag",

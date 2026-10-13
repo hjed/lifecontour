@@ -56,6 +56,8 @@ def _ctx(db_session: AsyncSession) -> dict[str, Any]:
 def _mock_google_client() -> AsyncMock:
     """A client that reports no remote changes and accepts writes."""
     client = AsyncMock()
+    # An update reads the person first; it holds nothing to merge.
+    client.get_person.return_value = {}
     client.update_contact.return_value = {
         "resourceName": _REMOTE,
         "etag": "etag-after-push",

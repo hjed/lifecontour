@@ -6,6 +6,7 @@ Migrated from backend/app/core/integrations/google/client.py
 """
 
 import json
+from collections.abc import Callable
 from typing import Any, cast
 
 import structlog
@@ -116,7 +117,8 @@ _CHANNEL_GONE_STATUSES: frozenset[int] = frozenset({404, 410})
 class GoogleContactNotFoundError(Exception):
     """The Google contact a push targets no longer exists (People API 404).
 
-    Raised by :meth:`GoogleAPIClient.update_contact` so callers can tell a
+    Raised by :meth:`GoogleAPIClient.update_contact` and
+    :meth:`GoogleAPIClient.get_person` so callers can tell a
     contact deleted on Google's side apart from any other API failure without
     inspecting HTTP status codes. The original ``HttpError`` is the cause.
     """
@@ -343,6 +345,7 @@ class GoogleAPIClient:
             Google People API person data
 
         Raises:
+            GoogleContactNotFoundError: If the person no longer exists (a 404)
             HttpError: If API request fails
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
@@ -380,6 +383,8 @@ class GoogleAPIClient:
                 error=str(e),
                 status_code=e.resp.status,
             )
+            if e.resp.status == 404:
+                raise GoogleContactNotFoundError(resource_name) from e
             raise e
 
     async def create_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
@@ -431,6 +436,7 @@ class GoogleAPIClient:
         resource_name: str,
         contact_data: dict[str, Any],
         etag: str | None = None,
+        rebase: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         Update an existing contact in Google People API.
@@ -451,6 +457,9 @@ class GoogleAPIClient:
             contact_data: Updated contact data in Google People API format
             etag: Optional ETag for optimistic concurrency control
                  If provided, will be set on contact_data's top-level ``etag`` field
+            rebase: Rebuilds the payload from the person refetched after a
+                 conflict. A payload merged with an earlier read of the person
+                 would otherwise revert what Google gained since that read.
 
         Returns:
             Updated contact data from Google People API including new etag
@@ -463,7 +472,7 @@ class GoogleAPIClient:
         """
         try:
             return await self._update_contact_with_etag_retry(
-                resource_name, contact_data, etag
+                resource_name, contact_data, etag, rebase
             )
         except HttpError as e:
             if e.resp.status == 404:
@@ -475,6 +484,7 @@ class GoogleAPIClient:
         resource_name: str,
         contact_data: dict[str, Any],
         etag: str | None,
+        rebase: Callable[[dict[str, Any]], dict[str, Any]] | None,
     ) -> dict[str, Any]:
         """Update a contact, refetching the etag and retrying once on conflict."""
         logger.info(
@@ -512,6 +522,8 @@ class GoogleAPIClient:
                 google_account_email=self.google_account_email,
                 resource_name=resource_name,
             )
+            if rebase is not None:
+                contact_data = rebase(fresh)
             contact_data["etag"] = fresh_etag
             try:
                 return await self._execute_update_contact(resource_name, contact_data)

@@ -58,6 +58,8 @@ def _mock_google_client(groups: dict[str, str] | None = None) -> AsyncMock:
     through ``create_contact_group``.
     """
     client = AsyncMock()
+    # An update reads the person first; it holds nothing to merge.
+    client.get_person.return_value = {}
     client.update_contact.return_value = {
         "resourceName": _REMOTE,
         "etag": _NEW_ETAG,
