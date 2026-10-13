@@ -229,3 +229,164 @@ class TestRecurringSeriesSyncIntegration:
             """)
         )
         assert outbox.scalar() == 1
+
+
+@pytest.mark.asyncio
+class TestSplitAdoptionIntegration:
+    """A "this and following" edit under an unrelated id, in one sync."""
+
+    NEW_MASTER = "9p7kac2r5m992mshlenq0j10pf"
+
+    @classmethod
+    def _split_batch(cls, new_start: datetime) -> list[dict]:
+        """One sync: the old instance cancelled, the new recurrence's live."""
+        from datetime import timedelta
+
+        return [
+            {
+                "id": f"{MASTER_ID}_old",
+                "status": "cancelled",
+                "etag": '"etag-cancelled"',
+                "recurringEventId": MASTER_ID,
+            },
+            {
+                "id": f"{cls.NEW_MASTER}_new",
+                "status": "confirmed",
+                "etag": '"etag-new"',
+                "summary": "Pilates",
+                "start": {"dateTime": new_start.isoformat()},
+                "end": {"dateTime": (new_start + timedelta(hours=1)).isoformat()},
+                "recurringEventId": cls.NEW_MASTER,
+            },
+        ]
+
+    async def _seed_upcoming_instance(
+        self, db_session, *, displayed_elsewhere: bool = False
+    ) -> tuple[str, int, datetime]:
+        from datetime import timedelta
+
+        now = datetime.now(UTC)
+        # Noon UTC (the user has no zone set): ten minutes later is the same
+        # local day whatever time the test runs.
+        start = (now + timedelta(days=7)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+        calendar_uuid = str(uuid.uuid4())
+        await db_session.execute(
+            text("""
+                INSERT INTO calendars (id, user_id, name, color, created_at,
+                    updated_at, google_calendar_id, is_synced_to_google)
+                VALUES (:cal_id, :user_id, 'Split Cal', '#00FF00', :now, :now,
+                    'primary', true)
+            """),
+            {"cal_id": calendar_uuid, "user_id": TEST_USER, "now": now},
+        )
+        journal_id = (
+            await db_session.execute(
+                text("""
+                    INSERT INTO journals (user_id, title, content,
+                        event_date_range_start, event_date_range_end,
+                        created_at, updated_at)
+                    VALUES (:user_id, 'Pilates', '', :start, :start, :now, :now)
+                    RETURNING id
+                """),
+                {"user_id": TEST_USER, "start": start, "now": now},
+            )
+        ).scalar_one()
+        await db_session.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, external_version,
+                 recurring_event_id, sync_capability, sync_status,
+                 created_at, updated_at)
+                VALUES (:journal_id, :cal_id, :external_event_id, :etag,
+                    :master, 'bidirectional', 'synced', :now, :now)
+            """),
+            {
+                "journal_id": journal_id,
+                "cal_id": calendar_uuid,
+                "external_event_id": f"{MASTER_ID}_old",
+                "etag": ETAG,
+                "master": MASTER_ID,
+                "now": now,
+            },
+        )
+        display_calendar = calendar_uuid
+        if displayed_elsewhere:
+            # A shared event: the journal belongs to another calendar, which
+            # keys its series; this calendar only holds a copy.
+            display_calendar = str(uuid.uuid4())
+            await db_session.execute(
+                text("""
+                    INSERT INTO calendars (id, user_id, name, color, created_at,
+                        updated_at, google_calendar_id, is_synced_to_google)
+                    VALUES (:cal_id, :user_id, 'Owner Cal', '#0000FF', :now, :now,
+                        'owner@example.com', false)
+                """),
+                {"cal_id": display_calendar, "user_id": TEST_USER, "now": now},
+            )
+        await db_session.execute(
+            text("""
+                INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day)
+                VALUES (:journal_id, :cal_id, false)
+            """),
+            {"journal_id": journal_id, "cal_id": display_calendar},
+        )
+        await db_session.commit()
+        return calendar_uuid, journal_id, start
+
+    async def test_the_new_instance_adopts_the_old_journal(self, db_session) -> None:
+        from datetime import timedelta
+
+        _, journal_id, start = await self._seed_upcoming_instance(db_session)
+        new_start = start + timedelta(minutes=10)
+
+        result = await _run_sync(
+            db_session,
+            self._split_batch(new_start),
+        )
+
+        assert result["status"] == "success"
+        assert result.get("events_split_adopted") == 1
+        outbox = await db_session.execute(
+            text("""
+                SELECT event_type, event_data FROM outbox_events
+                WHERE event_type LIKE 'journal_event.%'
+            """)
+        )
+        rows = outbox.fetchall()
+        assert [row.event_type for row in rows] == ["journal_event.updated"]
+        event_data = _as_dict(rows[0].event_data)
+        assert event_data["existing_journal_id"] == journal_id
+        assert event_data["external_event_id"] == f"{self.NEW_MASTER}_new"
+        assert event_data["split_adopted_from"] == MASTER_ID
+
+    async def test_a_journal_displayed_in_another_calendar_is_not_paired(
+        self, db_session
+    ) -> None:
+        """Its series is keyed on the calendar it is displayed in, so adopting
+        it through this one would start a second series."""
+        from datetime import timedelta
+
+        _, journal_id, start = await self._seed_upcoming_instance(
+            db_session, displayed_elsewhere=True
+        )
+        new_start = start + timedelta(minutes=10)
+
+        result = await _run_sync(
+            db_session,
+            self._split_batch(new_start),
+        )
+
+        assert result.get("events_split_adopted", 0) == 0
+        outbox = await db_session.execute(
+            text("""
+                SELECT event_type FROM outbox_events
+                WHERE event_type LIKE 'journal_event.%'
+                ORDER BY event_type
+            """)
+        )
+        assert [row.event_type for row in outbox] == [
+            "journal_event.cancelled",
+            "journal_event.created",
+        ]
