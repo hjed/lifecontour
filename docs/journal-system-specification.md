@@ -326,7 +326,11 @@ Recurrences cancelled before this rule existed were tidied once by migration
 0136. It queued a `journal_event.recurrence_tidy` event for each (calendar,
 recurrence) that still had a cancelled, not-yet-started linked journal, and the
 processor applies the same rule to the whole recurrence when it consumes the
-event. Links that never recorded a recurring id are left as they were.
+event. A recurrence is queued only when at least one of its links recorded a
+recurring id. Once its tidy runs, links of the same recurrence that never
+recorded one are found by their instance-id prefix, given the id and planned
+with the rest, so their continuations can be deleted too. A recurrence none of
+whose links recorded an id is not queued at all.
 
 #### Split recurrences under a new id
 

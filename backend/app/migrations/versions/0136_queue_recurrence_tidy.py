@@ -16,8 +16,11 @@ deleted, and their review items cascade away with them. Doing it through the
 processor rather than here keeps the deletions on the ordinary path, with
 their history, search and outbox side effects.
 
-Links without a recurring id (synced before it was recorded) are left out:
-the keep-next rule plans a recurrence by that id.
+Only a recurrence with at least one link that recorded its recurring id is
+queued: the keep-next rule plans a recurrence by that id. When its tidy runs,
+links of the same recurrence synced before the id was recorded are found by
+their instance-id prefix, backfilled and planned with the rest - so they can be
+tidied too. A recurrence none of whose links recorded an id is not queued.
 
 The downgrade removes any of these events not yet relayed; tidied journals
 stay deleted.
