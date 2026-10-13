@@ -912,28 +912,42 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 
 ---
 
-#### Phase 9: Custom date types
+#### Phase 9: Custom date types ✅ DONE
 
-**PR Size:** ~200 lines
+**PR Size:** ~200 lines (actual: three layers of ~500–650, see Delivery)
 
-> **Migration number:** indicative `0123_add_user_id_to_custom_date_types.py`.
+> **Migration numbers:** `0133_add_user_id_to_custom_date_types.py`,
+> `0134_require_custom_date_types_user_id.py`.
 
-- [ ] Migration `0123`: `custom_date_types.user_id`, derivation, `NOT NULL`,
+- [x] Migrations `0133` / `0134`: `custom_date_types.user_id`, derivation, `NOT NULL`,
   `UNIQUE(user_id, name)` replacing `UNIQUE(name)`.
-- [ ] `CustomDateTypeRepository` (`create`, `get_by_id`, `get_by_name`, `list_all`) and
-  `CustomDateTypeService` take `user_id`; the 3 routes pass it; creating or updating an important
-  date with a `custom_type_id` requires the type to belong to the acting user.
+- [x] `CustomDateTypeRepository` (`create`, `get_by_id`, `get_by_name`, `list_all`, and `delete`)
+  and `CustomDateTypeService` take `user_id`; the 3 routes pass it; creating or updating an
+  important date with a `custom_type_id` requires the type to belong to the acting user.
 
 **Required Test Coverage:**
-- [ ] **Integration (migration + repository):** assignment; per-user uniqueness; foreign type
-  invisible.
-- [ ] **Integration (REST):** date-type routes and "important date with a foreign custom type →
-  404" added to `test_contact_ownership.py`.
+- [x] **Integration (migration + repository):** assignment; per-user uniqueness; foreign type
+  invisible (`test_add_user_id_to_custom_date_types_migration.py`,
+  `test_require_custom_date_types_user_id_migration.py`,
+  `TestCustomDateTypeReadsAreScopedToTheOwner`, `TestImportantDateCustomTypeMustShareTheOwner`).
+- [x] **Integration (REST):** date-type routes (`CROSS_USER_DATE_TYPE_REQUESTS` with its own
+  `{type_id}` coverage guard; the list) and "important date with a foreign custom type → 404" on
+  add, edit, whole-contact update and contact create, added to `test_contact_ownership.py`.
 
-**E2E:** regression.
+**E2E:** regression, plus a new create-and-reuse test in `contact-important-dates.spec.ts` (no
+spec touched custom date types before). `contact-important-dates`, `contacts`,
+`contact-inline-editing`, `contacts-merge`, `contacts-merge-api`, `home-dashboard`: all passed on
+firefox and Mobile Chrome (one `home-dashboard` regenerate-summary test lost a click once on
+Mobile Chrome and passed 3/3 on rerun; it does not touch dates).
+
+**Status:** ✅ DONE — custom date types are owned, named per owner and scoped in SQL on every read
+and write, and an important date can carry only its contact's owner's type. Whole suite green on
+the final stack: backend unit 5108, backend integration 3833 (7 pre-existing skips), frontend
+jest 2979, `core_shared` unit 525.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/database-design.md` — custom date types.
+- [x] `docs/architecture/database-design.md` — custom date types; `domain-architecture.md` — the
+  ownership rule; `api-design.md` — the foreign-type 404.
 
 **Delivery:** a stack, each layer deployable on its own (the Phase 8 / 10 expand → contract
 shape). The realistic size is ~900 lines, not ~200: the migration tests alone are ~400.
@@ -951,9 +965,16 @@ shape). The realistic size is ~900 lines, not ~200: the migration tests alone ar
   on it in SQL; `GET` / `DELETE /api/custom-date-types` pass the session user (another user's type
   is a 404 on delete). Duplicate-name and in-use errors are matched by constraint name; the old
   in-use match (`fk_contact_important_dates_custom_type`) named a constraint that never existed.
-- **9c** — an important date's custom type must share its contact's owner, enforced in the
-  `contact_important_dates` INSERT / UPDATE SQL (404 `CUSTOM_DATE_TYPE_NOT_FOUND` otherwise); REST
-  isolation suite in `test_contact_ownership.py`; e2e; documentation.
+- **9c ✅ DONE** — an important date's custom type must share its contact's owner, enforced in
+  the `contact_important_dates` INSERT / UPDATE SQL (`INSERT … SELECT … WHERE` / `UPDATE … WHERE`
+  with an `EXISTS` over the type and the contact's owner); a refused write raises
+  `CustomDateTypeNotFoundError` (404 `CUSTOM_DATE_TYPE_NOT_FOUND`), and an update that matched no
+  row re-checks the date so a missing date stays `ImportantDateNotFoundError`. Every write path
+  goes through those two statements (single add/edit, whole-contact create/update, the inbound
+  consumer), so none needs its own check. The shared `foreign_contact_seeding` fixture gains a
+  foreign type, a custom-typed date and an unused type (snapshot, backdate and owner hand-over
+  include `custom_date_types`); REST isolation suite; e2e; docs. The editor's day, month, year
+  and custom-name inputs gained accessible names (they had placeholders only).
 
 **Decisions (recorded during implementation):**
 - **Migration numbers:** `0133` (column) and `0134` (contract + per-owner names). `main` had
@@ -968,7 +989,13 @@ shape). The realistic size is ~900 lines, not ~200: the migration tests alone ar
   `custom_date_types_name_key`. Making them case-insensitive could make `0134` fail on existing
   `Sobriety` / `sobriety` pairs; the editor already reuses an existing type case-insensitively.
 - **MCP parity needs no tool change:** no MCP tool lists, creates or assigns a custom date type,
-  and the important-date tools reject `date_type=custom`.
+  and the important-date tools reject `date_type=custom`. The MCP contact isolation suite runs
+  against the enriched foreign fixture and stays green.
+- **Display joins stay unscoped** (`get_contact`, `get_important_dates`, upcoming important
+  dates, the search indexer): they are keyed by a date, and the write rule keeps a date's type
+  within its contact's owner (the Phase 10 agenda-join precedent).
+- **The whole-contact create/update responses do not carry `custom_date_type_name`** (they are
+  built from the written entity, not re-read); pre-existing, unchanged here.
 
 ---
 

@@ -67,6 +67,69 @@ describe('ImportantDateInlineEditor', () => {
     expect(screen.getByLabelText('Cancel edit')).toBeInTheDocument();
   });
 
+  it('names every date input for assistive technology', () => {
+    renderEditor();
+
+    expect(screen.getByRole('spinbutton', { name: 'Day' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('spinbutton', { name: 'Month' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('spinbutton', { name: 'Year' })
+    ).toBeInTheDocument();
+  });
+
+  it('names the custom type input once Custom is chosen', async () => {
+    const user = userEvent.setup();
+    renderEditor();
+
+    await user.click(
+      screen.getByRole('combobox', { name: 'Important Date Type' })
+    );
+    await user.click(screen.getByRole('option', { name: 'Custom...' }));
+
+    expect(
+      screen.getByRole('textbox', { name: 'Custom date type name' })
+    ).toBeInTheDocument();
+  });
+
+  it('reuses the listed type whose name matches, whatever its case', async () => {
+    const createType = jest.fn();
+    (contactsApi.useCustomDateTypes as jest.Mock).mockReturnValue({
+      data: { data: [{ id: '42', attributes: { name: 'Sobriety' } }] },
+    });
+    (contactsApi.useCreateCustomDateType as jest.Mock).mockReturnValue({
+      mutateAsync: createType,
+      isPending: false,
+    });
+    const user = userEvent.setup();
+    renderEditor();
+
+    await user.click(
+      screen.getByRole('combobox', { name: 'Important Date Type' })
+    );
+    await user.click(screen.getByRole('option', { name: 'Custom...' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'Custom date type name' }),
+      'sobriety'
+    );
+    await user.type(screen.getByRole('spinbutton', { name: 'Day' }), '2');
+    await user.type(screen.getByRole('spinbutton', { name: 'Month' }), '8');
+    await user.type(screen.getByRole('spinbutton', { name: 'Year' }), '2019');
+    await user.click(screen.getByLabelText('Save date'));
+
+    await waitFor(() => {
+      expect(mockOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          date_type: ImportantDateTypeEnum.CUSTOM,
+          custom_date_type_id: 42,
+          custom_date_type_name: 'Sobriety',
+        })
+      );
+    });
+    expect(createType).not.toHaveBeenCalled();
+  });
+
   it('calls onSave with correct full-date payload', async () => {
     const user = userEvent.setup();
     renderEditor();

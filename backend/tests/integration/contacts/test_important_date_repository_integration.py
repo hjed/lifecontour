@@ -15,6 +15,7 @@ from app.core.contacts.adapters.sql.custom_date_type_repository import (
 from app.core.contacts.models.exceptions import (
     CustomDateTypeNotFoundError,
     DuplicateCustomDateTypeNameError,
+    ImportantDateNotFoundError,
 )
 from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 
@@ -318,3 +319,113 @@ class TestCustomDateTypeReadsAreScopedToTheOwner:
 
         with pytest.raises(DuplicateCustomDateTypeNameError):
             await custom_date_repo.create(name="Sobriety", user_id=TEST_USER_ID)
+
+
+def _custom_date(contact_id: int, type_id: int) -> ImportantDate:
+    return ImportantDate(
+        contact_id=contact_id,
+        date_type=ImportantDateType.CUSTOM,
+        precision=DatePrecision.DAY_MONTH,
+        month=8,
+        day=2,
+        custom_date_type_id=type_id,
+    )
+
+
+@pytest.mark.asyncio
+class TestImportantDateCustomTypeMustShareTheOwner:
+    """A date may carry only a type its contact's owner owns, on every write."""
+
+    async def test_adding_a_date_with_their_type_writes_nothing(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_repo: SqlCustomDateTypeRepository,
+        sample_contact: Contact,
+    ) -> None:
+        assert sample_contact.id is not None
+        theirs = await custom_date_repo.create("Sobriety", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+
+        with pytest.raises(CustomDateTypeNotFoundError):
+            await contact_repo.add_important_date(
+                sample_contact.id, _custom_date(sample_contact.id, theirs.id)
+            )
+
+        assert await contact_repo.get_important_dates(sample_contact.id) == []
+
+    async def test_adding_a_date_with_your_type_stores_it(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_repo: SqlCustomDateTypeRepository,
+        sample_contact: Contact,
+    ) -> None:
+        assert sample_contact.id is not None
+        mine = await custom_date_repo.create("Sobriety", user_id=TEST_USER_ID)
+        assert mine.id is not None
+
+        await contact_repo.add_important_date(
+            sample_contact.id, _custom_date(sample_contact.id, mine.id)
+        )
+
+        [stored] = await contact_repo.get_important_dates(sample_contact.id)
+        assert stored.custom_date_type_id == mine.id
+        assert stored.custom_date_type_name == "Sobriety"
+
+    async def test_editing_a_date_to_their_type_leaves_it(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_repo: SqlCustomDateTypeRepository,
+        sample_contact: Contact,
+    ) -> None:
+        assert sample_contact.id is not None
+        mine = await custom_date_repo.create("Sobriety", user_id=TEST_USER_ID)
+        theirs = await custom_date_repo.create("Graduation", user_id=OTHER_USER_ID)
+        assert mine.id is not None and theirs.id is not None
+        saved = await contact_repo.add_important_date(
+            sample_contact.id, _custom_date(sample_contact.id, mine.id)
+        )
+
+        saved.custom_date_type_id = theirs.id
+        with pytest.raises(CustomDateTypeNotFoundError):
+            await contact_repo.update_important_date(saved)
+
+        [stored] = await contact_repo.get_important_dates(sample_contact.id)
+        assert stored.custom_date_type_id == mine.id
+
+    async def test_editing_a_missing_date_is_still_date_not_found(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_repo: SqlCustomDateTypeRepository,
+        sample_contact: Contact,
+    ) -> None:
+        """The guard must not relabel a missing date as a missing type."""
+        assert sample_contact.id is not None
+        mine = await custom_date_repo.create("Sobriety", user_id=TEST_USER_ID)
+        assert mine.id is not None
+        ghost = _custom_date(sample_contact.id, mine.id)
+        ghost.id = 999999
+
+        with pytest.raises(ImportantDateNotFoundError):
+            await contact_repo.update_important_date(ghost)
+
+    async def test_editing_a_custom_date_into_a_birthday_drops_the_type(
+        self,
+        contact_repo: SqlContactRepository,
+        custom_date_repo: SqlCustomDateTypeRepository,
+        sample_contact: Contact,
+    ) -> None:
+        """No type at all is always allowed."""
+        assert sample_contact.id is not None
+        mine = await custom_date_repo.create("Sobriety", user_id=TEST_USER_ID)
+        assert mine.id is not None
+        saved = await contact_repo.add_important_date(
+            sample_contact.id, _custom_date(sample_contact.id, mine.id)
+        )
+
+        saved.date_type = ImportantDateType.BIRTHDAY
+        saved.custom_date_type_id = None
+        await contact_repo.update_important_date(saved)
+
+        [stored] = await contact_repo.get_important_dates(sample_contact.id)
+        assert stored.date_type == ImportantDateType.BIRTHDAY
+        assert stored.custom_date_type_id is None

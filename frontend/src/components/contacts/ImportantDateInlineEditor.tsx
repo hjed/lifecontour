@@ -177,6 +177,7 @@ export function ImportantDateInlineEditor({
           value={customType}
           onChange={e => setCustomType(e.target.value)}
           placeholder='Custom name'
+          aria-label='Custom date type name'
           className='h-8 w-[100px] text-xs'
           disabled={isLoading}
         />
@@ -209,6 +210,7 @@ export function ImportantDateInlineEditor({
           <Input
             type='number'
             placeholder='DD'
+            aria-label='Day'
             value={day}
             onChange={e => setDay(e.target.value)}
             className='h-8 w-[60px] text-xs'
@@ -219,6 +221,7 @@ export function ImportantDateInlineEditor({
           <Input
             type='number'
             placeholder='MM'
+            aria-label='Month'
             value={month}
             onChange={e => setMonth(e.target.value)}
             className='h-8 w-[60px] text-xs'
@@ -234,6 +237,7 @@ export function ImportantDateInlineEditor({
         <Input
           type='number'
           placeholder='YYYY'
+          aria-label='Year'
           value={year}
           onChange={e => setYear(e.target.value)}
           className='h-8 w-[70px] text-xs'

@@ -118,6 +118,31 @@ CREATE TABLE tags (
 );
 ```
 
+#### Custom Date Types Table
+```sql
+CREATE TABLE custom_date_types (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    user_id VARCHAR(50) NOT NULL,           -- the owner (OAuth subject); no FK
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_custom_date_types_user_id_name UNIQUE (user_id, name)
+);
+CREATE INDEX idx_custom_date_types_user_id ON custom_date_types (user_id);
+```
+
+A user's own labels for important dates (`contact_important_dates.custom_date_type_id`, required
+when `date_type = 'custom'`). Each type has one owner, and names are unique per owner and
+case-sensitive, so two users may each hold a `Sobriety` type. A date may only carry a type its
+contact's owner owns; the important-date INSERT and UPDATE check that in SQL and write nothing
+otherwise.
+
+Migrations `0133` / `0134` assigned the existing rows: a type takes the owner of the contacts
+whose dates use it, an unused type the site's one user (`owner_derivation`,
+`alembic -x custom_date_types_owner=<user_id>` when the data cannot choose). Both refuse, naming
+the type, when contacts of two owners use one type. `0134` then requires the column and replaced
+the global `custom_date_types_name_key (name)`; its downgrade refuses while two owners share a name.
+
 #### Contact Tags Junction Table
 ```sql
 CREATE TABLE contact_tags (

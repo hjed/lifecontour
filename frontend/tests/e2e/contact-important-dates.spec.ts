@@ -145,6 +145,90 @@ test.describe('Important Dates', () => {
     ).toBeVisible({ timeout: 15000 });
   });
 
+  test('creates a custom date type and reuses it for a second date', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    // Type names are unique per owner and the e2e user persists across runs.
+    const typeName = `Sobriety ${Date.now()}`;
+
+    const [contact] = await dataManager.createContacts([
+      { firstName: 'Custom', lastName: 'TypeDates' },
+    ]);
+    testCleanup(async () => {
+      // The contact first: a type its dates still use cannot be deleted.
+      await dataManager.cleanup();
+      const listed = await page.request.get('/api/custom-date-types');
+      const { data } = (await listed.json()) as {
+        data: { id: string; attributes: { name: string } }[];
+      };
+      for (const type of data.filter(t => t.attributes.name === typeName)) {
+        await page.request.delete(`/api/custom-date-types/${type.id}`);
+      }
+    });
+
+    await page.goto(`/contacts/${contact.id}`);
+    await expect(
+      page.getByText(`${contact.firstName} ${contact.lastName}`).first()
+    ).toBeVisible();
+
+    const addCustomDate = async (name: string, day: string, month: string) => {
+      await page.getByLabel('Add important date').click();
+      await selectRadixOption(
+        page,
+        page.getByRole('combobox', { name: 'Important Date Type' }),
+        'Custom...'
+      );
+      await page
+        .getByRole('textbox', { name: 'Custom date type name' })
+        .fill(name);
+      await selectRadixOption(
+        page,
+        page.getByRole('combobox', { name: 'Important Date Precision' }),
+        'Day & Month'
+      );
+      await page.getByRole('spinbutton', { name: 'Day' }).fill(day);
+      await page.getByRole('spinbutton', { name: 'Month' }).fill(month);
+
+      const saved = page.waitForResponse(
+        response =>
+          /\/api\/contacts\/\d+\/important-dates$/.test(response.url()) &&
+          response.request().method() === 'POST' &&
+          response.status() === 201
+      );
+      await page.getByRole('button', { name: 'Save date' }).click();
+      await saved;
+    };
+
+    // The first date creates the type (owned by the session user).
+    const typeCreated = page.waitForResponse(
+      response =>
+        response.url().endsWith('/api/custom-date-types') &&
+        response.request().method() === 'POST' &&
+        response.status() === 201
+    );
+    await addCustomDate(typeName, '2', '8');
+    await typeCreated;
+    await expect(page.getByText(typeName)).toHaveCount(1, { timeout: 15000 });
+
+    // The second, typed in another case, reuses it rather than adding another.
+    await addCustomDate(typeName.toLowerCase(), '9', '3');
+    await expect(page.getByText(typeName)).toHaveCount(2, { timeout: 15000 });
+
+    const listed = await page.request.get('/api/custom-date-types');
+    expect(listed.ok()).toBe(true);
+    const { data } = (await listed.json()) as {
+      data: { attributes: { name: string } }[];
+    };
+    expect(
+      data.filter(
+        t => t.attributes.name.toLowerCase() === typeName.toLowerCase()
+      )
+    ).toHaveLength(1);
+  });
+
   test('should render synced dates at different precisions', async ({
     authenticatedPage,
     testCleanup,
