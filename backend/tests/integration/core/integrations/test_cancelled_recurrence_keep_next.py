@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from core_shared.models.history import Provenance
+from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -491,3 +492,43 @@ class TestMergedContinuations:
             await _cancel(processor, calendar_id, journals, week)
 
         assert await _surviving_weeks(async_connection, journals) == [1, 2]
+
+
+@pytest.mark.integration
+class TestRecurrenceTidy:
+    """The backfill: a recurrence cancelled before the keep-next rule existed."""
+
+    async def test_a_queued_tidy_keeps_only_the_next_occurrence(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journals = await _seed_weekly(processor, calendar_id, weeks=4)
+        # What the old rule left: every link cancelled, every journal kept.
+        await async_connection.execute(
+            text(
+                "UPDATE journal_external_event_links SET sync_status = 'cancelled'"
+                " WHERE journal_id = ANY(:ids)"
+            ),
+            {"ids": list(journals.values())},
+        )
+        await _record_history(async_connection, journals[3], "ui")
+
+        result = await processor.process_event(
+            OutboxEvent(
+                id=uuid.uuid4(),
+                event_type="journal_event.recurrence_tidy",
+                aggregate_id="0",
+                event_data={
+                    "integration_source": "google",
+                    "calendar_id": calendar_id,
+                    "recurring_event_id": MASTER_ID,
+                },
+                occurred_at=datetime.now(UTC),
+                retry_count=0,
+            )
+        )
+
+        assert result["status"] == "success"
+        assert result["deleted"] == 2
+        assert await _surviving_weeks(async_connection, journals) == [1, 3]
