@@ -89,6 +89,7 @@ def sync_event(
     external_identity: str | None = None,
     timezone: str | None = None,
     contact_relationships: list[dict[str, Any]] | None = None,
+    split_adopted_from: str | None = None,
 ) -> OutboxEvent:
     """A `journal_event.created` / `.updated` / `.cancelled` outbox event.
 
@@ -123,6 +124,7 @@ def sync_event(
         "recurring_event_id": recurring_event_id,
         "series_recurring_event_id": series_recurring_event_id,
         "external_identity": external_identity,
+        "split_adopted_from": split_adopted_from,
     }
     return OutboxEvent(
         id=uuid.uuid4(),

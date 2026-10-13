@@ -186,30 +186,13 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 "recurring_event_id": recurring_event_id,
             },
         )
-        select_query = text(
-            f"""
-            SELECT {_SERIES_COLUMNS}
-            FROM journal_series
-            WHERE calendar_id = :calendar_id
-              AND recurring_event_id = :recurring_event_id
-              AND user_id = :user_id
-            """
-        )
-        result = await self.conn.execute(
-            select_query,
-            {
-                "calendar_id": calendar_id,
-                "recurring_event_id": recurring_event_id,
-                "user_id": user_id,
-            },
-        )
-        row = result.fetchone()
-        if row is None:  # pragma: no cover - defensive; the insert guarantees a row
+        series = await self._find_by_key(user_id, calendar_id, recurring_event_id)
+        if series is None:  # pragma: no cover - defensive; the insert guarantees a row
             raise RuntimeError(
                 "journal_series get_or_create failed for "
                 f"calendar={calendar_id} recurring_event_id={recurring_event_id}"
             )
-        return _row_to_series(row)
+        return series
 
     async def lock_for_merge(
         self, series_ids: Sequence[UUID], user_id: str
@@ -297,6 +280,154 @@ class SqlJournalSeriesRepository(JournalSeriesRepository):
                 "user_id": absorbed.user_id,
             },
         )
+
+    async def adopt_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str,
+        into_recurring_event_id: str,
+        into_split_recurring_event_id: str | None = None,
+    ) -> UUID | None:
+        """Fold a split-off recurrence into the old recurrence's series.
+
+        Resolved by recurrence key or alias, never by a journal's membership:
+        a journal can sit in manual series too. A series already started for
+        the new recurrence is merged in as a series merge would (``_fold_into``).
+        Otherwise the new recurrence is aliased under its key lock, which
+        orders it against ``get_or_create_by_recurrence`` creating a series for
+        it meanwhile; if one appeared while waiting, nothing is folded.
+        """
+        into_keys = (into_split_recurring_event_id, into_recurring_event_id)
+        into = await self._resolve_recurrence(user_id, calendar_id, into_keys)
+        if into is None or into.id is None:
+            return None
+
+        started = await self._find_by_key(user_id, calendar_id, recurring_event_id)
+        if started is not None:
+            return await self._fold_into(
+                started, into, user_id, recurring_event_id, into_keys
+            )
+
+        await self._lock_recurrence(calendar_id, recurring_event_id)
+        if await self._find_by_key(user_id, calendar_id, recurring_event_id):
+            # A sync keyed a series on the new recurrence while this waited for
+            # its key. Folding it now would take series row locks *after* this
+            # key lock - the reverse of a series merge's order, and a deadlock
+            # with one. Leave both series; the user can merge them.
+            return None
+
+        await self.conn.execute(
+            text(
+                """
+                INSERT INTO journal_series_recurrence_aliases
+                    (calendar_id, recurring_event_id, series_id, user_id)
+                VALUES
+                    (:calendar_id, :recurring_event_id, :series_id, :user_id)
+                ON CONFLICT (calendar_id, recurring_event_id) DO NOTHING
+                """
+            ),
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "series_id": into.id,
+                "user_id": user_id,
+            },
+        )
+        return into.id
+
+    async def _fold_into(
+        self,
+        started: JournalSeries,
+        into: JournalSeries,
+        user_id: str,
+        recurring_event_id: str,
+        into_keys: tuple[str | None, str],
+        *,
+        retried: bool = False,
+    ) -> UUID | None:
+        """Merge the series started for a split-off recurrence into ``into``.
+
+        Rows first, then keys, as ``JournalSeriesMergeService`` takes them. A
+        series missing from the locked set was merged away meanwhile: if it
+        was ``started``, its recurrence now resolves through the alias that
+        merge wrote, which is followed rather than overwritten; if it was
+        ``into``, the old recurrence's series is resolved again and the fold
+        retried once against where it went.
+        """
+        assert started.id is not None and into.id is not None
+        if started.id == into.id:
+            return into.id
+        locked = await self.lock_for_merge([started.id, into.id], user_id)
+        if started.id not in locked:
+            assert started.calendar_id is not None
+            moved_to = await self._find_by_alias(
+                user_id, started.calendar_id, recurring_event_id
+            )
+            return moved_to.id if moved_to else None
+        if into.id not in locked:
+            assert started.calendar_id is not None
+            moved_into = await self._resolve_recurrence(
+                user_id, started.calendar_id, into_keys
+            )
+            if retried or moved_into is None:
+                return None
+            return await self._fold_into(
+                started,
+                moved_into,
+                user_id,
+                recurring_event_id,
+                into_keys,
+                retried=True,
+            )
+        await self.alias_recurrences(started, into.id)
+        await self.move_members(started.id, into.id)
+        await self.delete(started.id, user_id)
+        return into.id
+
+    async def _resolve_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        keys: tuple[str | None, str],
+    ) -> JournalSeries | None:
+        """The series a recurrence resolves to, as a sync of it would join.
+
+        ``keys`` is ``(split id, series key)``, checked in the order
+        ``get_or_create_by_recurrence`` uses: an alias on the split's own id
+        first (the user merged that split somewhere), then one on the series
+        key, then the series keyed on it.
+        """
+        split_key, series_key = keys
+        for key in (split_key, series_key):
+            if key:
+                aliased = await self._find_by_alias(user_id, calendar_id, key)
+                if aliased is not None:
+                    return aliased
+        return await self._find_by_key(user_id, calendar_id, series_key)
+
+    async def _find_by_key(
+        self, user_id: str, calendar_id: UUID, recurring_event_id: str
+    ) -> JournalSeries | None:
+        """The series auto-created for a recurrence, if there is one."""
+        result = await self.conn.execute(
+            text(
+                f"""
+                SELECT {_SERIES_COLUMNS}
+                FROM journal_series
+                WHERE calendar_id = :calendar_id
+                  AND recurring_event_id = :recurring_event_id
+                  AND user_id = :user_id
+                """
+            ),
+            {
+                "calendar_id": calendar_id,
+                "recurring_event_id": recurring_event_id,
+                "user_id": user_id,
+            },
+        )
+        row = result.fetchone()
+        return _row_to_series(row) if row else None
 
     async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
         """Move every member of one series into another (shared members dedupe)."""

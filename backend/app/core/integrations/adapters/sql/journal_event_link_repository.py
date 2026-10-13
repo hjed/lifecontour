@@ -151,6 +151,23 @@ class SqlJournalEventLinkRepository:
         row = result.fetchone()
         return _row_to_linked_journal(row) if row else None
 
+    async def find_by_journal(
+        self, journal_id: int, calendar_id: UUID
+    ) -> SeriesLinkedJournal | None:
+        """Find the link+journal facts for a journal's link in one calendar."""
+        query = text(
+            f"""
+            {_LINKED_JOURNAL_SELECT}
+            WHERE l.journal_id = :journal_id
+              AND l.calendar_id = :calendar_id
+            """
+        )
+        result = await self.conn.execute(
+            query, {"journal_id": journal_id, "calendar_id": calendar_id}
+        )
+        row = result.fetchone()
+        return _row_to_linked_journal(row) if row else None
+
     async def find_journals_for_series(
         self, calendar_id: UUID, recurring_event_id: str
     ) -> list[SeriesLinkedJournal]:

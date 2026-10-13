@@ -39,6 +39,7 @@ from app.core.integrations.cancelled_recurrence import (
     CancelledInstanceVerdict,
     RecurrenceInstance,
     affected_by_cancel,
+    next_upcoming_after,
     plan_cancelled_recurrence,
 )
 from app.core.journal.services.journal_service import JournalService
@@ -88,13 +89,17 @@ class CancelledRecurrenceTidier:
         source: Provenance,
         changed_by: str,
         cancelled_journal_id: int | None = None,
+        left_slot: tuple[datetime, int] | None = None,
     ) -> TidyOutcome:
         """Apply the keep-next rule to one recurrence on one calendar.
 
         Given ``cancelled_journal_id``, only that occurrence and its successor
-        are considered - the only two one cancellation can change. Without it
-        (a whole series cancelled, or a backfill), every continuation is.
-        Call it after the cancellations have been marked on the links.
+        are considered - the only two one cancellation can change. Given
+        ``left_slot``, the ``(start, journal_id)`` of an occurrence that has
+        left the recurrence (adopted by a split's new one), only the next
+        occurrence after it is. Without either (a whole series cancelled, or a backfill),
+        every continuation is. Call it after the cancellations have been
+        marked on the links.
         """
         await self.link_repo.lock_recurrence(calendar_id, recurring_event_id)
         linked = await self.link_repo.find_journals_for_series(
@@ -109,11 +114,14 @@ class CancelledRecurrenceTidier:
         instances = [i for i in map(_as_instance, linked) if i is not None]
         now = datetime.now(UTC)
         verdicts = plan_cancelled_recurrence(instances, now)
-        candidates = (
-            affected_by_cancel(instances, cancelled_journal_id, now)
-            if cancelled_journal_id is not None
-            else tuple(verdicts)
-        )
+        candidates: tuple[int, ...]
+        if cancelled_journal_id is not None:
+            candidates = affected_by_cancel(instances, cancelled_journal_id, now)
+        elif left_slot is not None:
+            successor = next_upcoming_after(instances, left_slot, now)
+            candidates = () if successor is None else (successor,)
+        else:
+            candidates = tuple(verdicts)
 
         by_id = {row.journal_id: row for row in linked}
         deleted: set[int] = set()

@@ -74,6 +74,10 @@ from app.core.integrations.cancelled_recurrence_tidier import (
 from app.core.integrations.models.unmatched_participant import (
     UnmatchedParticipantEmail,
 )
+from app.core.integrations.split_adoption import (
+    SplitAdopter,
+    adopted_journal_data,
+)
 from app.core.journal.adapters.sql import SqlFitnessDataRepository
 from app.core.journal.adapters.sql.gear_maintenance_data_repository import (
     SqlGearMaintenanceDataRepository,
@@ -295,6 +299,9 @@ class JournalOutboxEventProcessor:
             connection, self.link_repo, journal_service
         )
         self.series_repo = SqlJournalSeriesRepository(connection)
+        self.split_adopter = SplitAdopter(
+            self.link_repo, self.series_repo, self.recurrence_tidier
+        )
         self.review_item_repo = SqlReviewItemRepository(connection)
         self.unmatched_participant_repo = SqlUnmatchedParticipantEmailRepository(
             connection
@@ -643,9 +650,37 @@ class JournalOutboxEventProcessor:
                 return _skipped_as_merged(
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
+            if payload.split_adopted_from is not None:
+                return await self._create_instead_of_adopting(event)
             raise JournalOutboxEventProcessingError(
                 f"Journal {existing_journal_id} not found for update"
             )
+
+        # A split-off recurrence adopting this journal (see ``split_adoption``)
+        split_adoption = None
+        if payload.split_adopted_from is not None:
+            if await self.split_adopter.is_superseded(
+                journal_id=existing_journal_id,
+                calendar_id=UUID(calendar_id),
+                payload=payload,
+            ):
+                logger.info(
+                    "Adoption skipped - the journal has since moved on",
+                    journal_id=existing_journal_id,
+                    external_event_id=external_event_id,
+                )
+                return {
+                    "status": "skipped",
+                    "event_type": EVENT_TYPE_JOURNAL_EVENT_UPDATED,
+                    "reason": "adoption_superseded",
+                    "journal_id": existing_journal_id,
+                }
+            split_adoption = await self.split_adopter.begin(
+                journal=existing_journal,
+                calendar_id=UUID(calendar_id),
+                payload=payload,
+            )
+            journal_data = adopted_journal_data(journal_data, existing_journal)
 
         # ETag idempotency check — only skip when etag is non-null
         existing_link = await self._find_external_event_link(
@@ -881,6 +916,19 @@ class JournalOutboxEventProcessor:
         if not fields_changed:
             await self._invalidate_summary_for_journal(existing_journal_id)
 
+        if split_adoption is not None:
+            tidied = await self.split_adopter.finish(
+                split_adoption,
+                source=_provenance_for_source(payload.integration_source),
+                changed_by=payload.integration_source or "system",
+            )
+            if tidied is not None and tidied.errors:
+                # Retried whole: adoption and tidy are both idempotent.
+                raise JournalOutboxEventProcessingError(
+                    f"Re-planning the recurrence journal {existing_journal_id} "
+                    "left failed; failing for retry"
+                )
+
         logger.info(
             "Updated journal from inbound sync event",
             journal_id=saved_journal.id,
@@ -894,6 +942,53 @@ class JournalOutboxEventProcessor:
             "journal_id": saved_journal.id,
             "external_event_id": external_event_id,
         }
+
+    async def _link_moved_on(
+        self, journal_id: int, calendar_id: UUID, external_event_id: str
+    ) -> bool:
+        """Whether the journal's link in this calendar names another event."""
+        current = await self.link_repo.find_by_journal(journal_id, calendar_id)
+        return (
+            current is not None
+            and current.external_event_id is not None
+            and current.external_event_id != external_event_id
+        )
+
+    async def _create_instead_of_adopting(self, event: OutboxEvent) -> dict[str, Any]:
+        """Create the instance whose adoption target was deleted meanwhile.
+
+        The worker has already moved past this event, so failing it would lose
+        the occurrence for good; it is created as the worker would have sent
+        it had there been nothing to adopt.
+        """
+        event_data: dict[str, Any] = dict(event.event_data)
+        payload = JournalSyncEventData.model_validate(event_data)
+        new_key = payload.series_recurring_event_id or payload.recurring_event_id
+        if new_key and payload.split_adopted_from:
+            # The old series survives the deleted journal: the new recurrence
+            # still belongs in it.
+            await self.series_repo.adopt_recurrence(
+                user_id=str(payload.journal_data["user_id"]),
+                calendar_id=UUID(payload.calendar_id),
+                recurring_event_id=new_key,
+                into_recurring_event_id=payload.split_adopted_from,
+            )
+        event_data.update(
+            existing_journal_id=None,
+            split_adopted_from=None,
+            sync_action="created",
+        )
+        logger.info(
+            "Adoption target gone, creating the instance instead",
+            external_event_id=event_data.get("external_event_id"),
+        )
+        return await self._process_journal_created(
+            OutboxEvent(
+                event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
+                event_data=event_data,
+                aggregate_id=0,
+            )
+        )
 
     async def _process_journal_conflicted(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -1023,8 +1118,32 @@ class JournalOutboxEventProcessor:
         recurring_event_id = payload.recurring_event_id or (
             linked.recurring_event_id if linked else None
         )
-        if linked is not None and recurring_event_id:
+        if recurring_event_id:
             await self.link_repo.lock_recurrence(UUID(calendar_id), recurring_event_id)
+            # Read again under the lock: an adoption of this journal that was
+            # still uncommitted a moment ago has now landed or not.
+            linked = await self.link_repo.find_by_external_event(
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+            )
+        if linked is None and await self._link_moved_on(
+            existing_journal_id, UUID(calendar_id), external_event_id
+        ):
+            # The journal's link in this calendar now names another event: a
+            # split's new recurrence adopted it after this cancellation was
+            # queued. Marking by journal and calendar would cancel the adopted,
+            # live event.
+            logger.info(
+                "Stale cancellation skipped - the journal now links another event",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "reason": "link_moved_on",
+                "journal_id": existing_journal_id,
+            }
 
         await self._mark_journal_cancelled(
             journal_id=existing_journal_id,

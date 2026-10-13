@@ -1473,6 +1473,28 @@ class JournalSeriesRepository(ABC):
         pass
 
     @abstractmethod
+    async def adopt_recurrence(
+        self,
+        user_id: str,
+        calendar_id: UUID,
+        recurring_event_id: str,
+        into_recurring_event_id: str,
+        into_split_recurring_event_id: str | None = None,
+    ) -> UUID | None:
+        """Fold a recurrence into the series another recurrence resolves to.
+
+        For a recurrence the source split off under an unrelated id: later
+        instances of ``recurring_event_id`` then join the series that
+        ``into_recurring_event_id`` resolves to (through its alias, if it was
+        merged). ``into_split_recurring_event_id`` is the old recurrence's own
+        id when it was itself a split: an alias on it wins, as it does for
+        ``get_or_create_by_recurrence``. A series already started for ``recurring_event_id`` is merged
+        into it. Returns that series' id, or ``None`` when the old recurrence
+        has no series to adopt into.
+        """
+        pass
+
+    @abstractmethod
     async def move_members(self, from_series_id: UUID, to_series_id: UUID) -> None:
         """Move every member of one series into another (shared members dedupe)."""
         pass

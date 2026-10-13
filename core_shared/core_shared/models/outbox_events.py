@@ -151,6 +151,17 @@ class JournalSyncEventData(BaseModel):
             "same journal. Null when the source has no such identity."
         ),
     )
+    split_adopted_from: str | None = Field(
+        default=None,
+        description=(
+            "Set on an update that adopts an existing journal for an instance "
+            "of a new recurrence, when the source split an old recurrence "
+            "under an unrelated id: the series key of the old recurrence the "
+            "journal belonged to. The consumer re-points the journal's link "
+            "at this event and folds the new recurrence into the old series "
+            "instead of starting another. Null for every other event."
+        ),
+    )
 
 
 class JournalStatusEventData(BaseModel):
