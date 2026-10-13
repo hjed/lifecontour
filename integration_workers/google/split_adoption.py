@@ -15,9 +15,11 @@ instance's cancellation is dropped once that adoption has been sent.
 
 Two instances pair when all of these hold:
 
-- the old one is cancelled in this batch and linked to a journal in this
-  calendar that is not synced outbound-only and has not already ended (the
-  sync's own past-cancellation skip, which reads the end);
+- the old one is cancelled in this batch and linked to a journal displayed
+  in this calendar (where its series is keyed - a copy shared from another
+  calendar would be adopted with no series to fold into) that is not synced
+  outbound-only and has not already ended (the sync's own past-cancellation
+  skip, which reads the end);
 - the new one is live, an instance of a *different* recurrence, and not yet
   linked here;
 - they fall on the same local day (in the user's zone) and have the same
@@ -208,6 +210,11 @@ async def find_split_pairing(
             JOIN journals j ON j.id = l.journal_id
             WHERE l.calendar_id = :calendar_id
               AND l.external_event_id = ANY(:event_ids)
+              AND EXISTS (
+                  SELECT 1 FROM journal_calendar_info ci
+                  WHERE ci.journal_id = l.journal_id
+                    AND ci.calendar_id = l.calendar_id
+              )
         """),
         {
             "calendar_id": calendar_id,

@@ -237,7 +237,9 @@ class TestSplitAdoptionIntegration:
 
     NEW_MASTER = "9p7kac2r5m992mshlenq0j10pf"
 
-    async def _seed_upcoming_instance(self, db_session) -> tuple[str, int, datetime]:
+    async def _seed_upcoming_instance(
+        self, db_session, *, displayed_elsewhere: bool = False
+    ) -> tuple[str, int, datetime]:
         from datetime import timedelta
 
         now = datetime.now(UTC)
@@ -286,6 +288,27 @@ class TestSplitAdoptionIntegration:
                 "now": now,
             },
         )
+        display_calendar = calendar_uuid
+        if displayed_elsewhere:
+            # A shared event: the journal belongs to another calendar, which
+            # keys its series; this calendar only holds a copy.
+            display_calendar = str(uuid.uuid4())
+            await db_session.execute(
+                text("""
+                    INSERT INTO calendars (id, user_id, name, color, created_at,
+                        updated_at, google_calendar_id, is_synced_to_google)
+                    VALUES (:cal_id, :user_id, 'Owner Cal', '#0000FF', :now, :now,
+                        'owner@example.com', false)
+                """),
+                {"cal_id": display_calendar, "user_id": TEST_USER, "now": now},
+            )
+        await db_session.execute(
+            text("""
+                INSERT INTO journal_calendar_info (journal_id, calendar_id, is_all_day)
+                VALUES (:journal_id, :cal_id, false)
+            """),
+            {"journal_id": journal_id, "cal_id": display_calendar},
+        )
         await db_session.commit()
         return calendar_uuid, journal_id, start
 
@@ -330,3 +353,49 @@ class TestSplitAdoptionIntegration:
         assert event_data["existing_journal_id"] == journal_id
         assert event_data["external_event_id"] == f"{self.NEW_MASTER}_new"
         assert event_data["split_adopted_from"] == MASTER_ID
+
+    async def test_a_journal_displayed_in_another_calendar_is_not_paired(
+        self, db_session
+    ) -> None:
+        """Its series is keyed on the calendar it is displayed in, so adopting
+        it through this one would start a second series."""
+        from datetime import timedelta
+
+        _, journal_id, start = await self._seed_upcoming_instance(
+            db_session, displayed_elsewhere=True
+        )
+        new_start = start + timedelta(minutes=10)
+
+        result = await _run_sync(
+            db_session,
+            [
+                {
+                    "id": f"{MASTER_ID}_old",
+                    "status": "cancelled",
+                    "etag": '"etag-cancelled"',
+                    "recurringEventId": MASTER_ID,
+                },
+                {
+                    "id": f"{self.NEW_MASTER}_new",
+                    "status": "confirmed",
+                    "etag": '"etag-new"',
+                    "summary": "Pilates",
+                    "start": {"dateTime": new_start.isoformat()},
+                    "end": {"dateTime": (new_start + timedelta(hours=1)).isoformat()},
+                    "recurringEventId": self.NEW_MASTER,
+                },
+            ],
+        )
+
+        assert result.get("events_split_adopted", 0) == 0
+        outbox = await db_session.execute(
+            text("""
+                SELECT event_type FROM outbox_events
+                WHERE event_type LIKE 'journal_event.%'
+                ORDER BY event_type
+            """)
+        )
+        assert [row.event_type for row in outbox] == [
+            "journal_event.cancelled",
+            "journal_event.created",
+        ]
