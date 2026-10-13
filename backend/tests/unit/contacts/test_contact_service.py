@@ -16,7 +16,7 @@ from core_shared.models.contacts.event_types import CONTACT_PUSH_EVENT_TYPES
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import TagName
 
-from app.core.contacts.models.exceptions import ContactNotFoundError
+from app.core.contacts.models.exceptions import ContactNotFoundError, TagNotFoundError
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from tests.integration.contact_seeding import TEST_USER_ID
@@ -911,6 +911,28 @@ class TestContactService:
 
         # Assert
         mock_contact_repo.assign_tag.assert_called_once_with(1, 2)
+
+    @pytest.mark.asyncio
+    async def test_a_tag_the_repository_refuses_is_not_found_and_not_announced(
+        self,
+        contact_service,
+        mock_contact_repo,
+        mock_tag_repo,
+        mock_event_publisher,
+        mock_transaction,
+    ):
+        """The SQL guard refused it (another owner's tag): no TagAssigned is published."""
+        mock_contact_repo.find_by_id.return_value = Contact(
+            user_id=TEST_USER_ID, first_name="John", id=1
+        )
+        mock_tag_repo.find_by_id.return_value = Tag(name=TagName("work"), id=2)
+        mock_contact_repo.assign_tag.return_value = False
+
+        with pytest.raises(TagNotFoundError):
+            await contact_service.assign_tag_to_contact(
+                1, 2, mock_transaction, user_id=TEST_USER_ID
+            )
+        mock_event_publisher.publish.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_remove_tag_from_contact_success(

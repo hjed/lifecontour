@@ -1369,16 +1369,34 @@ class SqlContactRepository(ContactRepository):
         query = text("DELETE FROM contact_notes WHERE contact_id = :contact_id")
         await self.conn.execute(query, {"contact_id": contact_id})
 
-    async def assign_tag(self, contact_id: int, tag_id: int) -> None:
-        """Assign a tag to a contact."""
+    async def assign_tag(self, contact_id: int, tag_id: int) -> bool:
+        """Assign a tag to a contact; return whether the contact now holds it.
+
+        A tag of another owner is never assigned (``False``); one the contact
+        already holds is ``True``.
+        """
         query = text(
             """
-            INSERT INTO contact_tags (contact_id, tag_id)
-            VALUES (:contact_id, :tag_id)
-            ON CONFLICT (contact_id, tag_id) DO NOTHING
+            WITH assigned AS (
+                INSERT INTO contact_tags (contact_id, tag_id)
+                SELECT c.id, t.id
+                FROM contacts c
+                JOIN tags t ON t.user_id = c.user_id
+                WHERE c.id = :contact_id AND t.id = :tag_id
+                ON CONFLICT (contact_id, tag_id) DO NOTHING
+                RETURNING 1
+            )
+            SELECT EXISTS (SELECT 1 FROM assigned)
+                OR EXISTS (
+                    SELECT 1 FROM contact_tags
+                    WHERE contact_id = :contact_id AND tag_id = :tag_id
+                )
         """
         )
-        await self.conn.execute(query, {"contact_id": contact_id, "tag_id": tag_id})
+        result = await self.conn.execute(
+            query, {"contact_id": contact_id, "tag_id": tag_id}
+        )
+        return bool(result.scalar_one())
 
     async def remove_tag(self, contact_id: int, tag_id: int) -> None:
         """Remove a tag from a contact."""

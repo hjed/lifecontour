@@ -212,18 +212,15 @@ class TestTagRepositoryIntegration:
         saved_tag = await tag_repo.save(tag, user_id=TEST_USER_ID)
 
         # Act
-        await tag_repo.delete(saved_tag.id)
+        assert await tag_repo.delete(saved_tag.id, user_id=TEST_USER_ID)
 
         # Assert - Tag should no longer exist
         found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is None
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_tag_raises_error(self, tag_repo):
-        """Test deleting non-existent tag raises error."""
-        # Act & Assert
-        with pytest.raises(TagNotFoundError):
-            await tag_repo.delete(999)
+    async def test_deleting_a_missing_tag_reports_nothing_deleted(self, tag_repo):
+        assert not await tag_repo.delete(999, user_id=TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_hierarchical_tags(self, tag_repo):
@@ -353,19 +350,6 @@ class TestTagOwnerIsRecorded:
         assert len(reads) == 10  # get_all and search both find parent and child
         assert {tag.user_id for tag in reads if tag is not None} == {TEST_USER_ID}
 
-    async def test_updating_a_tag_never_re_owns_it(
-        self, tag_repo: SqlTagRepository, clean_database: AsyncConnection
-    ) -> None:
-        tag = await tag_repo.save(Tag(name=TagName("crew")), user_id=TEST_USER_ID)
-        tag.color = "#00FF00"
-
-        await tag_repo.save(tag, user_id=OTHER_USER_ID)
-
-        owner = await clean_database.execute(
-            text("SELECT user_id FROM tags WHERE id = :id"), {"id": tag.id}
-        )
-        assert owner.scalar_one() == TEST_USER_ID
-
     async def test_a_contacts_tags_carry_their_owner(
         self, tag_repo: SqlTagRepository, clean_database: AsyncConnection
     ) -> None:
@@ -483,3 +467,127 @@ class TestTagReadsAreScopedToTheOwner:
 
         with pytest.raises(DuplicateTagNameError):
             await tag_repo.save(Tag(name=TagName("Crew")), user_id=TEST_USER_ID)
+
+
+@pytest.mark.integration
+class TestTagWritesAreScopedToTheOwner:
+    """A write naming another user's tag changes nothing of theirs."""
+
+    @pytest.fixture
+    def tag_repo(self, clean_database: AsyncConnection) -> SqlTagRepository:
+        return SqlTagRepository(clean_database)
+
+    @pytest.fixture
+    async def foreign(self, tag_repo: SqlTagRepository) -> Tag:
+        return await tag_repo.save(Tag(name=TagName("theirs")), user_id=OTHER_USER_ID)
+
+    @staticmethod
+    async def _tag_rows(conn: AsyncConnection) -> list[tuple[object, ...]]:
+        rows = await conn.execute(
+            text("SELECT id, user_id, name, parent_id FROM tags ORDER BY id")
+        )
+        return [tuple(row) for row in rows]
+
+    @staticmethod
+    async def _assignments(conn: AsyncConnection) -> set[tuple[int, int]]:
+        rows = await conn.execute(text("SELECT contact_id, tag_id FROM contact_tags"))
+        return {(row.contact_id, row.tag_id) for row in rows}
+
+    async def test_saving_a_foreign_tag_changes_nothing(
+        self,
+        tag_repo: SqlTagRepository,
+        foreign: Tag,
+        clean_database: AsyncConnection,
+    ) -> None:
+        before = await self._tag_rows(clean_database)
+        foreign.name = TagName("renamed")
+
+        with pytest.raises(TagNotFoundError):
+            await tag_repo.save(foreign, user_id=TEST_USER_ID)
+
+        assert await self._tag_rows(clean_database) == before
+
+    async def test_deleting_a_foreign_tag_changes_nothing(
+        self,
+        tag_repo: SqlTagRepository,
+        foreign: Tag,
+        clean_database: AsyncConnection,
+    ) -> None:
+        assert foreign.id is not None
+        before = await self._tag_rows(clean_database)
+
+        assert not await tag_repo.delete(foreign.id, user_id=TEST_USER_ID)
+
+        assert await self._tag_rows(clean_database) == before
+
+    async def test_merging_with_a_foreign_tag_moves_nothing(
+        self,
+        tag_repo: SqlTagRepository,
+        foreign: Tag,
+        clean_database: AsyncConnection,
+    ) -> None:
+        own = await tag_repo.save(Tag(name=TagName("mine")), user_id=TEST_USER_ID)
+        assert own.id is not None and foreign.id is not None
+        contacts = SqlContactRepository(clean_database)
+        theirs = await contacts.save(Contact(user_id=OTHER_USER_ID, first_name="Bo"))
+        assert theirs.id is not None
+        await contacts.assign_tag(theirs.id, foreign.id)
+        before = (
+            await self._tag_rows(clean_database),
+            await self._assignments(clean_database),
+        )
+
+        assert not await tag_repo.merge_into(foreign.id, own.id, user_id=TEST_USER_ID)
+        assert not await tag_repo.merge_into(own.id, foreign.id, user_id=TEST_USER_ID)
+
+        after = (
+            await self._tag_rows(clean_database),
+            await self._assignments(clean_database),
+        )
+        assert after == before
+
+    async def test_a_merge_adopts_only_the_owners_children(
+        self, tag_repo: SqlTagRepository, clean_database: AsyncConnection
+    ) -> None:
+        source = await tag_repo.save(Tag(name=TagName("old")), user_id=TEST_USER_ID)
+        target = await tag_repo.save(Tag(name=TagName("new")), user_id=TEST_USER_ID)
+        assert source.id is not None and target.id is not None
+        child = await tag_repo.save(
+            Tag(name=TagName("old/kid"), parent_id=source.id), user_id=TEST_USER_ID
+        )
+        # A cross-owner link no write can make, seeded to prove the filter.
+        stray = await tag_repo.save(
+            Tag(name=TagName("stray"), parent_id=source.id), user_id=OTHER_USER_ID
+        )
+
+        assert await tag_repo.merge_into(source.id, target.id, user_id=TEST_USER_ID)
+
+        rows = await clean_database.execute(text("SELECT id, parent_id FROM tags"))
+        parents = {row.id: row.parent_id for row in rows}
+        assert parents[child.id] == target.id
+        assert parents[stray.id] == source.id
+
+    async def test_a_contact_never_receives_another_users_tag(
+        self, foreign: Tag, clean_database: AsyncConnection
+    ) -> None:
+        assert foreign.id is not None
+        contacts = SqlContactRepository(clean_database)
+        own = await contacts.save(Contact(user_id=TEST_USER_ID, first_name="Ann"))
+        assert own.id is not None
+
+        assert not await contacts.assign_tag(own.id, foreign.id)
+
+        assert await self._assignments(clean_database) == set()
+
+    async def test_assigning_your_own_tag_reports_it_held_even_when_it_was(
+        self, tag_repo: SqlTagRepository, clean_database: AsyncConnection
+    ) -> None:
+        mine = await tag_repo.save(Tag(name=TagName("mine")), user_id=TEST_USER_ID)
+        assert mine.id is not None
+        contacts = SqlContactRepository(clean_database)
+        own = await contacts.save(Contact(user_id=TEST_USER_ID, first_name="Ann"))
+        assert own.id is not None
+
+        assert await contacts.assign_tag(own.id, mine.id)
+        assert await contacts.assign_tag(own.id, mine.id)
+        assert await self._assignments(clean_database) == {(own.id, mine.id)}

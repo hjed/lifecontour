@@ -43,6 +43,10 @@ class MockTagRepository:
         # When set, the next save() raises DuplicateTagNameError (simulating the
         # DB unique-name constraint firing on a concurrent create).
         self.raise_duplicate_on_save = False
+        # When set, delete/merge_into write nothing, as when the tag went away
+        # between the service's lookup and the write.
+        self.write_nothing = False
+        self.merged: list[tuple[int, int]] = []
 
     async def find_by_id(self, tag_id: int, *, user_id: str) -> Tag | None:
         tag = self.tags.get(tag_id)
@@ -66,10 +70,16 @@ class MockTagRepository:
         self.tags[tag.id] = tag
         return tag
 
-    async def delete(self, tag_id: int) -> None:
+    async def delete(self, tag_id: int, *, user_id: str) -> bool:
+        if self.write_nothing or await self.find_by_id(tag_id, user_id=user_id) is None:
+            return False
         self.deleted_ids.add(tag_id)
-        if tag_id in self.tags:
-            del self.tags[tag_id]
+        del self.tags[tag_id]
+        return True
+
+    async def merge_into(self, source_id: int, target_id: int, *, user_id: str) -> bool:
+        self.merged.append((source_id, target_id))
+        return not self.write_nothing
 
 
 class MockEventPublisher:
@@ -318,3 +328,36 @@ async def test_a_tag_cannot_sit_under_another_users_tag(service, repo):
     with pytest.raises(TagNotFoundError):
         await service.update_tag(tag_id=2, transaction=None, parent_id=1, user_id=OWNER)
     assert repo.tags[2].parent_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_delete_that_deletes_nothing_is_not_found(service, repo, publisher):
+    """No TagDeleted is published for a tag the write did not remove."""
+    await repo.save(Tag(id=1, name=TagName("Gone"), user_id=OWNER), user_id=OWNER)
+    repo.write_nothing = True
+
+    with pytest.raises(TagNotFoundError):
+        await service.delete_tag(tag_id=1, transaction=AsyncMock(), user_id=OWNER)
+    assert publisher.events == []
+
+
+@pytest.mark.asyncio
+async def test_a_merge_goes_through_the_owner_scoped_repository(service, repo):
+    await repo.save(Tag(id=1, name=TagName("Old"), user_id=OWNER), user_id=OWNER)
+    await repo.save(Tag(id=2, name=TagName("New"), user_id=OWNER), user_id=OWNER)
+
+    await service.merge_tags(1, 2, AsyncMock(), user_id=OWNER)
+
+    assert repo.merged == [(1, 2)]
+    assert 1 in repo.deleted_ids
+
+
+@pytest.mark.asyncio
+async def test_a_merge_that_moves_nothing_is_not_found(service, repo, publisher):
+    await repo.save(Tag(id=1, name=TagName("Old"), user_id=OWNER), user_id=OWNER)
+    await repo.save(Tag(id=2, name=TagName("New"), user_id=OWNER), user_id=OWNER)
+    repo.write_nothing = True
+
+    with pytest.raises(TagNotFoundError):
+        await service.merge_tags(1, 2, AsyncMock(), user_id=OWNER)
+    assert publisher.events == []
