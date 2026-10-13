@@ -6,9 +6,10 @@ import os
 import subprocess
 import time
 from base64 import b64encode
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -16,9 +17,18 @@ import pytest_asyncio
 from dishka.integrations.fastapi import setup_dishka as setup_fastapi_dishka
 from dishka.integrations.starlette import setup_dishka as setup_starlette_dishka
 from itsdangerous import TimestampSigner
+from meilisearch import Client as MeiliSearchClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from app.infrastructure.config import get_settings
+from app.infrastructure.events.outbox_repository import OutboxEvent
+from app.infrastructure.search.journal_indexing_service import JournalIndexingService
+from app.infrastructure.search.meilisearch_client import (
+    get_index_name,
+    get_meilisearch_client,
+)
+from app.infrastructure.search.search_indexer import SearchIndexer
 from tests.integration.sse_helpers import reset_sse_starlette_appstatus_event
 
 # Constants
@@ -915,6 +925,98 @@ async def authenticated_lifespan_client(
             yield client
 
     yield factory
+
+
+@pytest.fixture
+def app_uses_test_meilisearch(monkeypatch: pytest.MonkeyPatch, test_settings):
+    """Point the app's own ``SearchService`` at the test MeiliSearch.
+
+    The mounted app builds ``SearchService()`` from the cached ``get_settings()``
+    (environment) and the lru_cached client factory, so without this a real search
+    through the REST endpoints or MCP tools would hit the default dev URL and fail.
+    """
+    monkeypatch.setenv("MEILISEARCH_URL", test_settings.meilisearch_url)
+    monkeypatch.setenv("MEILISEARCH_API_KEY", test_settings.meilisearch_api_key)
+    # Both the settings and the client factory are lru_cached, so an earlier
+    # test may have pinned the default URL; clear both before and after.
+    get_settings.cache_clear()
+    get_meilisearch_client.cache_clear()
+    yield
+    get_settings.cache_clear()
+    get_meilisearch_client.cache_clear()
+
+
+def _test_meilisearch_client(test_settings) -> MeiliSearchClient:
+    return MeiliSearchClient(
+        url=test_settings.meilisearch_url, api_key=test_settings.meilisearch_api_key
+    )
+
+
+def _empty_index(client: MeiliSearchClient, index_name: str) -> None:
+    task = client.index(index_name).delete_all_documents()
+    client.wait_for_task(task.task_uid)
+
+
+def _created_event(event_type: str, aggregate_id: int, key: str) -> OutboxEvent:
+    now = datetime.now(UTC)
+    return OutboxEvent(
+        id=aggregate_id,
+        event_id=f"test-index-{event_type}-{aggregate_id}",
+        aggregate_id=aggregate_id,
+        event_type=event_type,
+        event_data={key: aggregate_id},
+        occurred_at=now,
+        retry_count=0,
+        created_at=now,
+    )
+
+
+@pytest_asyncio.fixture
+async def index_journal(
+    clean_database: AsyncConnection, test_settings, app_uses_test_meilisearch
+) -> Callable[[int], Awaitable[None]]:
+    """Index one already-inserted journal into the test MeiliSearch.
+
+    Journals written straight to SQL in a test are never indexed (indexing is
+    event-driven), and the index is not rolled back with the database, so this
+    empties the journals index first — stale documents from earlier sessions
+    reuse the same ids — and then indexes on demand through the real
+    ``JournalIndexingService`` so documents look exactly as they do in prod.
+    """
+    client = _test_meilisearch_client(test_settings)
+    service = JournalIndexingService(db_connection=clean_database, client=client)
+    index_name = get_index_name("journals")
+    service._ensure_journals_index_exists(index_name)
+    _empty_index(client, index_name)
+
+    async def _index(journal_id: int) -> None:
+        await service.process_event(
+            _created_event("JournalCreated", journal_id, "journal_id")
+        )
+
+    return _index
+
+
+@pytest_asyncio.fixture
+async def index_contact(
+    clean_database: AsyncConnection, test_settings, app_uses_test_meilisearch
+) -> Callable[[int], Awaitable[None]]:
+    """Index one already-seeded contact into the test MeiliSearch.
+
+    The contacts counterpart of ``index_journal``: empties the contacts index,
+    then indexes on demand through the real ``SearchIndexer``.
+    """
+    indexer = SearchIndexer(db_connection=clean_database)
+    index_name = get_index_name("contacts")
+    indexer._ensure_contacts_index_exists(index_name)
+    _empty_index(_test_meilisearch_client(test_settings), index_name)
+
+    async def _index(contact_id: int) -> None:
+        await indexer.process_event(
+            _created_event("ContactCreated", contact_id, "contact_id")
+        )
+
+    return _index
 
 
 @pytest.fixture

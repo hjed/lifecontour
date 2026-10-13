@@ -11,6 +11,8 @@ from meilisearch.errors import MeilisearchError
 
 from app.infrastructure.search.search_service import SearchService
 
+USER_ID = "user-1"
+
 
 class TestSearchService:
     """Test cases for SearchService."""
@@ -74,7 +76,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            results = search_service.search_contacts("John")
+            results = search_service.search_contacts("John", user_id=USER_ID)
 
         # Assert
         assert results["hits"] == mock_search_results["hits"]
@@ -108,7 +110,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John", filters=filters)
+            search_service.search_contacts("John", user_id=USER_ID, filters=filters)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -136,7 +138,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John", filters=filters)
+            search_service.search_contacts("John", user_id=USER_ID, filters=filters)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -163,7 +165,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John", filters=filters)
+            search_service.search_contacts("John", user_id=USER_ID, filters=filters)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -190,7 +192,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John", filters=filters)
+            search_service.search_contacts("John", user_id=USER_ID, filters=filters)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -202,8 +204,6 @@ class TestSearchService:
         assert "is_favourite = true" in filter_str
         assert "tags IN ['VIP']" in filter_str
         assert "entity_type = 'contact'" in filter_str
-        # Filters should be combined with AND
-        assert " AND " in filter_str
 
     def test_search_contacts_with_pagination(
         self, search_service, mock_meilisearch_client, mock_search_results
@@ -219,7 +219,9 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            results = search_service.search_contacts("John", limit=10, offset=20)
+            results = search_service.search_contacts(
+                "John", user_id=USER_ID, limit=10, offset=20
+            )
 
         # Assert
         call_args = mock_index.search.call_args
@@ -246,7 +248,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John", sort=sort_criteria)
+            search_service.search_contacts("John", user_id=USER_ID, sort=sort_criteria)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -267,7 +269,9 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            results = search_service.global_search("John", entity_types=["contact"])
+            results = search_service.global_search(
+                "John", user_id=USER_ID, entity_types=["contact"]
+            )
 
         # Assert
         assert results["hits"] == mock_search_results["hits"]
@@ -288,7 +292,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            results = search_service.global_search("John")
+            results = search_service.global_search("John", user_id=USER_ID)
 
         # Assert
         # When no entity types specified, should search all available types
@@ -298,7 +302,7 @@ class TestSearchService:
         """Test search suggestions functionality."""
         # Act
         suggestions = search_service.get_search_suggestions(
-            "Joh", entity_type="contacts"
+            "Joh", user_id=USER_ID, entity_type="contacts"
         )
 
         # Assert
@@ -360,7 +364,7 @@ class TestSearchService:
         ):
             # Act & Assert
             with pytest.raises(MeilisearchError, match="Search failed"):
-                search_service.search_contacts("John")
+                search_service.search_contacts("John", user_id=USER_ID)
 
     def test_search_contacts_handles_unexpected_error(
         self, search_service, mock_meilisearch_client
@@ -377,7 +381,7 @@ class TestSearchService:
         ):
             # Act & Assert
             with pytest.raises(Exception, match="Unexpected error"):
-                search_service.search_contacts("John")
+                search_service.search_contacts("John", user_id=USER_ID)
 
     def test_search_params_include_show_ranking_score(
         self, search_service, mock_meilisearch_client, mock_search_results
@@ -393,7 +397,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John")
+            search_service.search_contacts("John", user_id=USER_ID)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -414,7 +418,7 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            search_service.search_contacts("John")
+            search_service.search_contacts("John", user_id=USER_ID)
 
         # Assert
         call_args = mock_index.search.call_args
@@ -461,10 +465,108 @@ class TestSearchService:
             return_value="pms_contacts",
         ):
             # Act
-            results = search_service.global_search("test", entity_types=["contact"])
+            results = search_service.global_search(
+                "test", user_id=USER_ID, entity_types=["contact"]
+            )
 
         # Assert - hits should be sorted by _rankingScore descending
         hit_ids = [h["id"] for h in results["hits"]]
         assert hit_ids == [2, 3, 1], (
             f"Expected hits sorted by _rankingScore desc [2, 3, 1], got {hit_ids}"
         )
+
+
+class TestOwnerFilter:
+    """Every search is scoped to its owner before any other filter.
+
+    MeiliSearch ANDs the top-level elements of a filter array, so keeping the
+    owner expression as an element of its own means nothing a caller puts in
+    ``filters`` can widen it to another user's documents.
+    """
+
+    @pytest.fixture
+    def index(self) -> MagicMock:
+        index = MagicMock()
+        index.search.return_value = {"hits": [], "processingTimeMs": 1}
+        return index
+
+    @pytest.fixture
+    def search_service(self, index: MagicMock) -> SearchService:
+        client = MagicMock()
+        client.index.return_value = index
+        with patch(
+            "app.infrastructure.search.search_service.get_meilisearch_client",
+            return_value=client,
+        ):
+            return SearchService()
+
+    @staticmethod
+    def _filters(index: MagicMock) -> list[list[str]]:
+        return [call.args[1]["filter"] for call in index.search.call_args_list]
+
+    def test_owner_is_the_only_filter_without_client_filters(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.search_contacts("Ada", user_id=USER_ID)
+
+        assert self._filters(index) == [[f'user_id = "{USER_ID}"']]
+
+    def test_owner_comes_first_and_client_filters_are_separate_elements(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.search_contacts(
+            "Ada", user_id=USER_ID, filters={"is_favourite": True, "tags": ["VIP"]}
+        )
+
+        assert self._filters(index) == [
+            [f'user_id = "{USER_ID}"', "is_favourite = true", "tags IN ['VIP']"]
+        ]
+
+    def test_a_client_filter_cannot_widen_the_owner_filter(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.search_contacts(
+            "Ada",
+            user_id=USER_ID,
+            filters={"entity_type": "contact' OR user_id = 'someone-else"},
+        )
+
+        [owner, client] = self._filters(index)[0]
+        assert owner == f'user_id = "{USER_ID}"'
+        assert "someone-else" in client
+
+    def test_a_client_filter_on_user_id_is_refused(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        with pytest.raises(ValueError, match="user_id"):
+            search_service.search_contacts(
+                "Ada", user_id=USER_ID, filters={"user_id": "someone-else"}
+            )
+
+        index.search.assert_not_called()
+
+    def test_the_owner_value_is_quoted_and_escaped(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.search_contacts("Ada", user_id='we"ird\\id')
+
+        assert self._filters(index) == [['user_id = "we\\"ird\\\\id"']]
+
+    def test_journal_search_is_scoped_to_the_owner(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.search_journals(
+            "trip", user_id=USER_ID, filters={"types": ["HIKE"]}
+        )
+
+        assert self._filters(index) == [[f'user_id = "{USER_ID}"', "types IN ['HIKE']"]]
+
+    def test_global_search_scopes_contacts_and_journals_to_the_owner(
+        self, search_service: SearchService, index: MagicMock
+    ) -> None:
+        search_service.global_search("Ada", user_id=USER_ID)
+
+        assert self._filters(index) == [
+            [f'user_id = "{USER_ID}"'],
+            [f'user_id = "{USER_ID}"'],
+        ]

@@ -64,7 +64,8 @@ def test_filters_carry_user_types_and_source_ids() -> None:
     assert (results, total, ms) == ([], 0, 3)
     service.search_journals.assert_called_once_with(
         query="Zion canyoning",
-        filters={"user_id": "u1", "types": ["CANYONING"], "id": [3, 9]},
+        user_id="u1",
+        filters={"types": ["CANYONING"], "id": [3, 9]},
         limit=5,
         offset=0,
     )

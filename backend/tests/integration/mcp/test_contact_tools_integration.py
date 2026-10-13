@@ -431,7 +431,7 @@ class TestContactToolsIntegration:
 
         # Test search_contacts method
         result = search_service.search_contacts(
-            query="test", filters=None, limit=20, offset=0
+            query="test", user_id=TEST_USER_ID, filters=None, limit=20, offset=0
         )
 
         # Verify the mock returns expected structure
@@ -443,7 +443,7 @@ class TestContactToolsIntegration:
 
         # Test global_search method
         global_result = search_service.global_search(
-            query="test", entity_types=None, limit=20, offset=0
+            query="test", user_id=TEST_USER_ID, entity_types=None, limit=20, offset=0
         )
 
         # Verify the mock returns expected structure

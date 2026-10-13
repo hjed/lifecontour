@@ -272,6 +272,7 @@ async def test_contact_document_is_unchanged(
     }
     assert normalised == {
         "id": CONTACT_ID,
+        "user_id": TEST_USER_ID,
         "first_name": "Ada",
         "last_name": "Lovelace",
         "middle_name": "Byron",

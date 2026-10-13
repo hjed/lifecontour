@@ -542,5 +542,11 @@ class TestTasksNeverReachTheSearchIndexer:
 
         search_service = SearchService()
         for query in (task_text, f"Zarquon{run_token}", run_token):
-            assert search_service.search_contacts(query=query)["hits"] == []
-            assert search_service.search_journals(query=query)["hits"] == []
+            assert (
+                search_service.search_contacts(query=query, user_id=USER_ID)["hits"]
+                == []
+            )
+            assert (
+                search_service.search_journals(query=query, user_id=USER_ID)["hits"]
+                == []
+            )

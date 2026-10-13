@@ -207,7 +207,7 @@ cross-user isolation suites on REST and MCP, and contact search filtered by owne
 - [x] `contacts.user_id` exists, is `NOT NULL`, indexed, and the migration assigns existing rows per the `0106` derivation (refusing ambiguity unless `-x contacts_owner=` is given).
 - [x] `Contact.user_id: str` is required on the shared entity; no construction site in backend, `core_shared` or the workers omits it.
 - [x] Every aggregate-level `ContactRepository` method takes `user_id` and filters in SQL; every REST endpoint and MCP tool answers 404 for another user's contact and leaves it unchanged (`test_contact_ownership.py`, `test_mcp_contact_ownership.py`).
-- [ ] Contact search, global search and search suggestions return only the acting user's contacts.
+- [x] Contact search, global search and search suggestions return only the acting user's contacts (`test_search_ownership.py`).
 - [x] Worker-published contact sync events and backend contact events carry `user_id`.
 
 ---
@@ -786,35 +786,82 @@ and `api-design.md` (MCP joins the "404, never 403" rule).
 
 ---
 
-#### Phase 7: Owner-filtered contact search
+#### Phase 7: Owner-filtered contact search ✅ DONE
 
-**PR Size:** ~350 lines
+**Status:** ✅ DONE. Contact documents carry their owner. Every `SearchService` search (contacts,
+journals, global, suggestions) requires the acting user and filters on them first. REST and MCP
+pass the acting user. A cross-user leak in global search's journal half is fixed (see Reds found).
 
-- [ ] Documents carry `user_id`: `SearchIndexer._fetch_complete_contact_data`
-  (`search_indexer.py:193`) and `ReindexService._fetch_contact_document` (`:279`).
-- [ ] `CONTACTS_INDEX_SETTINGS.filterableAttributes += "user_id"` and
-  `CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES = ("user_id", …)` verified at startup like the journals
-  constant (`meilisearch_client.py:149-155`).
-- [ ] `SearchService.search_contacts`, `global_search` and `get_search_suggestions` take `user_id`
-  and prepend the `user_id = …` filter; `api/search/controllers.py` (`search_contacts`,
-  `global_search`, `get_search_suggestions`) and the MCP `search_contacts` / `global_search` tools
-  pass it.
-- [ ] Deployment note (PR description and `docs/architecture/deployment-guide.md`): call
-  `POST /api/search/reindex` after this deploys; until then owner-filtered contact search returns
-  nothing (the safe direction).
+**PR Size:** ~350 lines estimated; ~750 delivered (see Decisions)
+
+- [x] Documents carry `user_id`: `SearchIndexer._fetch_complete_contact_data` and
+  `ReindexService._fetch_contact_document`. `user_id` is not displayed or retrieved, so no
+  response gains it.
+- [x] `CONTACTS_INDEX_SETTINGS.filterableAttributes += "user_id"` and
+  `CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES = ("user_id",)`. `ensure_contact_search_index()` runs in
+  the app lifespan beside `ensure_journal_search_index()`. It creates the index if missing,
+  reapplies the settings if a required attribute is absent, and warns that a reindex is due.
+- [x] `SearchService.search_contacts`, `search_journals`, `global_search` and
+  `get_search_suggestions` take a required keyword-only `user_id`. `api/search/controllers.py`
+  and the MCP `search_contacts` / `global_search` tools pass the acting user. The journal search
+  endpoint and `search_journals_text` pass it as the parameter, not in `filters`.
+- [x] Deployment note (PR description and `docs/architecture/deployment-guide.md`, "Rebuilding the
+  Search Index"): call `POST /api/search/reindex` after this deploys. Until then, owner-filtered
+  contact search returns nothing, which is the safe direction.
 
 **Required Test Coverage:**
-- [ ] **Unit:** filter composition puts `user_id` first and cannot be overridden by client filters.
-- [ ] **Integration (real MeiliSearch, the `index_journal`-style fixture):** a contact of
-  `OTHER_USER_ID` is indexed but not returned to `TEST_USER_ID` by contact search, global search or
-  suggestions — over REST **and** the MCP `search_contacts` / `global_search` tools (deferred here
-  from Phase 6's isolation suite).
+- [x] **Unit:** `test_search_service.py::TestOwnerFilter` covers that the owner expression is the
+  first element of the filter array, that each client filter is a separate ANDed element, that a
+  client `user_id` filter raises `ValueError`, that the owner value is escaped, and that global
+  search scopes both halves. Also covered: `test_ensure_contact_search_index.py`, the settings
+  constants, and the indexer fallback.
+- [x] **Integration (real MeiliSearch):** `tests/integration/api/test_search_ownership.py`. Each user
+  owns a matching contact and journal, all indexed. Acting as `TEST_USER_ID`, REST
+  `/search/contacts`, `/search/global` and `/search/suggestions` and the MCP `search_contacts` /
+  `global_search` tools return the caller's documents and none of `OTHER_USER_ID`'s. Contact
+  documents pin `user_id` in `test_search_indexer_contact_document.py` and `test_reindex_endpoint.py`.
 
-**E2E:** regression — the contacts search e2e spec stays green (the e2e stack indexes from events, so
-documents already carry the owner).
+**E2E:** regression only. The contacts search e2e spec is unchanged, because the e2e stack indexes
+from events and its documents carry the owner.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/deployment-guide.md` — reindex step.
+- [x] `docs/architecture/deployment-guide.md`: reindex step and the release note.
+
+**Reds found and fixed:**
+- **Global search returned other users' journals.** Its journal half called `search_journals`
+  with no filter. Only the journals endpoint and the MCP journal tools added `user_id`, and they
+  added it through the generic `filters` dict. Making the owner a required parameter of every
+  search method closes this, and mypy now proves no search is unscoped.
+
+**Decisions (recorded during implementation):**
+- **The owner filter is its own array element.** MeiliSearch ANDs the top-level elements of a
+  `filter` array, so `[owner, *client_filters]` keeps the owner unwidenable even if a client value
+  carries `OR …`. This was verified against the test MeiliSearch, as was the owner-value escaping
+  (double-quoted; `\` and `"` backslash-escaped). A client filter keyed `user_id` is a
+  programming error and raises.
+- **`search_journals` requires the owner too.** One rule for every search method; its callers
+  moved from `filters={"user_id": …}` to `user_id=`.
+- **`get_search_suggestions` takes the owner though it is still a stub returning `[]`.** The
+  suggestions isolation test therefore has no positive control. The required signature is the
+  guarantee that a future implementation is scoped.
+- **The indexer's event-data fallback** (used when the DB read fails) takes the owner from the
+  event. It skips indexing and logs an error when the event names none, because an ownerless
+  document would match no search.
+- **Startup helper.** `ensure_index_configured` in `meilisearch_client.py` holds the
+  create-if-missing and configure-if-stale logic for contacts. The journals startup check keeps its
+  own implementation, which also repairs a missing primary key, and is not migrated here.
+- **Fixtures.** `app_uses_test_meilisearch` and `index_journal` moved from
+  `tests/integration/mcp/conftest.py` (now deleted) to `tests/integration/conftest.py`, beside a
+  new `index_contact`, so REST and MCP suites share them.
+- **PR size.** About 750 added lines against ~350 estimated. Roughly 100 are the moved fixtures and
+  the docs. The rest comes from making every search method require the owner, which touches the
+  journal callers and existing search tests. This was kept as one PR, because splitting the
+  signature change from its callers would leave `main` failing mypy.
+
+**Follow-ups (found in Phase 7):**
+- `tests/integration/infrastructure/test_meilisearch_integration.py` always skips locally and in
+  CI. It probes a default MeiliSearch URL rather than the workspace test port. Its calls were
+  updated for the new signature but are not exercised.
 
 ---
 

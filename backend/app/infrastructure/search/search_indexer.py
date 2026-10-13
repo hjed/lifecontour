@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 from core_shared.models.contacts.entities import RelationshipType
+from meilisearch import Client as MeiliSearchClient
 from meilisearch.errors import MeilisearchError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -21,11 +22,39 @@ from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
 from app.infrastructure.search.meilisearch_client import (
     CONTACTS_INDEX_SETTINGS,
+    CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES,
+    ensure_index_configured,
     get_index_name,
     get_meilisearch_client,
 )
 
 logger = structlog.get_logger()
+
+
+def ensure_contact_search_index(client: MeiliSearchClient | None = None) -> bool:
+    """Create or reconfigure the contacts index at application startup.
+
+    Settings are otherwise applied only when the next contact event arrives,
+    and until then a search filtering on its owner would be a MeiliSearch
+    error. Returns True when settings were (re)applied; existing documents then
+    still lack their owner, and so match no search, until
+    ``POST /api/search/reindex`` is run, and a warning says so.
+    """
+    index_name = get_index_name("contacts")
+    reconfigured = ensure_index_configured(
+        client or get_meilisearch_client(),
+        index_name,
+        CONTACTS_INDEX_SETTINGS,
+        CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES,
+    )
+    if reconfigured:
+        logger.warning(
+            "Contacts search index settings were (re)applied; existing documents "
+            "may predate the current schema and match no search. Run "
+            "POST /api/search/reindex to backfill them.",
+            index_name=index_name,
+        )
+    return reconfigured
 
 
 def format_relationship(
@@ -422,6 +451,7 @@ class SearchIndexer:
 
             return {
                 "id": contact_row.id,
+                "user_id": contact_row.user_id,
                 "first_name": contact_row.first_name,
                 "last_name": contact_row.last_name or "",
                 "middle_name": contact_row.middle_name or "",
@@ -478,7 +508,17 @@ class SearchIndexer:
         complete_data = await self._fetch_complete_contact_data(contact_id)
 
         if not complete_data:
-            # Fallback to basic data from event if database fetch fails
+            # Fallback to basic data from event if database fetch fails. Every
+            # contact search filters on the owner, so a document without one
+            # would match nothing; skip it rather than write it.
+            owner = contact_data.get("user_id")
+            if owner is None:
+                logger.error(
+                    "Could not fetch contact data and the event names no owner; "
+                    "not indexing",
+                    contact_id=contact_id,
+                )
+                return
             logger.warning(
                 "Could not fetch complete contact data, using event data",
                 contact_id=contact_id,
@@ -491,6 +531,7 @@ class SearchIndexer:
 
             complete_data = {
                 "id": contact_id,
+                "user_id": owner,
                 "first_name": first_name,
                 "last_name": last_name,
                 "full_name": full_name,

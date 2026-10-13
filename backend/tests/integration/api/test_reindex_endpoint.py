@@ -264,6 +264,8 @@ class TestReindexEndpoint:
         assert doc["tags"] == ["engineering"]
         assert doc["notes_content"] == "Brilliant engineer"
         assert doc["entity_type"] == "contact"
+        # Every contact search filters on the owner.
+        assert doc["user_id"] == TEST_USER_ID
 
     @pytest.mark.asyncio
     async def test_reindex_requires_authentication(

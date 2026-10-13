@@ -508,6 +508,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = 20,
         tags: Annotated[list[str] | None, Field(description="Filter by tags")] = None,
         search_service: SearchService = mcp_depends(get_search_service),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Search contacts using MeiliSearch for AI analysis.
@@ -536,6 +537,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         # Perform search
         results = search_service.search_contacts(
             query=query,
+            user_id=user_id,
             filters=filters or None,
             limit=limit,
             offset=0,
@@ -983,6 +985,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             Field(description="Entity types to search (e.g., 'contact')"),
         ] = None,
         search_service: SearchService = mcp_depends(get_search_service),
+        user_id: str = mcp_depends(get_current_user_id),
     ) -> str:
         """
         Perform global search across all entity types for AI analysis.
@@ -1012,6 +1015,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         # Perform global search
         results = search_service.global_search(
             query=query,
+            user_id=user_id,
             entity_types=entity_types,
             limit=limit,
             offset=0,

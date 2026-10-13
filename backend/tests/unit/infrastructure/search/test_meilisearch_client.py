@@ -4,7 +4,10 @@ Unit tests for MeiliSearch client configuration.
 Tests the MeiliSearch client configuration and index settings.
 """
 
-from app.infrastructure.search.meilisearch_client import CONTACTS_INDEX_SETTINGS
+from app.infrastructure.search.meilisearch_client import (
+    CONTACTS_INDEX_SETTINGS,
+    CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES,
+)
 
 
 class TestMeiliSearchClientConfiguration:
@@ -96,3 +99,16 @@ class TestMeiliSearchClientConfiguration:
         expected_sortable = ["created_at", "updated_at", "last_name", "first_name"]
         for attr in expected_sortable:
             assert attr in sortable_attributes
+
+
+def test_contacts_index_can_filter_by_owner() -> None:
+    """Every contact search filters on ``user_id``, so the index must allow it."""
+    assert "user_id" in CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES
+    assert set(CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES) <= set(
+        CONTACTS_INDEX_SETTINGS["filterableAttributes"]
+    )
+
+
+def test_contacts_index_never_displays_the_owner() -> None:
+    """The owner is a filter, not part of the search response."""
+    assert "user_id" not in CONTACTS_INDEX_SETTINGS["displayedAttributes"]

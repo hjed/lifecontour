@@ -5,7 +5,9 @@ Provides a configured MeiliSearch client with proper settings
 for Lifecontour search functionality.
 """
 
+from collections.abc import Collection, Mapping
 from functools import lru_cache
+from typing import Any
 
 import structlog
 from meilisearch import Client as MeiliSearchClient
@@ -65,6 +67,41 @@ def get_index_name(entity_type: str) -> str:
     return f"{settings.search_index_prefix}{entity_type}"
 
 
+def ensure_index_configured(
+    client: MeiliSearchClient,
+    index_name: str,
+    settings: Mapping[str, Any],
+    required_filterable: Collection[str],
+) -> bool:
+    """Create an index if it is missing and configure it if it is stale.
+
+    An index is stale when it lacks one of ``required_filterable``: a search
+    that filters on an attribute the index does not allow is an error, not an
+    empty result. Returns True when the settings were applied, which means
+    documents indexed earlier may predate the current schema.
+    """
+    try:
+        filterable = client.index(index_name).get_filterable_attributes()
+    except MeilisearchError:
+        logger.info("Creating search index", index_name=index_name)
+        task = client.create_index(index_name, {"primaryKey": "id"})
+        client.wait_for_task(task.task_uid)
+        filterable = None
+
+    if filterable and set(required_filterable) <= set(filterable):
+        return False
+
+    logger.info("Configuring search index settings", index_name=index_name)
+    task = client.index(index_name).update_settings(dict(settings))
+    client.wait_for_task(task.task_uid)
+    return True
+
+
+# Filterable attributes that every deployed contacts index must have; every
+# contact search filters on its owner. Verified at application startup (see
+# ensure_contact_search_index).
+CONTACTS_REQUIRED_FILTERABLE_ATTRIBUTES = ("user_id",)
+
 # Index configuration for contacts
 CONTACTS_INDEX_SETTINGS = {
     "searchableAttributes": [
@@ -86,6 +123,7 @@ CONTACTS_INDEX_SETTINGS = {
         "journal_mentions",
     ],
     "filterableAttributes": [
+        "user_id",
         "tags",
         "entity_type",
         "created_at",
