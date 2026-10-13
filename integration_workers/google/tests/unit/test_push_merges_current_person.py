@@ -50,14 +50,31 @@ async def test_update_keeps_the_values_google_holds_that_local_cannot() -> None:
     await _push(client, {"names": [{"givenName": "Augusta"}], "events": []})
 
     client.get_person.assert_awaited_once_with(_REMOTE)
-    client.update_contact.assert_awaited_once_with(
-        resource_name=_REMOTE,
-        contact_data={
-            "names": [{"givenName": "Augusta", "honorificPrefix": "Dr"}],
-            "events": [{"type": "Graduation", "date": {"year": 2010}}],
-        },
-        etag="fetched_etag",
-    )
+    update = client.update_contact.await_args.kwargs
+    assert update["resource_name"] == _REMOTE
+    assert update["etag"] == "fetched_etag"
+    assert update["contact_data"] == {
+        "names": [{"givenName": "Augusta", "honorificPrefix": "Dr"}],
+        "events": [{"type": "Graduation", "date": {"year": 2010}}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_retry_merges_into_the_refetched_person() -> None:
+    """The client rebuilds the payload from the person it refetches (#1789).
+
+    Google can change between the push's read and its write; the retry must
+    keep what it gained, not resend the merge with the older read.
+    """
+    client = _client({"names": [{"honorificPrefix": "Dr"}]})
+
+    await _push(client, {"names": [{"givenName": "Ada"}]})
+
+    rebase = client.update_contact.await_args.kwargs["rebase"]
+    refetched = {"etag": "e2", "names": [{"honorificPrefix": "Prof"}]}
+    assert rebase(refetched) == {
+        "names": [{"givenName": "Ada", "honorificPrefix": "Prof"}]
+    }
 
 
 @pytest.mark.asyncio

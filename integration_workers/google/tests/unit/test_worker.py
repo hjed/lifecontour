@@ -893,6 +893,43 @@ class TestGoogleAPIClient:
             assert retry_body["etag"] == "fresh_etag_999"
 
     @pytest.mark.asyncio
+    async def test_update_contact_conflict_rebuilds_the_payload_on_the_refetch(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """A payload merged with an older read is rebuilt from the refetched one.
+
+        Resending the first payload with only a fresh etag would revert
+        whatever Google gained between the push's read and its write (#1789).
+        """
+        mock_google_service.people().updateContact().execute.side_effect = [
+            self._http_error(400, "Request etag is different", "FAILED_PRECONDITION"),
+            {"resourceName": "people/c1", "etag": "after_retry"},
+        ]
+        fresh = {"resourceName": "people/c1", "etag": "fresh_etag"}
+        mock_google_service.people().get().execute.return_value = fresh
+        client = self._client(mock_auth_service)
+        rebuilt_from: list[dict[str, Any]] = []
+
+        def rebase(current: dict[str, Any]) -> dict[str, Any]:
+            rebuilt_from.append(current)
+            return {"names": [{"givenName": "Rebuilt"}]}
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            mock_google_service.people().updateContact.reset_mock()
+            await client.update_contact(
+                resource_name="people/c1",
+                contact_data={"names": [{"givenName": "First"}]},
+                etag="read_etag",
+                rebase=rebase,
+            )
+
+        assert rebuilt_from == [fresh]
+        retry_body = mock_google_service.people().updateContact.call_args.kwargs["body"]
+        assert retry_body == {"names": [{"givenName": "Rebuilt"}], "etag": "fresh_etag"}
+
+    @pytest.mark.asyncio
     async def test_update_contact_conflict_retry_exhausted_raises(
         self, mock_auth_service, mock_google_service
     ):

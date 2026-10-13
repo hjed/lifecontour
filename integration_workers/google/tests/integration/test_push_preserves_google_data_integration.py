@@ -167,3 +167,9 @@ async def test_update_push_merges_into_the_person_google_holds(
         },
         {"name": "Previous Co", "current": False},
     ]
+    # A conflict retry merges the same local values into the person the client
+    # refetches, keeping what Google gained after the first read.
+    refetched = {**_CURRENT_PERSON, "names": [{"honorificPrefix": "Prof"}]}
+    assert update["rebase"](refetched)["names"] == [
+        {"givenName": "Ada", "familyName": "Lovelace", "honorificPrefix": "Prof"}
+    ]

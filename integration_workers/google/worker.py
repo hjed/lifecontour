@@ -1098,7 +1098,9 @@ async def _update_or_recreate_contact_in_google(
     The update replaces every field the payload names, so the person is read
     first and the payload merged into it: Google values the local model cannot
     represent (honorifics, custom events, other organizations) survive the
-    push. The update goes out against the etag of the version merged with.
+    push. The update goes out against the etag of the version merged with, and
+    a conflict retry merges again into the person the client refetches, so a
+    Google edit landing between the read and the write is not reverted.
 
     Returns:
         The Google person, and whether it was recreated rather than updated.
@@ -1109,6 +1111,7 @@ async def _update_or_recreate_contact_in_google(
             resource_name=external_id,
             contact_data=merge_with_current_person(person_data, current),
             etag=current.get("etag") or etag,
+            rebase=lambda fresh: merge_with_current_person(person_data, fresh),
         )
         return result, False
     except GoogleContactNotFoundError:

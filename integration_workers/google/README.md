@@ -155,7 +155,9 @@ The owned entry is chosen exactly as the import chooses it, and values from a
 linked profile (rather than the contact) are never copied into the contact. The
 merge only touches fields the payload already names, so the update mask is
 unchanged, and the update goes out against the etag of the version it merged
-with. A 404 on that read takes the same recreate path as one on the update.
+with. If Google changes in between, the client's conflict retry merges again
+into the person it refetches (`update_contact(..., rebase=...)`) rather than
+resending the older merge. A 404 on that read takes the same recreate path as one on the update.
 Each update push therefore costs one People API read as well as the write.
 `biographies` is not merged: a Google contact holds a single biography, so all
 local notes are pushed joined into it.

@@ -55,7 +55,10 @@ def _client_for_deleted_remote() -> AsyncMock:
     """
 
     async def update_contact(
-        resource_name: str, contact_data: dict[str, Any], etag: str | None = None
+        resource_name: str,
+        contact_data: dict[str, Any],
+        etag: str | None = None,
+        rebase: Any = None,
     ) -> dict[str, Any]:
         if etag:
             contact_data["etag"] = etag
