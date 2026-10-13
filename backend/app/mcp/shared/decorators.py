@@ -28,6 +28,10 @@ from app.core.contacts.models.exceptions import (
     DuplicateTagNameError,
     TagNotFoundError,
 )
+from app.core.integrations.immich.conflict_resolution_service import (
+    ImmichConflictContactRequiredError,
+    ImmichConflictNotFoundError,
+)
 from app.infrastructure.database_errors import describe_data_error
 from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
 
@@ -130,6 +134,22 @@ def mcp_unified_error_handler(
             except DuplicateTagNameError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
                 return MCPResponseBuilder.validation_error_response("name", str(e))
+
+            except ImmichConflictNotFoundError as e:
+                # A DomainError rather than a ValueError, so without this it
+                # would fall through to the catch-all as an internal error.
+                MCPLogger.log_not_found_error(
+                    operation_name, "Conflict", str(e.conflict_id)
+                )
+                return MCPResponseBuilder.not_found_error_response(
+                    "Conflict", e.conflict_id
+                )
+
+            except ImmichConflictContactRequiredError as e:
+                MCPLogger.log_validation_error(operation_name, e.message)
+                return MCPResponseBuilder.validation_error_response(
+                    "contact_id", e.message
+                )
 
             except JournalNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Journal", str(e))

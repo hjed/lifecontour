@@ -5,6 +5,9 @@ Tests the full MCP integration tools with real database and queue service integr
 using Dishka dependency injection patterns.
 """
 
+import json
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -121,3 +124,48 @@ async def test_get_strava_athlete_mappings_mcp_tool(
         )
         assert "mappings" in payload2
         assert len(payload2["mappings"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_unknown_immich_conflict_is_not_found(
+    authenticated_lifespan_client: Callable[..., Any],
+) -> None:
+    """An unknown conflict answers not-found rather than an internal error."""
+    async with authenticated_lifespan_client() as client:
+        payload = await call_mcp_tool(
+            client,
+            "resolve_immich_conflict",
+            {"conflict_id": 999_999, "action": "create"},
+        )
+
+    assert payload["error"] == "Conflict not found", payload
+
+
+@pytest.mark.asyncio
+async def test_resolve_immich_conflict_link_without_contact_is_refused(
+    authenticated_lifespan_client: Callable[..., Any],
+    async_connection: AsyncConnection,
+) -> None:
+    """Linking without naming a contact is reported against contact_id."""
+    conflict_id = (
+        await async_connection.execute(
+            text("""
+                INSERT INTO pending_entity_mappings
+                    (user_id, integration_source, external_entity_id,
+                     external_entity_name, candidate_contact_ids, status)
+                VALUES ('test-user-123', 'immich', 'person-no-contact',
+                        'Ada Lovelace', '[]'::jsonb, 'unresolved')
+                RETURNING id
+            """)
+        )
+    ).scalar_one()
+
+    async with authenticated_lifespan_client() as client:
+        payload = await call_mcp_tool(
+            client,
+            "resolve_immich_conflict",
+            {"conflict_id": conflict_id, "action": "link"},
+        )
+
+    assert "error" in payload, payload
+    assert "contact_id" in json.dumps(payload)

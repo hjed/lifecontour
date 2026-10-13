@@ -10,6 +10,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.integrations.immich.conflict_resolution_service import (
+    ConflictResolutionAction,
+)
+
 # Shared field description constants (avoids literal duplication)
 STATUS_MESSAGE_DESCRIPTION = "Human-readable status message"
 
@@ -422,13 +426,6 @@ class WebhookUrlResponse(BaseModel):
 
 
 # Conflict Resolution Models (JSON API format)
-class ConflictResolutionAction(StrEnum):
-    """Action to take when resolving a conflict."""
-
-    LINK = "link"
-    CREATE = "create"
-
-
 class ConflictResolutionRequest(BaseModel):
     """Request model for resolving a sync conflict."""
 

@@ -231,6 +231,35 @@ async def test_resolve_immich_conflict_link_nonexistent_contact(
 
 
 @pytest.mark.asyncio
+async def test_resolve_unknown_immich_conflict_returns_404(
+    authenticated_client: AsyncClient,
+) -> None:
+    """An unknown or already-resolved conflict is a 404, not a server error."""
+    response = await authenticated_client.post(
+        "/api/integrations/immich/conflicts/999999/resolve",
+        json={"action": "create"},
+    )
+    assert response.status_code == 404
+    errors = response.json()["errors"]
+    assert len(errors) == 1
+    assert "not found" in errors[0]["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_immich_conflict_link_without_contact_returns_400(
+    authenticated_client: AsyncClient,
+    pending_conflict: int,
+) -> None:
+    """Linking without naming a contact is the caller's mistake."""
+    response = await authenticated_client.post(
+        f"/api/integrations/immich/conflicts/{pending_conflict}/resolve",
+        json={"action": "link"},
+    )
+    assert response.status_code == 400
+    assert "contact_id" in response.json()["errors"][0]["detail"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_immich_conflict_for_a_person_another_user_links(
     authenticated_client: AsyncClient,
     async_connection: AsyncConnection,

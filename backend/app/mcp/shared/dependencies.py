@@ -21,6 +21,9 @@ from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.integrations.immich.conflict_resolution_service import (
+    ImmichConflictResolutionService,
+)
 from app.core.integrations.services.contact_suggestion_service import (
     ContactSuggestionService,
 )
@@ -276,6 +279,14 @@ async def get_contact_suggestion_service() -> ContactSuggestionService:
     return cast(
         ContactSuggestionService,
         await _resolve_dependency(ContactSuggestionService),
+    )
+
+
+async def get_immich_conflict_resolution_service() -> ImmichConflictResolutionService:
+    """Resolve the Immich conflict resolution service for the current MCP request."""
+    return cast(
+        ImmichConflictResolutionService,
+        await _resolve_dependency(ImmichConflictResolutionService),
     )
 
 
