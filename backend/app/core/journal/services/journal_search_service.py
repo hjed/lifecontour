@@ -89,14 +89,18 @@ def search_journals_text(
     if journal_ids is not None and not journal_ids:
         # Nothing to intersect with; an empty `id IN []` is a Meili error.
         return [], 0, 0
-    filters: dict[str, Any] = {"user_id": user_id}
+    filters: dict[str, Any] = {}
     if type_filters:
         filters["types"] = [t.upper() for t in type_filters]
     if journal_ids is not None:
         filters["id"] = sorted(journal_ids)
     try:
         raw = search_service.search_journals(
-            query=query, filters=filters, limit=limit, offset=offset
+            query=query,
+            user_id=user_id,
+            filters=filters or None,
+            limit=limit,
+            offset=offset,
         )
     except MeilisearchError as exc:
         raise SearchServiceUnavailableError("MeiliSearch", str(exc)) from exc

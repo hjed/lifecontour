@@ -290,7 +290,7 @@ class ReindexService:
         try:
             contact_result = await self.db_connection.execute(
                 text("""
-                    SELECT id, first_name, last_name, middle_name, nick_name,
+                    SELECT id, user_id, first_name, last_name, middle_name, nick_name,
                            company, job_title, is_favourite, created_at, updated_at
                     FROM contacts
                     WHERE id = :contact_id
@@ -346,6 +346,7 @@ class ReindexService:
 
             return {
                 "id": contact_row.id,
+                "user_id": contact_row.user_id,
                 "first_name": contact_row.first_name,
                 "last_name": contact_row.last_name or "",
                 "middle_name": contact_row.middle_name or "",

@@ -49,7 +49,12 @@ class TestSearchIndexer:
             event_id="contact-created-123",
             event_type="ContactCreated",
             aggregate_id=42,
-            event_data={"contact_id": 42, "first_name": "John", "last_name": "Doe"},
+            event_data={
+                "contact_id": 42,
+                "user_id": "u1",
+                "first_name": "John",
+                "last_name": "Doe",
+            },
             occurred_at=datetime(2024, 1, 1, 12, 0, 0),
             retry_count=0,
             created_at=datetime(2024, 1, 1, 12, 0, 0),
@@ -118,6 +123,24 @@ class TestSearchIndexer:
         assert doc["last_name"] == "Doe"
         assert doc["full_name"] == "John Doe"
         assert doc["entity_type"] == "contact"
+        assert doc["user_id"] == "u1"
+
+    @pytest.mark.asyncio
+    async def test_fallback_without_an_owner_indexes_nothing(
+        self, indexer, mock_meilisearch_client, contact_created_event
+    ):
+        """A document with no owner would match no search; it is not written."""
+        mock_index = MagicMock()
+        mock_meilisearch_client.index.return_value = mock_index
+        del contact_created_event.event_data["user_id"]
+
+        with patch(
+            "app.infrastructure.search.search_indexer.get_index_name",
+            return_value="pms_contacts",
+        ):
+            await indexer.process_event(contact_created_event)
+
+        mock_index.add_documents.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_contact_updated_event(

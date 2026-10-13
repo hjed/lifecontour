@@ -182,7 +182,8 @@ class TestBrowseWindow:
         )
         search_service.search_journals.assert_called_once_with(
             query="river",
-            filters={"user_id": "user-1", "types": ["NOTE"], "id": [1, 2, 3]},
+            user_id="user-1",
+            filters={"types": ["NOTE"], "id": [1, 2, 3]},
             limit=3,
             offset=0,
         )
@@ -302,7 +303,8 @@ class TestSearch:
         )
         search_service.search_journals.assert_called_once_with(
             query="canyon",
-            filters={"user_id": "user-1", "types": ["CANYONING"], "id": [4]},
+            user_id="user-1",
+            filters={"types": ["CANYONING"], "id": [4]},
             limit=5,
             offset=10,
         )
@@ -330,7 +332,7 @@ class TestSearch:
         assert outcome.source_journal_ids is None
         journal_repo.find_ids_by_filters.assert_not_called()
         search_service.search_journals.assert_called_once_with(
-            query="river", filters={"user_id": "user-1"}, limit=20, offset=0
+            query="river", user_id="user-1", filters=None, limit=20, offset=0
         )
 
     @pytest.mark.asyncio

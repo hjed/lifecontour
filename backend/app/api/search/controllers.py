@@ -59,7 +59,7 @@ router = APIRouter()
 def search_contacts(
     request: Request,
     search_service: FromDishka[SearchService],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],  # Search is scoped to the acting user
     q: Annotated[str, Query(description="Search query", min_length=1, max_length=500)],
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Results per page", ge=1, le=100)] = 20,
@@ -88,6 +88,7 @@ def search_contacts(
     try:
         results = search_service.search_contacts(
             query=q,
+            user_id=user.id,
             filters=filters or None,
             limit=limit,
             offset=offset,
@@ -146,7 +147,7 @@ def search_contacts(
 def global_search(
     request: Request,
     search_service: FromDishka[SearchService],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],  # Search is scoped to the acting user
     q: Annotated[str, Query(description="Search query", min_length=1, max_length=500)],
     page: Annotated[int, Query(description="Page number", ge=1)] = 1,
     limit: Annotated[int, Query(description="Results per page", ge=1, le=100)] = 20,
@@ -166,7 +167,11 @@ def global_search(
     # Perform global search
     try:
         results = search_service.global_search(
-            query=q, entity_types=entity_types, limit=limit, offset=offset
+            query=q,
+            user_id=user.id,
+            entity_types=entity_types,
+            limit=limit,
+            offset=offset,
         )
     except MeilisearchError as e:
         logger.error("MeiliSearch error during global search", error=str(e), query=q)
@@ -257,7 +262,7 @@ def global_search(
 @inject
 def get_search_suggestions(
     search_service: FromDishka[SearchService],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],  # Search is scoped to the acting user
     q: Annotated[str, Query(description="Partial query", min_length=1, max_length=100)],
     entity_type: Annotated[str, Query(description="Entity type")] = "contacts",
     limit: Annotated[int, Query(description="Max suggestions", ge=1, le=20)] = 5,
@@ -269,7 +274,7 @@ def get_search_suggestions(
     """
     try:
         suggestions = search_service.get_search_suggestions(
-            query=q, entity_type=entity_type, limit=limit
+            query=q, user_id=user.id, entity_type=entity_type, limit=limit
         )
         return SearchSuggestionsResponse(suggestions=suggestions, query=q)
     except MeilisearchError as e:

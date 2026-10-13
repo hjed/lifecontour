@@ -849,15 +849,15 @@ async def search_journals(
     # Calculate offset from page
     offset = (page - 1) * limit
 
-    # Build filters - always filter by user_id for security
-    filters: dict[str, Any] = {"user_id": user.id}
+    filters: dict[str, Any] = {}
     if types:
         filters["types"] = types
 
     try:
         results = search_service.search_journals(
             query=q,
-            filters=filters,
+            user_id=user.id,
+            filters=filters or None,
             limit=limit,
             offset=offset,
             sort=sort,

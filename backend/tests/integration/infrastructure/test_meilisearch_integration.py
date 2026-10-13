@@ -224,6 +224,7 @@ class TestMeiliSearchIntegration:
                 "email": "alice@wonderland.com",
                 "tags": ["customer", "premium"],
                 "entity_type": "contact",
+                "user_id": "owner",
             },
             {
                 "id": 2,
@@ -233,6 +234,7 @@ class TestMeiliSearchIntegration:
                 "email": "bob@construction.com",
                 "tags": ["contractor"],
                 "entity_type": "contact",
+                "user_id": "owner",
             },
         ]
 
@@ -253,23 +255,27 @@ class TestMeiliSearchIntegration:
             search_service = SearchService()
 
             # Test basic search
-            results = search_service.search_contacts("Alice")
+            results = search_service.search_contacts("Alice", user_id="owner")
             assert results["estimated_total_hits"] >= 1
             assert any(hit["first_name"] == "Alice" for hit in results["hits"])
 
             # Test search with filters
-            results = search_service.search_contacts("", filters={"tags": ["premium"]})
+            results = search_service.search_contacts(
+                "", user_id="owner", filters={"tags": ["premium"]}
+            )
             assert len(results["hits"]) >= 1
             assert results["hits"][0]["first_name"] == "Alice"
 
             # Test pagination
-            results = search_service.search_contacts("", limit=1, offset=0)
+            results = search_service.search_contacts(
+                "", user_id="owner", limit=1, offset=0
+            )
             assert len(results["hits"]) == 1
             assert results["limit"] == 1
             assert results["offset"] == 0
 
             # Test global search
-            global_results = search_service.global_search("Bob")
+            global_results = search_service.global_search("Bob", user_id="owner")
             assert global_results["estimated_total_hits"] >= 1
             assert "searched_entity_types" in global_results
             assert "available_entity_types" in global_results

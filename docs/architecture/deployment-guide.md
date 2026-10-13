@@ -743,6 +743,32 @@ echo "Backup completed: $BACKUP_FILE.gz"
 4. **Data Validation**: Verify data integrity and application functionality
 5. **Service Verification**: Test all integrations (Google, Immich, MCP)
 
+### Rebuilding the Search Index
+
+MeiliSearch is a projection of PostgreSQL, so it can always be rebuilt from the
+database. Rebuild it after restoring a backup, after a MeiliSearch upgrade that
+loses its data, or when a release adds a field that every search filters on.
+
+1. Set `ENABLE_REINDEX_ENDPOINT=true` on the backend and restart it. The endpoint is
+   disabled by default.
+2. As a session user, or with a token that carries `pms_admin`, call
+   `POST /api/search/reindex`. Add `?entity_type=contacts` or `?entity_type=journals`
+   to rebuild one index only.
+3. Unset `ENABLE_REINDEX_ENDPOINT` again.
+
+At startup the backend checks that the contacts and journals indexes allow
+filtering on every attribute searches depend on, and reapplies the settings if
+they do not. When it does, it logs a warning that names the reindex step.
+Documents indexed before the change still lack the new field until the reindex
+runs.
+
+**Release note: owner-filtered contact search.** Contact search documents now
+carry their owner (`user_id`), and every contact and global search filters on
+it. Documents indexed before this release have no owner, so **contact search
+returns nothing until `POST /api/search/reindex?entity_type=contacts` is run**.
+Missing results are the safe failure: no search can return another user's
+contacts.
+
 ## Related Documents
 
 - [Architecture Overview](../architecture.md) - High-level system architecture and navigation

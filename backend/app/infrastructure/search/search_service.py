@@ -17,6 +17,18 @@ from app.infrastructure.search.meilisearch_client import (
 
 logger = structlog.get_logger()
 
+OWNER_ATTRIBUTE = "user_id"
+
+
+def owner_filter(user_id: str) -> str:
+    """The filter expression that restricts a search to one owner's documents.
+
+    The value is double-quoted with backslashes and double quotes escaped,
+    which is how MeiliSearch reads a literal inside a filter expression.
+    """
+    escaped = user_id.replace("\\", "\\\\").replace('"', '\\"')
+    return f'{OWNER_ATTRIBUTE} = "{escaped}"'
+
 
 class SearchService:
     """Service for search operations using MeiliSearch."""
@@ -27,6 +39,8 @@ class SearchService:
 
     def _build_search_params(
         self,
+        *,
+        owner_id: str,
         limit: int,
         offset: int,
         attributes_to_highlight: list[str],
@@ -37,7 +51,13 @@ class SearchService:
         """
         Build search parameters for MeiliSearch.
 
+        The filter is an array, whose top-level elements MeiliSearch ANDs. The
+        owner's expression is the first element and each client filter is an
+        element of its own, so no client filter can widen the search beyond the
+        owner's documents.
+
         Args:
+            owner_id: The user whose documents the search is restricted to
             limit: Maximum number of results
             offset: Offset for pagination
             attributes_to_highlight: Fields to highlight in results
@@ -47,7 +67,16 @@ class SearchService:
 
         Returns:
             Dictionary of search parameters
+
+        Raises:
+            ValueError: If ``filters`` names the owner attribute; the owner is
+                only ever given through ``owner_id``.
         """
+        if filters and OWNER_ATTRIBUTE in filters:
+            raise ValueError(
+                f"Pass the owner as owner_id, not as a '{OWNER_ATTRIBUTE}' filter"
+            )
+
         search_params: dict[str, Any] = {
             "limit": limit,
             "offset": offset,
@@ -58,9 +87,8 @@ class SearchService:
             "showRankingScore": True,
         }
 
-        # Add filters if provided
+        filter_expressions = [owner_filter(owner_id)]
         if filters:
-            filter_expressions = []
             for key, value in filters.items():
                 if isinstance(value, list):
                     # Handle array filters (e.g., tags, types)
@@ -70,9 +98,7 @@ class SearchService:
                     filter_expressions.append(f"{key} = {str(value).lower()}")
                 else:
                     filter_expressions.append(f"{key} = '{value}'")
-
-            if filter_expressions:
-                search_params["filter"] = " AND ".join(filter_expressions)
+        search_params["filter"] = filter_expressions
 
         # Add sort if provided
         if sort:
@@ -149,6 +175,8 @@ class SearchService:
     def search_contacts(
         self,
         query: str,
+        *,
+        user_id: str,
         filters: dict[str, Any] | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -159,6 +187,7 @@ class SearchService:
 
         Args:
             query: Search query string
+            user_id: The acting user; only their documents are searched
             filters: Optional filters to apply
             limit: Maximum number of results
             offset: Offset for pagination
@@ -170,6 +199,7 @@ class SearchService:
         index_name = get_index_name("contacts")
 
         search_params = self._build_search_params(
+            owner_id=user_id,
             limit=limit,
             offset=offset,
             attributes_to_highlight=[
@@ -216,6 +246,8 @@ class SearchService:
     def search_journals(
         self,
         query: str,
+        *,
+        user_id: str,
         filters: dict[str, Any] | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -226,6 +258,7 @@ class SearchService:
 
         Args:
             query: Search query string
+            user_id: The acting user; only their documents are searched
             filters: Optional filters to apply
             limit: Maximum number of results
             offset: Offset for pagination
@@ -237,6 +270,7 @@ class SearchService:
         index_name = get_index_name("journals")
 
         search_params = self._build_search_params(
+            owner_id=user_id,
             limit=limit,
             offset=offset,
             attributes_to_highlight=[
@@ -275,6 +309,8 @@ class SearchService:
     def global_search(
         self,
         query: str,
+        *,
+        user_id: str,
         entity_types: list[str] | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -284,6 +320,7 @@ class SearchService:
 
         Args:
             query: Search query string
+            user_id: The acting user; only their documents are searched
             entity_types: Optional list of entity types to search
             limit: Maximum number of results
             offset: Offset for pagination
@@ -304,7 +341,7 @@ class SearchService:
             if "contact" in search_types:
                 try:
                     contact_results = self.search_contacts(
-                        query=query, limit=limit, offset=offset
+                        query=query, user_id=user_id, limit=limit, offset=offset
                     )
                     all_hits.extend(contact_results["hits"])
                     total_processing_time += contact_results.get(
@@ -321,7 +358,7 @@ class SearchService:
             if "journal" in search_types:
                 try:
                     journal_results = self.search_journals(
-                        query=query, limit=limit, offset=offset
+                        query=query, user_id=user_id, limit=limit, offset=offset
                     )
                     all_hits.extend(journal_results["hits"])
                     total_processing_time += journal_results.get(
@@ -371,13 +408,20 @@ class SearchService:
             raise
 
     def get_search_suggestions(
-        self, query: str, entity_type: str = "contacts", limit: int = 5
+        self,
+        query: str,
+        *,
+        user_id: str,
+        entity_type: str = "contacts",
+        limit: int = 5,
     ) -> list[str]:
         """
         Get search suggestions for autocomplete.
 
         Args:
             query: Partial query string
+            user_id: The acting user; once suggestions are implemented they
+                may only come from this user's documents
             entity_type: Type of entity to get suggestions for
             limit: Maximum number of suggestions
 
