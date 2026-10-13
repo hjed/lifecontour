@@ -65,6 +65,8 @@ async def push_contact_data(db_session: AsyncSession) -> dict:  # type: ignore[t
 def _make_mock_google_client() -> MagicMock:
     """Create a mock GoogleAPIClient with default responses."""
     client = AsyncMock()
+    # An update reads the person first; it holds nothing to merge.
+    client.get_person.return_value = {}
     client.create_contact.return_value = {
         "resourceName": "people/c999",
         "etag": "etag_created",

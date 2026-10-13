@@ -1123,6 +1123,28 @@ class TestGoogleAPIClient:
         assert exc_info.value.resp.status == 500
 
     @pytest.mark.asyncio
+    async def test_get_person_404_raises_contact_not_found(
+        self, mock_auth_service: Any, mock_google_service: MagicMock
+    ) -> None:
+        """The push reads the person first, so its 404 must be typed too."""
+        from google_client import GoogleContactNotFoundError
+
+        not_found = self._http_error(
+            404, "Requested entity was not found.", "NOT_FOUND"
+        )
+        mock_google_service.people().get().execute.side_effect = not_found
+        client = self._client(mock_auth_service)
+
+        with patch.object(
+            client, "_get_people_service", return_value=mock_google_service
+        ):
+            with pytest.raises(GoogleContactNotFoundError) as exc_info:
+                await client.get_person("people/cGONE")
+
+        assert exc_info.value.resource_name == "people/cGONE"
+        assert exc_info.value.__cause__ is not_found
+
+    @pytest.mark.asyncio
     async def test_update_contact_empty_fields_raises_error(
         self, mock_auth_service, mock_google_service
     ):
@@ -1461,8 +1483,12 @@ class TestPushSyncLogic:
 
     @pytest.fixture
     def mock_google_client(self):
-        """Mock Google Contacts API client."""
+        """Mock Google Contacts API client.
+
+        An update reads the person before writing; it holds nothing to merge.
+        """
         mock_client = AsyncMock()
+        mock_client.get_person.return_value = {}
         return mock_client
 
     @pytest.mark.asyncio

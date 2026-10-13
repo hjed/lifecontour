@@ -47,6 +47,9 @@ def _ctx(db_session: AsyncSession) -> dict[str, Any]:
 def _client_for_deleted_remote() -> AsyncMock:
     """A Google client whose linked person was deleted on Google's side.
 
+    The person is gone by the time of the write, after the push read it — the
+    update's 404 is the late half of the race; a 404 on the read itself takes
+    the same recreate path (unit-tested in ``test_push_merges_current_person``).
     ``update_contact`` stamps the etag onto the payload before the request
     fails, exactly as the real client does, so the recreate must strip it.
     """
@@ -59,6 +62,7 @@ def _client_for_deleted_remote() -> AsyncMock:
         raise GoogleContactNotFoundError(resource_name)
 
     client = AsyncMock()
+    client.get_person.return_value = {}
     client.update_contact.side_effect = update_contact
     client.create_contact.return_value = {
         "resourceName": _RECREATED_REMOTE,

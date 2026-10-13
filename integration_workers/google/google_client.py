@@ -116,7 +116,8 @@ _CHANNEL_GONE_STATUSES: frozenset[int] = frozenset({404, 410})
 class GoogleContactNotFoundError(Exception):
     """The Google contact a push targets no longer exists (People API 404).
 
-    Raised by :meth:`GoogleAPIClient.update_contact` so callers can tell a
+    Raised by :meth:`GoogleAPIClient.update_contact` and
+    :meth:`GoogleAPIClient.get_person` so callers can tell a
     contact deleted on Google's side apart from any other API failure without
     inspecting HTTP status codes. The original ``HttpError`` is the cause.
     """
@@ -343,6 +344,7 @@ class GoogleAPIClient:
             Google People API person data
 
         Raises:
+            GoogleContactNotFoundError: If the person no longer exists (a 404)
             HttpError: If API request fails
             GoogleAuthTokensNotFoundError: If authentication tokens are missing
         """
@@ -380,6 +382,8 @@ class GoogleAPIClient:
                 error=str(e),
                 status_code=e.resp.status,
             )
+            if e.resp.status == 404:
+                raise GoogleContactNotFoundError(resource_name) from e
             raise e
 
     async def create_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:

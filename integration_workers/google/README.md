@@ -139,6 +139,27 @@ back. The import changes only the fields in `GOOGLE_CONTACT_SYNC_SCOPE`
 person, even one whose etag is unchanged (`force_apply`), so a field the scope
 newly claims reaches every contact.
 
+An update push **merges into** the person rather than replacing it (#1732).
+`updatePersonFields` replaces each named field wholesale, but the local model
+cannot represent everything Google holds, so `_update_or_recreate_contact_in_google`
+reads the person first and `person_merge.merge_with_current_person` keeps what
+the local contact does not own:
+
+| Field | Local contact owns | Kept from Google |
+|---|---|---|
+| `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
+| `events` | `anniversary` events | every other event (custom, untyped) |
+| `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
+
+The owned entry is chosen exactly as the import chooses it, and values from a
+linked profile (rather than the contact) are never copied into the contact. The
+merge only touches fields the payload already names, so the update mask is
+unchanged, and the update goes out against the etag of the version it merged
+with. A 404 on that read takes the same recreate path as one on the update.
+Each update push therefore costs one People API read as well as the write.
+`biographies` is not merged: a Google contact holds a single biography, so all
+local notes are pushed joined into it.
+
 Because an incomplete group mapping would strip memberships, outbound code lists
 groups with the strict `_fetch_contact_group_mapping`, which raises on any failed
 page. On the event path that leaves the stream event unacknowledged for retry;
