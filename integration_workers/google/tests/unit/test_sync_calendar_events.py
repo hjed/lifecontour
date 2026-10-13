@@ -1099,6 +1099,24 @@ class TestSyncRecurringSeries:
             ),
         ]
 
+    @staticmethod
+    def _old_link_lookups() -> tuple[MagicMock, MagicMock]:
+        """The old instance's link lookup and end-date lookup, in sync order."""
+        from datetime import UTC, datetime, timedelta
+
+        old_link = MagicMock()
+        old_link.fetchone.return_value = MagicMock(
+            journal_id=42,
+            external_version='"etag-old"',
+            sync_capability="bidirectional",
+            sync_status="synced",
+            recurring_event_id="old-1",
+            external_identity=None,
+        )
+        old_end = MagicMock()
+        old_end.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+        return old_link, old_end
+
     @classmethod
     def _old_instance_row(cls) -> MagicMock:
         from datetime import timedelta
@@ -1156,7 +1174,6 @@ class TestSyncRecurringSeries:
         """When the cross-calendar de-dupe sends the new instance to another
         journal, the old journal is not adopted - so it must still be told
         its event was cancelled, not left linked to a dead event."""
-        from datetime import UTC, datetime, timedelta
 
         cal_result = MagicMock()
         cal_result.fetchall.return_value = [_make_calendar_row()]
@@ -1168,17 +1185,7 @@ class TestSyncRecurringSeries:
         new_link.fetchone.return_value = None
         identity_hit = MagicMock()
         identity_hit.fetchone.return_value = MagicMock(journal_id=77)
-        old_link = MagicMock()
-        old_link.fetchone.return_value = MagicMock(
-            journal_id=42,
-            external_version='"etag-old"',
-            sync_capability="bidirectional",
-            sync_status="synced",
-            recurring_event_id="old-1",
-            external_identity=None,
-        )
-        old_end = MagicMock()
-        old_end.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+        old_link, old_end = self._old_link_lookups()
 
         mock_session.execute.side_effect = [
             cal_result,  # calendar query
@@ -1215,7 +1222,6 @@ class TestSyncRecurringSeries:
         self, mock_ctx: dict[str, Any], mock_session: AsyncMock
     ) -> None:
         """No adoption was sent, so the old journal must still be cancelled."""
-        from datetime import UTC, datetime, timedelta
 
         cal_result = MagicMock()
         cal_result.fetchall.return_value = [_make_calendar_row()]
@@ -1225,17 +1231,7 @@ class TestSyncRecurringSeries:
         split_links.fetchall.return_value = [self._old_instance_row()]
         new_link = MagicMock()
         new_link.fetchone.return_value = None
-        old_link = MagicMock()
-        old_link.fetchone.return_value = MagicMock(
-            journal_id=42,
-            external_version='"etag-old"',
-            sync_capability="bidirectional",
-            sync_status="synced",
-            recurring_event_id="old-1",
-            external_identity=None,
-        )
-        old_end = MagicMock()
-        old_end.scalar.return_value = datetime.now(UTC) + timedelta(days=7)
+        old_link, old_end = self._old_link_lookups()
 
         mock_session.execute.side_effect = [
             cal_result,

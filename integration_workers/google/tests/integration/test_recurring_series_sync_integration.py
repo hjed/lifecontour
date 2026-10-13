@@ -237,6 +237,29 @@ class TestSplitAdoptionIntegration:
 
     NEW_MASTER = "9p7kac2r5m992mshlenq0j10pf"
 
+    @classmethod
+    def _split_batch(cls, new_start: datetime) -> list[dict]:
+        """One sync: the old instance cancelled, the new recurrence's live."""
+        from datetime import timedelta
+
+        return [
+            {
+                "id": f"{MASTER_ID}_old",
+                "status": "cancelled",
+                "etag": '"etag-cancelled"',
+                "recurringEventId": MASTER_ID,
+            },
+            {
+                "id": f"{cls.NEW_MASTER}_new",
+                "status": "confirmed",
+                "etag": '"etag-new"',
+                "summary": "Pilates",
+                "start": {"dateTime": new_start.isoformat()},
+                "end": {"dateTime": (new_start + timedelta(hours=1)).isoformat()},
+                "recurringEventId": cls.NEW_MASTER,
+            },
+        ]
+
     async def _seed_upcoming_instance(
         self, db_session, *, displayed_elsewhere: bool = False
     ) -> tuple[str, int, datetime]:
@@ -320,23 +343,7 @@ class TestSplitAdoptionIntegration:
 
         result = await _run_sync(
             db_session,
-            [
-                {
-                    "id": f"{MASTER_ID}_old",
-                    "status": "cancelled",
-                    "etag": '"etag-cancelled"',
-                    "recurringEventId": MASTER_ID,
-                },
-                {
-                    "id": f"{self.NEW_MASTER}_new",
-                    "status": "confirmed",
-                    "etag": '"etag-new"',
-                    "summary": "Pilates",
-                    "start": {"dateTime": new_start.isoformat()},
-                    "end": {"dateTime": (new_start + timedelta(hours=1)).isoformat()},
-                    "recurringEventId": self.NEW_MASTER,
-                },
-            ],
+            self._split_batch(new_start),
         )
 
         assert result["status"] == "success"
@@ -368,23 +375,7 @@ class TestSplitAdoptionIntegration:
 
         result = await _run_sync(
             db_session,
-            [
-                {
-                    "id": f"{MASTER_ID}_old",
-                    "status": "cancelled",
-                    "etag": '"etag-cancelled"',
-                    "recurringEventId": MASTER_ID,
-                },
-                {
-                    "id": f"{self.NEW_MASTER}_new",
-                    "status": "confirmed",
-                    "etag": '"etag-new"',
-                    "summary": "Pilates",
-                    "start": {"dateTime": new_start.isoformat()},
-                    "end": {"dateTime": (new_start + timedelta(hours=1)).isoformat()},
-                    "recurringEventId": self.NEW_MASTER,
-                },
-            ],
+            self._split_batch(new_start),
         )
 
         assert result.get("events_split_adopted", 0) == 0
