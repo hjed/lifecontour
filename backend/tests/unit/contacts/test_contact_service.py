@@ -125,7 +125,7 @@ class TestContactService:
         existing = Tag(id=5, name=TagName("Friend"))
         created = Tag(id=9, name=TagName("Work"))
 
-        async def _find(name):
+        async def _find(name, *, user_id):
             return existing if name == "Friend" else None
 
         mock_tag_repo.find_by_name.side_effect = _find
@@ -1150,7 +1150,7 @@ class TestContactService:
         child_tag_1 = Tag(name=TagName("child1"), id=2, parent_id=parent_tag_id)
         child_tag_2 = Tag(name=TagName("child2"), id=3, parent_id=parent_tag_id)
 
-        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids, user_id: (
             [child_tag_1, child_tag_2] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_by_filters.return_value = []
@@ -1174,7 +1174,7 @@ class TestContactService:
         parent_tag_id = 10
         child_tag = Tag(name=TagName("child"), id=20, parent_id=parent_tag_id)
 
-        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids, user_id: (
             [child_tag] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_count_by_filters.return_value = 5
@@ -1220,7 +1220,7 @@ class TestContactService:
         child_tag = Tag(name=TagName("child"), id=2, parent_id=parent_tag_id)
         leaf_tag_id = 5
 
-        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids: (
+        mock_tag_repo.get_descendants_for_tags.side_effect = lambda tag_ids, user_id: (
             [child_tag] if parent_tag_id in tag_ids else []
         )
         mock_contact_repo.get_contacts_by_filters.return_value = []

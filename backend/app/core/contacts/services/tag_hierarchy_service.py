@@ -12,7 +12,11 @@ from app.core.contacts.models.repositories import TagRepository
 
 
 class TagHierarchyService:
-    """Service for managing tag hierarchies and validation."""
+    """Service for managing tag hierarchies and validation.
+
+    Every method works within one owner's tags (``user_id``): a hierarchy never
+    links tags of two owners, so another user's tag is simply not found.
+    """
 
     def __init__(self, tag_repo: TagRepository):
         self.tag_repo = tag_repo
@@ -22,16 +26,23 @@ class TagHierarchyService:
         name: str,
         _transaction: AsyncConnection,
         exclude_tag_id: int | None = None,
+        *,
+        user_id: str,
     ) -> None:
-        """Validate that tag name is unique."""
-        existing_tag = await self.tag_repo.find_by_name(name)
+        """Validate that tag name is unique among ``user_id``'s tags."""
+        existing_tag = await self.tag_repo.find_by_name(name, user_id=user_id)
 
         if existing_tag:
             if exclude_tag_id is None or existing_tag.id != exclude_tag_id:
                 raise DuplicateTagNameError(name)
 
     async def validate_parent_child_relationship(
-        self, parent_id: int, child_id: int, transaction: AsyncConnection
+        self,
+        parent_id: int,
+        child_id: int,
+        transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """Validate parent-child tag relationship."""
         if parent_id == child_id:
@@ -39,16 +50,23 @@ class TagHierarchyService:
 
         # Check if parent exists
         parent_tag = await self.tag_repo.find_by_id(
-            child_id
+            child_id, user_id=user_id
         )  # Note: checking child_id for parent
         if not parent_tag:
             raise TagNotFoundError(child_id)
 
         # Check for circular references (simplified - could be more comprehensive)
-        await self._check_circular_reference(parent_id, child_id, transaction)
+        await self._check_circular_reference(
+            parent_id, child_id, transaction, user_id=user_id
+        )
 
     async def _check_circular_reference(
-        self, parent_id: int, child_id: int, _transaction: AsyncConnection
+        self,
+        parent_id: int,
+        child_id: int,
+        _transaction: AsyncConnection,
+        *,
+        user_id: str,
     ) -> None:
         """Check for circular references in tag hierarchy."""
         # Get all ancestors of the proposed parent
@@ -72,7 +90,7 @@ class TagHierarchyService:
             visited.add(current_id)
 
             # Get parent of current tag
-            current_tag = await self.tag_repo.find_by_id(current_id)
+            current_tag = await self.tag_repo.find_by_id(current_id, user_id=user_id)
             if current_tag:
                 current_id = current_tag.parent_id
             else:
@@ -82,22 +100,28 @@ class TagHierarchyService:
         self,
         root_tag_id: int | None = None,
         _transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ) -> list[Tag]:
         """Get tag tree starting from root or specific tag."""
         if root_tag_id:
-            return await self.tag_repo.get_children(root_tag_id)
+            return await self.tag_repo.get_children(root_tag_id, user_id=user_id)
         else:
-            return await self.tag_repo.get_root_tags()
+            return await self.tag_repo.get_root_tags(user_id=user_id)
 
     async def get_tag_path(
-        self, tag_id: int, _transaction: AsyncConnection | None = None
+        self,
+        tag_id: int,
+        _transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ) -> list[Tag]:
         """Get the full path from root to the specified tag."""
         path: list[Tag] = []
         current_id: int | None = tag_id
 
         while current_id is not None:
-            tag = await self.tag_repo.find_by_id(current_id)
+            tag = await self.tag_repo.find_by_id(current_id, user_id=user_id)
             if not tag:
                 break
 
@@ -107,29 +131,37 @@ class TagHierarchyService:
         return path
 
     async def get_all_descendants(
-        self, tag_id: int, _transaction: AsyncConnection | None = None
+        self,
+        tag_id: int,
+        _transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ) -> list[Tag]:
         """Get all descendant tags of the specified tag."""
         descendants: list[Tag] = []
 
         # Get direct children
-        children = await self.tag_repo.get_children(tag_id)
+        children = await self.tag_repo.get_children(tag_id, user_id=user_id)
 
         for child in children:
             descendants.append(child)
             # Recursively get descendants of each child
             if child.id:
                 child_descendants = await self.get_all_descendants(
-                    child.id, _transaction
+                    child.id, _transaction, user_id=user_id
                 )
                 descendants.extend(child_descendants)
 
         return descendants
 
     async def get_all_descendants_bulk(
-        self, tag_ids: list[int], _transaction: AsyncConnection | None = None
+        self,
+        tag_ids: list[int],
+        _transaction: AsyncConnection | None = None,
+        *,
+        user_id: str,
     ) -> list[Tag]:
         """Get all descendant tags for multiple tags in a single query."""
         if not tag_ids:
             return []
-        return await self.tag_repo.get_descendants_for_tags(tag_ids)
+        return await self.tag_repo.get_descendants_for_tags(tag_ids, user_id=user_id)

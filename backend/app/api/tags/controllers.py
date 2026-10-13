@@ -38,18 +38,17 @@ router = APIRouter(
 async def list_tags(
     request: Request,
     tag_repo: FromDishka[TagRepository],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
     limit: Annotated[int, Query(description="Items per page", ge=1, le=1000)] = 1000,
 ) -> TagListResponse:
     """
-    List all available tags.
+    List the session user's tags.
 
-    Returns a list of all tags that can be used to categorize contacts.
+    Returns every tag the user can use to categorize their contacts.
     """
     base_url = get_request_base_url(request)
 
-    # Get all tags from repository
-    all_tags = await tag_repo.get_all()
+    all_tags = await tag_repo.get_all(user_id=user.id)
     # Apply limit
     tags = all_tags[:limit] if limit < len(all_tags) else all_tags
 
@@ -65,7 +64,7 @@ async def create_tag(
     tag_request: TagCreateRequest,
     tag_service: FromDishka[TagService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> TagResponse:
     """
     Create a new tag.
@@ -96,7 +95,7 @@ async def get_tag(
     tag_id: int,
     request: Request,
     tag_repo: FromDishka[TagRepository],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> TagResponse:
     """
     Get a specific tag by ID.
@@ -105,7 +104,7 @@ async def get_tag(
     """
     base_url = get_request_base_url(request)
 
-    tag = await tag_repo.find_by_id(tag_id)
+    tag = await tag_repo.find_by_id(tag_id, user_id=user.id)
     if not tag:
         from app.core.contacts.models.exceptions import ContactNotFoundError
 
@@ -124,7 +123,7 @@ async def update_tag(
     tag_request: TagUpdateRequest,
     tag_service: FromDishka[TagService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> TagResponse:
     """
     Update a specific tag by ID.
@@ -172,6 +171,7 @@ async def update_tag(
             description=attrs.description,
             parent_id=attrs.parent_id,
             set_parent_null=set_parent_null,
+            user_id=user.id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -190,7 +190,7 @@ async def delete_tag(
     tag_id: int,
     tag_service: FromDishka[TagService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Delete a specific tag by ID.
@@ -198,7 +198,7 @@ async def delete_tag(
     Removes the tag from the system. This will also remove the tag from any contacts
     that were associated with it.
     """
-    await tag_service.delete_tag(tag_id=tag_id, transaction=connection)
+    await tag_service.delete_tag(tag_id=tag_id, transaction=connection, user_id=user.id)
 
 
 @router.post("/{tag_id}/merge", status_code=status.HTTP_204_NO_CONTENT)
@@ -208,7 +208,7 @@ async def merge_tag(
     merge_request: TagMergeRequest,
     tag_service: FromDishka[TagService],
     connection: FromDishka[AsyncConnection],
-    user: FromDishka[SessionUser],  # Require authentication
+    user: FromDishka[SessionUser],
 ) -> None:
     """
     Merge a tag into another tag.
@@ -226,7 +226,10 @@ async def merge_tag(
 
     try:
         await tag_service.merge_tags(
-            source_id=tag_id, target_id=target_tag_id, transaction=connection
+            source_id=tag_id,
+            target_id=target_tag_id,
+            transaction=connection,
+            user_id=user.id,
         )
     except ValueError as e:
         raise HTTPException(

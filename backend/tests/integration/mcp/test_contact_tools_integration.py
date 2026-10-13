@@ -573,7 +573,9 @@ class TestContactToolsIntegration:
 
         for tag_name in tag_names:
             # Try to find existing tag by name
-            existing_tag_found = await tag_repo.find_by_name(tag_name)
+            existing_tag_found = await tag_repo.find_by_name(
+                tag_name, user_id=TEST_USER_ID
+            )
 
             if existing_tag_found:
                 # Use existing tag
@@ -804,7 +806,7 @@ class TestContactToolsIntegration:
         assert payload["color"] == "#123456"
         assert payload["description"] == "People I see often"
 
-        persisted = await tag_repo.find_by_id(tag.id)
+        persisted = await tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert str(persisted.name) == "close-friend"
 
@@ -873,7 +875,7 @@ class TestContactToolsIntegration:
             authenticated_lifespan_client,
             {"tag_id": str(child.id), "parent_id": str(parent.id)},
         )
-        reparented = await tag_repo.find_by_id(child.id)
+        reparented = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert reparented is not None
         assert reparented.parent_id == parent.id
 
@@ -881,7 +883,7 @@ class TestContactToolsIntegration:
             authenticated_lifespan_client,
             {"tag_id": str(child.id), "move_to_root": True},
         )
-        cleared = await tag_repo.find_by_id(child.id)
+        cleared = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert cleared is not None
         assert cleared.parent_id is None
 
@@ -911,7 +913,7 @@ class TestContactToolsIntegration:
         )
 
         assert response.status_code == 200
-        persisted = await tag_repo.find_by_id(child.id)
+        persisted = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert persisted.parent_id == parent.id
 
@@ -935,7 +937,7 @@ class TestContactToolsIntegration:
         assert response.status_code == 200
         assert "already exists" in response.text.lower()
 
-        persisted = await tag_repo.find_by_id(other.id)
+        persisted = await tag_repo.find_by_id(other.id, user_id=TEST_USER_ID)
         assert persisted is not None
         assert str(persisted.name) == "colleague"
 
@@ -974,7 +976,7 @@ class TestContactToolsIntegration:
 
         assert payload["status"] == "success"
 
-        assert await tag_repo.find_by_id(tag.id) is None
+        assert await tag_repo.find_by_id(tag.id, user_id=TEST_USER_ID) is None
         remaining = await clean_database.execute(
             text("SELECT COUNT(*) FROM contact_tags WHERE contact_id = :contact_id"),
             {"contact_id": contact.id},
@@ -1047,13 +1049,13 @@ class TestContactToolsIntegration:
 
         assert payload["status"] == "success"
 
-        assert await tag_repo.find_by_id(source.id) is None
+        assert await tag_repo.find_by_id(source.id, user_id=TEST_USER_ID) is None
         assigned = await clean_database.execute(
             text("SELECT tag_id FROM contact_tags WHERE contact_id = :contact_id"),
             {"contact_id": contact.id},
         )
         assert [row.tag_id for row in assigned.fetchall()] == [target.id]
-        surviving_child = await tag_repo.find_by_id(child.id)
+        surviving_child = await tag_repo.find_by_id(child.id, user_id=TEST_USER_ID)
         assert surviving_child is not None
         assert surviving_child.parent_id == target.id
 
@@ -1439,7 +1441,7 @@ class TestMCPTagParity:
         tag_names = ["existing", "brand-new", "also-new"]
         resolved_tags = []
         for name in tag_names:
-            found = await tag_repo.find_by_name(name)
+            found = await tag_repo.find_by_name(name, user_id=TEST_USER_ID)
             if found:
                 resolved_tags.append(found)
             else:

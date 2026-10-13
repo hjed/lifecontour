@@ -17,6 +17,7 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.models.exceptions import DuplicateTagNameError
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.outbox_event_processor import (
     OutboxEventProcessingError,
@@ -1031,6 +1032,29 @@ class TestOutboxEventProcessor:
         assert created_arg.first_name == "Unknown"
 
     @pytest.mark.asyncio
+    async def test_resolve_contact_tags_looks_names_up_among_the_owners_tags(
+        self, processor: OutboxEventProcessor, mock_tag_repo: AsyncMock
+    ):
+        """A lost create race falls back to the owner's tag, never another user's."""
+        mock_tag_repo.save.side_effect = DuplicateTagNameError("VIP")
+        mock_tag_repo.find_by_name.return_value = Tag(
+            id=3, name=TagName("VIP"), user_id=SYNC_OWNER
+        )
+
+        result = await processor._resolve_contact_tags(
+            contact_data={"tags": [{"name": "VIP"}]},
+            existing_reference_data=None,
+            existing_contact_tags=[],
+            user_id=SYNC_OWNER,
+        )
+
+        assert result is not None and [t.id for t in result] == [3]
+        mock_tag_repo.find_by_names.assert_awaited_once_with(
+            ["VIP"], user_id=SYNC_OWNER
+        )
+        mock_tag_repo.find_by_name.assert_awaited_once_with("VIP", user_id=SYNC_OWNER)
+
+    @pytest.mark.asyncio
     async def test_resolve_contact_tags_returns_none_if_tags_not_in_payload(
         self, processor: OutboxEventProcessor
     ):
@@ -1196,7 +1220,7 @@ class TestOutboxEventProcessor:
         """
         scouts = Tag(id=1, name=TagName("Scouts"))
 
-        def _case_insensitive_find(names: list[str]) -> dict[str, Tag]:
+        def _case_insensitive_find(names: list[str], *, user_id: str) -> dict[str, Tag]:
             return {n: scouts for n in names if n.lower() == "scouts"}
 
         mock_tag_repo.find_by_names.side_effect = _case_insensitive_find
@@ -1220,7 +1244,7 @@ class TestOutboxEventProcessor:
         the same tag, not a preserved local-only tag to append again."""
         scouts = Tag(id=1, name=TagName("Scouts"))
 
-        def _case_insensitive_find(names: list[str]) -> dict[str, Tag]:
+        def _case_insensitive_find(names: list[str], *, user_id: str) -> dict[str, Tag]:
             return {n: scouts for n in names if n.lower() == "scouts"}
 
         mock_tag_repo.find_by_names.side_effect = _case_insensitive_find

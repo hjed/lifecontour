@@ -13,6 +13,8 @@ from app.core.contacts.models.exceptions import (
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 
+OWNER = "tag-owner"
+
 
 class TestTagHierarchyService:
     """Test TagHierarchyService."""
@@ -39,9 +41,11 @@ class TestTagHierarchyService:
         """Test tag name uniqueness validation when no existing tag."""
         mock_tag_repo.find_by_name.return_value = None
 
-        await service.validate_tag_name_uniqueness("work", mock_transaction)
+        await service.validate_tag_name_uniqueness(
+            "work", mock_transaction, user_id=OWNER
+        )
 
-        mock_tag_repo.find_by_name.assert_called_once_with("work")
+        mock_tag_repo.find_by_name.assert_called_once_with("work", user_id=OWNER)
 
     @pytest.mark.asyncio
     async def test_validate_tag_name_uniqueness_existing_tag_same_id(
@@ -52,10 +56,10 @@ class TestTagHierarchyService:
         mock_tag_repo.find_by_name.return_value = existing_tag
 
         await service.validate_tag_name_uniqueness(
-            "work", mock_transaction, exclude_tag_id=1
+            "work", mock_transaction, exclude_tag_id=1, user_id=OWNER
         )
 
-        mock_tag_repo.find_by_name.assert_called_once_with("work")
+        mock_tag_repo.find_by_name.assert_called_once_with("work", user_id=OWNER)
 
     @pytest.mark.asyncio
     async def test_validate_tag_name_uniqueness_existing_tag_different_id_raises_error(
@@ -67,7 +71,7 @@ class TestTagHierarchyService:
 
         with pytest.raises(DuplicateTagNameError):
             await service.validate_tag_name_uniqueness(
-                "work", mock_transaction, exclude_tag_id=1
+                "work", mock_transaction, exclude_tag_id=1, user_id=OWNER
             )
 
     @pytest.mark.asyncio
@@ -79,7 +83,9 @@ class TestTagHierarchyService:
         mock_tag_repo.find_by_name.return_value = existing_tag
 
         with pytest.raises(DuplicateTagNameError):
-            await service.validate_tag_name_uniqueness("work", mock_transaction)
+            await service.validate_tag_name_uniqueness(
+                "work", mock_transaction, user_id=OWNER
+            )
 
     @pytest.mark.asyncio
     async def test_validate_parent_child_relationship_same_id_raises_error(
@@ -87,7 +93,9 @@ class TestTagHierarchyService:
     ):
         """Test parent-child relationship validation raises error when same ID."""
         with pytest.raises(ContactValidationError) as exc_info:
-            await service.validate_parent_child_relationship(1, 1, mock_transaction)
+            await service.validate_parent_child_relationship(
+                1, 1, mock_transaction, user_id=OWNER
+            )
 
         assert exc_info.value.field == "parent_id"
         assert "Tag cannot be its own parent" in exc_info.value.message
@@ -100,7 +108,9 @@ class TestTagHierarchyService:
         mock_tag_repo.find_by_id.return_value = None
 
         with pytest.raises(TagNotFoundError):
-            await service.validate_parent_child_relationship(1, 2, mock_transaction)
+            await service.validate_parent_child_relationship(
+                1, 2, mock_transaction, user_id=OWNER
+            )
 
     @pytest.mark.asyncio
     async def test_validate_parent_child_relationship_valid(
@@ -111,7 +121,7 @@ class TestTagHierarchyService:
         parent_tag = Tag(name=TagName("parent"), id=1)
 
         # Mock the find_by_id calls for circular reference check
-        def mock_find_by_id(tag_id):
+        def mock_find_by_id(tag_id, *, user_id):
             if tag_id == 2:
                 return child_tag
             elif tag_id == 1:
@@ -120,7 +130,9 @@ class TestTagHierarchyService:
 
         mock_tag_repo.find_by_id.side_effect = mock_find_by_id
 
-        await service.validate_parent_child_relationship(1, 2, mock_transaction)
+        await service.validate_parent_child_relationship(
+            1, 2, mock_transaction, user_id=OWNER
+        )
 
     @pytest.mark.asyncio
     async def test_check_circular_reference_direct_cycle_raises_error(
@@ -131,7 +143,7 @@ class TestTagHierarchyService:
         tag1 = Tag(name=TagName("tag1"), id=1, parent_id=2)
         tag2 = Tag(name=TagName("tag2"), id=2, parent_id=1)
 
-        def mock_find_by_id(tag_id):
+        def mock_find_by_id(tag_id, *, user_id):
             if tag_id == 1:
                 return tag1
             elif tag_id == 2:
@@ -141,7 +153,9 @@ class TestTagHierarchyService:
         mock_tag_repo.find_by_id.side_effect = mock_find_by_id
 
         with pytest.raises(ContactValidationError) as exc_info:
-            await service.validate_parent_child_relationship(1, 2, mock_transaction)
+            await service.validate_parent_child_relationship(
+                1, 2, mock_transaction, user_id=OWNER
+            )
 
         assert exc_info.value.field == "parent_id"
         assert "child cannot be ancestor of parent" in exc_info.value.message
@@ -156,7 +170,7 @@ class TestTagHierarchyService:
         tag2 = Tag(name=TagName("tag2"), id=2, parent_id=1)
         tag3 = Tag(name=TagName("tag3"), id=3, parent_id=2)
 
-        def mock_find_by_id(tag_id):
+        def mock_find_by_id(tag_id, *, user_id):
             if tag_id == 1:
                 return tag1
             elif tag_id == 2:
@@ -168,7 +182,9 @@ class TestTagHierarchyService:
         mock_tag_repo.find_by_id.side_effect = mock_find_by_id
 
         with pytest.raises(ContactValidationError) as exc_info:
-            await service.validate_parent_child_relationship(3, 1, mock_transaction)
+            await service.validate_parent_child_relationship(
+                3, 1, mock_transaction, user_id=OWNER
+            )
 
         assert exc_info.value.field == "parent_id"
         assert "child cannot be ancestor of parent" in exc_info.value.message
@@ -182,10 +198,10 @@ class TestTagHierarchyService:
         ]
         mock_tag_repo.get_children.return_value = children
 
-        result = await service.get_tag_tree(root_tag_id=1)
+        result = await service.get_tag_tree(root_tag_id=1, user_id=OWNER)
 
         assert result == children
-        mock_tag_repo.get_children.assert_called_once_with(1)
+        mock_tag_repo.get_children.assert_called_once_with(1, user_id=OWNER)
 
     @pytest.mark.asyncio
     async def test_get_tag_tree_without_root_id(self, service, mock_tag_repo):
@@ -193,7 +209,7 @@ class TestTagHierarchyService:
         root_tags = [Tag(name=TagName("root1"), id=1), Tag(name=TagName("root2"), id=2)]
         mock_tag_repo.get_root_tags.return_value = root_tags
 
-        result = await service.get_tag_tree()
+        result = await service.get_tag_tree(user_id=OWNER)
 
         assert result == root_tags
         mock_tag_repo.get_root_tags.assert_called_once()
@@ -204,7 +220,7 @@ class TestTagHierarchyService:
         tag = Tag(name=TagName("tag"), id=1, parent_id=None)
         mock_tag_repo.find_by_id.return_value = tag
 
-        result = await service.get_tag_path(1)
+        result = await service.get_tag_path(1, user_id=OWNER)
 
         assert len(result) == 1
         assert result[0] == tag
@@ -217,7 +233,7 @@ class TestTagHierarchyService:
         parent = Tag(name=TagName("parent"), id=2, parent_id=1)
         child = Tag(name=TagName("child"), id=3, parent_id=2)
 
-        def mock_find_by_id(tag_id):
+        def mock_find_by_id(tag_id, *, user_id):
             if tag_id == 1:
                 return grandparent
             elif tag_id == 2:
@@ -228,7 +244,7 @@ class TestTagHierarchyService:
 
         mock_tag_repo.find_by_id.side_effect = mock_find_by_id
 
-        result = await service.get_tag_path(3)
+        result = await service.get_tag_path(3, user_id=OWNER)
 
         assert len(result) == 3
         assert result[0] == grandparent  # Root first
@@ -240,7 +256,7 @@ class TestTagHierarchyService:
         """Test getting tag path when tag not found."""
         mock_tag_repo.find_by_id.return_value = None
 
-        result = await service.get_tag_path(999)
+        result = await service.get_tag_path(999, user_id=OWNER)
 
         assert result == []
 
@@ -249,10 +265,10 @@ class TestTagHierarchyService:
         """Test getting descendants when tag has no children."""
         mock_tag_repo.get_children.return_value = []
 
-        result = await service.get_all_descendants(1)
+        result = await service.get_all_descendants(1, user_id=OWNER)
 
         assert result == []
-        mock_tag_repo.get_children.assert_called_once_with(1)
+        mock_tag_repo.get_children.assert_called_once_with(1, user_id=OWNER)
 
     @pytest.mark.asyncio
     async def test_get_all_descendants_with_children(self, service, mock_tag_repo):
@@ -262,7 +278,7 @@ class TestTagHierarchyService:
         child2 = Tag(name=TagName("child2"), id=3, parent_id=1)
         grandchild = Tag(name=TagName("grandchild"), id=4, parent_id=2)
 
-        def mock_get_children(tag_id):
+        def mock_get_children(tag_id, *, user_id):
             if tag_id == 1:
                 return [child1, child2]
             elif tag_id == 2:
@@ -273,7 +289,7 @@ class TestTagHierarchyService:
 
         mock_tag_repo.get_children.side_effect = mock_get_children
 
-        result = await service.get_all_descendants(1)
+        result = await service.get_all_descendants(1, user_id=OWNER)
 
         assert len(result) == 3
         assert child1 in result

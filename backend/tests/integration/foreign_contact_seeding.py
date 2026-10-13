@@ -177,6 +177,7 @@ _OWNED_TABLES = (
     text("UPDATE journals SET user_id = :me WHERE user_id = :them"),
     text("UPDATE tasks SET user_id = :me WHERE user_id = :them"),
     text("UPDATE custom_date_types SET user_id = :me WHERE user_id = :them"),
+    text("UPDATE tags SET user_id = :me WHERE user_id = :them"),
 )
 
 

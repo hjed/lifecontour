@@ -61,7 +61,7 @@ class TestTagRepositoryIntegration:
         assert updated_tag.updated_at is not None
 
         # Verify the tag was actually updated in the database
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag.color == "#00FF00"
         assert found_tag.description == "Updated description"
 
@@ -87,7 +87,7 @@ class TestTagRepositoryIntegration:
         saved_tag = await tag_repo.save(tag, user_id=TEST_USER_ID)
 
         # Act
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
 
         # Assert
         assert found_tag is not None
@@ -99,7 +99,7 @@ class TestTagRepositoryIntegration:
     async def test_find_by_id_not_existing(self, tag_repo):
         """Test finding tag by ID when it doesn't exist."""
         # Act
-        found_tag = await tag_repo.find_by_id(999)
+        found_tag = await tag_repo.find_by_id(999, user_id=TEST_USER_ID)
 
         # Assert
         assert found_tag is None
@@ -112,7 +112,7 @@ class TestTagRepositoryIntegration:
         saved_tag = await tag_repo.save(tag, user_id=TEST_USER_ID)
 
         # Act
-        found_tag = await tag_repo.find_by_name("client")
+        found_tag = await tag_repo.find_by_name("client", user_id=TEST_USER_ID)
 
         # Assert
         assert found_tag is not None
@@ -124,7 +124,7 @@ class TestTagRepositoryIntegration:
     async def test_find_by_name_not_existing(self, tag_repo):
         """Test finding tag by name when it doesn't exist."""
         # Act
-        found_tag = await tag_repo.find_by_name("nonexistent")
+        found_tag = await tag_repo.find_by_name("nonexistent", user_id=TEST_USER_ID)
 
         # Assert
         assert found_tag is None
@@ -141,7 +141,9 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(tag3, user_id=TEST_USER_ID)
 
         # Act
-        results = await tag_repo.find_by_names(["tag_a", "tag_c", "nonexistent"])
+        results = await tag_repo.find_by_names(
+            ["tag_a", "tag_c", "nonexistent"], user_id=TEST_USER_ID
+        )
 
         # Assert
         assert len(results) == 2
@@ -159,7 +161,9 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(tag1, user_id=TEST_USER_ID)
 
         # Act
-        results = await tag_repo.find_by_names(["testtagcase", "TESTTAGCASE"])
+        results = await tag_repo.find_by_names(
+            ["testtagcase", "TESTTAGCASE"], user_id=TEST_USER_ID
+        )
 
         # Assert
         assert len(results) == 2
@@ -172,7 +176,7 @@ class TestTagRepositoryIntegration:
     async def test_find_by_names_empty_list(self, tag_repo):
         """Test finding tags with an empty list of names."""
         # Act
-        results = await tag_repo.find_by_names([])
+        results = await tag_repo.find_by_names([], user_id=TEST_USER_ID)
 
         # Assert
         assert isinstance(results, dict)
@@ -191,7 +195,7 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(tag3, user_id=TEST_USER_ID)
 
         # Act
-        all_tags = await tag_repo.get_all()
+        all_tags = await tag_repo.get_all(user_id=TEST_USER_ID)
 
         # Assert
         assert len(all_tags) >= 3
@@ -211,7 +215,7 @@ class TestTagRepositoryIntegration:
         await tag_repo.delete(saved_tag.id)
 
         # Assert - Tag should no longer exist
-        found_tag = await tag_repo.find_by_id(saved_tag.id)
+        found_tag = await tag_repo.find_by_id(saved_tag.id, user_id=TEST_USER_ID)
         assert found_tag is None
 
     @pytest.mark.asyncio
@@ -240,7 +244,7 @@ class TestTagRepositoryIntegration:
         assert str(saved_child.name) == "client"
 
         # Verify parent can be found
-        found_parent = await tag_repo.find_by_id(saved_parent.id)
+        found_parent = await tag_repo.find_by_id(saved_parent.id, user_id=TEST_USER_ID)
         assert found_parent is not None
         assert str(found_parent.name) == "business"
 
@@ -257,7 +261,7 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(tag3, user_id=TEST_USER_ID)
 
         # Act
-        results = await tag_repo.search("work")
+        results = await tag_repo.search("work", user_id=TEST_USER_ID)
 
         # Assert
         assert len(results) >= 2
@@ -280,7 +284,7 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(orphan, user_id=TEST_USER_ID)
 
         # Act
-        children = await tag_repo.get_children(saved_parent.id)
+        children = await tag_repo.get_children(saved_parent.id, user_id=TEST_USER_ID)
 
         # Assert
         assert len(children) == 2
@@ -304,7 +308,7 @@ class TestTagRepositoryIntegration:
         await tag_repo.save(child, user_id=TEST_USER_ID)
 
         # Act
-        root_tags = await tag_repo.get_root_tags()
+        root_tags = await tag_repo.get_root_tags(user_id=TEST_USER_ID)
 
         # Assert
         assert len(root_tags) >= 2
@@ -333,17 +337,17 @@ class TestTagOwnerIsRecorded:
         assert child.id is not None
         assert parent.user_id == TEST_USER_ID
 
-        found = await tag_repo.find_by_id(parent.id)
-        by_name = await tag_repo.find_by_name("crew")
+        found = await tag_repo.find_by_id(parent.id, user_id=TEST_USER_ID)
+        by_name = await tag_repo.find_by_name("crew", user_id=TEST_USER_ID)
         reads = [
             found,
             by_name,
-            *(await tag_repo.find_by_names(["crew"])).values(),
-            *await tag_repo.get_all(),
-            *await tag_repo.get_children(parent.id),
-            *await tag_repo.get_descendants_for_tags([parent.id]),
-            *await tag_repo.get_root_tags(),
-            *await tag_repo.search("crew"),
+            *(await tag_repo.find_by_names(["crew"], user_id=TEST_USER_ID)).values(),
+            *await tag_repo.get_all(user_id=TEST_USER_ID),
+            *await tag_repo.get_children(parent.id, user_id=TEST_USER_ID),
+            *await tag_repo.get_descendants_for_tags([parent.id], user_id=TEST_USER_ID),
+            *await tag_repo.get_root_tags(user_id=TEST_USER_ID),
+            *await tag_repo.search("crew", user_id=TEST_USER_ID),
         ]
 
         assert len(reads) == 10  # get_all and search both find parent and child
@@ -378,3 +382,104 @@ class TestTagOwnerIsRecorded:
         assert single is not None and single.tags is not None
         assert [t.user_id for t in single.tags] == [TEST_USER_ID]
         assert [t.user_id for c in batch for t in c.tags or []] == [TEST_USER_ID]
+
+
+@pytest.mark.integration
+class TestTagReadsAreScopedToTheOwner:
+    """Another user's tag, even one of the same name, is invisible to every read."""
+
+    @pytest.fixture
+    def tag_repo(self, clean_database: AsyncConnection) -> SqlTagRepository:
+        return SqlTagRepository(clean_database)
+
+    @pytest.fixture
+    async def tags(self, tag_repo: SqlTagRepository) -> dict[str, Tag]:
+        """The same tree for both owners: ``crew`` > ``crew/deck``."""
+        tags: dict[str, Tag] = {}
+        for owner, label in ((TEST_USER_ID, "own"), (OTHER_USER_ID, "foreign")):
+            parent = await tag_repo.save(Tag(name=TagName("crew")), user_id=owner)
+            assert parent.id is not None
+            child = await tag_repo.save(
+                Tag(name=TagName("crew/deck"), parent_id=parent.id), user_id=owner
+            )
+            tags[label] = parent
+            tags[f"{label}_child"] = child
+        return tags
+
+    async def test_a_foreign_tag_is_not_found_by_id(
+        self, tag_repo: SqlTagRepository, tags: dict[str, Tag]
+    ) -> None:
+        foreign_id = tags["foreign"].id
+        assert foreign_id is not None
+
+        assert await tag_repo.find_by_id(foreign_id, user_id=TEST_USER_ID) is None
+        found = await tag_repo.find_by_id(foreign_id, user_id=OTHER_USER_ID)
+        assert found is not None and found.user_id == OTHER_USER_ID
+
+    async def test_a_name_resolves_to_the_users_own_tag(
+        self, tag_repo: SqlTagRepository, tags: dict[str, Tag]
+    ) -> None:
+        by_name = await tag_repo.find_by_name("CREW", user_id=TEST_USER_ID)
+        by_names = await tag_repo.find_by_names(["crew"], user_id=TEST_USER_ID)
+
+        assert by_name is not None and by_name.id == tags["own"].id
+        assert {name: tag.id for name, tag in by_names.items()} == {
+            "crew": tags["own"].id
+        }
+
+    async def test_listing_reads_return_only_the_users_tags(
+        self, tag_repo: SqlTagRepository, tags: dict[str, Tag]
+    ) -> None:
+        own_ids = {tags["own"].id, tags["own_child"].id}
+
+        assert {t.id for t in await tag_repo.get_all(user_id=TEST_USER_ID)} == own_ids
+        assert {t.id for t in await tag_repo.search("crew", user_id=TEST_USER_ID)} == (
+            own_ids
+        )
+        assert [t.id for t in await tag_repo.get_root_tags(user_id=TEST_USER_ID)] == [
+            tags["own"].id
+        ]
+
+    async def test_the_hierarchy_never_reaches_a_foreign_tag(
+        self, tag_repo: SqlTagRepository, tags: dict[str, Tag]
+    ) -> None:
+        foreign_id = tags["foreign"].id
+        assert foreign_id is not None
+
+        assert await tag_repo.get_children(foreign_id, user_id=TEST_USER_ID) == []
+        assert (
+            await tag_repo.get_descendants_for_tags([foreign_id], user_id=TEST_USER_ID)
+            == []
+        )
+
+    async def test_the_descendant_walk_stops_at_a_foreign_grandchild(
+        self,
+        tag_repo: SqlTagRepository,
+        tags: dict[str, Tag],
+        clean_database: AsyncConnection,
+    ) -> None:
+        """Every level of the walk is filtered, not only its starting point."""
+        own_child = tags["own_child"]
+        assert own_child.id is not None
+        # A cross-owner link no write can make, seeded to prove the filter.
+        await tag_repo.save(
+            Tag(name=TagName("crew/deck/stray"), parent_id=own_child.id),
+            user_id=OTHER_USER_ID,
+        )
+        own_id = tags["own"].id
+        assert own_id is not None
+
+        descendants = await tag_repo.get_descendants_for_tags(
+            [own_id], user_id=TEST_USER_ID
+        )
+
+        assert [t.id for t in descendants] == [own_child.id]
+
+    async def test_two_users_may_each_hold_the_same_name(
+        self, tag_repo: SqlTagRepository, tags: dict[str, Tag]
+    ) -> None:
+        """Names are unique per owner, and still case-insensitively so."""
+        assert tags["own"].id != tags["foreign"].id
+
+        with pytest.raises(DuplicateTagNameError):
+            await tag_repo.save(Tag(name=TagName("Crew")), user_id=TEST_USER_ID)

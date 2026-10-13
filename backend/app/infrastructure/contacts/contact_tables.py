@@ -17,6 +17,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -179,13 +180,19 @@ tags_table = Table(
         server_default=text("now()"),
         nullable=False,
     ),
-    UniqueConstraint("name"),
     CheckConstraint(
         "name ~ '^[a-zA-Z0-9_&-]+(/[a-zA-Z0-9_&-]+)*$'", name="ck_tags_name_format"
     ),
 )
 
 Index("idx_tags_user_id", tags_table.c.user_id)
+# Names are unique per owner, case-insensitively.
+Index(
+    "uq_tags_user_id_name_lower",
+    tags_table.c.user_id,
+    func.lower(tags_table.c.name),
+    unique=True,
+)
 
 # Contact tags table (many-to-many)
 contact_tags_table = Table(
