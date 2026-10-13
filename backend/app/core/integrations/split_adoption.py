@@ -14,12 +14,18 @@ recurrence's series key. Adopting it means:
    the user's title and notes are kept, as the payload's are dropped.
 3. **The old recurrence is re-planned.** The adopted journal leaves it, and the
    occurrence after the slot it left may now continue a cancelled run.
+
+When the halves reach the backend in different syncs the worker cannot pair
+them, and the new instance arrives as a create. ``find_split_predecessor``
+then looks for the one cancelled journal it could be adopting: the old
+recurrence's kept "next one", or a continuation the user added to.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from core_shared.models.history import Provenance
 from core_shared.models.journals import Journal
@@ -34,6 +40,11 @@ from app.core.integrations.cancelled_recurrence_tidier import (
 )
 from app.core.integrations.recurrence_keys import root_recurring_event_id
 from app.core.journal.models.repositories import JournalSeriesRepository
+from app.core.journal.services.journal_date_resolver import (
+    JournalDateResolver,
+    local_date,
+    local_day_window,
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +55,65 @@ class SplitAdoption:
     calendar_id: UUID
     old_recurring_event_id: str | None
     old_start: datetime | None
+
+
+@dataclass(frozen=True)
+class SplitPredecessor:
+    """The cancelled journal a new instance adopts, and its series key."""
+
+    journal_id: int
+    adopted_from: str
+    old_recurring_event_id: str
+
+
+def _zone(name: object) -> ZoneInfo | None:
+    if not isinstance(name, str) or not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError, ValueError:
+        return None
+
+
+async def find_split_predecessor(
+    link_repo: SqlJournalEventLinkRepository,
+    date_resolver: JournalDateResolver,
+    payload: JournalSyncEventData,
+) -> SplitPredecessor | None:
+    """The one cancelled journal a create of a new recurrence's instance adopts.
+
+    Only a recurring instance can be half of a split. The day is the instance's
+    local day: its event's zone, else the user's. Anything but exactly one
+    candidate adopts nothing - a wrong merge is worse than a duplicate.
+    """
+    journal_data = payload.journal_data
+    start_value = journal_data.get("event_date_range_start")
+    title = journal_data.get("title")
+    if not payload.recurring_event_id or not start_value or not title:
+        return None
+    user_id = str(journal_data["user_id"])
+    zone = _zone(payload.calendar_info_data.get("timezone")) or (
+        await date_resolver.timezone_for(user_id)
+    )
+    day = local_date(datetime.fromisoformat(str(start_value)), zone)
+    window = local_day_window(day, zone)
+    candidates = await link_repo.find_split_candidates(
+        user_id=user_id,
+        calendar_id=UUID(payload.calendar_id),
+        recurring_event_id=payload.recurring_event_id,
+        title=str(title),
+        window_start=window.start,
+        window_end=window.end,
+    )
+    if len(candidates) != 1 or not candidates[0].recurring_event_id:
+        return None
+    [candidate] = candidates
+    assert candidate.recurring_event_id is not None
+    return SplitPredecessor(
+        journal_id=candidate.journal_id,
+        adopted_from=root_recurring_event_id(candidate.recurring_event_id),
+        old_recurring_event_id=candidate.recurring_event_id,
+    )
 
 
 def adopted_journal_data(
