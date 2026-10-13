@@ -10,6 +10,9 @@ from arq.connections import ArqRedis, RedisSettings
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from core_shared.repositories.pending_entity_mapping_repository import (
+    PendingEntityMappingRepository,
+)
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -47,6 +50,9 @@ from app.core.integrations.immich.asset_thumbnail_proxy_service import (
     AssetThumbnailProxyService,
 )
 from app.core.integrations.immich.avatar_proxy_service import AvatarProxyService
+from app.core.integrations.immich.conflict_resolution_service import (
+    ImmichConflictResolutionService,
+)
 from app.core.integrations.outbox_event_processor import OutboxEventProcessor
 from app.core.integrations.registry.google_provider import GoogleIntegrationProvider
 from app.core.integrations.registry.immich_provider import ImmichIntegrationProvider
@@ -420,6 +426,22 @@ class IntegrationProvider(Provider):
             journal_repo=SqlJournalRepository(connection),
             album_link_repo=AlbumSyncReadRepository(connection),
             user_settings_repo=SqlUserSettingsRepository(connection),
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def provide_immich_conflict_resolution_service(
+        self,
+        connection: AsyncConnection,
+        contact_repo: ContactRepository,
+        sync_metadata_repo: SyncMetadataRepository,
+        contact_service: ContactService,
+    ) -> ImmichConflictResolutionService:
+        """Provide the Immich conflict resolution service for request scope."""
+        return ImmichConflictResolutionService(
+            conflict_repo=PendingEntityMappingRepository(connection),
+            contact_repo=contact_repo,
+            sync_metadata_repo=sync_metadata_repo,
+            contact_service=contact_service,
         )
 
     @provide(scope=Scope.REQUEST)

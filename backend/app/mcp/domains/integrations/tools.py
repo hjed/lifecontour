@@ -9,19 +9,22 @@ integrations.
 import json
 
 import structlog
+from core_shared.models.contacts.value_objects import Provenance
 from fastmcp import FastMCP
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.services import ContactService
 from app.core.integrations.immich.album_creation_service import (
     ImmichAlbumCreationService,
+)
+from app.core.integrations.immich.conflict_resolution_service import (
+    ConflictResolutionAction,
+    ImmichConflictResolutionService,
 )
 from app.core.integrations.registry.service import IntegrationRegistryService
 from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
 )
 from app.core.integrations.task_queue_service import TaskQueueService
-from app.infrastructure.unit_of_work import unit_of_work
 from app.mcp.domains.integrations.contact_suggestion_tools import (
     register_contact_suggestion_tools,
 )
@@ -34,9 +37,9 @@ from app.mcp.shared.annotations import (
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
-    get_contact_service,
     get_current_user_id,
     get_immich_album_creation_service,
+    get_immich_conflict_resolution_service,
     get_integration_registry_service,
     get_strava_athlete_mapping_service,
     get_task_queue_service,
@@ -353,7 +356,9 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         contact_id: int | None = None,
         user_id: str = mcp_depends(get_current_user_id),
         connection: AsyncConnection = mcp_depends(get_async_connection),
-        contact_service: ContactService = mcp_depends(get_contact_service),
+        service: ImmichConflictResolutionService = mcp_depends(
+            get_immich_conflict_resolution_service
+        ),
     ) -> str:
         """
         Resolve an Immich synchronisation conflict.
@@ -371,19 +376,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         Returns:
             JSON string containing the resolved conflict details.
         """
-        from core_shared.models.contacts.entities import Contact
-        from core_shared.models.contacts.value_objects import Provenance
-        from core_shared.repositories.pending_entity_mapping_repository import (
-            PendingEntityMappingRepository,
-        )
-
-        from app.core.contacts.adapters.sql.contact_repository import (
-            SqlContactRepository,
-        )
-        from app.core.integrations.adapters.sql.sync_metadata_repository import (
-            SyncMetadataRepository,
-        )
-
         logger.info(
             "MCP: Resolving Immich conflict",
             user_id=user_id,
@@ -394,72 +386,16 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         if action not in ("link", "create"):
             raise ValueError(f"Invalid action '{action}'. Must be 'link' or 'create'.")
 
-        repo = PendingEntityMappingRepository(connection)
-        contact_repo = SqlContactRepository(connection)
-        sync_metadata_repo = SyncMetadataRepository(connection)
-
-        # Single atomic operation: resolve the conflict, (optionally) create the
-        # contact, and upsert the external reference must all commit together
-        # before the response is sent.
-        async with unit_of_work(connection):
-            conflict_row = await repo.get_unresolved_by_id(
-                conflict_id=conflict_id,
-                user_id=user_id,
-                integration_source="immich",
-            )
-
-            if not conflict_row:
-                raise ValueError(
-                    f"Conflict {conflict_id} not found or already resolved."
-                )
-
-            external_id = conflict_row["external_entity_id"]
-            external_name = conflict_row["external_entity_name"]
-
-            resolved_contact_id = contact_id
-
-            if action == "create":
-                from core_shared.contact_name_matcher import ContactNameMatcher
-
-                name = (external_name or "").strip()
-                first_name, last_name_parsed = ContactNameMatcher.parse_name(name)
-                first_name = first_name or "Unnamed"
-                last_name = last_name_parsed or ""
-
-                new_contact = Contact(
-                    first_name=first_name, user_id=user_id, last_name=last_name
-                )
-                saved_contact = await contact_service.create_contact(
-                    contact=new_contact,
-                    transaction=connection,
-                    changed_by="mcp",
-                    source=Provenance.MCP,
-                )
-                resolved_contact_id = saved_contact.id
-
-            if resolved_contact_id is None:
-                raise ValueError("contact_id is required when action is 'link'.")
-
-            if action == "link":
-                if not await contact_repo.contact_exists(
-                    resolved_contact_id, user_id=user_id
-                ):
-                    raise ValueError(f"Contact {resolved_contact_id} not found.")
-
-            updated = await repo.resolve(
-                conflict_id=conflict_id, resolved_contact_id=resolved_contact_id
-            )
-
-            if not updated:
-                raise ValueError(f"Failed to resolve conflict {conflict_id}.")
-
-            await sync_metadata_repo.upsert_contact_link(
-                contact_id=resolved_contact_id,
-                user_id=user_id,
-                external_system="immich",
-                external_entity_type="person",
-                external_entity_id=external_id,
-            )
+        # The @transactional service owns the commit (see AGENTS.md "Transactions").
+        resolved = await service.resolve(
+            conflict_id,
+            ConflictResolutionAction(action),
+            contact_id,
+            user_id=user_id,
+            provenance=Provenance.MCP,
+            transaction=connection,
+        )
+        resolved_contact_id = resolved.contact_id
 
         result = {
             "conflict_id": conflict_id,
