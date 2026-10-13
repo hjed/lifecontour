@@ -171,6 +171,7 @@ class TagService:
                 tag_name=new_path_str,
                 changed_fields=changed_fields,
                 transaction=transaction,
+                user_id=_owner(tag),
             )
             await self.event_publisher.publish(event)
 
@@ -258,6 +259,7 @@ class TagService:
             tag_id=tag_id,
             tag_name=path_str,
             transaction=transaction,
+            user_id=_owner(tag),
         )
         await self.event_publisher.publish(event)
 

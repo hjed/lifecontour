@@ -185,6 +185,7 @@ async def test_update_tag_basic(service, repo, publisher):
     assert event.aggregate_id == 1
     assert "name" in event.event_data["changed_fields"]
     assert "color" in event.event_data["changed_fields"]
+    assert event.event_data["user_id"] == OWNER
 
 
 @pytest.mark.asyncio
@@ -277,6 +278,7 @@ async def test_delete_tag(service, repo, publisher):
     assert isinstance(event, TagDeleted)
     assert event.aggregate_id == 1
     assert event.event_data["tag_name"] == "To_Delete"
+    assert event.event_data["user_id"] == OWNER
 
 
 @pytest.mark.asyncio

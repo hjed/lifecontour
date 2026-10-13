@@ -888,7 +888,12 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
   returns the owner; `TagRepository.save(tag, *, user_id)` writes it on INSERT only. REST
   `POST /tags` stamps the session user, `ContactService._resolve_tag_names` the contact's owner,
   and the inbound processor the event's owner. Reads and the name index still global.
-- **8b** — `TagUpdated` / `TagDeleted` carry the owner; Google `process_tag_event` scoped.
+- **8b ✅ DONE** — `TagUpdated` / `TagDeleted` carry the tag's owner (`user_id`, a required
+  keyword). Google `process_tag_event` renames or deletes the contact group only in
+  `user_google_auth WHERE user_id = :owner` (the Phase 13 `_owner_google_accounts` helper), and
+  an event without an owner is skipped as `no_owner` with a warning, before any database work.
+  Proven against two real accounts (`test_process_tag_event_owner_integration.py`). It lands
+  before per-user names (8c), while a name still identifies one tag.
 - **8c** — owner-scoped reads through repository, services, REST, MCP and the inbound
   processor; `0136` per-owner names.
 - **8d** — owner-scoped writes in SQL (update, delete, merge, re-parent, assign).
