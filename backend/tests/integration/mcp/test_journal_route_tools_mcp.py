@@ -13,6 +13,9 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
+    extract_typed_tool_result,
+    post_mcp_tool,
 )
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
@@ -68,6 +71,24 @@ async def _call(client: Any, tool: str, arguments: dict[str, Any]) -> dict[str, 
 
 class TestCreateJournalRoute:
     @pytest.mark.asyncio
+    async def test_the_route_is_sent_as_structured_content(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ) -> None:
+        """The saved route reaches a client as its response model, not a string."""
+        journal_id = await create_journal(SqlJournalRepository(clean_database))
+
+        async with authenticated_lifespan_client() as client:
+            response = await post_mcp_tool(
+                client,
+                "create_journal_route",
+                {"journal_id": journal_id, "name": "Harbour Loop"},
+            )
+
+        payload = extract_typed_tool_result(response.text)
+        assert payload["journal_id"] == journal_id
+        assert payload["has_gpx_data"] is False
+
+    @pytest.mark.asyncio
     async def test_attaches_a_gpx_route_with_mcp_provenance(
         self, authenticated_lifespan_client, clean_database: AsyncConnection
     ) -> None:
@@ -115,7 +136,7 @@ class TestCreateJournalRoute:
         journal_id = await create_journal(SqlJournalRepository(clean_database))
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "create_journal_route",
                 {"journal_id": journal_id, "name": "Broken", "gpx_data": gpx_data},
@@ -135,7 +156,7 @@ class TestCreateJournalRoute:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "create_journal_route",
                 {"journal_id": journal_id, "name": "Theirs", "gpx_data": VALID_GPX},
@@ -214,7 +235,7 @@ class TestListJournalRoutes:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client, "list_journal_routes", {"journal_id": journal_id}
             )
 
@@ -329,7 +350,7 @@ class TestUpdateJournalRoute:
         route_id = await _seed_route(clean_database, journal_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_journal_route",
                 {
@@ -356,7 +377,7 @@ class TestUpdateJournalRoute:
         route_id = await _seed_route(clean_database, route_journal_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_journal_route",
                 {"journal_id": other_journal_id, "route_id": route_id, "name": "X"},
@@ -376,7 +397,7 @@ class TestUpdateJournalRoute:
         route_id = await _seed_route(clean_database, journal_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_journal_route",
                 {"journal_id": journal_id, "route_id": route_id, "name": "Mine now"},
@@ -393,7 +414,7 @@ class TestUpdateJournalRoute:
         journal_id = await create_journal(SqlJournalRepository(clean_database))
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_journal_route",
                 {"journal_id": journal_id, "route_id": "not-a-uuid", "name": "X"},
@@ -489,7 +510,7 @@ class TestDeleteJournalRoute:
         route_id = await _seed_route(clean_database, route_journal_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "delete_journal_route",
                 {"journal_id": other_journal_id, "route_id": route_id},
@@ -508,7 +529,7 @@ class TestDeleteJournalRoute:
         route_id = await _seed_route(clean_database, journal_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "delete_journal_route",
                 {"journal_id": journal_id, "route_id": route_id},
@@ -524,7 +545,7 @@ class TestDeleteJournalRoute:
         journal_id = await create_journal(SqlJournalRepository(clean_database))
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call(
+            payload = await call_mcp_tool_error(
                 client,
                 "delete_journal_route",
                 {"journal_id": journal_id, "route_id": str(uuid4())},

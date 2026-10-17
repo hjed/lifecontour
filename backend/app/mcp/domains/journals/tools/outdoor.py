@@ -44,7 +44,7 @@ from app.mcp.shared.dependencies import (
     get_outdoor_dashboard_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
 # These will be created when the user provides type_data
@@ -66,7 +66,7 @@ async def list_incomplete_outdoor_activities(
     incomplete_service: IncompleteOutdoorActivityService = mcp_depends(
         get_incomplete_outdoor_activity_service
     ),
-) -> str:
+) -> IncompleteOutdoorActivitiesMCPResponse:
     """
     List the user's incomplete outdoor activity journals with their reasons.
 
@@ -99,15 +99,13 @@ async def list_incomplete_outdoor_activities(
         for entry in entries
     ]
 
-    return MCPResponseBuilder.success_response(
-        IncompleteOutdoorActivitiesMCPResponse(
-            total_count=len(activities),
-            activities=activities,
-            summary=(
-                f"Found {len(activities)} incomplete outdoor activit"
-                f"{'y' if len(activities) == 1 else 'ies'}."
-            ),
-        )
+    return IncompleteOutdoorActivitiesMCPResponse(
+        total_count=len(activities),
+        activities=activities,
+        summary=(
+            f"Found {len(activities)} incomplete outdoor activit"
+            f"{'y' if len(activities) == 1 else 'ies'}."
+        ),
     )
 
 
@@ -129,7 +127,7 @@ async def dismiss_incomplete_outdoor_activity(
     dismissal_service: OutdoorActivityDismissalService = mcp_depends(
         get_outdoor_activity_dismissal_service
     ),
-) -> str:
+) -> OutdoorActivityDismissalMCPResponse:
     """
     Dismiss a journal from the incomplete outdoor activities review.
 
@@ -138,19 +136,17 @@ async def dismiss_incomplete_outdoor_activity(
     provenance. Reversible via ``undismiss_incomplete_outdoor_activity``.
     """
     if not await _journal_owned_by_user(db_connection, user_id, journal_id):
-        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+        raise MCPErrors.not_found("Journal", journal_id)
 
     dismissal = await dismissal_service.dismiss(
         journal_id, user_id, Provenance.MCP, db_connection
     )
 
-    return MCPResponseBuilder.success_response(
-        OutdoorActivityDismissalMCPResponse(
-            journal_id=journal_id,
-            dismissed=True,
-            provenance=dismissal.provenance.value,
-            summary=f"Dismissed journal {journal_id} from the incomplete review.",
-        )
+    return OutdoorActivityDismissalMCPResponse(
+        journal_id=journal_id,
+        dismissed=True,
+        provenance=dismissal.provenance.value,
+        summary=f"Dismissed journal {journal_id} from the incomplete review.",
     )
 
 
@@ -163,7 +159,7 @@ async def undismiss_incomplete_outdoor_activity(
     dismissal_service: OutdoorActivityDismissalService = mcp_depends(
         get_outdoor_activity_dismissal_service
     ),
-) -> str:
+) -> OutdoorActivityDismissalMCPResponse:
     """
     Un-dismiss a journal, restoring it to the incomplete review when flagged.
 
@@ -171,23 +167,21 @@ async def undismiss_incomplete_outdoor_activity(
     ``was_dismissed`` false.
     """
     if not await _journal_owned_by_user(db_connection, user_id, journal_id):
-        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+        raise MCPErrors.not_found("Journal", journal_id)
 
     was_dismissed = await dismissal_service.undismiss(
         journal_id, user_id, db_connection
     )
 
-    return MCPResponseBuilder.success_response(
-        OutdoorActivityDismissalMCPResponse(
-            journal_id=journal_id,
-            dismissed=False,
-            was_dismissed=was_dismissed,
-            summary=(
-                f"Un-dismissed journal {journal_id}."
-                if was_dismissed
-                else f"Journal {journal_id} was not dismissed; nothing to undo."
-            ),
-        )
+    return OutdoorActivityDismissalMCPResponse(
+        journal_id=journal_id,
+        dismissed=False,
+        was_dismissed=was_dismissed,
+        summary=(
+            f"Un-dismissed journal {journal_id}."
+            if was_dismissed
+            else f"Journal {journal_id} was not dismissed; nothing to undo."
+        ),
     )
 
 
@@ -198,7 +192,7 @@ async def get_outdoor_dashboard(
     dashboard_service: OutdoorDashboardService = mcp_depends(
         get_outdoor_dashboard_service
     ),
-) -> str:
+) -> OutdoorDashboardMCPResponse:
     """
     The outdoor logbook dashboard: all four widget sections in one call.
 
@@ -263,24 +257,22 @@ async def get_outdoor_dashboard(
         for template_type, templates in templates_done.by_type.items()
     }
 
-    return MCPResponseBuilder.success_response(
-        OutdoorDashboardMCPResponse(
+    return OutdoorDashboardMCPResponse(
+        upcoming_activities=upcoming_entries,
+        checked_out_gear=gear_entries,
+        activity_totals_last_30_days=totals.last_30_days,
+        activity_totals_last_365_days=totals.last_365_days,
+        total_activities_last_30_days=totals.total_last_30_days,
+        total_activities_last_365_days=totals.total_last_365_days,
+        templates_done=template_entries,
+        templates_done_last_30_days=templates_done.recent_unique_count,
+        summary=build_dashboard_summary(
             upcoming_activities=upcoming_entries,
             checked_out_gear=gear_entries,
-            activity_totals_last_30_days=totals.last_30_days,
-            activity_totals_last_365_days=totals.last_365_days,
-            total_activities_last_30_days=totals.total_last_30_days,
-            total_activities_last_365_days=totals.total_last_365_days,
+            total_last_30_days=totals.total_last_30_days,
             templates_done=template_entries,
             templates_done_last_30_days=templates_done.recent_unique_count,
-            summary=build_dashboard_summary(
-                upcoming_activities=upcoming_entries,
-                checked_out_gear=gear_entries,
-                total_last_30_days=totals.total_last_30_days,
-                templates_done=template_entries,
-                templates_done_last_30_days=templates_done.recent_unique_count,
-            ),
-        )
+        ),
     )
 
 

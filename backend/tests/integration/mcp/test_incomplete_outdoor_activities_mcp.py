@@ -27,6 +27,7 @@ from tests.integration.journal.outdoor_activity_seeding import (
 )
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -215,34 +216,34 @@ async def test_dismiss_unknown_and_foreign_journal_returns_not_found(
     )
 
     async with authenticated_lifespan_client() as client:
-        unknown = await _call_tool(
+        unknown = await call_mcp_tool_error(
             client,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": 999999},
         )
         assert unknown["error"] == "Journal not found"
 
-        foreign = await _call_tool(
+        foreign = await call_mcp_tool_error(
             client,
             "dismiss_incomplete_outdoor_activity",
             {"journal_id": foreign_journal_id},
-            req_id=2,
+            request_id=2,
         )
         assert foreign["error"] == "Journal not found"
 
-        unknown_undismiss = await _call_tool(
+        unknown_undismiss = await call_mcp_tool_error(
             client,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": 999999},
-            req_id=3,
+            request_id=3,
         )
         assert unknown_undismiss["error"] == "Journal not found"
 
-        foreign_undismiss = await _call_tool(
+        foreign_undismiss = await call_mcp_tool_error(
             client,
             "undismiss_incomplete_outdoor_activity",
             {"journal_id": foreign_journal_id},
-            req_id=4,
+            request_id=4,
         )
         assert foreign_undismiss["error"] == "Journal not found"
 

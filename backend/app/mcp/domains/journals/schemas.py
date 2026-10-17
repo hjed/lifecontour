@@ -1402,3 +1402,11 @@ class JournalTagMergedMCPResponse(BaseModel):
 
     status: str
     summary: str
+
+
+class RouteDeletedMCPResponse(BaseModel):
+    """A route deleted from a journal. The journal itself is not changed."""
+
+    deleted: Literal[True]
+    route_id: str
+    journal_id: int

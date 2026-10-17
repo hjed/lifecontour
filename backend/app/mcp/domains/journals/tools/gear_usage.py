@@ -33,7 +33,7 @@ from app.mcp.shared.dependencies import (
     get_journal_write_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 # A date argument left out: distinct from null, which clears the date.
 _UNCHANGED: Literal["unchanged"] = "unchanged"
@@ -91,7 +91,7 @@ async def add_gear_usage_item(
     ] = _UNCHANGED,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
-) -> str:
+) -> GearUsageItemsMCPResponse:
     """Record that a gear item was used on a journal, keeping its other gear.
 
     Adds the item (giving the journal the GEAR_USAGE type if it has none), or,
@@ -104,9 +104,7 @@ async def add_gear_usage_item(
     await _require_owned_journal(repos, journal_id, user_id)
     gear_item = await repos.gear_item_repo.find_by_id(str(gear_item_id))
     if gear_item is None or gear_item.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response(
-            "Gear item", str(gear_item_id)
-        )
+        raise MCPErrors.not_found("Gear item", str(gear_item_id))
 
     attrs: dict[str, Any] = {"gear_item_id": str(gear_item_id)}
     for field, value in (
@@ -123,9 +121,7 @@ async def add_gear_usage_item(
         source=Provenance.MCP,
     )
 
-    return MCPResponseBuilder.success_response(
-        await _gear_usage_response(repos, journal_id)
-    )
+    return await _gear_usage_response(repos, journal_id)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -135,7 +131,7 @@ async def remove_gear_usage_item(
     gear_item_id: Annotated[UUID, Field(description="Gear item UUID to remove")],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     write_service: JournalWriteService = mcp_depends(get_journal_write_service),
-) -> str:
+) -> GearUsageItemsMCPResponse:
     """Remove one gear item from a journal, keeping its other gear.
 
     The journal keeps the GEAR_USAGE type even when this was its last item.
@@ -153,9 +149,7 @@ async def remove_gear_usage_item(
         source=Provenance.MCP,
     )
 
-    return MCPResponseBuilder.success_response(
-        await _gear_usage_response(repos, journal_id)
-    )
+    return await _gear_usage_response(repos, journal_id)
 
 
 def register_gear_usage_tools(mcp: FastMCP[None]) -> None:

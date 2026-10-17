@@ -21,6 +21,8 @@ from app.mcp.domains.journals.converters import (
     ActivityTemplateMCPConverter,
 )
 from app.mcp.domains.journals.schemas import (
+    ActivityTemplateListMCPResponse,
+    ActivityTemplateMCPResponse,
     JournalTemplateMCPResponse,
     TemplatePitchInput,
 )
@@ -42,7 +44,7 @@ from app.mcp.shared.dependencies import (
     get_current_user_id,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 # The template fields ``create_template`` and ``update_template`` share, declared
 # once: the two signatures repeat them verbatim otherwise, and a field's
@@ -91,7 +93,7 @@ async def create_template(
     activity_template_service: ActivityTemplateService = mcp_depends(
         get_activity_template_service
     ),
-) -> str:
+) -> ActivityTemplateMCPResponse:
     """
     Create a new activity template.
     """
@@ -128,7 +130,7 @@ async def create_template(
     )
 
     response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -137,7 +139,7 @@ async def get_template(
     template_id: Annotated[str, Field(description="Template UUID")],
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> ActivityTemplateMCPResponse:
     """
     Get a specific activity template by ID.
     """
@@ -149,14 +151,12 @@ async def get_template(
         uuid.UUID(template_id)
         template = await repos.activity_template_repo.find_by_id(template_id)
         if not template or template.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response("Template", template_id)
+            raise MCPErrors.not_found("Template", template_id)
 
         response = ActivityTemplateMCPConverter.to_mcp_response(template)
-        return MCPResponseBuilder.success_response(response)
+        return response
     except ValueError:
-        return MCPResponseBuilder.validation_error_response(
-            "template_id", "Invalid UUID"
-        )
+        raise MCPErrors.validation("template_id", "Invalid UUID") from None
 
 
 @tool(annotations=READ_ONLY)
@@ -165,7 +165,7 @@ async def get_journal_template(
     journal_id: Annotated[int, Field(description="Journal id")],
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalTemplateMCPResponse:
     """
     Retrieve the activity template an abseiling-derived journal was created from.
 
@@ -180,7 +180,7 @@ async def get_journal_template(
 
     journal = await repos.journal_repo.find_by_id(journal_id)
     if not journal or journal.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+        raise MCPErrors.not_found("Journal", journal_id)
 
     abseiling_data = await repos.abseiling_data_repo.find_by_journal_id(journal_id)
     template = None
@@ -192,22 +192,18 @@ async def get_journal_template(
             template = candidate
 
     if template is None:
-        return MCPResponseBuilder.success_response(
-            JournalTemplateMCPResponse(
-                journal_id=journal_id,
-                has_template=False,
-                template=None,
-                summary=f"Journal {journal_id} has no template reference.",
-            )
+        return JournalTemplateMCPResponse(
+            journal_id=journal_id,
+            has_template=False,
+            template=None,
+            summary=f"Journal {journal_id} has no template reference.",
         )
 
-    return MCPResponseBuilder.success_response(
-        JournalTemplateMCPResponse(
-            journal_id=journal_id,
-            has_template=True,
-            template=ActivityTemplateMCPConverter.to_mcp_response(template),
-            summary=f"Journal {journal_id} based on template: {template.name}.",
-        )
+    return JournalTemplateMCPResponse(
+        journal_id=journal_id,
+        has_template=True,
+        template=ActivityTemplateMCPConverter.to_mcp_response(template),
+        summary=f"Journal {journal_id} based on template: {template.name}.",
     )
 
 
@@ -223,7 +219,7 @@ async def search_templates(
     ] = None,
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> ActivityTemplateListMCPResponse:
     """
     Search activity templates for the user.
     """
@@ -235,7 +231,7 @@ async def search_templates(
         templates = [t for t in templates if t.template_type == template_type]
 
     response = ActivityTemplateMCPConverter.to_mcp_list_response(templates)
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -261,7 +257,7 @@ async def update_template(
     activity_template_service: ActivityTemplateService = mcp_depends(
         get_activity_template_service
     ),
-) -> str:
+) -> ActivityTemplateMCPResponse:
     """
     Update an existing activity template.
     """
@@ -273,7 +269,7 @@ async def update_template(
         uuid.UUID(template_id)
         template = await repos.activity_template_repo.find_by_id(template_id)
         if not template or template.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response("Template", template_id)
+            raise MCPErrors.not_found("Template", template_id)
 
         if name is not None:
             template.name = name
@@ -309,18 +305,16 @@ async def update_template(
         try:
             template.__post_init__()
         except Exception as e:  # noqa: BLE001
-            return MCPResponseBuilder.validation_error_response("template", str(e))
+            raise MCPErrors.validation("template", str(e)) from e
 
         saved_template = await activity_template_service.update(
             template, transaction=db_connection
         )
 
         response = ActivityTemplateMCPConverter.to_mcp_response(saved_template)
-        return MCPResponseBuilder.success_response(response)
-    except ValueError:
-        return MCPResponseBuilder.validation_error_response(
-            "template_id", "Invalid UUID"
-        )
+        return response
+    except ValueError as e:
+        raise MCPErrors.validation("template_id", "Invalid UUID") from e
 
 
 def register_template_tools(mcp: FastMCP[None]) -> None:
