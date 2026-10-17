@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { JournalTypeManager } from '../JournalTypeManager';
 import { JournalType } from '@/types/journals';
 
@@ -66,12 +66,13 @@ describe('JournalTypeManager', () => {
       expect(mockOnTypeAdd).toHaveBeenCalledWith(JournalType.EVENT);
     });
 
-    it('shows remove button when hovering/clicking on existing type', async () => {
+    it('shows remove button when clicking an existing type', async () => {
       const user = userEvent.setup();
       renderComponent([JournalType.NOTE]);
 
-      // Radix HoverCard opens on hover
-      await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
+      // A click (or tap) opens the manage popover; hover alone is not
+      // reachable on touch devices.
+      await user.click(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
 
       const removeBtn = await screen.findByTestId(
         `remove-type-${JournalType.NOTE}`
@@ -84,6 +85,31 @@ describe('JournalTypeManager', () => {
       expect(mockOnTypeRemove).toHaveBeenCalledWith(JournalType.NOTE);
     });
 
+    // A touch tap fires no hover, so a hover-only overlay never opens on a
+    // phone; the remove control must be reachable by keyboard and by tap.
+    it.each<[string, (user: UserEvent, badge: HTMLElement) => Promise<void>]>([
+      [
+        'the keyboard',
+        async (user, badge) => {
+          badge.focus();
+          await user.keyboard('{Enter}');
+        },
+      ],
+      [
+        'a touch tap',
+        (user, badge) => user.pointer({ keys: '[TouchA]', target: badge }),
+      ],
+    ])('opens the manage controls from %s', async (_, open) => {
+      const user = userEvent.setup();
+      renderComponent([JournalType.NOTE]);
+
+      await open(user, screen.getByTestId(`manage-type-${JournalType.NOTE}`));
+
+      expect(
+        await screen.findByTestId(`remove-type-${JournalType.NOTE}`)
+      ).toBeInTheDocument();
+    });
+
     it('does not remove type if confirm is cancelled', async () => {
       const user = userEvent.setup();
       (globalThis as unknown as { confirm: jest.Mock }).confirm = jest.fn(
@@ -91,7 +117,7 @@ describe('JournalTypeManager', () => {
       );
       renderComponent([JournalType.NOTE]);
 
-      await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
+      await user.click(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
       const removeBtn = await screen.findByTestId(
         `remove-type-${JournalType.NOTE}`
       );
@@ -142,7 +168,7 @@ describe('JournalTypeManager', () => {
 
       renderComponent([JournalType.NOTE]);
 
-      await user.hover(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
+      await user.click(screen.getByTestId(`manage-type-${JournalType.NOTE}`));
       const removeBtn = await screen.findByTestId(
         `remove-type-${JournalType.NOTE}`
       );

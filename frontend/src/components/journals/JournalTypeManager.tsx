@@ -14,10 +14,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@/components/ui/hover-card';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { JournalType } from '@/types/journals';
 import { TYPE_ICONS, TYPE_LABELS } from './JournalTypeBadges';
 import { cn } from '@/lib/utils';
@@ -88,8 +88,8 @@ export function JournalTypeManager({
         const label = TYPE_LABELS[type];
 
         return (
-          <HoverCard key={type}>
-            <HoverCardTrigger asChild>
+          <Popover key={type}>
+            <PopoverTrigger asChild>
               <Button
                 variant='outline'
                 size='sm'
@@ -101,8 +101,8 @@ export function JournalTypeManager({
                 {Icon && <Icon className='h-3.5 w-3.5' />}
                 {label}
               </Button>
-            </HoverCardTrigger>
-            <HoverCardContent className='w-auto p-2'>
+            </PopoverTrigger>
+            <PopoverContent className='w-auto p-2'>
               <div className='flex flex-col gap-2'>
                 <span className='text-sm font-medium'>Manage {label}</span>
                 <span className='text-muted-foreground text-xs'>
@@ -119,8 +119,8 @@ export function JournalTypeManager({
                   Remove Type
                 </Button>
               </div>
-            </HoverCardContent>
-          </HoverCard>
+            </PopoverContent>
+          </Popover>
         );
       })}
 

@@ -296,14 +296,16 @@ test.describe('Journal Detail Page', () => {
       // Register dialog handler BEFORE the action that triggers it
       page.on('dialog', dialog => dialog.accept());
 
-      // Hover (or tap on mobile) over PLAN to reveal remove button
+      // Open PLAN's manage popover the way each device's user would. A real
+      // touch tap matters on mobile: it fires no hover and no compatibility
+      // mouse events, so it fails if the controls only open on hover.
       if (isMobile) {
         await page.getByTestId(`manage-type-${JournalType.PLAN}`).tap();
       } else {
-        await page.getByTestId(`manage-type-${JournalType.PLAN}`).hover();
+        await page.getByTestId(`manage-type-${JournalType.PLAN}`).click();
       }
 
-      // Wait for the HoverCard to fully appear before clicking
+      // Wait for the popover to fully appear before clicking
       await expect(
         page.getByTestId(`remove-type-${JournalType.PLAN}`)
       ).toBeVisible();
