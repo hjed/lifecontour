@@ -32,6 +32,9 @@ from core_shared.models.tasks import (
 
 from app.api.error_handlers import create_domain_error_response
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from tests.unit.mcp.tool_errors import raised_tool_error
+
+pytestmark = pytest.mark.unit
 
 VALIDATION_CODE = "TASK_VALIDATION_ERROR"
 
@@ -43,7 +46,7 @@ async def call_tool_raising(error: Exception) -> dict[str, Any]:
     async def failing_tool() -> str:
         raise error
 
-    payload: dict[str, Any] = json.loads(await failing_tool())
+    payload: dict[str, Any] = await raised_tool_error(failing_tool())
     return payload
 
 

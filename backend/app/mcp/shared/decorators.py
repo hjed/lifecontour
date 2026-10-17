@@ -8,7 +8,7 @@ reducing duplication and ensuring consistent error responses.
 import json
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 import pydantic
 from core_shared.exceptions import PreconditionFailedError
@@ -33,17 +33,20 @@ from app.core.integrations.immich.conflict_resolution_service import (
     ImmichConflictNotFoundError,
 )
 from app.infrastructure.database_errors import describe_data_error
-from app.mcp.shared.response_builders import MCPLogger, MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors, MCPLogger, MCPToolError
 
 # String arguments longer than this are logged by size only: a GPX track can be
 # megabytes, and copying it into every log line helps nobody.
 _MAX_LOGGED_STRING_LENGTH = 1000
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 
 def mcp_unified_error_handler(
     operation_name: str,
     operation_type: str = "general",  # "contact", "search", "management", "general"
-) -> Callable[[Callable[..., Awaitable[str]]], Callable[..., Awaitable[str]]]:
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """
     Unified decorator for consistent MCP tool error handling across all operation types.
 
@@ -58,9 +61,9 @@ def mcp_unified_error_handler(
         Decorated function with unified error handling
     """
 
-    def decorator(func: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> str:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             try:
                 # Log operation start with appropriate context
                 from pydantic import BaseModel
@@ -94,6 +97,12 @@ def mcp_unified_error_handler(
 
                 return result
 
+            except MCPToolError:
+                # The tool's own refusal, already in the shape a client reads.
+                # First, so the catch-all below cannot flatten it into
+                # "Internal error".
+                raise
+
             except PreconditionFailedError as e:
                 # First, because it is raised from inside both the journal and
                 # the contact domains and would otherwise be swallowed by
@@ -104,7 +113,7 @@ def mcp_unified_error_handler(
                 # matches the REST surface's; ``current_version`` matches the
                 # tools' ``expected_version`` rather than REST's ``ETag`` naming.
                 MCPLogger.log_validation_error(operation_name, e.message)
-                return MCPResponseBuilder.error_response(
+                raise MCPErrors.error(
                     error_type="Conflict",
                     message=e.message,
                     context={
@@ -113,15 +122,15 @@ def mcp_unified_error_handler(
                         "resource_id": str(e.resource_id),
                         "current_version": e.current_etag,
                     },
-                )
+                ) from e
 
             except ContactNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Contact", str(e))
-                return MCPResponseBuilder.not_found_error_response("Contact", str(e))
+                raise MCPErrors.not_found("Contact", str(e)) from e
 
             except ContactValidationError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
-                return MCPResponseBuilder.validation_error_response(e.field, e.message)
+                raise MCPErrors.validation(e.field, e.message) from e
 
             except TagNotFoundError as e:
                 # Without this, a missing tag is indistinguishable from a server
@@ -129,11 +138,11 @@ def mcp_unified_error_handler(
                 # domain handling below. The builder formats the second argument
                 # as the id, so pass the id itself rather than the message.
                 MCPLogger.log_not_found_error(operation_name, "Tag", e.tag_id)
-                return MCPResponseBuilder.not_found_error_response("Tag", e.tag_id)
+                raise MCPErrors.not_found("Tag", e.tag_id) from e
 
             except DuplicateTagNameError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
-                return MCPResponseBuilder.validation_error_response("name", str(e))
+                raise MCPErrors.validation("name", str(e)) from e
 
             except ImmichConflictNotFoundError as e:
                 # A DomainError rather than a ValueError, so without this it
@@ -141,19 +150,15 @@ def mcp_unified_error_handler(
                 MCPLogger.log_not_found_error(
                     operation_name, "Conflict", str(e.conflict_id)
                 )
-                return MCPResponseBuilder.not_found_error_response(
-                    "Conflict", e.conflict_id
-                )
+                raise MCPErrors.not_found("Conflict", e.conflict_id) from e
 
             except ImmichConflictContactRequiredError as e:
                 MCPLogger.log_validation_error(operation_name, e.message)
-                return MCPResponseBuilder.validation_error_response(
-                    "contact_id", e.message
-                )
+                raise MCPErrors.validation("contact_id", e.message) from e
 
             except JournalNotFoundError as e:
                 MCPLogger.log_not_found_error(operation_name, "Journal", str(e))
-                return MCPResponseBuilder.not_found_error_response("Journal", str(e))
+                raise MCPErrors.not_found("Journal", str(e)) from e
 
             except JournalHasAnchoredTasksError as e:
                 # Above the catch-all below, because this is the one journal
@@ -167,32 +172,32 @@ def mcp_unified_error_handler(
                 # same builder, plus the code REST sends so a client can branch
                 # on the refusal without matching on prose.
                 MCPLogger.log_validation_error(operation_name, e.message)
-                return MCPResponseBuilder.error_response(
+                raise MCPErrors.error(
                     error_type="Journal has anchored tasks",
                     message=e.message,
                     context={"code": "JOURNAL_HAS_ANCHORED_TASKS", **e.error_meta()},
-                )
+                ) from e
 
             except RouteValidationError as e:
                 # Above the journal catch-all, which would bury the field in
                 # prose: a caller sending a bad GPX track needs to be told the
                 # refusal is about ``gpx_data``, as the REST surface does.
                 MCPLogger.log_validation_error(operation_name, e.message)
-                return MCPResponseBuilder.validation_error_response(e.field, e.reason)
+                raise MCPErrors.validation(e.field, e.reason) from e
 
             except JournalDomainError as e:
                 # Handles all journal domain errors including validation errors raised
                 # by dataclasses.replace() __post_init__ and UUID parsing errors.
                 MCPLogger.log_validation_error(operation_name, e.message)
                 if e.status_code == 404:
-                    return MCPResponseBuilder.error_response(
+                    raise MCPErrors.error(
                         error_type="Not found",
                         message=e.message,
-                    )
-                return MCPResponseBuilder.error_response(
+                    ) from e
+                raise MCPErrors.error(
                     error_type="Journal error",
                     message=e.message,
-                )
+                ) from e
 
             except TaskDomainError as e:
                 # Every task rejection is actionable in its own way — pick
@@ -204,11 +209,11 @@ def mcp_unified_error_handler(
                 # surface's, where the same errors carry the same text.
                 MCPLogger.log_validation_error(operation_name, e.message)
                 if e.status_code == 404:
-                    return MCPResponseBuilder.error_response(
+                    raise MCPErrors.error(
                         error_type="Not found",
                         message=e.message,
-                    )
-                return MCPResponseBuilder.error_response(
+                    ) from e
+                raise MCPErrors.error(
                     error_type="Task error",
                     message=e.message,
                     # Whatever structured detail the error opted into, which for
@@ -220,7 +225,7 @@ def mcp_unified_error_handler(
                     # every error that opted into nothing answers byte-for-byte
                     # what it answered before.
                     context=e.error_meta(),
-                )
+                ) from e
 
             except json.JSONDecodeError as e:
                 MCPLogger.log_validation_error(
@@ -229,9 +234,9 @@ def mcp_unified_error_handler(
                 field_name = (
                     "contact_data" if operation_type == "management" else "JSON"
                 )
-                return MCPResponseBuilder.validation_error_response(
+                raise MCPErrors.validation(
                     field_name, f"Failed to parse JSON data: {str(e)}"
-                )
+                ) from e
 
             except pydantic.ValidationError as e:
                 MCPLogger.log_validation_error(
@@ -241,7 +246,7 @@ def mcp_unified_error_handler(
                 # fields wrong should not need three round trips to find out.
                 errors = e.errors()
                 if not errors:
-                    return MCPResponseBuilder.validation_error_response("Input", str(e))
+                    raise MCPErrors.validation("Input", str(e)) from e
 
                 def _path(error: Any) -> str:
                     return (
@@ -252,11 +257,11 @@ def mcp_unified_error_handler(
                 message = "; ".join(
                     f"{_path(error)}: {error['msg']}" for error in errors
                 )
-                return MCPResponseBuilder.validation_error_response(field_name, message)
+                raise MCPErrors.validation(field_name, message) from e
 
             except ValueError as e:
                 MCPLogger.log_validation_error(operation_name, str(e))
-                return MCPResponseBuilder.validation_error_response("Input", str(e))
+                raise MCPErrors.validation("Input", str(e)) from e
 
             except HTTPException as e:
                 # A service has no business raising an HTTP error, but one that
@@ -265,11 +270,11 @@ def mcp_unified_error_handler(
                 # to report it as "Internal error" and lose the detail that
                 # said what was actually wrong.
                 MCPLogger.log_validation_error(operation_name, str(e.detail))
-                return MCPResponseBuilder.error_response(
+                raise MCPErrors.error(
                     error_type="Validation error",
                     message=str(e.detail),
                     context={"status_code": e.status_code},
-                )
+                ) from e
 
             except DataError as e:
                 # The database refusing a value for its column — too long, out
@@ -279,10 +284,10 @@ def mcp_unified_error_handler(
                 # describe_data_error redacts the literal Postgres quotes into
                 # that message, so the caller's own data is not read back to it.
                 MCPLogger.log_validation_error(operation_name, str(e))
-                return MCPResponseBuilder.validation_error_response(
+                raise MCPErrors.validation(
                     "type_data" if operation_type == "journal" else "Input",
                     describe_data_error(e),
-                )
+                ) from e
 
             except Exception as e:  # noqa: BLE001
                 # Handle search-specific errors
@@ -294,11 +299,11 @@ def mcp_unified_error_handler(
                     MCPLogger.log_operation_error(
                         operation_name, str(e), **search_context
                     )
-                    return MCPResponseBuilder.error_response(
+                    raise MCPErrors.error(
                         error_type="Search error",
                         message=f"An error occurred while {operation_name}",
                         context=search_context,
-                    )
+                    ) from e
                 else:
                     # Handle general errors
                     MCPLogger.log_operation_error(operation_name, str(e))
@@ -307,9 +312,7 @@ def mcp_unified_error_handler(
                         if operation_type != "general"
                         else None
                     )
-                    return MCPResponseBuilder.internal_error_response(
-                        operation_name, context=context
-                    )
+                    raise MCPErrors.internal(operation_name, context=context) from e
 
         return wrapper
 

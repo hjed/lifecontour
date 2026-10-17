@@ -1,6 +1,5 @@
 """Route refusals and large arguments through the unified MCP error handler."""
 
-import json
 from typing import Any
 
 import pytest
@@ -8,6 +7,9 @@ from core_shared.models.journals import RouteValidationError
 
 from app.mcp.shared import decorators
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from tests.unit.mcp.tool_errors import raised_tool_error
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
@@ -16,7 +18,7 @@ async def test_route_validation_error_names_the_field() -> None:
     async def tool() -> str:
         raise RouteValidationError("gpx_data", "GPX data must be valid XML")
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Validation error"
     assert payload["field"] == "gpx_data"

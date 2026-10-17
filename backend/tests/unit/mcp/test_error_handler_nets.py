@@ -7,8 +7,6 @@ wrong: an ``HTTPException`` raised out of a service, and the database refusing
 a value for its column. Both are bad input, and both now name what was wrong.
 """
 
-import json
-
 import pydantic
 import pytest
 from fastapi import HTTPException
@@ -16,6 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import DataError
 
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from tests.unit.mcp.tool_errors import raised_tool_error
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
@@ -26,7 +27,7 @@ async def test_http_exception_is_reported_as_a_validation_error() -> None:
     async def tool() -> str:
         raise HTTPException(status_code=400, detail="mood_value must be an integer")
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Validation error"
     assert payload["message"] == "mood_value must be an integer"
@@ -45,7 +46,7 @@ async def test_database_rejection_names_the_constraint() -> None:
             Exception("value too long for type character varying(100)"),
         )
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Validation error"
     assert "character varying(100)" in payload["message"]
@@ -63,7 +64,7 @@ async def test_database_rejection_does_not_echo_the_statement() -> None:
             Exception("value too long for type character varying(100)"),
         )
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert "INSERT INTO" not in payload["message"]
     assert "secret-value" not in payload["message"]
@@ -88,7 +89,7 @@ async def test_database_rejection_redacts_a_quoted_literal() -> None:
             Exception('invalid input syntax for type uuid: "patient-4821-078051120"'),
         )
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert "patient-4821-078051120" not in payload["message"]
     # The shape of the failure is what makes it actionable, so it survives.
@@ -112,7 +113,7 @@ async def test_a_value_containing_a_quote_cannot_slip_past_redaction() -> None:
             Exception('invalid input syntax for type uuid: "prefix"secret-078051120"'),
         )
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert "secret" not in payload["message"]
     assert "078051120" not in payload["message"]
@@ -131,7 +132,7 @@ async def test_text_after_the_quoted_value_is_kept() -> None:
             Exception('value "99999999999" is out of range for type integer'),
         )
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert "99999999999" not in payload["message"]
     assert "is out of range for type integer" in payload["message"]
@@ -151,7 +152,7 @@ async def test_every_schema_rejection_is_reported() -> None:
         Payload.model_validate({"first": 0, "second": 0, "third": 0})
         return "{}"
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Validation error"
     for field in ("first", "second", "third"):
@@ -166,7 +167,7 @@ async def test_an_unexpected_error_is_still_reported_as_internal() -> None:
     async def tool() -> str:
         raise RuntimeError("the disk caught fire")
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Internal error"
     assert "disk caught fire" not in payload["message"]
@@ -180,6 +181,6 @@ async def test_a_pydantic_error_with_no_details_still_answers() -> None:
     async def tool() -> str:
         raise pydantic.ValidationError.from_exception_data("Payload", [])
 
-    payload = json.loads(await tool())
+    payload = await raised_tool_error(tool())
 
     assert payload["error"] == "Validation error"

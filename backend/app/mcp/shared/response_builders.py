@@ -1,33 +1,100 @@
 """
 MCP response building utilities.
 
-Provides common utilities for building consistent MCP tool responses,
-reducing duplication and ensuring consistent error handling.
+A tool returns its response model, which fastmcp publishes as the tool's
+``outputSchema`` and sends as ``structuredContent``. A tool *refuses* by
+raising one of the ``MCPErrors`` factories: the ``MCPToolError`` reaches the
+client as an ``isError`` result whose text is a JSON payload — ``error``,
+``message`` and whatever context (``code``, ``field``, ``current_version``)
+the refusal carries for an agent to act on.
 """
 
 import json
+import logging
 from typing import Any
 
 import structlog
+from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
 logger = structlog.get_logger()
 
 
+class MCPToolError(ToolError):
+    """A tool refusal, sent to the client as ``isError: true``.
+
+    fastmcp passes a ``ToolError`` through unmasked with ``str(error)`` as the
+    result's only text, so the message *is* the JSON payload — the same JSON
+    the tools used to return as a success.
+    """
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        # A refusal is expected traffic, already logged by the error handler;
+        # fastmcp would otherwise log every one at ERROR.
+        super().__init__(json.dumps(payload, indent=2), log_level=logging.WARNING)
+        self.payload = payload
+
+
+class MCPErrors:
+    """Factories for the refusals a tool raises: ``raise MCPErrors.not_found(...)``."""
+
+    @staticmethod
+    def error(
+        error_type: str,
+        message: str,
+        context: dict[str, Any] | None = None,
+    ) -> MCPToolError:
+        """
+        A refusal with a type, a human-readable message and optional context.
+
+        Args:
+            error_type: Type of error (e.g., "Contact not found")
+            message: Human-readable error message
+            context: Additional fields merged into the payload
+        """
+        payload: dict[str, Any] = {"error": error_type, "message": message}
+        if context:
+            payload.update(context)
+        return MCPToolError(payload)
+
+    @staticmethod
+    def validation(field: str, message: str) -> MCPToolError:
+        """A refusal of one field's value."""
+        return MCPErrors.error(
+            error_type="Validation error",
+            message=f"Validation failed for {field}: {message}",
+            context={"field": field},
+        )
+
+    @staticmethod
+    def not_found(entity_type: str, entity_id: Any) -> MCPToolError:
+        """A refusal because the entity does not exist (for this user)."""
+        return MCPErrors.error(
+            error_type=f"{entity_type} not found",
+            message=f"No {entity_type.lower()} exists with ID: {entity_id}",
+            context={f"{entity_type.lower()}_id": entity_id},
+        )
+
+    @staticmethod
+    def internal(operation: str, context: dict[str, Any] | None = None) -> MCPToolError:
+        """A server fault, reported without its detail."""
+        return MCPErrors.error(
+            error_type="Internal error",
+            message=f"An error occurred while {operation}",
+            context=context,
+        )
+
+
 class MCPResponseBuilder:
-    """Builder for consistent MCP tool responses."""
+    """Legacy string responses, kept while tools are converted to typed returns.
+
+    Each error builder renders the payload its ``MCPErrors`` counterpart
+    raises, for the tools that still return their refusal as a string.
+    """
 
     @staticmethod
     def success_response(data: BaseModel) -> str:
-        """
-        Create a successful MCP response.
-
-        Args:
-            data: Pydantic model containing the response data
-
-        Returns:
-            JSON string formatted for MCP consumption
-        """
+        """Render a response model as the indented JSON the tool returns."""
         return json.dumps(data.model_dump(mode="json"), indent=2)
 
     @staticmethod
@@ -36,82 +103,25 @@ class MCPResponseBuilder:
         message: str,
         context: dict[str, Any] | None = None,
     ) -> str:
-        """
-        Create an error MCP response.
-
-        Args:
-            error_type: Type of error (e.g., "Contact not found")
-            message: Human-readable error message
-            context: Additional context information
-
-        Returns:
-            JSON string formatted for MCP consumption
-        """
-        error_data = {
-            "error": error_type,
-            "message": message,
-        }
-
-        if context:
-            error_data.update(context)
-
-        return json.dumps(error_data, indent=2)
+        """The string form of ``MCPErrors.error``."""
+        return str(MCPErrors.error(error_type, message, context))
 
     @staticmethod
     def validation_error_response(field: str, message: str) -> str:
-        """
-        Create a validation error response.
-
-        Args:
-            field: Field that failed validation
-            message: Validation error message
-
-        Returns:
-            JSON string formatted for MCP consumption
-        """
-        return MCPResponseBuilder.error_response(
-            error_type="Validation error",
-            message=f"Validation failed for {field}: {message}",
-            context={"field": field},
-        )
+        """The string form of ``MCPErrors.validation``."""
+        return str(MCPErrors.validation(field, message))
 
     @staticmethod
     def not_found_error_response(entity_type: str, entity_id: Any) -> str:
-        """
-        Create a not found error response.
-
-        Args:
-            entity_type: Type of entity (e.g., "Contact")
-            entity_id: ID of the entity that was not found
-
-        Returns:
-            JSON string formatted for MCP consumption
-        """
-        return MCPResponseBuilder.error_response(
-            error_type=f"{entity_type} not found",
-            message=f"No {entity_type.lower()} exists with ID: {entity_id}",
-            context={f"{entity_type.lower()}_id": entity_id},
-        )
+        """The string form of ``MCPErrors.not_found``."""
+        return str(MCPErrors.not_found(entity_type, entity_id))
 
     @staticmethod
     def internal_error_response(
         operation: str, context: dict[str, Any] | None = None
     ) -> str:
-        """
-        Create an internal error response.
-
-        Args:
-            operation: Operation that failed
-            context: Additional context information
-
-        Returns:
-            JSON string formatted for MCP consumption
-        """
-        return MCPResponseBuilder.error_response(
-            error_type="Internal error",
-            message=f"An error occurred while {operation}",
-            context=context,
-        )
+        """The string form of ``MCPErrors.internal``."""
+        return str(MCPErrors.internal(operation, context))
 
 
 class MCPLogger:

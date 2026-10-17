@@ -11,9 +11,9 @@ non-future due journal means *pick a later one*, and an empty text means *say
 what the commitment is*.
 """
 
-import json
 from datetime import date
 
+import pytest
 from core_shared.exceptions import DomainError
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
@@ -25,6 +25,9 @@ from core_shared.models.tasks import (
 )
 
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from tests.unit.mcp.tool_errors import raised_tool_error
+
+pytestmark = pytest.mark.unit
 
 
 async def _render(error: Exception) -> dict[str, str]:
@@ -32,7 +35,7 @@ async def _render(error: Exception) -> dict[str, str]:
     async def failing() -> str:
         raise error
 
-    rendered: dict[str, str] = json.loads(await failing())
+    rendered: dict[str, str] = await raised_tool_error(failing())
     return rendered
 
 

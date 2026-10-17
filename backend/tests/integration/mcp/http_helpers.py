@@ -87,8 +87,38 @@ def _iter_json_dicts(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _tool_call_result(response_body: Any) -> dict[str, Any] | None:
+    """The JSON-RPC ``result`` of a ``tools/call`` response, if there is one."""
+    for candidate in _iter_json_dicts(response_body):
+        result = candidate.get("result")
+        if "jsonrpc" in candidate and isinstance(result, dict):
+            return result
+    return None
+
+
+def _typed_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    """A typed tool's ``structuredContent``: the response model itself.
+
+    Read directly rather than by the key heuristic below, which would skip a
+    model whose fields happen to share envelope names (``id``, ``type``). A
+    ``-> str`` tool's content is wrapped in ``{"result": ...}`` and flagged as
+    such in ``_meta``; its payload is the JSON in the text content instead.
+    """
+    structured = result.get("structuredContent")
+    wrapped = result.get("_meta", {}).get("fastmcp", {}).get("wrap_result", False)
+    if isinstance(structured, dict) and not wrapped:
+        return structured
+    return None
+
+
 def extract_mcp_json_payload(response_body: Any) -> dict[str, Any]:
     """Extract the application payload from an MCP HTTP response body."""
+    result = _tool_call_result(response_body)
+    if result is not None and not result.get("isError"):
+        typed = _typed_payload(result)
+        if typed is not None:
+            return typed
+
     for candidate in _iter_json_dicts(response_body):
         if set(candidate).issubset(_WRAPPER_KEYS):
             continue
@@ -185,3 +215,32 @@ async def call_mcp_tool(
     )
     assert response.status_code == 200, response.text
     return extract_mcp_json_payload(response.text)
+
+
+def extract_mcp_tool_error(response_body: Any) -> dict[str, Any]:
+    """Extract a refusal's payload, asserting the result is flagged ``isError``.
+
+    A refusal returned as a success would be read by a client as a result, so
+    the flag is part of what an error test asserts.
+    """
+    result = _tool_call_result(response_body)
+    assert result is not None, f"no tools/call result in: {response_body}"
+    assert result.get("isError") is True, (
+        f"expected an isError result, got a success: {response_body}"
+    )
+    return extract_mcp_json_payload(response_body)
+
+
+async def call_mcp_tool_error(
+    authenticated_client: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    request_id: int = 1,
+) -> dict[str, Any]:
+    """Call one MCP tool that is expected to refuse, and return the refusal."""
+    response = await post_mcp_tool(
+        authenticated_client, tool_name, arguments, request_id=request_id
+    )
+    assert response.status_code == 200, response.text
+    return extract_mcp_tool_error(response.text)
