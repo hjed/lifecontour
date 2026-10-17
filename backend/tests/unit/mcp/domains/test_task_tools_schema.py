@@ -1245,6 +1245,7 @@ async def _output_schema(name: str) -> dict[str, Any]:
     return schema
 
 
+@pytest.mark.unit
 class TestTheResultShapeIsPublished:
     """What each tool answers is in its outputSchema, not only its prose."""
 
