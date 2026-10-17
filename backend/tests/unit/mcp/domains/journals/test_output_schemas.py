@@ -12,6 +12,8 @@ from fastmcp import Client
 
 from app.mcp.server import create_mcp_server
 
+pytestmark = pytest.mark.unit
+
 _SERIES_FIELDS = {
     "id",
     "name",
