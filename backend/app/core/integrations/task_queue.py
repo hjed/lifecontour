@@ -174,7 +174,7 @@ class WorkerSettings:
     on_shutdown = shutdown
 
     # Redis connection settings (will be set dynamically)
-    redis_settings = None
+    redis_settings: RedisSettings | None = None
 
     # Worker configuration
     max_jobs = TaskQueueConfig.MAX_JOBS
