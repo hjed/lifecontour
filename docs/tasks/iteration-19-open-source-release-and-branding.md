@@ -354,7 +354,7 @@ new ones permanently.
 - **Verification:** the audit doc's GitHub-side section lists each surface scanned, its count, and
   zero unresolved real findings.
 
-**Phase 4 — Pre-flip delta rescan.** PR ~40 lines (audit record only).
+**Phase 4 — Pre-flip delta rescan.** PR ~40 lines (audit record only). ⏭️ WAIVED by the owner (2026-10-17): the earlier scans were complete and nothing had changed since. Recorded in [the audit](../security/open-source-release-audit.md#phase-4-waived).
 
 Phase 3 has a cutoff. Content keeps arriving after it: PRs, issues and edits, Actions logs (kept for 10 days) and artifacts, and the new `lifecontour-*` images from ITER19-005 Phases 1 and 1b. This phase closes the gap just before the packages and the repository go public.
 
@@ -930,7 +930,17 @@ Tracked in [#1661](https://github.com/hjed/personal-management-system/issues/166
   - after release, production health, login and an MCP call are verified.
 - **Docs:** `docs/architecture/deployment-guide.md` (the new environment variable, and the image layout).
 
-**Phase 2 — Configure the public repository and flip.** PR ~100 lines (docs only).
+**Phase 2 — Configure the public repository and flip.** PR ~150 lines (docs only). 🚧 IN PROGRESS.
+
+- **Progress:**
+  - The settings are recorded in `docs/ci-cd-setup.md` → "Public Repository Settings".
+  - ITER19-001 Phase 4 was waived by the owner, so the gate is the Phase 1 and Phase 3 audits.
+  - Corrections found while planning:
+    - fork-PR approval and private vulnerability reporting cannot be set on a private
+      repository, so they move to post-flip;
+    - every GHCR package is already linked to the repository (by the image's source label);
+    - only the `lifecontour-*` packages go public; the legacy ones stay private;
+    - Dependabot alerts were already on.
 
 - **Pre-flip:**
   - Install CLA Assistant, with `CLA.md` published as its gist. **Allowlist the bots**
