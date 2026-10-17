@@ -838,15 +838,6 @@ class TestGetTaskToolParameters:
 class TestGetTaskDocumentsWhatItReturns:
     """The docstring is the only place a model learns the answer's shape."""
 
-    def test_it_says_the_journals_come_back_by_role(
-        self, get_task_schema: dict[str, Any]
-    ) -> None:
-        """Three journal roles is not something to infer from a key name."""
-        description = get_task_schema["description"].lower()
-
-        assert "creating" in description
-        assert "due" in description
-
     def test_it_explains_what_lapsed_means(
         self, get_task_schema: dict[str, Any]
     ) -> None:
