@@ -8,6 +8,7 @@ from core_shared.models.journals.journal_relationship_types import (
 )
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.strava_athlete_mapping import StravaAthleteMapping
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
@@ -27,6 +28,9 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
+
+STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
 
 
 async def _create_processor(
@@ -52,15 +56,42 @@ async def _create_processor(
 
 
 async def _ensure_strava_calendar(connection: AsyncConnection) -> None:
-    from sqlalchemy import text
-
     await connection.execute(
         text("""
             INSERT INTO calendars (id, user_id, google_calendar_id, name, color)
             VALUES (:id, 'test-user-id', 'strava-synthetic', 'Strava Activities', '#FC4C02')
             ON CONFLICT (id) DO NOTHING
         """),
-        {"id": "00000000-0000-0000-0000-000000000001"},
+        {"id": STRAVA_CALENDAR_ID},
+    )
+
+
+def _strava_activity_event(
+    user_id: str, *, title: str, activity_id: str, athlete: dict[str, str]
+) -> OutboxEvent:
+    """A Strava activity arriving as a new journal, with one athlete on it."""
+    return OutboxEvent(
+        id=uuid.uuid4(),
+        event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
+        aggregate_id=activity_id,
+        event_data={
+            "integration_source": "strava",
+            "journal_data": {
+                "user_id": user_id,
+                "title": title,
+                "strava_athletes": [athlete],
+                "fitness_data": {"strava_activity_id": activity_id},
+                "version_hash": f"hash-{activity_id}",
+            },
+            "calendar_info_data": {"calendar_id": STRAVA_CALENDAR_ID},
+            "external_event_id": activity_id,
+            "calendar_id": STRAVA_CALENDAR_ID,
+            "sync_action": "created",
+            "sync_timestamp": datetime.now(UTC).isoformat(),
+            "contact_relationships": [],
+        },
+        occurred_at=datetime.now(UTC),
+        retry_count=0,
     )
 
 
@@ -83,35 +114,11 @@ async def test_participant_detection_by_exact_name(
     saved_contact = await contact_repo.save(contact)
     assert saved_contact.id is not None
 
-    # Create event
-    journal_data = {
-        "user_id": user_id,
-        "title": "Morning Run",
-        "strava_athletes": [{"id": "12345", "name": "John Doe"}],
-        "fitness_data": {
-            "strava_activity_id": "999",
-        },
-        "version_hash": "hash123",
-    }
-
-    event = OutboxEvent(
-        id=uuid.uuid4(),
-        event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
-        aggregate_id="999",
-        event_data={
-            "integration_source": "strava",
-            "journal_data": journal_data,
-            "calendar_info_data": {
-                "calendar_id": "00000000-0000-0000-0000-000000000001"
-            },
-            "external_event_id": "999",
-            "calendar_id": "00000000-0000-0000-0000-000000000001",
-            "sync_action": "created",
-            "sync_timestamp": datetime.now(UTC).isoformat(),
-            "contact_relationships": [],
-        },
-        occurred_at=datetime.now(UTC),
-        retry_count=0,
+    event = _strava_activity_event(
+        user_id,
+        title="Morning Run",
+        activity_id="999",
+        athlete={"id": "12345", "name": "John Doe"},
     )
 
     # Process event
@@ -163,35 +170,11 @@ async def test_participant_detection_uses_existing_mapping(
     )
     await mapping_repo.save(mapping)
 
-    # Create event
-    journal_data = {
-        "user_id": user_id,
-        "title": "Evening Ride",
-        "strava_athletes": [{"id": "54321", "name": "Jane S."}],
-        "fitness_data": {
-            "strava_activity_id": "888",
-        },
-        "version_hash": "hash456",
-    }
-
-    event = OutboxEvent(
-        id=uuid.uuid4(),
-        event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
-        aggregate_id="888",
-        event_data={
-            "integration_source": "strava",
-            "journal_data": journal_data,
-            "calendar_info_data": {
-                "calendar_id": "00000000-0000-0000-0000-000000000001"
-            },
-            "external_event_id": "888",
-            "calendar_id": "00000000-0000-0000-0000-000000000001",
-            "sync_action": "created",
-            "sync_timestamp": datetime.now(UTC).isoformat(),
-            "contact_relationships": [],
-        },
-        occurred_at=datetime.now(UTC),
-        retry_count=0,
+    event = _strava_activity_event(
+        user_id,
+        title="Evening Ride",
+        activity_id="888",
+        athlete={"id": "54321", "name": "Jane S."},
     )
 
     # Process event
@@ -228,35 +211,11 @@ async def test_participant_detection_skips_ambiguous_names(
     assert c1.id is not None
     assert c2.id is not None
 
-    # Create event
-    journal_data = {
-        "user_id": user_id,
-        "title": "Group Run",
-        "strava_athletes": [{"id": "111", "name": "Bob Jones"}],
-        "fitness_data": {
-            "strava_activity_id": "777",
-        },
-        "version_hash": "hash789",
-    }
-
-    event = OutboxEvent(
-        id=uuid.uuid4(),
-        event_type=EVENT_TYPE_JOURNAL_EVENT_CREATED,
-        aggregate_id="777",
-        event_data={
-            "integration_source": "strava",
-            "journal_data": journal_data,
-            "calendar_info_data": {
-                "calendar_id": "00000000-0000-0000-0000-000000000001"
-            },
-            "external_event_id": "777",
-            "calendar_id": "00000000-0000-0000-0000-000000000001",
-            "sync_action": "created",
-            "sync_timestamp": datetime.now(UTC).isoformat(),
-            "contact_relationships": [],
-        },
-        occurred_at=datetime.now(UTC),
-        retry_count=0,
+    event = _strava_activity_event(
+        user_id,
+        title="Group Run",
+        activity_id="777",
+        athlete={"id": "111", "name": "Bob Jones"},
     )
 
     # Process event
@@ -274,3 +233,46 @@ async def test_participant_detection_skips_ambiguous_names(
     mapping_repo = SqlStravaAthleteMappingRepository(async_connection)
     mapping = await mapping_repo.get_by_strava_id(user_id, "111")
     assert mapping is None
+
+
+@pytest.mark.asyncio
+async def test_participant_detection_ignores_another_users_contact(
+    async_connection: AsyncConnection,
+    clean_database: None,
+) -> None:
+    """Only the journal owner's contacts are matched by the athlete's name.
+
+    Another user's contact with exactly that name is neither linked nor mapped;
+    the athlete is recorded as unmatched, for the owner to map by hand.
+    """
+    await _ensure_strava_calendar(async_connection)
+    processor = await _create_processor(async_connection)
+    user_id = "test-user-id"
+    await seed_contact(
+        async_connection, user_id=OTHER_USER_ID, first_name="Ada", last_name="Byron"
+    )
+    event = _strava_activity_event(
+        user_id,
+        title="Hill Repeats",
+        activity_id="666",
+        athlete={"id": "222", "name": "Ada Byron"},
+    )
+
+    result = await processor.process_event(event)
+    journal_id = result["journal_id"]
+
+    relationships = await processor._get_relationships_by_type(
+        journal_id, JournalContactRelationshipType.PARTICIPANT
+    )
+    assert relationships == []
+    mapping_repo = SqlStravaAthleteMappingRepository(async_connection)
+    assert await mapping_repo.get_by_strava_id(user_id, "222") is None
+    unmatched = await async_connection.execute(
+        text("""
+            SELECT strava_athlete_id, strava_athlete_name
+            FROM journal_unmatched_strava_athletes
+            WHERE journal_id = :journal_id
+        """),
+        {"journal_id": journal_id},
+    )
+    assert [tuple(row) for row in unmatched.all()] == [("222", "Ada Byron")]

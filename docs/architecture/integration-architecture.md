@@ -755,6 +755,16 @@ the backend no later than the workers.
 3. Link faces to contacts via person matching
 4. Store thumbnails and metadata locally
 
+**Person conflicts.** A person whose name matches more than one of the owner's contacts is held
+in `pending_entity_mappings` (per user) for the user to resolve on the
+Integrations page or with the `resolve_immich_conflict` MCP tool. Both surfaces go through
+`ImmichConflictResolutionService.resolve`, which loads the conflict for the acting user and, for
+**link**, checks the chosen contact with `contact_exists(contact_id, user_id=…)`: another user's
+contact is `ContactNotFoundError` (404, identical to a missing id), and neither the conflict nor
+any `sync_metadata` link is written. **Create** makes a contact owned by the acting user. The
+conflict update and the link are one unit of work. The link candidate is not restricted to the
+conflict's `candidate_contact_ids`; any contact the user owns may be chosen.
+
 ### 3. One-Way Import (Strava, Firefly III)
 
 **Challenge**: Transform external data to internal entities
@@ -768,6 +778,24 @@ the backend no later than the workers.
 5. Record sync metadata
 
 **Journal Integration Example**: Strava activities are imported as journal entries with FITNESS + OUTDOOR_ACTIVITY types. See [Journal System Specification](../journal-system-specification.md) for merge behavior and conflict resolution patterns.
+
+#### Strava Athletes as Participants
+
+Each athlete on an imported activity becomes a PARTICIPANT of the journal when it resolves to one
+of the **journal owner's** contacts (`JournalOutboxEventProcessor._resolve_strava_athlete_to_contact`):
+first through the owner's `strava_athlete_mappings` row, otherwise by a case-insensitive exact
+name match (first and last name, or the first name of a contact with no last name) among the
+owner's contacts only (`ContactRepository.search(…, user_id=…)`, top 10 results). A unique match
+is saved as a mapping; an athlete that resolves to nothing — including one whose name only another
+user's contact holds — is recorded in `journal_unmatched_strava_athletes`.
+
+The user maps an unmatched athlete by hand with `POST /api/integrations/strava/athlete-mappings`
+(`StravaAthleteMappingService.create_mapping`), which reads the contact with
+`find_by_id(contact_id, user_id=…)` before anything is written. Another user's contact is
+`ContactNotFoundError` (404, identical to a missing id): no mapping is saved, no journal gains a
+participant, and the athlete stays unmatched. On success the mapping, the retroactive participant
+links on every journal that held the athlete, and the removal of those unmatched rows commit
+together.
 
 #### Strava Webhook Push Subscription
 

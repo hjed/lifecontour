@@ -3,7 +3,8 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
+from tests.integration.not_found_responses import MISSING_CONTACT_ID, masked_errors
 
 
 @pytest.fixture
@@ -298,3 +299,63 @@ async def test_resolve_immich_conflict_for_a_person_another_user_links(
         ("other-user-456", 999),
         (TEST_USER_ID, contact_id),
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_immich_conflict_link_to_another_users_contact_is_404(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    pending_conflict: int,
+) -> None:
+    """Another user's contact is refused exactly as a missing one.
+
+    The conflict stays open and no Immich link is written for this user, so
+    they can still link the person to a contact of their own.
+    """
+    their_contact_id = await seed_contact(
+        async_connection, user_id=OTHER_USER_ID, first_name="John", last_name="Doe"
+    )
+    conflict_before = await _conflict_row(async_connection, pending_conflict)
+
+    foreign = await authenticated_client.post(
+        f"/api/integrations/immich/conflicts/{pending_conflict}/resolve",
+        json={"action": "link", "contact_id": their_contact_id},
+    )
+    missing = await authenticated_client.post(
+        f"/api/integrations/immich/conflicts/{pending_conflict}/resolve",
+        json={"action": "link", "contact_id": MISSING_CONTACT_ID},
+    )
+
+    assert foreign.status_code == missing.status_code == 404
+    assert masked_errors(foreign, their_contact_id) == masked_errors(
+        missing, MISSING_CONTACT_ID
+    )
+    assert await _conflict_row(async_connection, pending_conflict) == conflict_before
+    links = await async_connection.execute(
+        text("""
+            SELECT count(*) FROM sync_metadata
+            WHERE user_id = :user_id AND integration_source = 'immich'
+        """),
+        {"user_id": TEST_USER_ID},
+    )
+    assert links.scalar_one() == 0
+
+
+async def _conflict_row(
+    connection: AsyncConnection, conflict_id: int
+) -> tuple[str, int | None]:
+    """The conflict's status and the contact it was resolved to.
+
+    ``updated_at`` is left out: under the test's shared transaction ``now()``
+    is the same instant whether or not the row was written.
+    """
+    row = (
+        await connection.execute(
+            text("""
+                SELECT status, resolved_contact_id
+                FROM pending_entity_mappings WHERE id = :id
+            """),
+            {"id": conflict_id},
+        )
+    ).one()
+    return (row.status, row.resolved_contact_id)

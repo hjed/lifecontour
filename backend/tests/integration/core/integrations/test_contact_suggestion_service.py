@@ -30,6 +30,7 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.integration.contact_seeding import seed_contact
 from tests.integration.contacts.contact_service_harness import (
     RecordingEventPublisher,
     build_contact_service,
@@ -321,6 +322,30 @@ class TestAcceptIntoExistingContact:
                 provenance=Provenance.UI,
             )
 
+        assert await unmatched_journal_ids(async_connection, "jane@x.com") == set(
+            journal_ids
+        )
+
+    async def test_another_users_contact_raises_and_keeps_the_suggestion(
+        self, service: ContactSuggestionService, async_connection: AsyncConnection
+    ) -> None:
+        """Their contact is not found: it gains no email and no journal."""
+        their_contact_id = await seed_contact(
+            async_connection, user_id=OTHER_USER_ID, first_name="Jane"
+        )
+        journal_ids = await seed_participant(async_connection, "jane@x.com", 5)
+
+        with pytest.raises(ContactNotFoundError):
+            await service.accept(
+                USER_ID,
+                "jane@x.com",
+                ExistingContactTarget(contact_id=their_contact_id),
+                transaction=async_connection,
+                provenance=Provenance.UI,
+            )
+
+        assert await _emails_of(async_connection, their_contact_id) == []
+        assert await journal_relationships(async_connection, their_contact_id) == {}
         assert await unmatched_journal_ids(async_connection, "jane@x.com") == set(
             journal_ids
         )
