@@ -15,7 +15,6 @@ from typing import Any
 
 import structlog
 from fastmcp.exceptions import ToolError
-from pydantic import BaseModel
 
 logger = structlog.get_logger()
 
@@ -83,45 +82,6 @@ class MCPErrors:
             message=f"An error occurred while {operation}",
             context=context,
         )
-
-
-class MCPResponseBuilder:
-    """Legacy string responses, kept while tools are converted to typed returns.
-
-    Each error builder renders the payload its ``MCPErrors`` counterpart
-    raises, for the tools that still return their refusal as a string.
-    """
-
-    @staticmethod
-    def success_response(data: BaseModel) -> str:
-        """Render a response model as the indented JSON the tool returns."""
-        return json.dumps(data.model_dump(mode="json"), indent=2)
-
-    @staticmethod
-    def error_response(
-        error_type: str,
-        message: str,
-        context: dict[str, Any] | None = None,
-    ) -> str:
-        """The string form of ``MCPErrors.error``."""
-        return str(MCPErrors.error(error_type, message, context))
-
-    @staticmethod
-    def validation_error_response(field: str, message: str) -> str:
-        """The string form of ``MCPErrors.validation``."""
-        return str(MCPErrors.validation(field, message))
-
-    @staticmethod
-    def not_found_error_response(entity_type: str, entity_id: Any) -> str:
-        """The string form of ``MCPErrors.not_found``."""
-        return str(MCPErrors.not_found(entity_type, entity_id))
-
-    @staticmethod
-    def internal_error_response(
-        operation: str, context: dict[str, Any] | None = None
-    ) -> str:
-        """The string form of ``MCPErrors.internal``."""
-        return str(MCPErrors.internal(operation, context))
 
 
 class MCPLogger:
