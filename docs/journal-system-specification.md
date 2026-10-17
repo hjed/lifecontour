@@ -323,7 +323,7 @@ before a cancellation can be missed, and protection is checked when the
 cancellation arrives rather than again later.
 
 Recurrences cancelled before this rule existed were tidied once by migration
-0136. It queued a `journal_event.recurrence_tidy` event for each (calendar,
+0137. It queued a `journal_event.recurrence_tidy` event for each (calendar,
 recurrence) that still had a cancelled, not-yet-started linked journal, and the
 processor applies the same rule to the whole recurrence when it consumes the
 event. A recurrence is queued only when at least one of its links recorded a

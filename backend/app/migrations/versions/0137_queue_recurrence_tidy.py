@@ -1,7 +1,7 @@
 """queue a tidy of every recurrence left with cancelled upcoming journals
 
-Revision ID: 0136
-Revises: 0135
+Revision ID: 0137
+Revises: 0136
 Create Date: 2026-10-13 00:00:00.000000
 
 Before the keep-next rule, a recurrence Google truncated or deleted left every
@@ -30,8 +30,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0136"
-down_revision: str | Sequence[str] | None = "0135"
+revision: str = "0137"
+down_revision: str | Sequence[str] | None = "0136"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
