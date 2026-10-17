@@ -65,7 +65,11 @@ def fake_generic_secret(gitleaks_bin: str, scratch: Path) -> str:
         )
         if completed.returncode == 1:
             return value
-    pytest.fail("gitleaks flagged none of 20 random generic secrets")
+    pytest.fail(
+        "gitleaks flagged none of 20 random generic secrets; "
+        f"last exit code: {completed.returncode}\n"
+        f"{completed.stdout}{completed.stderr}"
+    )
 
 
 @pytest.fixture(scope="module")
