@@ -2306,7 +2306,7 @@ Returns a JSON API response listing all registered integrations:
 
 ### MCP Tool: `list_integrations`
 
-The same data is exposed via the MCP `list_integrations` tool in `app/mcp/domains/integrations/tools.py`. It returns both structured JSON data and an AI-friendly `summary` field (e.g. `"1/1 integrations connected"`).
+The same data is exposed via the MCP `list_integrations` tool in `app/mcp/domains/integrations/tools.py`. It returns `IntegrationListResponse` (`app/mcp/domains/integrations/schemas.py`), published as the tool's output schema, including an AI-friendly `summary` field (e.g. `"1/1 integrations connected"`).
 
 ### Adding a New Integration Provider
 

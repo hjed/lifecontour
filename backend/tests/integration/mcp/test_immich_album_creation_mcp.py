@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 USER_ID = "test-user-123"
@@ -138,7 +139,7 @@ async def test_create_immich_album_for_journal_mcp_excluding_all_creates_nothing
 
     with patch(_GET_CREDS, new_callable=AsyncMock, return_value=CREDS):
         async with authenticated_lifespan_client() as client:
-            payload = await _call_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "create_immich_album_for_journal",
                 {"journal_id": journal_id, "exclude_asset_ids": ["asset-1", "asset-2"]},

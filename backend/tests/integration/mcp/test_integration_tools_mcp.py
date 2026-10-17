@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 
@@ -132,7 +133,7 @@ async def test_resolve_unknown_immich_conflict_is_not_found(
 ) -> None:
     """An unknown conflict answers not-found rather than an internal error."""
     async with authenticated_lifespan_client() as client:
-        payload = await call_mcp_tool(
+        payload = await call_mcp_tool_error(
             client,
             "resolve_immich_conflict",
             {"conflict_id": 999_999, "action": "create"},
@@ -161,7 +162,7 @@ async def test_resolve_immich_conflict_link_without_contact_is_refused(
     ).scalar_one()
 
     async with authenticated_lifespan_client() as client:
-        payload = await call_mcp_tool(
+        payload = await call_mcp_tool_error(
             client,
             "resolve_immich_conflict",
             {"conflict_id": conflict_id, "action": "link"},

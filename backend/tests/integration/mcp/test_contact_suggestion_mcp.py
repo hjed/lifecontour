@@ -19,7 +19,7 @@ from tests.integration.core.integrations.contact_suggestion_seeding import (
     journal_relationships,
     seed_participant,
 )
-from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.mcp.http_helpers import call_mcp_tool, call_mcp_tool_error
 
 pytestmark = pytest.mark.asyncio
 
@@ -106,7 +106,9 @@ async def test_accept_needs_exactly_one_target(
     authenticated_lifespan_client: LifespanClient, arguments: dict[str, Any]
 ) -> None:
     async with authenticated_lifespan_client() as client:
-        payload = await call_mcp_tool(client, "accept_contact_suggestion", arguments)
+        payload = await call_mcp_tool_error(
+            client, "accept_contact_suggestion", arguments
+        )
 
     assert "error" in payload
 
@@ -115,7 +117,7 @@ async def test_accept_into_unknown_contact_is_not_found(
     authenticated_lifespan_client: LifespanClient,
 ) -> None:
     async with authenticated_lifespan_client() as client:
-        payload = await call_mcp_tool(
+        payload = await call_mcp_tool_error(
             client,
             "accept_contact_suggestion",
             {"email": "jane@x.com", "contact_id": 999_999},
@@ -158,7 +160,7 @@ async def test_ignore_rejects_a_malformed_email(
     authenticated_lifespan_client: LifespanClient,
 ) -> None:
     async with authenticated_lifespan_client() as client:
-        ignored = await call_mcp_tool(
+        ignored = await call_mcp_tool_error(
             client, "ignore_contact_suggestion", {"email": "not-an-email"}
         )
         listed = await call_mcp_tool(

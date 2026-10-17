@@ -6,8 +6,6 @@ Each tool returns AI-friendly, contextual information about registered
 integrations.
 """
 
-import json
-
 import structlog
 from core_shared.models.contacts.value_objects import Provenance
 from fastmcp import FastMCP
@@ -27,6 +25,20 @@ from app.core.integrations.strava.athlete_mapping_service import (
 from app.core.integrations.task_queue_service import TaskQueueService
 from app.mcp.domains.integrations.contact_suggestion_tools import (
     register_contact_suggestion_tools,
+)
+from app.mcp.domains.integrations.schemas import (
+    ImmichAlbumCreatedResponse,
+    ImmichConflictListResponse,
+    ImmichConflictMCP,
+    ImmichConflictResolvedResponse,
+    ImmichPhotoMCP,
+    ImmichPhotoSearchResponse,
+    IntegrationListResponse,
+    IntegrationStatusMCP,
+    StravaAthleteMappingListResponse,
+    StravaAthleteMappingMCP,
+    SyncSummaryMCP,
+    SyncTriggeredResponse,
 )
 from app.mcp.shared.annotations import (
     EXTERNAL_ADDITIVE_WRITE,
@@ -66,7 +78,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         registry_service: IntegrationRegistryService = mcp_depends(
             get_integration_registry_service
         ),
-    ) -> str:
+    ) -> IntegrationListResponse:
         """
         List all registered integrations with their current status.
 
@@ -78,9 +90,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         Use this tool to check which integrations are available and their
         health status before performing integration-specific operations.
-
-        Returns:
-            JSON string containing integration list with status and capabilities
         """
         logger.info("MCP: Listing integrations", user_id=user_id)
 
@@ -88,30 +97,30 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             user_id=user_id, connection=connection
         )
 
-        result = {
-            "integrations": [
-                {
-                    "id": info.id,
-                    "name": info.name,
-                    "status": info.status.value,
-                    "capabilities": [c.value for c in info.capabilities],
-                    "sync_summary": {
-                        "last_sync_time": (
+        result = IntegrationListResponse(
+            integrations=[
+                IntegrationStatusMCP(
+                    id=info.id,
+                    name=info.name,
+                    status=info.status,
+                    capabilities=list(info.capabilities),
+                    sync_summary=SyncSummaryMCP(
+                        last_sync_time=(
                             info.sync_summary.last_sync_time.isoformat()
                             if info.sync_summary.last_sync_time
                             else None
                         ),
-                        "sync_count": info.sync_summary.sync_count,
-                        "error_count": info.sync_summary.error_count,
-                    },
-                    "needs_reauth": info.needs_reauth,
-                    "needs_reconsent": info.needs_reconsent,
-                }
+                        sync_count=info.sync_summary.sync_count,
+                        error_count=info.sync_summary.error_count,
+                    ),
+                    needs_reauth=info.needs_reauth,
+                    needs_reconsent=info.needs_reconsent,
+                )
                 for info in integrations
             ],
-            "total_count": len(integrations),
-            "summary": _build_summary(integrations),
-        }
+            total_count=len(integrations),
+            summary=_build_summary(integrations),
+        )
 
         logger.info(
             "MCP: Integrations listed",
@@ -119,7 +128,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             integration_count=len(integrations),
         )
 
-        return json.dumps(result, indent=2)
+        return result
 
     def _build_summary(integrations: list) -> str:  # type: ignore[type-arg]
         """Build an AI-friendly summary of integration states."""
@@ -153,16 +162,13 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         sync_type: str = "smart",
-    ) -> str:
+    ) -> SyncTriggeredResponse:
         """
         Trigger a sync for a specific integration.
 
         Args:
             integration_id: The ID of the integration ('strava', 'immich', 'google_calendar', or 'google_contacts').
             sync_type: The type of sync to perform (e.g., 'smart', 'full'). Defaults to 'smart'.
-
-        Returns:
-            JSON string containing the job ID, integration_id, and status of the newly enqueued sync job.
         """
         logger.info(
             "MCP: Triggering sync",
@@ -223,13 +229,9 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         else:
             raise ValueError(f"Unsupported integration_id: {integration_id}")
 
-        result = {
-            "integration_id": integration_id,
-            "job_id": job_id,
-            "status": "queued",
-        }
-
-        return json.dumps(result, indent=2)
+        return SyncTriggeredResponse(
+            integration_id=integration_id, job_id=job_id, status="queued"
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("get_strava_athlete_mappings", "integration")
@@ -240,7 +242,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         mapping_service: StravaAthleteMappingService = mcp_depends(
             get_strava_athlete_mapping_service
         ),
-    ) -> str:
+    ) -> StravaAthleteMappingListResponse:
         """
         Get Strava athlete-to-contact mappings.
 
@@ -250,9 +252,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         Args:
             contact_id: Filter mappings by the internal contact ID.
             strava_athlete_id: Filter mappings by the Strava athlete ID.
-
-        Returns:
-            JSON string containing the athlete mappings.
         """
         logger.info(
             "MCP: Getting Strava athlete mappings",
@@ -274,26 +273,24 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                 m for m in filtered_mappings if m.strava_athlete_id == strava_athlete_id
             ]
 
-        result = {
-            "mappings": [
-                {
-                    "strava_athlete_id": m.strava_athlete_id,
-                    "strava_athlete_name": m.strava_athlete_name,
-                    "contact_id": m.contact_id,
-                }
+        return StravaAthleteMappingListResponse(
+            mappings=[
+                StravaAthleteMappingMCP(
+                    strava_athlete_id=m.strava_athlete_id,
+                    strava_athlete_name=m.strava_athlete_name,
+                    contact_id=m.contact_id,
+                )
                 for m in filtered_mappings
             ],
-            "total_count": len(filtered_mappings),
-        }
-
-        return json.dumps(result, indent=2)
+            total_count=len(filtered_mappings),
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("list_immich_conflicts", "integration")
     async def list_immich_conflicts(
         user_id: str = mcp_depends(get_current_user_id),
         connection: AsyncConnection = mcp_depends(get_async_connection),
-    ) -> str:
+    ) -> ImmichConflictListResponse:
         """
         List unresolved Immich synchronisation conflicts.
 
@@ -308,9 +305,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         - external_entity_name: the person's name in Immich
         - candidate_contact_ids: list of local contact IDs that may match
         - status: always 'unresolved' for pending conflicts
-
-        Returns:
-            JSON string containing the list of unresolved conflicts.
         """
         from core_shared.repositories.pending_entity_mapping_repository import (
             PendingEntityMappingRepository,
@@ -323,22 +317,22 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             user_id=user_id, integration_source="immich"
         )
 
-        result = {
-            "conflicts": [
-                {
-                    "id": c["id"],
-                    "external_entity_id": c["external_entity_id"],
-                    "external_entity_name": c["external_entity_name"],
-                    "candidate_contact_ids": c["candidate_contact_ids"],
-                    "status": c["status"],
-                    "created_at": (
+        result = ImmichConflictListResponse(
+            conflicts=[
+                ImmichConflictMCP(
+                    id=c["id"],
+                    external_entity_id=c["external_entity_id"],
+                    external_entity_name=c["external_entity_name"],
+                    candidate_contact_ids=c["candidate_contact_ids"],
+                    status=c["status"],
+                    created_at=(
                         c["created_at"].isoformat() if c["created_at"] else None
                     ),
-                }
+                )
                 for c in conflicts
             ],
-            "total_count": len(conflicts),
-        }
+            total_count=len(conflicts),
+        )
 
         logger.info(
             "MCP: Immich conflicts listed",
@@ -346,7 +340,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             conflict_count=len(conflicts),
         )
 
-        return json.dumps(result, indent=2)
+        return result
 
     @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("resolve_immich_conflict", "integration")
@@ -359,7 +353,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         service: ImmichConflictResolutionService = mcp_depends(
             get_immich_conflict_resolution_service
         ),
-    ) -> str:
+    ) -> ImmichConflictResolvedResponse:
         """
         Resolve an Immich synchronisation conflict.
 
@@ -372,9 +366,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
                     'create' (to create a new contact from the Immich name).
             contact_id: Required when action='link'. The ID of the local
                         contact to link the Immich person to.
-
-        Returns:
-            JSON string containing the resolved conflict details.
         """
         logger.info(
             "MCP: Resolving Immich conflict",
@@ -397,12 +388,12 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         )
         resolved_contact_id = resolved.contact_id
 
-        result = {
-            "conflict_id": conflict_id,
-            "action": action,
-            "contact_id": resolved_contact_id,
-            "status": "resolved",
-        }
+        result = ImmichConflictResolvedResponse(
+            conflict_id=conflict_id,
+            action=ConflictResolutionAction(action),
+            contact_id=resolved_contact_id,
+            status="resolved",
+        )
 
         logger.info(
             "MCP: Immich conflict resolved",
@@ -412,7 +403,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             contact_id=resolved_contact_id,
         )
 
-        return json.dumps(result, indent=2)
+        return result
 
     @mcp.tool(annotations=READ_ONLY_EXTERNAL)
     @mcp_unified_error_handler("search_immich_photos_for_journal", "integration")
@@ -422,7 +413,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         service: ImmichAlbumCreationService = mcp_depends(
             get_immich_album_creation_service
         ),
-    ) -> str:
+    ) -> ImmichPhotoSearchResponse:
         """
         Find Immich photos taken within a journal's date range.
 
@@ -433,10 +424,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             journal_id: The ID of the journal whose date range to search.
-
-        Returns:
-            JSON string with the matching photos (asset_id, original_file_name,
-            taken_at) and a total count.
         """
         logger.info(
             "MCP: Searching Immich photos for journal",
@@ -446,19 +433,18 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
 
         photos = await service.search_photos(journal_id, user_id)
 
-        result = {
-            "journal_id": journal_id,
-            "photos": [
-                {
-                    "asset_id": p.asset_id,
-                    "original_file_name": p.original_file_name,
-                    "taken_at": p.taken_at,
-                }
+        return ImmichPhotoSearchResponse(
+            journal_id=journal_id,
+            photos=[
+                ImmichPhotoMCP(
+                    asset_id=p.asset_id,
+                    original_file_name=p.original_file_name,
+                    taken_at=p.taken_at,
+                )
                 for p in photos
             ],
-            "total_count": len(photos),
-        }
-        return json.dumps(result, indent=2)
+            total_count=len(photos),
+        )
 
     @mcp.tool(annotations=EXTERNAL_ADDITIVE_WRITE)
     @mcp_unified_error_handler("create_immich_album_for_journal", "integration")
@@ -470,7 +456,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         service: ImmichAlbumCreationService = mcp_depends(
             get_immich_album_creation_service
         ),
-    ) -> str:
+    ) -> ImmichAlbumCreatedResponse:
         """
         Create an Immich album from a journal's date range.
 
@@ -484,10 +470,6 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             journal_id: The ID of the journal to create an album for.
             create_shared_link: Whether to create a public shared link.
             exclude_asset_ids: Immich asset IDs to omit from the album.
-
-        Returns:
-            JSON string with the created album_id, asset_count and optional
-            shared_link_url.
         """
         logger.info(
             "MCP: Creating Immich album for journal",
@@ -510,11 +492,10 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
             create_shared_link=create_shared_link,
         )
 
-        result = {
-            "journal_id": created.journal_id,
-            "album_id": created.album_id,
-            "asset_count": created.asset_count,
-            "shared_link_url": created.shared_link_url,
-            "status": "created",
-        }
-        return json.dumps(result, indent=2)
+        return ImmichAlbumCreatedResponse(
+            journal_id=created.journal_id,
+            album_id=created.album_id,
+            asset_count=created.asset_count,
+            shared_link_url=created.shared_link_url,
+            status="created",
+        )
