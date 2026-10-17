@@ -1,6 +1,5 @@
 """Closed vocabularies are published through FastMCP and list_journal_types."""
 
-import json
 from typing import Any
 
 import pytest
@@ -82,7 +81,7 @@ async def test_template_tools_publish_enums_in_their_schema(tool_name: str) -> N
 
 @pytest.mark.asyncio
 async def test_list_journal_types_states_units_and_enums() -> None:
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     fitness = by_name["FITNESS"]["type_data_fields"]
@@ -117,7 +116,7 @@ async def test_units_block_still_covers_every_measured_field() -> None:
     is only reachable through ABSEILING_TRIP.pitches, so a caller looking a
     bare field name up lost its unit.
     """
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     units = payload["units"]
 
     for field in (
@@ -145,7 +144,7 @@ async def test_list_journal_types_publishes_every_field_limit() -> None:
     and came back as an opaque 500, so every bound the domain enforces is
     published: text caps, numeric ranges, fixed formats and closed vocabularies.
     """
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     role = by_name["OUTDOOR_ACTIVITY"]["type_data_fields"]["role"]
@@ -164,7 +163,7 @@ async def test_list_journal_types_publishes_every_field_limit() -> None:
 @pytest.mark.asyncio
 async def test_list_journal_types_publishes_the_undocumented_vocabularies() -> None:
     """event_state and activity_types are validated but were never published."""
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     assert payload["enums"]["event_states"] == [state.value for state in EventState]
@@ -182,7 +181,7 @@ async def test_list_journal_types_publishes_the_undocumented_vocabularies() -> N
 @pytest.mark.asyncio
 async def test_pitch_fields_are_structured_rather_than_prose() -> None:
     """The pitch shape used to be one prose blob a caller had to parse."""
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     pitches = by_name["ABSEILING_TRIP"]["type_data_fields"]["pitches"]
@@ -194,7 +193,7 @@ async def test_pitch_fields_are_structured_rather_than_prose() -> None:
 @pytest.mark.asyncio
 async def test_jogging_pace_is_published_as_the_integer_it_is() -> None:
     """It was published as a '5:30/km' string; the column is seconds per km."""
-    payload = json.loads(await list_journal_types())
+    payload = (await list_journal_types()).model_dump(mode="json")
     by_name = {t["name"]: t for t in payload["journal_types"]}
 
     pace = by_name["JOGGING"]["type_data_fields"]["pace"]

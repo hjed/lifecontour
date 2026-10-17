@@ -4,7 +4,6 @@
 ``get_journal*`` tools return the full owner-scoped journal payload.
 """
 
-import json
 from typing import Annotated
 
 from core_shared.models.history import Provenance
@@ -37,6 +36,7 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
+from app.mcp.domains.journals.schemas import JournalTypeCatalogueMCPResponse
 from app.mcp.domains.journals.tools._shared import (
     fetch_parent_journal,
 )
@@ -58,7 +58,7 @@ from app.mcp.shared.response_builders import MCPResponseBuilder
 
 @tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_journal_types", "journal")
-async def list_journal_types() -> str:
+async def list_journal_types() -> JournalTypeCatalogueMCPResponse:
     """
     List all valid journal types, their descriptions, dependencies, and type_data fields.
 
@@ -66,11 +66,8 @@ async def list_journal_types() -> str:
     valid type names, what type_data fields each type accepts, the unit each
     numeric field is stored in, and the allowed values of closed vocabularies
     (anchor types, canyon types, climbing types, pitch types, grades).
-
-    Returns:
-        JSON with all available journal types and their schemas
     """
-    return json.dumps(describe_journal_types(), indent=2)
+    return JournalTypeCatalogueMCPResponse.model_validate(describe_journal_types())
 
 
 async def _build_journal_response(

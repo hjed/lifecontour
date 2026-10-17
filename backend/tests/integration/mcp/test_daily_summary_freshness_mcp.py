@@ -89,9 +89,12 @@ async def seed_todays_summary(
 
 
 async def call_get_daily_summary(client: Any) -> dict[str, Any]:
-    return await call_mcp_tool(
+    """Today's summary, unwrapped from the tool's ``{"data": ...}`` envelope."""
+    payload = await call_mcp_tool(
         client, "get_daily_summary", {"summary_date": TODAY.isoformat()}
     )
+    summary: dict[str, Any] = payload["data"]
+    return summary
 
 
 @pytest.mark.integration

@@ -1,6 +1,5 @@
 """MCP tools for the journal review queue (suspected duplicates to merge)."""
 
-import json
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -11,6 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from app.core.journal.services.review_item_service import ReviewItemService
+from app.mcp.domains.journals.schemas import (
+    PageMetaMCP,
+    ReviewItemDismissedMCPResponse,
+    ReviewItemJournalMCP,
+    ReviewItemListMCPResponse,
+    ReviewItemMCP,
+)
 from app.mcp.shared.annotations import (
     IDEMPOTENT_WRITE,
     READ_ONLY,
@@ -22,6 +28,7 @@ from app.mcp.shared.dependencies import (
     get_review_item_service,
     mcp_depends,
 )
+from app.mcp.shared.response_builders import MCPErrors
 
 # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
 # These will be created when the user provides type_data
@@ -52,7 +59,7 @@ async def list_review_items(
         ),
     ] = "pending",
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> ReviewItemListMCPResponse:
     """
     List pending journal review items for the user.
 
@@ -65,7 +72,9 @@ async def list_review_items(
     user_id = await get_current_user_id()
 
     if status != "pending":
-        return json.dumps({"error": "Only 'pending' status is currently supported"})
+        raise MCPErrors.validation(
+            "status", "Only 'pending' status is currently supported"
+        )
 
     review_item_repo = SqlReviewItemRepository(db_connection)
 
@@ -92,36 +101,32 @@ async def list_review_items(
         candidate_journal = journal_map.get(item.candidate_journal_id)
 
         results.append(
-            {
-                "id": item.id,
-                "status": item.status,
-                "reason": item.reason.value
-                if hasattr(item.reason, "value")
-                else item.reason,
-                "confidence_score": item.confidence_score,
-                "details": item.details,
-                "source_journal": {
-                    "id": item.source_journal_id,
-                    "title": source_journal.title
+            ReviewItemMCP(
+                id=item.id,
+                status=item.status,
+                reason=item.reason,
+                confidence_score=item.confidence_score,
+                details=item.details,
+                source_journal=ReviewItemJournalMCP(
+                    id=item.source_journal_id,
+                    title=source_journal.title
                     if source_journal
                     else f"Journal {item.source_journal_id}",
-                },
-                "candidate_journal": {
-                    "id": item.candidate_journal_id,
-                    "title": candidate_journal.title
+                ),
+                candidate_journal=ReviewItemJournalMCP(
+                    id=item.candidate_journal_id,
+                    title=candidate_journal.title
                     if candidate_journal
                     else f"Journal {item.candidate_journal_id}",
-                },
-            }
+                ),
+            )
         )
 
-    response_data = {
-        "meta": {"total_count": total_count, "offset": offset, "limit": limit},
-        "data": results,
-        "summary": f"Found {total_count} pending review item(s).",
-    }
-
-    return json.dumps(response_data, indent=2)
+    return ReviewItemListMCPResponse(
+        meta=PageMetaMCP(total_count=total_count, offset=offset, limit=limit),
+        data=results,
+        summary=f"Found {total_count} pending review item(s).",
+    )
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -130,7 +135,7 @@ async def dismiss_review_item(
     item_id: int,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     review_item_service: ReviewItemService = mcp_depends(get_review_item_service),
-) -> str:
+) -> ReviewItemDismissedMCPResponse:
     """
     Dismiss a journal review item.
 
@@ -144,15 +149,14 @@ async def dismiss_review_item(
     )
 
     if not item:
-        return json.dumps({"error": f"Review item {item_id} not found."})
+        raise MCPErrors.error(
+            error_type="Not found", message=f"Review item {item_id} not found."
+        )
 
-    return json.dumps(
-        {
-            "success": True,
-            "message": f"Successfully dismissed review item {item_id}.",
-            "status": item.status,
-        },
-        indent=2,
+    return ReviewItemDismissedMCPResponse(
+        success=True,
+        message=f"Successfully dismissed review item {item_id}.",
+        status=item.status,
     )
 
 

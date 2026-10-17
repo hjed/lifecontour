@@ -1145,13 +1145,13 @@ class TestJournalToolsIntegration:
             ) as mock_get:
                 mock_get.return_value = mock_summary
 
-                payload = await call_mcp_tool(
+                response = await call_mcp_tool(
                     authenticated_client,
                     "get_daily_summary",
                     {"summary_date": summary_date},
                 )
 
-            assert "error" not in payload
+            payload = response["data"]
             assert payload["summary_date"] == summary_date
             assert payload["status"] == "generated"
             assert payload["journal_count"] == 2
