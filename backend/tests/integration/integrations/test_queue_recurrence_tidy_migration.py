@@ -1,7 +1,7 @@
-"""Migration test for 0136 (queue a tidy of every cancelled recurrence).
+"""Migration test for 0137 (queue a tidy of every cancelled recurrence).
 
 Before the keep-next rule, a recurrence Google truncated left every upcoming
-occurrence behind as a cancelled journal. 0136 queues one
+occurrence behind as a cancelled journal. 0137 queues one
 ``journal_event.recurrence_tidy`` outbox event per (calendar, recurrence) that
 still has a cancelled, not-yet-started linked journal, and the processor
 applies the rule to each when it consumes them.
@@ -20,8 +20,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
-_PREVIOUS_REVISION = "0135"
-_REVISION = "0136"
+_PREVIOUS_REVISION = "0136"
+_REVISION = "0137"
 
 USER_ID = "user-recurrence-tidy"
 CALENDAR_ID = UUID("00000000-0000-4000-8000-000000000136")
