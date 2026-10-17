@@ -13,7 +13,8 @@ commit only.
 |---|---|---|
 | Phase 1 | Git history (every ref) and the current tree | ✅ Complete: 0 real credentials, gate met |
 | Phase 3 | GitHub-side content (PR/issue text, Actions logs and artifacts, releases, GHCR layers) | ✅ Complete: 0 real credentials, gate met at the cutoff |
-| Phase 4 | Pre-flip delta rescan of everything after the Phase 3 cutoff; the final release gate | Not started |
+| Phase 4 | Pre-flip delta rescan of everything after the Phase 3 cutoff | ⏭️ Waived by the owner (2026-10-17); see [Phase 4: waived](#phase-4-waived) |
+| Post-flip | GitHub secret scanning of the full history once public | Pending the flip |
 
 ## Phase 1: Git history and current tree
 
@@ -356,7 +357,7 @@ Publishing an image therefore publishes its keys.
 
 - There are 0 real credentials on any GitHub-side surface, and TruffleHog verified 0.
 - The only open items are the pre-flip actions:
-  - the delta rescan, which is ITER19-001 Phase 4 and the final gate;
+  - the delta rescan, which is ITER19-001 Phase 4 and the final gate (later [waived](#phase-4-waived));
   - the frontend image hardening, ITER19-005 Phase 1b;
   - the Actions cache purge, an ITER19-005 Phase 2 pre-flip step.
 
@@ -387,3 +388,19 @@ For the delta rescan (ITER19-001 Phase 4), restrict each step to content newer t
 [the cutoff](#cutoff). That means
 items created or edited since then, runs and artifacts with higher IDs, and package versions with
 higher IDs, including the `lifecontour-*` packages. Then record the counts in a new section.
+
+## Phase 4: waived
+
+The owner waived the pre-flip delta rescan on 2026-10-17, when approving the ITER19-005 Phase 2
+plan: the Phase 1 and Phase 3 scans were complete, and nothing had changed since that the owner
+considered to need a rescan. The flip went ahead on the Phase 1 and Phase 3 gates. What still
+covers the gap:
+
+- the gitleaks pre-commit hook and the `secret-scan` CI job on every commit since Phase 1;
+- the Actions cache purge just before the flip (see below);
+- GitHub's full-history secret scan once the repository is public, triaged in the next section.
+
+## Post-flip: GitHub secret scanning
+
+_To be completed after the flip: the Actions cache purge, the alert counts from GitHub's
+full-history scan, and their triage by the classes above._

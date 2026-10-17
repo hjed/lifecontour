@@ -147,15 +147,7 @@ pre-commit hook and the `secret-scan` job in `ci.yml` (see
 credential audit, including how to re-run it, is recorded in
 [Open-Source Release Credential Audit](./security/open-source-release-audit.md).
 
-### 4. Dependency Updates (`.github/workflows/dependency-update.yml`)
-
-**Triggers:** Weekly schedule (Mondays) + manual dispatch
-
-**Jobs:**
-- `update-backend-dependencies`: UV-based Python updates
-- `update-frontend-dependencies`: pnpm-based Node.js updates
-
-### 5. Release Workflow (`.github/workflows/release.yml`)
+### 3. Release Workflow (`.github/workflows/release.yml`)
 
 **Triggers:** Git tags (`v*.*.*`) + manual dispatch
 
@@ -204,38 +196,6 @@ that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.
 - Linked issue, diff size (≤500 lines) and tests run
 - AI-assistance disclosure and CLA acknowledgement
 - Maintainer check that `secret-scan` passed on the head ([Stacked PRs](#stacked-prs))
-
-## Setup Instructions
-
-### 1. Repository Secrets
-
-Add these secrets to your GitHub repository:
-
-```
-CODECOV_TOKEN        # Codecov token (for private repos)
-```
-
-### 2. External Service Setup
-
-**Codecov:**
-1. Sign up at https://codecov.io
-2. Add your repository
-3. Configure token (if private repo)
-
-**SonarCloud:**
-1. Sign up at https://sonarcloud.io
-2. Import your repository
-3. Keep Automatic Analysis enabled; no token or properties file is needed
-
-### 3. Dependabot Configuration
-
-Update `.github/dependabot.yml`:
-- Replace `YOUR_USERNAME` with your GitHub username
-- Adjust reviewers and assignees as needed
-
-### 4. Badge Integration
-
-Add status badges to your README.md (see `.github/README-badges.md`)
 
 ## Local Development Integration
 
