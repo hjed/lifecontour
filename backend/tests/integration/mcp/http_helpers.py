@@ -217,6 +217,22 @@ async def call_mcp_tool(
     return extract_mcp_json_payload(response.text)
 
 
+def extract_typed_tool_result(response_body: Any) -> dict[str, Any]:
+    """A typed tool's success, checked as a client that reads either half sees it.
+
+    The ``structuredContent`` is the response model and the text content is the
+    fallback for clients that ignore it; the two must agree.
+    """
+    result = _tool_call_result(response_body)
+    assert result is not None, f"no tools/call result in: {response_body}"
+    assert not result.get("isError"), f"expected a success: {response_body}"
+    typed = _typed_payload(result)
+    assert typed is not None, f"not a typed result: {response_body}"
+    [text] = [block["text"] for block in result["content"]]
+    assert json.loads(text) == typed
+    return typed
+
+
 def extract_mcp_tool_error(response_body: Any) -> dict[str, Any]:
     """Extract a refusal's payload, asserting the result is flagged ``isError``.
 

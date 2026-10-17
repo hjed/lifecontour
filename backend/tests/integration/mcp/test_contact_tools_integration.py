@@ -33,6 +33,8 @@ from tests.integration import contact_seeding
 from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
+    extract_typed_tool_result,
     post_mcp_tool,
     sessionless_mcp_headers,
     sessionless_mcp_request,
@@ -823,7 +825,7 @@ class TestContactToolsIntegration:
         fall through to the catch-all.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "update_contact_tag",
                 {"tag_id": "999999", "name": "ghost"},
@@ -848,7 +850,7 @@ class TestContactToolsIntegration:
         rather than letting the int() cast surface as a generic failure.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "update_contact_tag",
                 {"tag_id": "not-a-number", "name": "ghost"},
@@ -991,7 +993,7 @@ class TestContactToolsIntegration:
     ):
         """An unknown tag id is reported as not-found, not a generic failure."""
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "delete_contact_tag",
                 {"tag_id": "999999"},
@@ -1245,11 +1247,14 @@ class TestContactToolsIntegration:
             assert merged["id"] == str(survivor.id)
 
             # The source contact is deleted — fetching it now errors.
-            missing = await call_mcp("get_contact", {"contact_id": source.id})
+            missing = await call_mcp_tool_error(
+                authenticated_client, "get_contact", {"contact_id": source.id}
+            )
             assert "error" in missing
 
             # Self-merge is rejected.
-            self_merge = await call_mcp(
+            self_merge = await call_mcp_tool_error(
+                authenticated_client,
                 "merge_contacts",
                 {
                     "survivor_contact_id": survivor.id,
@@ -1259,7 +1264,8 @@ class TestContactToolsIntegration:
             assert "error" in self_merge
 
             # A missing source is rejected.
-            not_found = await call_mcp(
+            not_found = await call_mcp_tool_error(
+                authenticated_client,
                 "merge_contacts",
                 {"survivor_contact_id": survivor.id, "source_contact_id": 999999},
             )
@@ -1322,7 +1328,9 @@ class TestContactToolsIntegration:
             assert merged["name"] == "Jane Survivor"
 
             # The source contact is deleted.
-            missing = await call_mcp("get_contact", {"contact_id": source.id})
+            missing = await call_mcp_tool_error(
+                authenticated_client, "get_contact", {"contact_id": source.id}
+            )
             assert "error" in missing
 
 
@@ -1739,6 +1747,30 @@ class TestContactConverterAISummaryIntegration:
             assert links[0]["source"] == "google_contacts"
             assert links[0]["external_id"] == "people/c123456789"
             assert links[0]["url"] == "https://contacts.google.com/person/c123456789"
+
+    @pytest.mark.asyncio
+    async def test_get_contact_is_sent_as_structured_content(
+        self,
+        authenticated_lifespan_client,
+        contact_service: ContactService,
+        clean_database: AsyncConnection,
+    ):
+        """The contact reaches a client as its response model, not a string."""
+        from core_shared.models.contacts.entities import Contact
+
+        contact = await contact_service.create_contact(
+            Contact(user_id=TEST_USER_ID, first_name="Jane", last_name="Doe"),
+            clean_database,
+        )
+
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await post_mcp_tool(
+                authenticated_client, "get_contact", {"contact_id": contact.id}
+            )
+
+        payload = extract_typed_tool_result(response.text)
+        assert payload["id"] == str(contact.id)
+        assert payload["name"] == "Jane Doe"
 
     @pytest.mark.asyncio
     async def test_get_contact_includes_immich_person_link_via_http_session(

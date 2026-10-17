@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 USER_ID = "test-user-123"
@@ -324,7 +325,7 @@ class TestGetContactByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_contact_by_external_id",
                 {"source": "google", "external_id": "people/c-theirs"},
@@ -335,7 +336,7 @@ class TestGetContactByExternalId:
     @pytest.mark.asyncio
     async def test_unknown_id_is_not_found(self, authenticated_lifespan_client) -> None:
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_contact_by_external_id",
                 {"source": "immich", "external_id": "nobody"},
@@ -349,7 +350,7 @@ class TestGetContactByExternalId:
         self, authenticated_lifespan_client
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_contact_by_external_id",
                 {"source": "strava", "external_id": "1"},

@@ -216,7 +216,7 @@ class TestContactVersions:
             read = await call_tool(client, "get_contact", {"contact_id": contact_id})
             await simulate_concurrent_write(clean_database, "contacts", contact_id)
 
-            payload = await call_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_contact",
                 {
