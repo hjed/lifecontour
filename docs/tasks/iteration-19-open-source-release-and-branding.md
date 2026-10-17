@@ -933,7 +933,9 @@ Tracked in [#1661](https://github.com/hjed/personal-management-system/issues/166
 **Phase 2 — Configure the public repository and flip.** PR ~150 lines (docs only). 🚧 IN PROGRESS.
 
 - **Progress:**
-  - The settings are recorded in `docs/ci-cd-setup.md` → "Public Repository Settings".
+  - The settings live in GitHub only. The owner dropped the planned "Public repository
+    settings" section of `docs/ci-cd-setup.md` (it restated what GitHub shows); the
+    non-obvious choices are recorded on the Phase 2 PR.
   - ITER19-001 Phase 4 was waived by the owner, so the gate is the Phase 1 and Phase 3 audits.
   - Corrections found while planning:
     - fork-PR approval and private vulnerability reporting cannot be set on a private

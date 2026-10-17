@@ -197,26 +197,6 @@ that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.
 - AI-assistance disclosure and CLA acknowledgement
 - Maintainer check that `secret-scan` passed on the head ([Stacked PRs](#stacked-prs))
 
-## Public Repository Settings
-
-The settings themselves are visible in GitHub (`gh api repos/hjed/lifecontour/rulesets`). These
-are the parts that are not obvious from them:
-
-- **Matrix jobs are not required checks** (Worker *, Frontend E2E Tests). A skipped matrix job
-  reports under the literal `${{ matrix.* }}` name, so requiring e.g. `Frontend E2E Tests
-  (firefox)` would leave every docs-only PR and upper stack layer waiting forever. The required
-  checks are the non-matrix jobs, which always report (run or skipped), plus `license/cla`.
-- **Skipped counts as passing.** An upper stack layer reports every check as skipped, so if it
-  is retargeted to `main` without a new head commit, the ruleset passes it with no CI. The
-  [Stacked PRs](#stacked-prs) `secret-scan` rule is the guard; do not fix this by loosening the
-  stack gate.
-- **CLA Assistant** reports `license/cla` only on PR events. Bots (`dependabot[bot]`,
-  `github-actions[bot]`, `Copilot`) are allowlisted in its settings; after changing the CLA or
-  the allowlist, recheck open PRs from the link in its comment.
-- Only the `lifecontour-*` GHCR packages are public. The legacy `personal-management-system-*`
-  packages stay private: they predate the
-  [frontend image hardening](architecture/deployment-guide.md#frontend-image).
-
 ## Local Development Integration
 
 The CI/CD setup integrates with local development and Docker Compose:
