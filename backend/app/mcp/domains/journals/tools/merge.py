@@ -28,6 +28,7 @@ from app.mcp.domains.journals.converters import (
 )
 from app.mcp.domains.journals.schemas import (
     EventDateRangeSchema,
+    JournalResponse,
     MergeCandidateResult,
     MergeCandidatesResponse,
     MergeJournalMCPRequest,
@@ -49,7 +50,6 @@ from app.mcp.shared.dependencies import (
     get_outbox_event_publisher,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
 # These will be created when the user provides type_data
@@ -85,7 +85,7 @@ async def merge_journals(
     link_service: JournalExternalLinkService = mcp_depends(
         get_journal_external_link_service
     ),
-) -> str:
+) -> JournalResponse:
     """
     Merge a source journal into a target journal.
 
@@ -112,9 +112,6 @@ async def merge_journals(
         target_journal_id: ID of the journal to keep
         merge_data: JSON string containing source_journal_id, optional overrides
             and optional fitness_merge_mode
-
-    Returns:
-        JSON string containing the merged target journal with all combined data
     """
     merge_request = MergeJournalMCPRequest.model_validate_json(merge_data)
 
@@ -164,7 +161,7 @@ async def merge_journals(
         external_links=await link_service.links_for_journal(target_journal_id, user_id),
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -185,7 +182,7 @@ async def get_merge_candidates(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> MergeCandidatesResponse:
     """
     Find journals that could be merged with a given journal.
 
@@ -196,9 +193,6 @@ async def get_merge_candidates(
     Args:
         journal_id: The journal to find candidates for
         limit: Maximum number of candidates to return
-
-    Returns:
-        JSON string with merge candidate summaries and AI recommendations
     """
     repos = create_journal_tool_repositories(db_connection)
 
@@ -272,7 +266,7 @@ async def get_merge_candidates(
         summary=summary_text,
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_merge_tools(mcp: FastMCP[None]) -> None:

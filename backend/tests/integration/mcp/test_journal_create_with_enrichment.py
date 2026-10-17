@@ -21,6 +21,7 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
@@ -30,9 +31,13 @@ def _create_journal_via_mcp():
     """Helper to create a journal via the MCP create_journal_entry tool."""
 
     async def _create(
-        authenticated_client: Any, journal_data: dict[str, object]
+        authenticated_client: Any,
+        journal_data: dict[str, object],
+        *,
+        refused: bool = False,
     ) -> dict[str, Any]:
-        return await call_mcp_tool(
+        call = call_mcp_tool_error if refused else call_mcp_tool
+        return await call(
             authenticated_client,
             "create_journal_entry",
             {
@@ -52,8 +57,11 @@ def _update_journal_via_mcp():
         authenticated_client: Any,
         journal_id: int,
         journal_data: dict[str, object],
+        *,
+        refused: bool = False,
     ) -> dict[str, Any]:
-        return await call_mcp_tool(
+        call = call_mcp_tool_error if refused else call_mcp_tool
+        return await call(
             authenticated_client,
             "update_journal_entry",
             {
@@ -179,6 +187,7 @@ class TestCreateJournalWithTypes:
                     "types": ["TRIP"],
                     "tags": ["utah", "road-trip"],
                 },
+                refused=True,
             )
 
             # Should report a validation error with the invalid type name
@@ -432,6 +441,7 @@ class TestCreateJournalWithParent:
                     "types": ["NOTE"],
                     "parent_id": theirs,
                 },
+                refused=True,
             )
             absent_payload = await _create_journal_via_mcp(
                 authenticated_client,
@@ -493,9 +503,7 @@ class TestCreateJournalWithParent:
             assert "error" not in mine, f"Setup error: {mine}"
 
             payload = await _update_journal_via_mcp(
-                authenticated_client,
-                mine["id"],
-                {"parent_id": theirs},
+                authenticated_client, mine["id"], {"parent_id": theirs}, refused=True
             )
 
         assert payload["error"] == "Journal not found"
@@ -571,9 +579,7 @@ class TestUpdateJournalWithTypesAndTags:
 
             # Update with invalid type
             update_payload = await _update_journal_via_mcp(
-                authenticated_client,
-                journal_id,
-                {"types": ["CANYON"]},
+                authenticated_client, journal_id, {"types": ["CANYON"]}, refused=True
             )
 
             # Should report a validation error with the invalid type name
@@ -831,9 +837,7 @@ class TestCreateJournalServicifiedParity:
 
     @pytest.mark.asyncio
     async def test_create_journal_missing_gear_usage_type_data_rejected(
-        self,
-        authenticated_lifespan_client,
-        _create_journal_via_mcp,
+        self, authenticated_lifespan_client, _create_journal_via_mcp
     ) -> None:
         """Adding GEAR_USAGE without type_data is rejected (validation in the tool)."""
         async with authenticated_lifespan_client() as authenticated_client:
@@ -848,6 +852,7 @@ class TestCreateJournalServicifiedParity:
                     },
                     "types": ["GEAR_USAGE"],
                 },
+                refused=True,
             )
 
             assert "error" in payload

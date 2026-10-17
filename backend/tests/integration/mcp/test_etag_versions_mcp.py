@@ -20,6 +20,8 @@ from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
     call_mcp_tool_error,
+    extract_typed_tool_result,
+    post_mcp_tool,
 )
 from tests.integration.tasks.task_seeding import USER_ID
 
@@ -75,6 +77,20 @@ class TestJournalVersions:
         async with authenticated_lifespan_client() as client:
             payload = await call_tool(client, "get_journal", {"journal_id": journal_id})
 
+        assert payload["version"]
+
+    @pytest.mark.asyncio
+    async def test_get_journal_is_sent_as_structured_content(
+        self, authenticated_lifespan_client, journal_id: int
+    ):
+        """The journal, version included, reaches a client as its response model."""
+        async with authenticated_lifespan_client() as client:
+            response = await post_mcp_tool(
+                client, "get_journal", {"journal_id": journal_id}
+            )
+
+        payload = extract_typed_tool_result(response.text)
+        assert payload["title"] == "Original title"
         assert payload["version"]
 
     @pytest.mark.asyncio
@@ -157,7 +173,7 @@ class TestJournalVersions:
             read = await call_tool(client, "get_journal", {"journal_id": journal_id})
             await simulate_concurrent_write(clean_database, "journals", journal_id)
 
-            await call_tool(
+            await call_mcp_tool_error(
                 client,
                 "update_journal_entry",
                 {

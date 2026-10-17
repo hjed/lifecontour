@@ -15,6 +15,7 @@ import pytest
 
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 # Each abseiling-derived journal type paired with a same-typed template.
@@ -304,8 +305,12 @@ async def _create_from_template(
     title: str = "Applied from template",
     type_data: dict[str, Any] | None = None,
     req_id: int = 2,
+    refused: bool = False,
 ) -> dict[str, Any]:
-    """Call create_journal_entry with a top-level template_id."""
+    """Call create_journal_entry with a top-level template_id.
+
+    ``refused`` expects an ``isError`` result and returns its payload.
+    """
     request: dict[str, Any] = {
         "title": title,
         "content": "Created from a template.",
@@ -318,8 +323,9 @@ async def _create_from_template(
     }
     if type_data is not None:
         request["type_data"] = type_data
-    return await _call_tool(
-        client, "create_journal_entry", {"request": request}, req_id=req_id
+    call = call_mcp_tool_error if refused else call_mcp_tool
+    return await call(
+        client, "create_journal_entry", {"request": request}, request_id=req_id
     )
 
 
@@ -445,6 +451,7 @@ async def test_mcp_create_rejects_an_unknown_template(
             client,
             "CANYONING",
             "00000000-0000-4000-8000-000000000000",
+            refused=True,
             title="Should not exist",
         )
         assert "error" in created, created
@@ -462,7 +469,9 @@ async def test_mcp_create_rejects_a_malformed_template_id(
 ) -> None:
     """A template id that is not a UUID is a validation error, not a 500."""
     async with authenticated_lifespan_client() as client:
-        created = await _create_from_template(client, "CANYONING", "not-a-uuid")
+        created = await _create_from_template(
+            client, "CANYONING", "not-a-uuid", refused=True
+        )
         assert "error" in created, created
         assert "template_id" in created["message"]
 
@@ -473,7 +482,7 @@ async def test_mcp_create_rejects_an_empty_template_id(
 ) -> None:
     """An empty template_id is malformed, not "no template"."""
     async with authenticated_lifespan_client() as client:
-        created = await _create_from_template(client, "CANYONING", "")
+        created = await _create_from_template(client, "CANYONING", "", refused=True)
         assert "error" in created, created
         assert "template_id" in created["message"]
 
@@ -486,6 +495,6 @@ async def test_mcp_create_rejects_a_template_on_a_non_abseiling_journal(
     async with authenticated_lifespan_client() as client:
         template_id = await _create_rich_template(client, "canyoning")
 
-        created = await _create_from_template(client, "NOTE", template_id)
+        created = await _create_from_template(client, "NOTE", template_id, refused=True)
         assert "error" in created, created
         assert "template_id" in created["message"]

@@ -201,7 +201,7 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_journal_by_external_id",
                 {"source": "strava", "external_id": "999"},
@@ -227,7 +227,7 @@ class TestGetJournalByExternalId:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_journal_by_external_id",
                 {"source": "immich_album", "external_id": album_id},
@@ -240,7 +240,7 @@ class TestGetJournalByExternalId:
         self, authenticated_lifespan_client
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "get_journal_by_external_id",
                 {"source": "garmin", "external_id": "1"},

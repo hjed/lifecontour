@@ -45,6 +45,7 @@ from tests.integration.contact_seeding import seed_contact
 from tests.integration.journal_enrichment import enrichment_service_for
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
     extract_mcp_json_payload,
     post_mcp_tool,
 )
@@ -292,7 +293,7 @@ class TestJournalToolsIntegration:
         arguments: dict[str, str],
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client, tool_name, arguments, request_id=2
             )
 
@@ -347,7 +348,7 @@ class TestJournalToolsIntegration:
             )
             assert journal_response.status_code == 201
 
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "delete_calendar",
                 {"calendar_id": calendar_id},
@@ -399,7 +400,7 @@ class TestJournalToolsIntegration:
                 {"journal_id": journal_id, "calendar_id": calendar_id},
             )
 
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "delete_calendar",
                 {"calendar_id": calendar_id},
@@ -975,7 +976,7 @@ class TestJournalToolsIntegration:
         error the tool could only report as a 500. An agent cannot act on that.
         """
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "update_journal_entry",
                 {
@@ -1003,7 +1004,7 @@ class TestJournalToolsIntegration:
     ) -> None:
         """A refused composite writes nothing — the content must not survive."""
         async with authenticated_lifespan_client() as authenticated_client:
-            await call_mcp_tool(
+            await call_mcp_tool_error(
                 authenticated_client,
                 "update_journal_entry",
                 {
@@ -1087,7 +1088,7 @@ class TestJournalToolsIntegration:
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
             # Try to set the journal as its own parent
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "update_journal_entry",
                 {
@@ -2303,7 +2304,7 @@ class TestActivityMcpToolsMountedIntegration:
         )
 
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await self._call_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "get_journal_history",
                 {"journal_id": other_journal_id},
@@ -2628,7 +2629,7 @@ class TestMergeMcpToolsMountedIntegration:
             assert target_response.status_code == 201
             journal_id = int(target_response.json()["data"]["id"])
 
-            payload = await self._call_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "merge_journals",
                 {
@@ -2670,7 +2671,7 @@ class TestMergeMcpToolsMountedIntegration:
             assert target_response.status_code == 201
             target_id = int(target_response.json()["data"]["id"])
 
-            payload = await self._call_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "merge_journals",
                 {

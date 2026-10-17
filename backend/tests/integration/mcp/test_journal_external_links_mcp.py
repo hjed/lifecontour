@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 
@@ -781,7 +782,7 @@ class TestSearchJournalsIntegrationSourceFilter:
     ) -> None:
         """search_journals with invalid integration_source returns error."""
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client, "search_journals", {"integration_source": "invalid_source"}
             )
 

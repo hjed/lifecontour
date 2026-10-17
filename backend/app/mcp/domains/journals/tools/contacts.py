@@ -9,7 +9,7 @@ from core_shared.models.journals import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
@@ -20,6 +20,7 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.mcp.domains.journals.schemas import (
+    JournalContactLinkMCPResponse,
     JournalSearchResponse,
 )
 from app.mcp.domains.journals.tools._shared import (
@@ -38,7 +39,6 @@ from app.mcp.shared.dependencies import (
     get_journal_contact_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
 @tool(annotations=READ_ONLY)
@@ -57,7 +57,7 @@ async def get_contact_journals(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     contact_service: ContactService = mcp_depends(get_contact_service),
     user_id: str = mcp_depends(get_current_user_id),
-) -> str:
+) -> JournalSearchResponse:
     """
     Get journals associated with a contact.
 
@@ -67,9 +67,6 @@ async def get_contact_journals(
     Args:
         contact_id: The unique identifier of the contact
         limit: Maximum number of results to return
-
-    Returns:
-        JSON string containing AI-friendly journal summaries
 
     Raises:
         ContactNotFoundError: If the contact does not exist or is another
@@ -104,7 +101,7 @@ async def get_contact_journals(
         summary=f"Found {len(results)} journal(s) for contact {contact_id}",
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -134,7 +131,7 @@ async def link_journal_to_contact(
     journal_contact_service: JournalContactService = mcp_depends(
         get_journal_contact_service
     ),
-) -> str:
+) -> JournalContactLinkMCPResponse:
     """
     Link a journal to a contact with a specific relationship type.
 
@@ -145,9 +142,6 @@ async def link_journal_to_contact(
         journal_id: The unique identifier of the journal
         contact_id: The unique identifier of the contact
         relationship_type: Relationship type (PARTICIPANT, INVITEE, MENTION, ABOUT)
-
-    Returns:
-        JSON string containing relationship creation confirmation
 
     Raises:
         ValueError: If relationship is invalid, or if journal or contact do not exist.
@@ -204,16 +198,7 @@ async def link_journal_to_contact(
     except sqlalchemy.exc.IntegrityError as e:
         raise ValueError("Relationship already exists") from e
 
-    class LinkResponse(BaseModel):
-        journal_id: int
-        contact_id: int
-        relationship_type: str
-        status: str | None
-        role: str | None
-        linked: bool
-        summary: str
-
-    response = LinkResponse(
+    response = JournalContactLinkMCPResponse(
         journal_id=journal_id,
         contact_id=contact_id,
         relationship_type=relationship_enum.value,
@@ -223,7 +208,7 @@ async def link_journal_to_contact(
         summary=f"Successfully linked journal {journal_id} to contact {contact_id} as {relationship_enum.value}",
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_contact_tools(mcp: FastMCP[None]) -> None:

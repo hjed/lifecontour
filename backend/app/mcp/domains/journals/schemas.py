@@ -1339,3 +1339,66 @@ class DailySummaryToolResponse(BaseModel):
     """A day's summary, or null when the day has none."""
 
     data: DailySummaryMCPResponse | None
+
+
+class JournalDeletedMCPResponse(BaseModel):
+    """A deleted journal."""
+
+    journal_id: int
+    deleted: bool
+    summary: str
+
+
+class CalendarMCPListItem(BaseModel):
+    """A calendar."""
+
+    id: str
+    name: str
+    description: str | None = None
+    color: str | None = None
+
+
+class CalendarListMCPResponse(BaseModel):
+    """The calendars available for EVENT journals."""
+
+    calendars: list[CalendarMCPListItem]
+
+
+class CalendarMCPResponse(BaseModel):
+    """A created or updated calendar."""
+
+    id: str
+    name: str
+    summary: str
+
+
+class CalendarDeletedMCPResponse(BaseModel):
+    """A deleted calendar."""
+
+    summary: str
+
+
+class JournalContactLinkMCPResponse(BaseModel):
+    """A contact linked to a journal, with the relationship."""
+
+    journal_id: int
+    contact_id: int
+    relationship_type: str
+    status: str | None
+    role: str | None
+    linked: bool
+    summary: str
+
+
+class JournalTagDeletedMCPResponse(BaseModel):
+    """A deleted journal tag."""
+
+    status: str
+    summary: str
+
+
+class JournalTagMergedMCPResponse(BaseModel):
+    """A journal tag merged into another."""
+
+    status: str
+    summary: str

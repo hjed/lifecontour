@@ -19,6 +19,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.settings.models import UserSettings
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 USER_ID = "test-user-123"
@@ -208,7 +209,7 @@ class TestBrowseJournalsByDateWindowIntegration:
     ) -> None:
         """Invalid anchor_date returns a validation error payload."""
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "browse_journals_by_date_window",
                 {

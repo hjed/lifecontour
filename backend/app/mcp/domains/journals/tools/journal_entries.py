@@ -44,6 +44,7 @@ from app.mcp.domains.journals.converters import (
 )
 from app.mcp.domains.journals.schemas import (
     JournalCreateRequest,
+    JournalResponse,
     JournalUpdateRequest,
     validate_type_data,
 )
@@ -64,7 +65,6 @@ from app.mcp.shared.dependencies import (
     get_journal_write_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
 def _external_links_preserved(
@@ -232,7 +232,7 @@ async def create_journal_entry(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalResponse:
     """
     Create a new journal entry with types, type-specific data, relationships, and tags.
 
@@ -252,14 +252,6 @@ async def create_journal_entry(
     wins over the template — your own ``pitches`` replace the template's, and the
     abseil counts are derived from whichever pitches are stored unless you set
     the counts yourself.
-
-    Returns:
-        JSON string containing AI-friendly journal information including:
-        - Journal details (title, content, date range)
-        - Types and type-specific data
-        - Contact relationships
-        - Tags
-        - Contextual summary for AI understanding
 
     Raises:
         JournalValidationError: If validation fails
@@ -395,7 +387,7 @@ async def create_journal_entry(
         external_links=external_links,
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -413,7 +405,7 @@ async def update_journal_entry(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalResponse:
     """
     Update an existing journal entry with partial data.
 
@@ -433,9 +425,6 @@ async def update_journal_entry(
     ``expected_version``: the update is then refused, with nothing written, if
     the journal changed in between. The refusal carries ``current_version`` to
     retry with after re-reading.
-
-    Returns:
-        JSON string containing AI-friendly updated journal information
 
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
@@ -554,7 +543,7 @@ async def update_journal_entry(
         type_data_discarded=update_result.type_data_discarded,
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_entry_tools(mcp: FastMCP[None]) -> None:
