@@ -199,83 +199,23 @@ that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.
 
 ## Public Repository Settings
 
-The repository is public. These settings live in GitHub, not in the tree, so this section is
-their record. Re-check them with the `gh api` reads listed under each one.
+The settings themselves are visible in GitHub (`gh api repos/hjed/lifecontour/rulesets`). These
+are the parts that are not obvious from them:
 
-### CLA Assistant
-
-- The hosted [CLA Assistant](https://cla-assistant.io) is linked to the repository, with
-  [`CLA.md`](../CLA.md) published as its gist. It comments on each PR whose author has not
-  signed, and posts the `license/cla` commit status. See
-  [CONTRIBUTING](../CONTRIBUTING.md) for the contributor side.
-- **Bots are allowlisted** in its settings (`dependabot[bot]`, `github-actions[bot]`,
-  `Copilot`), so the required `license/cla` check does not block them.
-- CLA Assistant was linked just after the flip, because it needs the repository to be public.
-  `license/cla` became a required check only after it was live, so open PRs were not left
-  waiting on a status that would never arrive.
-- CLA Assistant only reports on PR events. When the CLA or its allowlist changes, use the
-  "recheck" link in its comment (or push to the PR) to refresh an open PR's status.
-
-### Ruleset on `main`
-
-A branch ruleset (`gh api repos/hjed/lifecontour/rulesets`) on the default branch:
-
-- **Pull request required**, with 0 required approvals. There is one maintainer, who cannot
-  approve their own PRs, so requiring a PR is what blocks direct pushes.
-- **No force-push, no deletion** of `main`.
-- **Bypass:** the repository admin role, in `pull_request` mode only. An emergency PR can be
-  merged past a failing check; nobody can push to `main` directly.
-- **Required status checks** (not strict, so a branch need not be up to date with `main`; with
-  bottom-only stack CI that would force constant re-runs):
-  - `license/cla` (a commit status from CLA Assistant);
-  - from GitHub Actions: Backend Linting, Core Shared Linting, Backend Unit Tests, Core Shared
-    Unit Tests, Backend Integration Tests, Frontend Linting, Frontend Tests, E2E Docker Image
-    Build, Frontend Image Check, and Secret Scan (gitleaks).
-- **Matrix jobs are not required** (Worker Lint, Unit and Integration Tests; Frontend E2E
-  Tests). When a matrix job is skipped by a path filter or the stack gate, its check is
-  reported under the literal `${{ matrix.* }}` name, so a required `Frontend E2E Tests
-  (firefox)` would never arrive on a docs-only PR. A failing matrix job is still visible on the
-  PR and must not be merged past.
-- Every required job has `needs: changes` and always reports, run or skipped, and GitHub
-  treats a skipped check as passing. That is what lets path-filtered PRs and upper stack
-  layers through.
-- **Known gap:** an upper stack layer reports every check as skipped. If it is retargeted to
-  `main` without a new head commit, nothing re-runs and the ruleset passes it with no CI. The
-  [Stacked PRs](#stacked-prs) rule still applies: no layer merges without a passing
-  `secret-scan` on its head, checked by the maintainer (it is on the PR template). Do not close
-  this gap by loosening the stack gate.
-- The disabled `copilot` ruleset is unrelated (Copilot code review) and is not a protection.
-
-### Fork PRs and workflow approval
-
-- **First-time contributors need approval** before their workflows run
-  (`actions/permissions/fork-pr-contributor-approval`, policy `first_time_contributors`).
-  Read the diff before approving: approval runs the fork's code on GitHub's runners.
-- Fork PRs get a read-only `GITHUB_TOKEN` and no secrets. CI needs neither, so it runs
-  unchanged ([Workflow security rules](#workflow-security-rules)). Fork PRs always target
-  `main`, so they always run the full in-gate CI.
-- The Actions caches were purged just before the flip, because fork-PR runs can restore
-  base-branch caches that predate the credential audit. Caches created since are public-era.
-
-### Security features
-
-- **Secret scanning and push protection** are on. Push protection rejects a push containing
-  a recognised credential, as a backstop to the gitleaks hook and `secret-scan` job. Alerts
-  are triaged as in the [credential audit](./security/open-source-release-audit.md).
-- **Private vulnerability reporting** is on; [`SECURITY.md`](../SECURITY.md) sends reporters
-  to it.
-- **Dependabot alerts** and automated security fixes are on, alongside the version updates in
-  `.github/dependabot.yml`.
-
-### Container packages
-
-- The `ghcr.io/hjed/lifecontour-*` packages are **public**, so self-hosters can
-  `docker pull` without logging in. Every package is linked to this repository through the
-  image's `org.opencontainers.image.source` label.
-- The legacy `ghcr.io/hjed/personal-management-system-*` packages stay **private**. They are
-  kept only for rollback, and their frontend versions predate the
+- **Matrix jobs are not required checks** (Worker *, Frontend E2E Tests). A skipped matrix job
+  reports under the literal `${{ matrix.* }}` name, so requiring e.g. `Frontend E2E Tests
+  (firefox)` would leave every docs-only PR and upper stack layer waiting forever. The required
+  checks are the non-matrix jobs, which always report (run or skipped), plus `license/cla`.
+- **Skipped counts as passing.** An upper stack layer reports every check as skipped, so if it
+  is retargeted to `main` without a new head commit, the ruleset passes it with no CI. The
+  [Stacked PRs](#stacked-prs) `secret-scan` rule is the guard; do not fix this by loosening the
+  stack gate.
+- **CLA Assistant** reports `license/cla` only on PR events. Bots (`dependabot[bot]`,
+  `github-actions[bot]`, `Copilot`) are allowlisted in its settings; after changing the CLA or
+  the allowlist, recheck open PRs from the link in its comment.
+- Only the `lifecontour-*` GHCR packages are public. The legacy `personal-management-system-*`
+  packages stay private: they predate the
   [frontend image hardening](architecture/deployment-guide.md#frontend-image).
-- Making a package public cannot be undone.
 
 ## Setup Instructions
 
