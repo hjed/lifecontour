@@ -8,6 +8,7 @@
 
 import { test, expect } from './fixtures';
 import { selectRadixOption } from './utils/radix-select';
+import { openJournalsInView, selectCalendarView } from './utils/calendar-view';
 
 /**
  * Generate an ISO datetime string offset from today by the given number of days.
@@ -17,6 +18,11 @@ function relativeDate(dayOffset: number): string {
   d.setUTCDate(d.getUTCDate() + dayOffset);
   d.setUTCHours(12, 0, 0, 0); // Noon UTC to avoid boundary issues
   return d.toISOString();
+}
+
+/** The month grid's heading for `date`, e.g. "October 2026". */
+function monthHeading(date: Date): string {
+  return `${date.toLocaleString('en-AU', { month: 'long' })} ${date.getFullYear()}`;
 }
 
 test.describe('Calendar Views', () => {
@@ -59,35 +65,11 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    // Navigate to journals page
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible({
-      timeout: 10000,
-    });
-
-    // Click Month view toggle
-    await page.getByRole('radio', { name: /month view/i }).click();
-
-    // Verify month grid appears
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await openJournalsInView(page, 'Month');
 
     // Verify month heading is present with the current date
     const now = new Date();
-    const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    const expectedHeading = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+    const expectedHeading = monthHeading(now);
     await expect(page.getByText(expectedHeading)).toBeVisible();
 
     // Verify event pill is visible in the month grid
@@ -134,12 +116,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to month view
-    await page.getByRole('radio', { name: /month view/i }).click();
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await openJournalsInView(page, 'Month');
 
     // Click the event pill to navigate to the journal detail page.
     // The pill is a Next.js <Link>, so the click triggers a client-side soft
@@ -209,14 +186,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to agenda view
-    await page.getByRole('radio', { name: /agenda view/i }).click();
-
-    // Verify agenda view appears
-    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+    await openJournalsInView(page, 'Agenda');
 
     // Verify event is listed
     await expect(
@@ -265,12 +235,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to agenda view
-    await page.getByRole('radio', { name: /agenda view/i }).click();
-    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+    await openJournalsInView(page, 'Agenda');
 
     // Click the event
     await page.getByRole('link', { name: /clickable agenda event/i }).click();
@@ -338,12 +303,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to agenda view (easier to verify colours in agenda)
-    await page.getByRole('radio', { name: /agenda view/i }).click();
-    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+    await openJournalsInView(page, 'Agenda');
 
     // Verify both events are visible
     await expect(
@@ -406,12 +366,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to agenda view
-    await page.getByRole('radio', { name: /agenda view/i }).click();
-    await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
+    await openJournalsInView(page, 'Agenda');
 
     // Both entries should be visible initially
     await expect(
@@ -479,12 +434,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to month view
-    await page.getByRole('radio', { name: /month view/i }).click();
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await openJournalsInView(page, 'Month');
 
     // Apply a filter while in month view
     const filtersSection = page.locator('[data-testid="journal-filters"]');
@@ -517,30 +467,11 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to month view
-    await page.getByRole('radio', { name: /month view/i }).click();
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await openJournalsInView(page, 'Month');
 
     // Get the current month heading
     const now = new Date();
-    const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    const currentHeading = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+    const currentHeading = monthHeading(now);
     await expect(page.getByText(currentHeading)).toBeVisible();
 
     // Click next month
@@ -548,7 +479,7 @@ test.describe('Calendar Views', () => {
 
     // Verify heading changed to next month
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const nextHeading = `${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+    const nextHeading = monthHeading(nextMonth);
     await expect(page.getByText(nextHeading)).toBeVisible();
 
     // Click previous month twice to go back one month from the original
@@ -557,7 +488,7 @@ test.describe('Calendar Views', () => {
 
     await page.getByRole('button', { name: /previous month/i }).click();
     const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevHeading = `${monthNames[prevMonth.getMonth()]} ${prevMonth.getFullYear()}`;
+    const prevHeading = monthHeading(prevMonth);
     await expect(page.getByText(prevHeading)).toBeVisible();
   });
 
@@ -599,19 +530,13 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to week view
-    await page.getByLabel('Week view').click();
-    await expect(page.getByTestId('calendar-week-view')).toBeVisible();
+    await openJournalsInView(page, 'Week');
     await expect(
       page.getByRole('link', { name: /week view event/i })
     ).toBeVisible();
 
     // Switch to month view first to set anchor date deterministically
-    await page.getByLabel('Month view').click();
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await selectCalendarView(page, 'Month');
 
     const eventLink = page
       .getByRole('link', { name: /week view event/i })
@@ -629,8 +554,7 @@ test.describe('Calendar Views', () => {
     await expect(page.getByTestId('calendar-agenda-view')).toBeVisible();
 
     // Switch to day view (anchorDate is now locked)
-    await page.getByLabel('Day view').click();
-    await expect(page.getByTestId('calendar-day-view')).toBeVisible();
+    await selectCalendarView(page, 'Day');
     await expect(
       page.getByRole('link', { name: /week view event/i })
     ).toBeVisible();
@@ -660,12 +584,7 @@ test.describe('Calendar Views', () => {
       await dataManager.cleanup();
     });
 
-    await page.goto('/journals');
-    await expect(page.getByTestId('journals-list-ready')).toBeVisible();
-
-    // Switch to Month view to use its grid
-    await page.getByLabel('Month view').click();
-    await expect(page.getByTestId('calendar-month-view')).toBeVisible();
+    await openJournalsInView(page, 'Month');
 
     // Find today's date cell, click it (or the add button) to trigger quick create
     // Since today is marked with data-today="true", we can locate it easily.
