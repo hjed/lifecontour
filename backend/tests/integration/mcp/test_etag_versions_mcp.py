@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 from tests.integration.tasks.task_seeding import USER_ID
 
@@ -106,7 +107,7 @@ class TestJournalVersions:
             read = await call_tool(client, "get_journal", {"journal_id": journal_id})
             await simulate_concurrent_write(clean_database, "journals", journal_id)
 
-            payload = await call_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_journal_entry",
                 {

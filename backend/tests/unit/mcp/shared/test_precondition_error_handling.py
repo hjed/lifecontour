@@ -7,11 +7,10 @@ would either give up or blindly retry the same doomed write. The refusal has to
 say the resource moved on, and hand back the version to retry with.
 """
 
-import json
-
 from core_shared.exceptions import PreconditionFailedError
 
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from tests.unit.mcp.tool_errors import raised_tool_error
 
 
 async def _render(error: Exception) -> dict[str, str]:
@@ -19,7 +18,7 @@ async def _render(error: Exception) -> dict[str, str]:
     async def failing() -> str:
         raise error
 
-    rendered: dict[str, str] = json.loads(await failing())
+    rendered: dict[str, str] = await raised_tool_error(failing())
     return rendered
 
 

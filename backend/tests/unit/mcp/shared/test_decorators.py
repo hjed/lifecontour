@@ -5,14 +5,22 @@ Tests the error handling decorators for MCP tools.
 """
 
 import json
+from typing import get_type_hints
 
 import pytest
 from core_shared.models.contacts.exceptions import ContactValidationError
+from pydantic import BaseModel
 
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
 )
 from app.mcp.shared.decorators import mcp_unified_error_handler
+from app.mcp.shared.response_builders import MCPErrors
+from tests.unit.mcp.tool_errors import raised_tool_error
+
+
+class _Item(BaseModel):
+    id: int
 
 
 class TestMCPUnifiedErrorHandler:
@@ -51,10 +59,7 @@ class TestMCPUnifiedErrorHandler:
             raise ContactNotFoundError(123)
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Contact not found"
         assert "123" in response_data["message"]
 
@@ -67,10 +72,7 @@ class TestMCPUnifiedErrorHandler:
             raise ContactValidationError("email", "Invalid email format")
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Validation error"
         assert response_data["field"] == "email"
         assert "Invalid email format" in response_data["message"]
@@ -84,10 +86,7 @@ class TestMCPUnifiedErrorHandler:
             raise json.JSONDecodeError("Invalid JSON", "test", 0)
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Validation error"
         assert response_data["field"] == "contact_data"
         assert "Failed to parse JSON data" in response_data["message"]
@@ -101,10 +100,7 @@ class TestMCPUnifiedErrorHandler:
             raise json.JSONDecodeError("Invalid JSON", "test", 0)
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Validation error"
         assert response_data["field"] == "JSON"
         assert "Failed to parse JSON data" in response_data["message"]
@@ -118,10 +114,7 @@ class TestMCPUnifiedErrorHandler:
             raise ValueError("Invalid input value")
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Validation error"
         assert response_data["field"] == "Input"
         assert "Invalid input value" in response_data["message"]
@@ -148,10 +141,7 @@ class TestMCPUnifiedErrorHandler:
             return "Should not reach here"
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Validation error"
         assert response_data["field"] == "nested.value"
 
@@ -164,10 +154,9 @@ class TestMCPUnifiedErrorHandler:
             raise Exception("Search service unavailable")
 
         # Test error handling - pass parameters as keyword arguments
-        result = await test_search_function(query="test", limit=20)
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(
+            test_search_function(query="test", limit=20)
+        )
         assert response_data["error"] == "Search error"
         assert "search_contacts" in response_data["message"]
         assert response_data["query"] == "test"
@@ -182,10 +171,7 @@ class TestMCPUnifiedErrorHandler:
             raise Exception("Unexpected error")
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Internal error"
         assert "test_operation" in response_data["message"]
 
@@ -198,10 +184,7 @@ class TestMCPUnifiedErrorHandler:
             raise Exception("Database connection failed")
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Internal error"
         assert "get_contact" in response_data["message"]
         assert response_data["operation_type"] == "contact"
@@ -215,10 +198,7 @@ class TestMCPUnifiedErrorHandler:
             raise Exception("Service unavailable")
 
         # Test error handling
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Internal error"
         assert "create_contact" in response_data["message"]
         assert response_data["operation_type"] == "management"
@@ -249,9 +229,39 @@ class TestMCPUnifiedErrorHandler:
             raise Exception("Test error")
 
         # Test error handling with default type
-        result = await test_function()
-
-        # Parse the JSON response
-        response_data = json.loads(result)
+        response_data = await raised_tool_error(test_function())
         assert response_data["error"] == "Internal error"
         assert "test_operation" in response_data["message"]
+
+
+class TestTypedReturns:
+    """Tools return their response model; refusals are raised, not returned."""
+
+    @pytest.mark.asyncio
+    async def test_a_raised_refusal_passes_through_unchanged(self) -> None:
+        """A tool's own refusal must not be flattened into "Internal error"."""
+
+        @mcp_unified_error_handler("get_tag", "general")
+        async def tool() -> str:
+            raise MCPErrors.not_found("Tag", 7)
+
+        payload = await raised_tool_error(tool())
+
+        assert payload == MCPErrors.not_found("Tag", 7).payload
+
+    @pytest.mark.asyncio
+    async def test_the_response_model_is_returned_as_is(self) -> None:
+        @mcp_unified_error_handler("get_item", "general")
+        async def tool() -> _Item:
+            return _Item(id=1)
+
+        assert await tool() == _Item(id=1)
+
+    def test_the_inner_return_annotation_survives_wrapping(self) -> None:
+        """fastmcp derives a tool's outputSchema from this annotation."""
+
+        @mcp_unified_error_handler("get_item", "general")
+        async def tool() -> _Item:
+            return _Item(id=1)
+
+        assert get_type_hints(tool)["return"] is _Item
