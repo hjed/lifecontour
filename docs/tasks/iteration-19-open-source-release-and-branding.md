@@ -940,7 +940,10 @@ Tracked in [#1661](https://github.com/hjed/personal-management-system/issues/166
       repository, so they move to post-flip;
     - every GHCR package is already linked to the repository (by the image's source label);
     - only the `lifecontour-*` packages go public; the legacy ones stay private;
-    - Dependabot alerts were already on.
+    - Dependabot alerts were already on;
+    - CLA Assistant can only be set up once the repository is public (owner, 2026-10-17). So
+      the ruleset went live before the flip with the CI checks only, and `license/cla` is added
+      to it after the flip, once CLA Assistant is linked and the open PRs have been rechecked.
 
 - **Pre-flip:**
   - Install CLA Assistant, with `CLA.md` published as its gist. **Allowlist the bots**

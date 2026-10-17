@@ -210,6 +210,9 @@ their record. Re-check them with the `gh api` reads listed under each one.
   [CONTRIBUTING](../CONTRIBUTING.md) for the contributor side.
 - **Bots are allowlisted** in its settings (`dependabot[bot]`, `github-actions[bot]`,
   `Copilot`), so the required `license/cla` check does not block them.
+- CLA Assistant was linked just after the flip, because it needs the repository to be public.
+  `license/cla` became a required check only after it was live, so open PRs were not left
+  waiting on a status that would never arrive.
 - CLA Assistant only reports on PR events. When the CLA or its allowlist changes, use the
   "recheck" link in its comment (or push to the PR) to refresh an open PR's status.
 
