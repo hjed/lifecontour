@@ -16,6 +16,7 @@ descriptions the schema carries — and nowhere else, so a test asserts it exist
 from typing import Any
 
 import pytest
+from core_shared.models.tasks import TaskLinkRole, TaskStatus
 from fastmcp import Client, FastMCP
 
 from app.mcp.domains.tasks.tools import register_task_tools
@@ -836,7 +837,18 @@ class TestGetTaskToolParameters:
 
 @pytest.mark.unit
 class TestGetTaskDocumentsWhatItReturns:
-    """The docstring is the only place a model learns the answer's shape."""
+    """What a model needs to read the answer is published with the tool."""
+
+    async def test_it_says_the_journals_come_back_by_role(self) -> None:
+        """Three journal roles is not something to infer from a key name.
+
+        Said in the outputSchema, where the answer's shape lives: fastmcp
+        strips a docstring's ``Returns:`` section from the description.
+        """
+        properties = (await _output_schema("get_task"))["properties"]
+
+        assert "creating" in properties["creating_journal"]["description"].lower()
+        assert "due" in properties["due_journal"]["description"].lower()
 
     def test_it_explains_what_lapsed_means(
         self, get_task_schema: dict[str, Any]
@@ -1198,3 +1210,91 @@ class TestGetTaskHistoryPagingCannotOverflowTheQuery:
         assert "maximum" in page
         # Comfortably inside int64 once multiplied by the largest legal limit.
         assert page["maximum"] * 100 < 2**63
+
+
+_TASK_FIELDS = {
+    "id",
+    "text",
+    "status",
+    "creating_journal_id",
+    "due_journal_id",
+    "intermediate_journal_ids",
+    "created_at",
+    "updated_at",
+}
+_READ_FIELDS = _TASK_FIELDS | {
+    "creating_journal",
+    "due_journal",
+    "intermediate_journals",
+    "contacts",
+    "lapsed",
+    "lapse_reason",
+}
+
+
+async def _output_schema(name: str) -> dict[str, Any]:
+    """The result shape a client is told to expect from a task tool."""
+    mcp: FastMCP[None] = FastMCP(name="Test")
+    register_task_tools(mcp)
+
+    async with Client(mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+
+    schema: dict[str, Any] | None = tools[name].output_schema
+    assert schema is not None, f"{name} publishes no outputSchema"
+    return schema
+
+
+class TestTheResultShapeIsPublished:
+    """What each tool answers is in its outputSchema, not only its prose."""
+
+    @pytest.mark.parametrize(
+        ("name", "fields"),
+        [
+            ("create_task", _TASK_FIELDS),
+            ("set_task_status", _TASK_FIELDS),
+            ("retarget_task", _TASK_FIELDS),
+            ("update_task_text", _TASK_FIELDS),
+            ("delete_task", {"deleted", "task_id"}),
+            ("link_task_to_contact", {"task_id", "contact_id", "linked", "changed"}),
+            (
+                "unlink_task_from_contact",
+                {"task_id", "contact_id", "linked", "changed"},
+            ),
+            (
+                "attach_intermediate_journal_to_task",
+                {"task_id", "journal_id", "attached", "changed"},
+            ),
+            (
+                "detach_intermediate_journal_from_task",
+                {"task_id", "journal_id", "attached", "changed"},
+            ),
+            ("get_task", _READ_FIELDS),
+            ("list_journal_tasks", {"journal_id", "groups"}),
+            ("list_upcoming_tasks", {"window", "total", "tasks"}),
+            (
+                "get_task_history",
+                {"task_id", "total_count", "page", "limit", "entries"},
+            ),
+        ],
+    )
+    async def test_each_tool_publishes_its_fields(
+        self, name: str, fields: set[str]
+    ) -> None:
+        schema = await _output_schema(name)
+
+        assert set(schema["properties"]) == fields
+
+    async def test_the_status_is_one_of_the_domain_values(self) -> None:
+        schema = await _output_schema("get_task")
+
+        assert set(schema["properties"]["status"]["enum"]) == {
+            str(status) for status in TaskStatus
+        }
+
+    async def test_every_link_role_is_a_group(self) -> None:
+        """The groups are keyed by role, so a client knows which keys exist."""
+        schema = await _output_schema("list_journal_tasks")
+
+        groups = schema["properties"]["groups"]
+        assert set(groups["properties"]) == {str(role) for role in TaskLinkRole}

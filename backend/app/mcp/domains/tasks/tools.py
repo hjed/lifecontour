@@ -19,9 +19,8 @@ for any caller, so it is absent here and the transport rejects it as an unknown
 argument.
 """
 
-import json
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
@@ -45,6 +44,22 @@ from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
+from app.mcp.domains.tasks.schemas import (
+    GroupedTaskMCP,
+    JournalTasksResponse,
+    TaskContactLinkResponse,
+    TaskContactMCP,
+    TaskDeletedResponse,
+    TaskGroupsMCP,
+    TaskHistoryEntryMCP,
+    TaskHistoryResponse,
+    TaskJournalLinkResponse,
+    TaskJournalRefMCP,
+    TaskMCP,
+    TaskReadMCP,
+    UpcomingTasksResponse,
+    UpcomingWindowMCP,
+)
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
     DESTRUCTIVE_WRITE,
@@ -63,9 +78,9 @@ from app.mcp.shared.dependencies import (
 )
 
 
-def _link_to_dict(
+def _contact_link(
     task_id: int, contact_id: int, *, linked: bool, changed: bool
-) -> dict[str, Any]:
+) -> TaskContactLinkResponse:
     """The answer both link tools give.
 
     ``linked`` is the *resulting state* and ``changed`` says whether this call
@@ -74,17 +89,14 @@ def _link_to_dict(
     ``linked`` it would have to infer the state from which tool it called. There
     is no read tool yet to ask instead.
     """
-    return {
-        "task_id": task_id,
-        "contact_id": contact_id,
-        "linked": linked,
-        "changed": changed,
-    }
+    return TaskContactLinkResponse(
+        task_id=task_id, contact_id=contact_id, linked=linked, changed=changed
+    )
 
 
-def _journal_link_to_dict(
+def _journal_link(
     task_id: int, journal_id: int, *, attached: bool, changed: bool
-) -> dict[str, Any]:
+) -> TaskJournalLinkResponse:
     """The answer both intermediate-journal tools give.
 
     ``attached`` is the *resulting state* and ``changed`` says whether this call
@@ -99,34 +111,33 @@ def _journal_link_to_dict(
     caller did not ask about, and would hide the one fact it did: whether this
     call moved a row.
     """
-    return {
-        "task_id": task_id,
-        "journal_id": journal_id,
-        "attached": attached,
-        "changed": changed,
-    }
+    return TaskJournalLinkResponse(
+        task_id=task_id, journal_id=journal_id, attached=attached, changed=changed
+    )
 
 
-def _task_to_dict(task: Task, intermediate_journal_ids: list[int]) -> dict[str, Any]:
+def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
     """The answer every task-returning tool gives.
 
     ``intermediate_journal_ids`` is passed in rather than read here, and every
     caller supplies one, so a task looks the same whichever tool produced it —
-    ``get_task`` included, which builds on this dict rather than beside it.
+    ``get_task`` included, which builds on these fields rather than beside them.
     Before that tool existed a trail left out of a write's answer was
     *unreachable* rather than merely inconvenient; it is now readable directly,
     and the field stays on every answer so an agent needs one shape, not two.
     """
-    return {
-        "id": task.id,
-        "text": task.text,
-        "status": str(task.status),
-        "creating_journal_id": task.creating_journal_id,
-        "due_journal_id": task.due_journal_id,
-        "intermediate_journal_ids": intermediate_journal_ids,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-    }
+    if task.id is None:
+        raise ValueError("A task answer needs a persisted task")
+    return TaskMCP(
+        id=task.id,
+        text=task.text,
+        status=task.status,
+        creating_journal_id=task.creating_journal_id,
+        due_journal_id=task.due_journal_id,
+        intermediate_journal_ids=intermediate_journal_ids,
+        created_at=task.created_at.isoformat() if task.created_at else None,
+        updated_at=task.updated_at.isoformat() if task.updated_at else None,
+    )
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -170,7 +181,7 @@ async def create_task(
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskMCP:
     """
     Create a task: something to do, anchored to the journal it is due in.
 
@@ -183,11 +194,6 @@ async def create_task(
     or is not yours is reported as not found naming which anchor it was, and a
     due journal that is not future-dated comes back with both its date and
     today's so a later journal can be chosen.
-
-    Returns:
-        JSON string with the created task: id, text, status (always "not_done"
-        on creation), both journal anchors, the journals it has passed through
-        (always empty on creation), and timestamps.
     """
     user_id = await get_current_user_id()
 
@@ -206,7 +212,7 @@ async def create_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(created, trail), indent=2)
+    return _task_fields(created, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -226,7 +232,7 @@ async def set_task_status(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskMCP:
     """
     Mark a task done, not done, or cancelled.
 
@@ -240,10 +246,6 @@ async def set_task_status(
     so asking here for not_done or done on a cancelled task is refused and the
     message says what to do instead. Setting the status a task already has
     changes nothing.
-
-    Returns:
-        JSON string with the task: id, text, status, both journal anchors, the
-        journals it has passed through, and timestamps.
     """
     user_id = await get_current_user_id()
 
@@ -255,7 +257,7 @@ async def set_task_status(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(updated, trail), indent=2)
+    return _task_fields(updated, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -276,7 +278,7 @@ async def link_task_to_contact(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskContactLinkResponse:
     """
     Reference a contact from a task.
 
@@ -288,11 +290,6 @@ async def link_task_to_contact(
     Contact links can be changed in any status, including on a task that is
     already done or cancelled. Linking a contact that is already linked is
     accepted and changes nothing, so a retry is safe.
-
-    Returns:
-        JSON string with task_id, contact_id, linked (the resulting state, and
-        true here) and changed (whether this call created the link, false when
-        it was already there).
     """
     user_id = await get_current_user_id()
 
@@ -304,9 +301,7 @@ async def link_task_to_contact(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(
-        _link_to_dict(task_id, contact_id, linked=True, changed=changed), indent=2
-    )
+    return _contact_link(task_id, contact_id, linked=True, changed=changed)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -325,7 +320,7 @@ async def unlink_task_from_contact(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskContactLinkResponse:
     """
     Stop referencing a contact from a task.
 
@@ -334,11 +329,6 @@ async def unlink_task_from_contact(
     not linked is accepted rather than refused, so a retry is safe. Deleting the
     contact itself removes its task links automatically, so this is not needed
     for that.
-
-    Returns:
-        JSON string with task_id, contact_id, linked (the resulting state, and
-        false here) and changed (whether this call removed a link, false when
-        there was none).
     """
     user_id = await get_current_user_id()
 
@@ -350,9 +340,7 @@ async def unlink_task_from_contact(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(
-        _link_to_dict(task_id, contact_id, linked=False, changed=changed), indent=2
-    )
+    return _contact_link(task_id, contact_id, linked=False, changed=changed)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -391,7 +379,7 @@ async def retarget_task(
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskMCP:
     """
     Move a task to a different due journal, keeping the one it is leaving.
 
@@ -409,11 +397,6 @@ async def retarget_task(
     Asking for the journal the task is already due in changes nothing at all.
     The journal the task is *leaving* is never checked, so a task whose due
     journal has already passed can be moved onto a future one.
-
-    Returns:
-        JSON string with the task: id, text, status (always "not_done" after a
-        real retarget), both journal anchors, the journals it has passed
-        through — including the one it just left — and timestamps.
     """
     user_id = await get_current_user_id()
 
@@ -426,7 +409,7 @@ async def retarget_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(retargeted, trail), indent=2)
+    return _task_fields(retargeted, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -447,7 +430,7 @@ async def update_task_text(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskMCP:
     """
     Reword a task, in any status.
 
@@ -458,10 +441,6 @@ async def update_task_text(
     No journal is involved and none is linked: rewording a task does not attach
     it to whatever journal the conversation happens to be about. Use the journal
     link tools for that.
-
-    Returns:
-        JSON string with the task: id, text, status, both journal anchors, the
-        journals it has passed through, and timestamps.
     """
     user_id = await get_current_user_id()
 
@@ -473,7 +452,7 @@ async def update_task_text(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_task_to_dict(updated, trail), indent=2)
+    return _task_fields(updated, trail)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -489,7 +468,7 @@ async def delete_task(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskDeletedResponse:
     """
     Delete a task permanently. Prefer cancelling it instead.
 
@@ -505,9 +484,6 @@ async def delete_task(
 
     Deleting a task that does not exist, or is not yours, reports not found —
     including a second delete of a task already deleted.
-
-    Returns:
-        JSON string confirming the deletion: deleted (true) and task_id.
     """
     user_id = await get_current_user_id()
 
@@ -518,7 +494,7 @@ async def delete_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps({"deleted": True, "task_id": task_id}, indent=2)
+    return TaskDeletedResponse(deleted=True, task_id=task_id)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -541,7 +517,7 @@ async def attach_intermediate_journal_to_task(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskJournalLinkResponse:
     """
     Note that a task came up in another journal, as an intermediate link.
 
@@ -561,11 +537,6 @@ async def attach_intermediate_journal_to_task(
     nothing, so a retry is safe. Retargeting a task keeps its previous due
     journal as an intermediate link automatically — this tool is for the links a
     person asks for, and nothing infers one from an ordinary edit.
-
-    Returns:
-        JSON string with task_id, journal_id, attached (the resulting state, and
-        true here) and changed (whether this call created the link, false when
-        it was already there).
     """
     user_id = await get_current_user_id()
 
@@ -577,10 +548,7 @@ async def attach_intermediate_journal_to_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(
-        _journal_link_to_dict(task_id, journal_id, attached=True, changed=changed),
-        indent=2,
-    )
+    return _journal_link(task_id, journal_id, attached=True, changed=changed)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -599,7 +567,7 @@ async def detach_intermediate_journal_from_task(
     ],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
-) -> str:
+) -> TaskJournalLinkResponse:
     """
     Remove an intermediate-journal link from a task.
 
@@ -621,11 +589,6 @@ async def detach_intermediate_journal_from_task(
     that is *both* an anchor and an intermediate journal — which happens when a
     task is retargeted onto a journal it already mentioned — keeps its
     intermediate link removable; only the anchor role is out of reach.
-
-    Returns:
-        JSON string with task_id, journal_id, attached (the resulting state, and
-        false here) and changed (whether this call removed a link, false when
-        there was none).
     """
     user_id = await get_current_user_id()
 
@@ -637,61 +600,55 @@ async def detach_intermediate_journal_from_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(
-        _journal_link_to_dict(task_id, journal_id, attached=False, changed=changed),
-        indent=2,
-    )
+    return _journal_link(task_id, journal_id, attached=False, changed=changed)
 
 
-def _journal_ref_to_dict(ref: TaskJournalRef) -> dict[str, Any]:
+def _journal_ref(ref: TaskJournalRef) -> TaskJournalRefMCP:
     """One of a task's journals, as a read tool hands it over.
 
     The date is a **date**, already resolved in the user's timezone — the same
     one the lapse rule judged the task against. Sending an instant would invite
     an agent to re-derive the day in UTC and disagree with the verdict beside it.
     """
-    return {
-        "id": ref.id,
-        "title": ref.title,
-        "date": ref.date.isoformat(),
-        "cancelled": ref.cancelled,
-    }
+    return TaskJournalRefMCP(
+        id=ref.id, title=ref.title, date=ref.date, cancelled=ref.cancelled
+    )
 
 
-def _read_model_to_dict(model: TaskReadModel) -> dict[str, Any]:
+def _read_model(model: TaskReadModel) -> TaskReadMCP:
     """A task as the read tools return it.
 
-    A **superset** of what the write tools return: every field ``_task_to_dict``
+    A **superset** of what the write tools return: every field ``_task_fields``
     carries is here, including ``intermediate_journal_ids``, with the resolved
     journals, the contacts and the lapse added. An agent that learned the shape
     from ``create_task`` does not have to learn a second one to read the task
     back.
     """
-    return {
-        **_task_to_dict(model.task, [ref.id for ref in model.intermediate_journals]),
-        "creating_journal": _journal_ref_to_dict(model.creating_journal),
-        "due_journal": _journal_ref_to_dict(model.due_journal),
-        "intermediate_journals": [
-            _journal_ref_to_dict(ref) for ref in model.intermediate_journals
+    return TaskReadMCP(
+        **_task_fields(
+            model.task, [ref.id for ref in model.intermediate_journals]
+        ).model_dump(),
+        creating_journal=_journal_ref(model.creating_journal),
+        due_journal=_journal_ref(model.due_journal),
+        intermediate_journals=[
+            _journal_ref(ref) for ref in model.intermediate_journals
         ],
-        "contacts": [
-            {
-                "id": contact.id,
-                "display_name": contact.display_name,
-                "photo_url": contact.photo_url,
-            }
+        contacts=[
+            TaskContactMCP(
+                id=contact.id,
+                display_name=contact.display_name,
+                photo_url=contact.photo_url,
+            )
             for contact in model.contacts
         ],
         # Taken from the model rather than recomputed from the reason, so the
         # flag and the reason can never disagree about the same task.
-        "lapsed": model.lapsed,
-        "lapse_reason": (
-            str(model.lapse_reason) if model.lapse_reason is not None else None
-        ),
-    }
+        lapsed=model.lapsed,
+        lapse_reason=model.lapse_reason,
+    )
 
 
-def _groups_to_dict(groups: JournalTaskGroups) -> dict[str, Any]:
+def _groups(groups: JournalTaskGroups) -> JournalTasksResponse:
     """A journal's tasks, nested under the role each link holds.
 
     **The roles are the structure here**, unlike the JSON:API endpoint, which
@@ -704,21 +661,21 @@ def _groups_to_dict(groups: JournalTaskGroups) -> dict[str, Any]:
     narrow with the groups, so a copy never names a group this answer left
     empty.
     """
-    return {
-        "journal_id": groups.journal_id,
-        "groups": {
-            str(role): [
-                {
-                    **_read_model_to_dict(model),
-                    "link_roles": [
-                        str(held) for held in groups.roles_for(model.task.id or 0)
-                    ],
-                }
-                for model in groups.for_role(role)
-            ]
-            for role in TaskLinkRole
-        },
-    }
+    return JournalTasksResponse(
+        journal_id=groups.journal_id,
+        groups=TaskGroupsMCP(
+            **{
+                str(role): [
+                    GroupedTaskMCP(
+                        **_read_model(model).model_dump(),
+                        link_roles=list(groups.roles_for(model.task.id or 0)),
+                    )
+                    for model in groups.for_role(role)
+                ]
+                for role in TaskLinkRole
+            }
+        ),
+    )
 
 
 @tool(annotations=READ_ONLY)
@@ -729,7 +686,7 @@ async def get_task(
         Field(ge=1, le=INT32_MAX, description="The id of the task to read."),
     ],
     task_read_service: TaskReadService = mcp_depends(get_task_read_service),
-) -> str:
+) -> TaskReadMCP:
     """
     Read one task whole: its journals by role, its contacts, and its lapse.
 
@@ -750,19 +707,11 @@ async def get_task(
 
     A lapsed task is not broken: it can still be completed, reworded, cancelled
     or retargeted.
-
-    Returns:
-        JSON string with the task's id, text, status and timestamps; its
-        journals by role — the **creating** journal it arose in, the **due**
-        journal it is due in, and the intermediate journals it has passed
-        through, given both as ids and as objects carrying title, date and
-        whether the journal is a cancelled event; its linked contacts; and
-        whether it has lapsed, with the reason.
     """
     user_id = await get_current_user_id()
 
     model = await task_read_service.read_model(user_id, task_id)
-    return json.dumps(_read_model_to_dict(model), indent=2)
+    return _read_model(model)
 
 
 @tool(annotations=READ_ONLY)
@@ -786,7 +735,7 @@ async def list_journal_tasks(
         ),
     ] = None,
     task_read_service: TaskReadService = mcp_depends(get_task_read_service),
-) -> str:
+) -> JournalTasksResponse:
     """
     List the tasks linked to a journal, grouped by how each one is linked.
 
@@ -809,22 +758,16 @@ async def list_journal_tasks(
     are worked with on journals and on the home dashboard, nowhere else.
 
     Tasks are ordered by their due journal's date, soonest first.
-
-    Returns:
-        JSON string with journal_id and a groups object keyed due, created and
-        mentioned, each holding the same task shape get_task returns plus
-        link_roles. A journal of yours with no tasks returns three empty groups;
-        a journal that does not exist or is not yours is an error.
     """
     user_id = await get_current_user_id()
 
     groups = await task_read_service.read_models_for_journal(
         user_id, journal_id, role=role
     )
-    return json.dumps(_groups_to_dict(groups), indent=2)
+    return _groups(groups)
 
 
-def _upcoming_to_dict(upcoming: UpcomingTasks) -> dict[str, Any]:
+def _upcoming(upcoming: UpcomingTasks) -> UpcomingTasksResponse:
     """The upcoming window as the tool hands it over.
 
     The window travels beside the tasks rather than being left for the agent to
@@ -832,15 +775,15 @@ def _upcoming_to_dict(upcoming: UpcomingTasks) -> dict[str, Any]:
     from — and "nothing due between today and next Tuesday" is a different, more
     useful sentence than "nothing due".
     """
-    return {
-        "window": {
-            "start_date": upcoming.window.first_day.isoformat(),
-            "end_date": upcoming.window.last_day.isoformat(),
-            "days_ahead": upcoming.window.days_ahead,
-        },
-        "total": upcoming.total,
-        "tasks": [_read_model_to_dict(model) for model in upcoming.tasks],
-    }
+    return UpcomingTasksResponse(
+        window=UpcomingWindowMCP(
+            start_date=upcoming.window.first_day,
+            end_date=upcoming.window.last_day,
+            days_ahead=upcoming.window.days_ahead,
+        ),
+        total=upcoming.total,
+        tasks=[_read_model(model) for model in upcoming.tasks],
+    )
 
 
 @tool(annotations=READ_ONLY)
@@ -858,7 +801,7 @@ async def list_upcoming_tasks(
         ),
     ] = DEFAULT_UPCOMING_DAYS_AHEAD,
     task_read_service: TaskReadService = mcp_depends(get_task_read_service),
-) -> str:
+) -> UpcomingTasksResponse:
     """
     List what the user has coming up: tasks due in the next few days.
 
@@ -888,24 +831,16 @@ async def list_upcoming_tasks(
     The whole window comes back in one answer and is **not paginated**: there is
     no second page to ask for, and this is deliberately not a way to list every
     task the user has.
-
-    Returns:
-        JSON string with a window object naming start_date, end_date and
-        days_ahead; a total count; and tasks, each in the same shape get_task
-        returns — id, text, status, both journal anchors resolved with title and
-        date, the intermediate journals, the linked contacts, and the lapse
-        fields, which for every task listed here say it has not lapsed. An empty
-        window is an ordinary answer, and a good one.
     """
     user_id = await get_current_user_id()
 
     upcoming = await task_read_service.read_models_for_upcoming_window(
         user_id, days_ahead=days_ahead
     )
-    return json.dumps(_upcoming_to_dict(upcoming), indent=2)
+    return _upcoming(upcoming)
 
 
-def _history_entry_to_dict(entry: FieldHistoryEntry) -> dict[str, Any]:
+def _history_entry(entry: FieldHistoryEntry) -> TaskHistoryEntryMCP:
     """One change, as the history tool hands it over.
 
     ``source`` is the ``Provenance`` value rather than the enum, and
@@ -916,16 +851,16 @@ def _history_entry_to_dict(entry: FieldHistoryEntry) -> dict[str, Any]:
     behaviour this iteration forbids.
     """
     created_at = entry.created_at
-    return {
-        "field_name": entry.field_name,
-        "old_value": entry.old_value,
-        "new_value": entry.new_value,
-        "changed_by": entry.changed_by,
-        "source": entry.source.value,
-        "created_at": (
+    return TaskHistoryEntryMCP(
+        field_name=entry.field_name,
+        old_value=entry.old_value,
+        new_value=entry.new_value,
+        changed_by=entry.changed_by,
+        source=entry.source.value,
+        created_at=(
             created_at.isoformat() if isinstance(created_at, datetime) else created_at
         ),
-    }
+    )
 
 
 @tool(annotations=READ_ONLY)
@@ -942,7 +877,7 @@ async def get_task_history(
     ] = 1,
     limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
     history_service: TaskHistoryService = mcp_depends(get_task_history_service),
-) -> str:
+) -> TaskHistoryResponse:
     """
     Read a task's change history: what changed, when, and where it came from.
 
@@ -980,11 +915,6 @@ async def get_task_history(
     A page past the end of the history is an ordinary empty answer rather than
     an error, and ``total_count`` still tells you how many entries there are, so
     an overshoot is recoverable without guessing.
-
-    Returns:
-        JSON string with task_id, total_count (every entry, not just this
-        page), page, limit, and entries — each with field_name, old_value,
-        new_value, changed_by, source and created_at.
     """
     user_id = await get_current_user_id()
 
@@ -1000,15 +930,12 @@ async def get_task_history(
         user_id=user_id,
     )
 
-    return json.dumps(
-        {
-            "task_id": task_id,
-            "total_count": total_count,
-            "page": page,
-            "limit": limit,
-            "entries": [_history_entry_to_dict(entry) for entry in entries],
-        },
-        indent=2,
+    return TaskHistoryResponse(
+        task_id=task_id,
+        total_count=total_count,
+        page=page,
+        limit=limit,
+        entries=[_history_entry(entry) for entry in entries],
     )
 
 

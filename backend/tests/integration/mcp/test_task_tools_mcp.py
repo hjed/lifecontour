@@ -37,6 +37,8 @@ from tests.integration.core.integrations.journal_sync_seeding import (
 )
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
+    extract_mcp_tool_error,
+    extract_typed_tool_result,
     sessionless_mcp_headers,
     sessionless_mcp_request,
 )
@@ -75,6 +77,13 @@ async def _raw_call(client: Any, tool: str, arguments: dict[str, Any]) -> Any:
         ),
         headers=sessionless_mcp_headers("tools/call", tool),
     )
+
+
+async def _refused(client: Any, tool: str, **arguments: Any) -> dict[str, Any]:
+    """Call ``tool`` expecting a refusal; the payload of its ``isError`` result."""
+    response = await _raw_call(client, tool, arguments)
+    assert response.status_code == 200
+    return extract_mcp_tool_error(response.text)
 
 
 async def _raw_tool_call(client: Any, arguments: dict[str, Any]) -> Any:
@@ -133,6 +142,26 @@ class TestCreateTaskTool:
         assert int(payload["id"]) > 0
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 1
 
+    async def test_the_task_is_sent_as_structured_content(
+        self, authenticated_lifespan_client, task_anchors: tuple[int, int]
+    ):
+        """The task reaches a client as its response model, not a string."""
+        creating_id, due_id = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_tool_call(
+                client,
+                {
+                    "creating_journal_id": creating_id,
+                    "due_journal_id": due_id,
+                    "text": "print the permit",
+                },
+            )
+
+        payload = extract_typed_tool_result(response.text)
+        assert payload["text"] == "print the permit"
+        assert payload["status"] == "not_done"
+
     async def test_accepts_the_same_journal_as_both_anchors(
         self,
         authenticated_lifespan_client,
@@ -190,8 +219,9 @@ class TestUnreachableAnchors:
         creating_id, _ = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=999_999,
                 text="print the permit",
@@ -219,14 +249,16 @@ class TestUnreachableAnchors:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _create_task(
+            foreign = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=foreign_id,
                 text="print the permit",
             )
-            absent = await _create_task(
+            absent = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=999_999,
                 text="print the permit",
@@ -251,8 +283,9 @@ class TestUnreachableAnchors:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=foreign_id,
                 due_journal_id=due_id,
                 text="print the permit",
@@ -280,8 +313,9 @@ class TestTheFutureDatedRuleReachesTheTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=past_id,
                 text="too late",
@@ -317,8 +351,9 @@ class TestTheFutureDatedRuleReachesTheTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=past_id,
                 text="too late",
@@ -340,8 +375,9 @@ class TestRejectedArguments:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="split the gear",
@@ -361,8 +397,9 @@ class TestRejectedArguments:
         creating_id, due_id = task_anchors
 
         async with authenticated_lifespan_client() as client:
-            payload = await _create_task(
+            payload = await _refused(
                 client,
+                "create_task",
                 creating_journal_id=creating_id,
                 due_journal_id=due_id,
                 text="   ",
@@ -515,7 +552,9 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _set_task_status(client, task_id=task_id, status=target)
+            payload = await _refused(
+                client, "set_task_status", task_id=task_id, status=target
+            )
 
         assert payload["error"] == "Task error"
         assert "retarget" in payload["message"].lower()
@@ -542,10 +581,12 @@ class TestSetTaskStatusTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _set_task_status(
-                client, task_id=foreign_task, status="done"
+            foreign = await _refused(
+                client, "set_task_status", task_id=foreign_task, status="done"
             )
-            absent = await _set_task_status(client, task_id=999_999, status="done")
+            absent = await _refused(
+                client, "set_task_status", task_id=999_999, status="done"
+            )
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -756,7 +797,9 @@ class TestContactLinkToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _link_contact(client, task_id=task_id, contact_id=999_999)
+            payload = await _refused(
+                client, "link_task_to_contact", task_id=task_id, contact_id=999_999
+            )
 
         assert payload["error"] == "Contact not found"
         assert "999999" in payload["message"]
@@ -783,10 +826,12 @@ class TestContactLinkToolRejections:
         sarah = await create_contact(clean_database, first_name="Sarah")
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _link_contact(
-                client, task_id=foreign_task, contact_id=sarah
+            foreign = await _refused(
+                client, "link_task_to_contact", task_id=foreign_task, contact_id=sarah
             )
-            absent = await _link_contact(client, task_id=999_999, contact_id=sarah)
+            absent = await _refused(
+                client, "link_task_to_contact", task_id=999_999, contact_id=sarah
+            )
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -816,8 +861,11 @@ class TestContactLinkToolRejections:
         await link_contact(clean_database, task_id=foreign_task, contact_id=sarah)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _unlink_contact(
-                client, task_id=foreign_task, contact_id=sarah
+            payload = await _refused(
+                client,
+                "unlink_task_from_contact",
+                task_id=foreign_task,
+                contact_id=sarah,
             )
 
         assert payload["error"] == "Not found"
@@ -990,7 +1038,9 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="   ")
+            payload = await _refused(
+                client, "update_task_text", task_id=task_id, text="   "
+            )
 
         assert "text" in payload["message"]
         assert await stored_text(clean_database, task_id) == "print the permit"
@@ -1017,10 +1067,12 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _update_task_text(
-                client, task_id=foreign_task, text="reworded"
+            foreign = await _refused(
+                client, "update_task_text", task_id=foreign_task, text="reworded"
             )
-            absent = await _update_task_text(client, task_id=999_999, text="reworded")
+            absent = await _refused(
+                client, "update_task_text", task_id=999_999, text="reworded"
+            )
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -1140,7 +1192,7 @@ class TestDeleteTaskTool:
 
         async with authenticated_lifespan_client() as client:
             first = await _delete_task(client, task_id=task_id)
-            second = await _delete_task(client, task_id=task_id)
+            second = await _refused(client, "delete_task", task_id=task_id)
 
         assert first["deleted"] is True
         assert second["error"] == "Not found"
@@ -1166,8 +1218,8 @@ class TestDeleteTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _delete_task(client, task_id=foreign_task)
-            absent = await _delete_task(client, task_id=999_999)
+            foreign = await _refused(client, "delete_task", task_id=foreign_task)
+            absent = await _refused(client, "delete_task", task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -1532,7 +1584,9 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _set_task_status(client, task_id=task_id, status="done")
+            payload = await _refused(
+                client, "set_task_status", task_id=task_id, status="done"
+            )
 
         assert "error" in payload
         assert await task_events(clean_database, task_id=task_id) == []
@@ -1561,7 +1615,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _delete_task(client, task_id=foreign_task_id)
+            payload = await _refused(client, "delete_task", task_id=foreign_task_id)
 
         assert "error" in payload
         assert await task_events(clean_database) == []
@@ -1832,8 +1886,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _retarget_task(
-                client, task_id=task_id, due_journal_id=later_id
+            payload = await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=later_id
             )
 
         assert payload["error"] == "Task error"
@@ -1859,7 +1913,9 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            await _retarget_task(client, task_id=task_id, due_journal_id=later_id)
+            await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=later_id
+            )
 
         assert await stored_status(clean_database, task_id) == "done"
         assert await stored_anchors(clean_database, task_id) == (creating_id, due_id)
@@ -1954,8 +2010,8 @@ class TestTheReopenGateReachesAnAgent:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _retarget_task(
-                client, task_id=task_id, due_journal_id=past_id
+            payload = await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=past_id
             )
 
         assert payload["error"] == "Task error"
@@ -1990,8 +2046,9 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _retarget_task(
+            payload = await _refused(
                 client,
+                "retarget_task",
                 task_id=task_id,
                 due_journal_id=past_id,
                 acknowledge_reopen=True,
@@ -2022,11 +2079,11 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _retarget_task(
-                client, task_id=task_id, due_journal_id=foreign_id
+            foreign = await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=foreign_id
             )
-            absent = await _retarget_task(
-                client, task_id=task_id, due_journal_id=999_999
+            absent = await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=999_999
             )
 
         assert foreign["error"] == absent["error"] == "Not found"
@@ -2058,11 +2115,11 @@ class TestTheRetargetToolRevalidatesTheJournalRules:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _retarget_task(
-                client, task_id=foreign_task, due_journal_id=due_id
+            foreign = await _refused(
+                client, "retarget_task", task_id=foreign_task, due_journal_id=due_id
             )
-            absent = await _retarget_task(
-                client, task_id=999_999, due_journal_id=due_id
+            absent = await _refused(
+                client, "retarget_task", task_id=999_999, due_journal_id=due_id
             )
 
         assert foreign["error"] == absent["error"] == "Not found"
@@ -2377,8 +2434,11 @@ class TestIntermediateJournalToolRejections:
         journal_id = creating_id if anchor == "creating" else due_id
 
         async with authenticated_lifespan_client() as client:
-            payload = await _attach_journal(
-                client, task_id=task_id, journal_id=journal_id
+            payload = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=journal_id,
             )
 
         assert payload["error"] == "Task error"
@@ -2400,8 +2460,11 @@ class TestIntermediateJournalToolRejections:
         journal_id = creating_id if anchor == "creating" else due_id
 
         async with authenticated_lifespan_client() as client:
-            payload = await _detach_journal(
-                client, task_id=task_id, journal_id=journal_id
+            payload = await _refused(
+                client,
+                "detach_intermediate_journal_from_task",
+                task_id=task_id,
+                journal_id=journal_id,
             )
 
         assert payload["error"] == "Task error"
@@ -2424,8 +2487,18 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            anchor = await _attach_journal(client, task_id=task_id, journal_id=due_id)
-            missing = await _attach_journal(client, task_id=task_id, journal_id=999_999)
+            anchor = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=due_id,
+            )
+            missing = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=999_999,
+            )
 
         assert anchor["error"] != missing["error"]
         assert missing["error"] == "Journal not found"
@@ -2447,7 +2520,12 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _attach_journal(client, task_id=task_id, journal_id=999_999)
+            payload = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=999_999,
+            )
 
         assert payload["error"] == "Journal not found"
         assert "999999" in payload["message"]
@@ -2469,8 +2547,18 @@ class TestIntermediateJournalToolRejections:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _attach_journal(client, task_id=task_id, journal_id=theirs)
-            absent = await _attach_journal(client, task_id=task_id, journal_id=999_999)
+            foreign = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=theirs,
+            )
+            absent = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=task_id,
+                journal_id=999_999,
+            )
 
         assert foreign["error"] == absent["error"] == "Journal not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -2503,17 +2591,29 @@ class TestIntermediateJournalToolRejections:
         mine = await create_journal(journal_repository, title="Mine")
 
         async with authenticated_lifespan_client() as client:
-            foreign_attach = await _attach_journal(
-                client, task_id=their_task, journal_id=mine
+            foreign_attach = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=their_task,
+                journal_id=mine,
             )
-            absent_attach = await _attach_journal(
-                client, task_id=999_999, journal_id=mine
+            absent_attach = await _refused(
+                client,
+                "attach_intermediate_journal_to_task",
+                task_id=999_999,
+                journal_id=mine,
             )
-            foreign_detach = await _detach_journal(
-                client, task_id=their_task, journal_id=their_mention
+            foreign_detach = await _refused(
+                client,
+                "detach_intermediate_journal_from_task",
+                task_id=their_task,
+                journal_id=their_mention,
             )
-            absent_detach = await _detach_journal(
-                client, task_id=999_999, journal_id=their_mention
+            absent_detach = await _refused(
+                client,
+                "detach_intermediate_journal_from_task",
+                task_id=999_999,
+                journal_id=their_mention,
             )
 
         # Compared with each other rather than each against a constant, which is
@@ -2840,8 +2940,8 @@ class TestGetTaskTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _get_task(client, task_id=theirs)
-            absent = await _get_task(client, task_id=999_999)
+            foreign = await _refused(client, "get_task", task_id=theirs)
+            absent = await _refused(client, "get_task", task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -3087,8 +3187,8 @@ class TestListJournalTasksTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _list_journal_tasks(client, journal_id=theirs)
-            absent = await _list_journal_tasks(client, journal_id=999_999)
+            foreign = await _refused(client, "list_journal_tasks", journal_id=theirs)
+            absent = await _refused(client, "list_journal_tasks", journal_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Journal not found"
         assert foreign["message"].replace(str(theirs), "X") == absent[
@@ -3600,7 +3700,7 @@ class TestGetTaskHistoryTool:
         async with authenticated_lifespan_client() as client:
             deleted = await _delete_task(client, task_id=task_id)
             payload = await _get_task_history(client, task_id=task_id)
-            gone = await _get_task(client, task_id=task_id)
+            gone = await _refused(client, "get_task", task_id=task_id)
 
         assert deleted["deleted"] is True
         assert not await task_exists(clean_database, task_id)
@@ -3633,8 +3733,8 @@ class TestGetTaskHistoryTool:
         await _seed_a_life(clean_database, foreign_task, user_id=OTHER_USER_ID)
 
         async with authenticated_lifespan_client() as client:
-            foreign = await _get_task_history(client, task_id=foreign_task)
-            absent = await _get_task_history(client, task_id=999_999)
+            foreign = await _refused(client, "get_task_history", task_id=foreign_task)
+            absent = await _refused(client, "get_task_history", task_id=999_999)
 
         assert foreign["error"] == absent["error"] == "Not found"
         assert foreign["message"].replace(str(foreign_task), "X") == absent[
@@ -3673,7 +3773,7 @@ class TestGetTaskHistoryTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _get_task_history(client, task_id=foreign_task)
+            payload = await _refused(client, "get_task_history", task_id=foreign_task)
 
         assert payload["error"] == "Not found"
 
