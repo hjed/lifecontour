@@ -16,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.integrations.adapters.sql.contact_suggestion_ignore_repository import (
     SqlContactSuggestionIgnoreRepository,
 )
+from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
 from tests.integration.core.integrations.contact_suggestion_seeding import (
     USER_ID,
     create_contact,
     journal_relationships,
     seed_participant,
 )
+from tests.integration.not_found_responses import MISSING_CONTACT_ID, masked_errors
 
 pytestmark = pytest.mark.asyncio
 
@@ -116,6 +118,37 @@ async def test_accept_into_unknown_contact_is_404(
     )
 
     assert response.status_code == 404
+
+
+async def test_accept_into_another_users_contact_is_404_like_a_missing_one(
+    authenticated_client: AsyncClient, async_connection: AsyncConnection
+) -> None:
+    """Their contact is refused exactly as a missing one, and the suggestion stays."""
+    their_contact_id = await seed_contact(
+        async_connection, user_id=OTHER_USER_ID, first_name="Jane"
+    )
+    await seed_participant(async_connection, "jane@x.com", 5)
+
+    foreign = await authenticated_client.post(
+        f"{BASE_URL}/accept",
+        json=_accept_body(
+            "jane@x.com", {"kind": "existing", "contact_id": their_contact_id}
+        ),
+    )
+    missing = await authenticated_client.post(
+        f"{BASE_URL}/accept",
+        json=_accept_body(
+            "jane@x.com", {"kind": "existing", "contact_id": MISSING_CONTACT_ID}
+        ),
+    )
+
+    assert foreign.status_code == missing.status_code == 404
+    assert masked_errors(foreign, their_contact_id) == masked_errors(
+        missing, MISSING_CONTACT_ID
+    )
+    assert await journal_relationships(async_connection, their_contact_id) == {}
+    suggestions = (await authenticated_client.get(BASE_URL)).json()["data"]
+    assert [s["id"] for s in suggestions] == ["jane@x.com"]
 
 
 @pytest.mark.parametrize(

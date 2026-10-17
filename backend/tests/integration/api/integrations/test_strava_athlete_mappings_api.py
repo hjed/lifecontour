@@ -1,5 +1,12 @@
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID, seed_contact
+from tests.integration.not_found_responses import MISSING_CONTACT_ID, masked_errors
+
+UNMATCHED_ATHLETE_ID = "athlete-unmatched"
 
 
 @pytest.mark.asyncio
@@ -133,3 +140,70 @@ async def test_get_journal_unmatched_athletes(
     assert athlete_data["id"] == "unmatched_1"
     assert athlete_data["attributes"]["strava_athlete_id"] == "unmatched_1"
     assert athlete_data["attributes"]["strava_athlete_name"] == "Jane Doe"
+
+
+async def _post_mapping(client: AsyncClient, contact_id: int) -> Response:
+    return await client.post(
+        "/api/integrations/strava/athlete-mappings",
+        json={
+            "strava_athlete_id": UNMATCHED_ATHLETE_ID,
+            "strava_athlete_name": "Theodora Quince",
+            "contact_id": contact_id,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_mapping_to_another_users_contact_is_not_found(
+    authenticated_client: AsyncClient,
+    async_connection: AsyncConnection,
+    sample_journal_id: int,
+) -> None:
+    """Another user's contact is refused exactly as a missing one, writing nothing.
+
+    The athlete stays unmatched on the journal, so the user can still map it to
+    a contact of their own.
+    """
+    their_contact_id = await seed_contact(
+        async_connection, user_id=OTHER_USER_ID, first_name="Theodora"
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_unmatched_strava_athletes
+                (journal_id, strava_athlete_id, strava_athlete_name)
+            VALUES (:journal_id, :athlete_id, 'Theodora Quince')
+        """),
+        {"journal_id": sample_journal_id, "athlete_id": UNMATCHED_ATHLETE_ID},
+    )
+
+    foreign = await _post_mapping(authenticated_client, their_contact_id)
+    missing = await _post_mapping(authenticated_client, MISSING_CONTACT_ID)
+
+    assert foreign.status_code == missing.status_code == 404
+    assert masked_errors(foreign, their_contact_id) == masked_errors(
+        missing, MISSING_CONTACT_ID
+    )
+    mappings = await async_connection.execute(
+        text("""
+            SELECT count(*) FROM strava_athlete_mappings
+            WHERE user_id = :user_id AND strava_athlete_id = :athlete_id
+        """),
+        {"user_id": TEST_USER_ID, "athlete_id": UNMATCHED_ATHLETE_ID},
+    )
+    assert mappings.scalar_one() == 0
+    participants = await async_connection.execute(
+        text("""
+            SELECT count(*) FROM journal_contact_relationships
+            WHERE journal_id = :journal_id
+        """),
+        {"journal_id": sample_journal_id},
+    )
+    assert participants.scalar_one() == 0
+    unmatched = await async_connection.execute(
+        text("""
+            SELECT strava_athlete_id FROM journal_unmatched_strava_athletes
+            WHERE journal_id = :journal_id
+        """),
+        {"journal_id": sample_journal_id},
+    )
+    assert unmatched.scalars().all() == [UNMATCHED_ATHLETE_ID]

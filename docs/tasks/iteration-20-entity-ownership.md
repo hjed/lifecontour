@@ -1185,7 +1185,7 @@ resolving the divergences recorded in iterations 13 and 18.
 **Specification Reference:** Part 4.
 
 **Acceptance Criteria (task-level):**
-- [ ] Journal participants, task contacts, contact relationships, contact merge, athlete mappings, suggestion accept, Immich conflict resolution and contact history treat a foreign contact as not found and write nothing.
+- [x] Journal participants, task contacts, contact relationships, contact merge, athlete mappings, suggestion accept, Immich conflict resolution and contact history treat a foreign contact as not found and write nothing. (Phases 11 and 12)
 - [x] The divergence notes in `task_service.py:1638`, iteration 13, iteration 18 phase 4 and `domain-architecture.md` are replaced by pointers to the enforced rule. (Phase 11)
 
 ---
@@ -1287,7 +1287,7 @@ relationship, merge and history proofs; 11c the task proofs and the documents.
 
 ---
 
-#### Phase 12: Integration-adjacent links — athlete mappings, suggestions, Immich conflicts
+#### Phase 12: Integration-adjacent links — athlete mappings, suggestions, Immich conflicts ✅ DONE
 
 **PR Size:** ~300 lines
 
@@ -1299,24 +1299,68 @@ relationship, merge and history proofs; 11c the task proofs and the documents.
 >
 > What remains is the integration proofs below.
 
-- [ ] `AthleteMappingService.create_mapping` resolves the contact with `(contact_id, user_id)`.
-- [ ] `ContactSuggestionService` accept with an `ExistingContactTarget` resolves the contact for the
+- [x] `StravaAthleteMappingService.create_mapping` resolves the contact with `(contact_id, user_id)`
+  (`find_by_id(contact_id, user_id=…)` before the unit of work).
+  The Strava athlete name match on inbound activities searches only the journal owner's contacts.
+- [x] `ContactSuggestionService` accept with an `ExistingContactTarget` resolves the contact for the
   acting user; the `NewContactTarget` path already stamps the owner (Phase 3).
-- [ ] Immich person-conflict resolution ("link" action) in `immich_auth_controller.py` and
-  `mcp/domains/integrations/tools.py`: the candidate contact must belong to the acting user;
-  `pending_entity_mappings` is already per-user.
-- [ ] Contact summary refresh (`ContactSummaryRefreshRequested` from journal links) unchanged — it
-  carries `contact_id` and the summary consumer loads the owned contact.
+- [x] Immich person-conflict resolution ("link" action), REST and MCP: the candidate contact must
+  belong to the acting user; `pending_entity_mappings` is already per-user. Both surfaces now go
+  through `ImmichConflictResolutionService` (#1750).
+- [x] Contact summary refresh (`ContactSummaryRefreshRequested` from journal links) unchanged — the
+  "requested" handler only marks `contact_id`, and generation reads the contact as its stored owner
+  (`find_owner_id` → `find_by_id(…, user_id=owner)`). Verified; no change.
 
 **Required Test Coverage:**
-- [ ] **Integration (first):** foreign contact in each path → not found, no mapping / method / link
-  row (`tests/integration/integrations/`, `tests/integration/mcp/test_integration_tools_mcp.py`).
+- [x] **Integration (first):** foreign contact in each path → not found exactly as a missing id
+  (the not-found body compared with the id masked, `tests/integration/not_found_responses.py`),
+  and no mapping / method / link row:
+  - athlete mapping: `api/integrations/test_strava_athlete_mappings_api.py::test_mapping_to_another_users_contact_is_not_found`
+    (no mapping, no participant, the athlete stays unmatched)
+  - athlete name match: `core/integrations/test_strava_participant_detection_integration.py::test_participant_detection_ignores_another_users_contact`
+    (not linked, not mapped, recorded as unmatched)
+  - suggestion accept: `core/integrations/test_contact_suggestion_service.py::TestAcceptIntoExistingContact::test_another_users_contact_raises_and_keeps_the_suggestion`
+    and `api/test_contact_suggestions_api.py::test_accept_into_another_users_contact_is_404_like_a_missing_one`
+  - Immich link: `integrations/test_immich_conflicts_api.py::test_resolve_immich_conflict_link_to_another_users_contact_is_404`
+    (conflict unchanged, no `sync_metadata` link); the service proof
+    `test_immich_conflict_resolution_service.py::test_link_to_another_users_contact_is_refused` already existed
+  - MCP: `mcp/test_mcp_contact_ownership.py` (Phase 6) — see the decisions.
+- [x] **Unit:** `tests/unit/core/integrations/test_strava_athlete_mapping_service.py` — a contact
+  the user does not own is refused before any write (the service had no unit test).
 
 **E2E:** not applicable.
 
 **Required Documentation Updates:**
-- [ ] `docs/architecture/integration-architecture.md` — Strava participant mapping and Immich
-  conflict resolution note the ownership check.
+- [x] `docs/architecture/integration-architecture.md` — new "Strava Athletes as Participants"
+  section (name match and manual mapping, owner-scoped) and an Immich "Person conflicts" note.
+
+**Status:** ✅ DONE — a Strava athlete maps, by hand or by name, only to the journal owner's
+contact; a suggestion is accepted only into the acting user's contact; an Immich person conflict
+links only to the acting user's contact. Another user's contact is answered exactly as a missing
+one and nothing is written. Backend unit 5168 passed; backend integration 3966 passed (7
+pre-existing skips).
+
+**Decisions (recorded during implementation):**
+- **No production change.** Phase 4 already scoped every path; each proof was green on first
+  run. Each was checked against a mutation (the scoped check pointed at another owner): the
+  athlete-mapping, name-match and Immich proofs fail when their one check is broken; the
+  suggestion proofs fail only when all three of its layers are (next decision).
+- **Suggestion accept refuses a foreign contact three times over.** The contact read, the
+  `add_contact_method(…, user_id=…)` write and the journal links
+  (`JournalContactService.add_contact_to_journal`, Phase 11) each raise `ContactNotFoundError`,
+  and `accept` is one `@transactional` unit, so the proofs only fail when all three are broken.
+  Each layer's own rule is proven where it lives: `add_contact_method` by the Phase 5 REST
+  isolation suite, the journal link by Phase 11's `test_journal_contact_ownership.py`.
+  The Immich link has a single check (`contact_exists`); without it a foreign contact is linked.
+- **The MCP proofs are Phase 6's, not new tests in `test_integration_tools_mcp.py`.**
+  `test_mcp_contact_ownership.py` already calls `resolve_immich_conflict` and
+  `accept_contact_suggestion` with another user's contact and compares the payload with a missing
+  id's. No MCP tool creates an athlete mapping; `get_strava_athlete_mappings` is covered there as
+  a no-result filter.
+- **The Immich link candidate is not limited to the conflict's `candidate_contact_ids`.** Any
+  contact the user owns may be chosen. That is not an ownership question, so it is left as is.
+- **REST not-found bodies name the id** ("Contact with ID 7 not found"), as for a missing id, so
+  the comparison masks it; each error's own `id` is a fresh UUID and is dropped.
 
 ---
 
