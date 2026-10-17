@@ -217,30 +217,6 @@ are the parts that are not obvious from them:
   packages stay private: they predate the
   [frontend image hardening](architecture/deployment-guide.md#frontend-image).
 
-## Setup Instructions
-
-### 1. Repository Secrets
-
-None. No workflow that runs on a PR references a repository secret
-([Workflow security rules](#workflow-security-rules)), and `release.yml` uses only the
-built-in `GITHUB_TOKEN`.
-
-### 2. External Service Setup
-
-**Codecov:**
-1. Sign up at https://codecov.io and add the repository
-2. Uploads are tokenless: the `codecov/codecov-action` steps pass no token, which Codecov
-   accepts for a public repository. An upload failure does not fail CI.
-
-**SonarCloud:**
-1. Sign up at https://sonarcloud.io
-2. Import your repository
-3. Keep Automatic Analysis enabled; no token or properties file is needed
-
-### 3. Dependabot Configuration
-
-`.github/dependabot.yml` is ready to use; adjust the schedules and groups there.
-
 ## Local Development Integration
 
 The CI/CD setup integrates with local development and Docker Compose:
