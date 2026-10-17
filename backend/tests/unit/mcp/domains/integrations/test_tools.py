@@ -10,6 +10,8 @@ from fastmcp import Client, FastMCP
 
 from app.mcp.domains.integrations.tools import register_integration_tools
 
+pytestmark = pytest.mark.unit
+
 
 class TestIntegrationTools:
     """Test integration MCP tools registration and functionality."""
