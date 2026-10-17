@@ -45,9 +45,31 @@ def fake_aws_access_key() -> str:
     return "AKIA" + "".join(secrets.choice(_BASE32) for _ in range(16))
 
 
-def fake_generic_secret() -> str:
-    """A high-entropy value that is not one of the allowlisted placeholders."""
-    return "".join(secrets.choice(_ALNUM) for _ in range(32))
+def fake_generic_secret(gitleaks_bin: str, scratch: Path) -> str:
+    """A high-entropy value that gitleaks' default rules flag.
+
+    The generic-api-key rule skips any value containing one of its stopwords
+    (``vpn``, ``math``, ...), which a random string hits about 0.5% of the
+    time. Retry until the default ruleset, without our allowlist, flags it.
+    """
+    config = scratch / "gitleaks-default.toml"
+    config.write_text("[extend]\nuseDefault = true\n", encoding="utf-8")
+    for _ in range(20):
+        value = "".join(secrets.choice(_ALNUM) for _ in range(32))
+        completed = subprocess.run(
+            [gitleaks_bin, "stdin", "--no-banner", "--config", str(config)],
+            input=f'client_secret = "{value}"\n',
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 1:
+            return value
+    pytest.fail(
+        "gitleaks flagged none of 20 random generic secrets; "
+        f"last exit code: {completed.returncode}\n"
+        f"{completed.stdout}{completed.stderr}"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -163,13 +185,12 @@ class TestSecretScanFlagsNewSecrets:
 
     @pytest.mark.parametrize("path", [".env.dev", "backend/tests/conftest.py"])
     def test_non_placeholder_value_in_allowlisted_path_is_still_caught(
-        self, repo: TempRepo, path: str
+        self, repo: TempRepo, path: str, tmp_path: Path
     ) -> None:
         # The allowlist pairs these paths with placeholder value regexes
         # (condition = "AND"), so a real-looking value is not hidden.
-        repo.commit(
-            "add secret", {path: f'client_secret = "{fake_generic_secret()}"\n'}
-        )
+        secret = fake_generic_secret(repo.gitleaks_bin, tmp_path)
+        repo.commit("add secret", {path: f'client_secret = "{secret}"\n'})
 
         result = repo.full_scan()
 
