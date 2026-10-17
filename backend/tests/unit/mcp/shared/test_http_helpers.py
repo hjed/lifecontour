@@ -10,6 +10,8 @@ from tests.integration.mcp.http_helpers import (
     extract_mcp_tool_error,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _sse(result: dict[str, Any]) -> str:
     """A streamable-HTTP body carrying one JSON-RPC ``tools/call`` result."""

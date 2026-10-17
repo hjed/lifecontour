@@ -16,6 +16,8 @@ from sqlalchemy.exc import DataError
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from tests.unit.mcp.tool_errors import raised_tool_error
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.asyncio
 async def test_http_exception_is_reported_as_a_validation_error() -> None:

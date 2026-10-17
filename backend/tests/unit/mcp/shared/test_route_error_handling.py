@@ -9,6 +9,8 @@ from app.mcp.shared import decorators
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from tests.unit.mcp.tool_errors import raised_tool_error
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.asyncio
 async def test_route_validation_error_names_the_field() -> None:

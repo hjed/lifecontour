@@ -18,6 +18,8 @@ from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.response_builders import MCPErrors
 from tests.unit.mcp.tool_errors import raised_tool_error
 
+pytestmark = pytest.mark.unit
+
 
 class _Item(BaseModel):
     id: int

@@ -20,6 +20,8 @@ from mcp.types import Tool as MCPTool
 
 from app.mcp.server import create_mcp_server
 
+pytestmark = pytest.mark.unit
+
 #: The marker fastmcp sets on a schema it had to wrap in ``{"result": ...}``.
 WRAPPED_MARKER = "x-fastmcp-wrap-result"
 

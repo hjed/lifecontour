@@ -13,6 +13,7 @@ what the commitment is*.
 
 from datetime import date
 
+import pytest
 from core_shared.exceptions import DomainError
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
@@ -25,6 +26,8 @@ from core_shared.models.tasks import (
 
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from tests.unit.mcp.tool_errors import raised_tool_error
+
+pytestmark = pytest.mark.unit
 
 
 async def _render(error: Exception) -> dict[str, str]:

@@ -38,6 +38,8 @@ from app.api.error_handlers import create_domain_error_response
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from tests.unit.mcp.tool_errors import raised_tool_error
 
+pytestmark = pytest.mark.unit
+
 DELETED = 10
 OTHER = 20
 

@@ -9,6 +9,7 @@ the JSON payload an agent reads the error's ``code`` and context from.
 import json
 import logging
 
+import pytest
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
@@ -17,6 +18,8 @@ from app.mcp.shared.response_builders import (
     MCPResponseBuilder,
     MCPToolError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class SampleResponse(BaseModel):
