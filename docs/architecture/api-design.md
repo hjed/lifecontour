@@ -353,6 +353,19 @@ the resulting cycle by aborting one transaction with a deadlock — which
 **up front** (`guard_journal_write`, `lock_journal`, or the touch itself where
 it is unconditional), and all writers queue instead of deadlocking.
 
+**Inbound contact syncs take the same path, in the same order.** An inbound
+`contact.updated` — and a `contact.created` reconciled onto an existing contact
+by email — builds the contact to save inside `modify_contact`, from the contact
+as read under its lock: the fields outside the sync's scope, archived values
+and unsynced tags come from that read, so a local edit committed before the
+event is kept rather than written back (#1735). Locks come **contact first,
+then the sync link**, which is the order a contact merge takes them in (both
+contacts, then it repoints their links); the old link-first order deadlocked
+against a merge. The link is peeked unlocked to find the contact, then re-read
+under its lock and must still name it; a contact merged away in between fails
+the event as transient, and its redelivery resolves the link onto the
+survivor.
+
 **Lock modes are the aggregate's choice.** Contacts lock `FOR UPDATE`. Journals
 lock `FOR NO KEY UPDATE` — the mode a plain `UPDATE` of the row takes anyway —
 because a task link holds `FOR KEY SHARE` on the journal it anchors to, and an

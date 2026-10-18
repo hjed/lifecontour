@@ -5,6 +5,7 @@ Tests the processing of outbox events from integration workers,
 including contact sync events and sync completion events.
 """
 
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,7 +18,10 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.contacts.models.exceptions import DuplicateTagNameError
+from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
+    DuplicateTagNameError,
+)
 from app.core.contacts.services.contact_service import ContactService
 from app.core.integrations.outbox_event_processor import (
     OutboxEventProcessingError,
@@ -35,8 +39,40 @@ class TestOutboxEventProcessor:
 
     @pytest.fixture
     def mock_contact_service(self) -> AsyncMock:
-        """Create mock contact service."""
-        return AsyncMock(spec=ContactService)
+        """Create mock contact service.
+
+        ``modify_contact`` keeps the real one's contract: it reads the stored
+        contact (``get_contact_by_id``, else the contact the event's link
+        names), hands the mutation a copy, and saves what comes back through
+        ``update_contact`` - so a test asserts on the saved contact there, and
+        on a skip by ``update_contact`` not being called. With no contact of
+        the owner's to read it raises ``ContactNotFoundError``, as the guard
+        does.
+
+        ``find_contact_by_external_reference.return_value`` is how a test says
+        which contact the event's ``sync_metadata`` link names: the mock
+        repository below resolves the link from it.
+        """
+        service = AsyncMock(spec=ContactService)
+
+        async def modify_contact(
+            contact_id: int, mutate: Any, transaction: Any, **kwargs: Any
+        ) -> Contact | None:
+            stored = service.get_contact_by_id.return_value
+            if not isinstance(stored, Contact):
+                stored = service.find_contact_by_external_reference.return_value
+            if not isinstance(stored, Contact):
+                raise ContactNotFoundError(contact_id)
+            desired = await mutate(deepcopy(stored))
+            if desired is None:
+                return None
+            saved: Contact = await service.update_contact(
+                desired, transaction, **kwargs
+            )
+            return saved
+
+        service.modify_contact.side_effect = modify_contact
+        return service
 
     @pytest.fixture
     def mock_connection(self) -> AsyncMock:
@@ -53,11 +89,37 @@ class TestOutboxEventProcessor:
         return conn
 
     @pytest.fixture
-    def mock_sync_metadata_repo(self) -> AsyncMock:
-        """Create mock sync metadata repository."""
+    def mock_sync_metadata_repo(self, mock_contact_service: AsyncMock) -> AsyncMock:
+        """Create mock sync metadata repository.
+
+        The locked link names whichever contact the external reference
+        resolved to, as it does when nothing moved between the two reads.
+        """
         repo = AsyncMock()
-        repo.find_and_lock.return_value = None
-        # Idempotency check (contact.created) reads the canonical link store.
+
+        async def find_and_lock(**_: Any) -> MagicMock:
+            link = MagicMock()
+            found = mock_contact_service.find_contact_by_external_reference.return_value
+            link.internal_id = found.id if isinstance(found, Contact) else None
+            link.version_hash = "etag-old"
+            return link
+
+        repo.find_and_lock.side_effect = find_and_lock
+
+        # The unlocked peek (contact.updated) and the idempotency check
+        # (contact.created) read the link without locking. A test that names
+        # a linked contact gets its link; otherwise whatever it set here.
+        async def find_by_external_id(**kwargs: Any) -> Any:
+            found = mock_contact_service.find_contact_by_external_reference.return_value
+            if isinstance(found, Contact):
+                return SyncMetadata(
+                    internal_id=found.id,
+                    integration_source=kwargs["integration_source"],
+                    external_id=kwargs["external_id"],
+                )
+            return repo.find_by_external_id.return_value
+
+        repo.find_by_external_id.side_effect = find_by_external_id
         repo.find_by_external_id.return_value = None
         repo.upsert.return_value = AsyncMock()
         repo.should_sync = MagicMock(return_value=True)
@@ -309,11 +371,10 @@ class TestOutboxEventProcessor:
         # Process the event
         result = await processor.process_event(contact_updated_event)
 
-        # Verify existing contact was looked up
-        mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
+        # Verify the event's link was looked up
+        mock_sync_metadata_repo.find_by_external_id.assert_called_once_with(
             integration_source="google",
             external_id="people/c123456789",
-            transaction=mock_connection,
             user_id=SYNC_OWNER,
         )
 
@@ -411,9 +472,131 @@ class TestOutboxEventProcessor:
         assert mock_contact_service.update_contact.await_args.kwargs["user_id"] == (
             SYNC_OWNER
         )
-        assert mock_contact_service.get_contact_by_id.await_args.kwargs["user_id"] == (
+        # The stored contact is read by the service, under its lock, as the
+        # event's owner.
+        assert mock_contact_service.modify_contact.await_args.kwargs["user_id"] == (
             SYNC_OWNER
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "lost_contact",
+        [
+            pytest.param("link_moved", id="link moved to another contact"),
+            pytest.param("link_gone", id="link removed"),
+            pytest.param("contact_gone", id="contact merged away or deleted"),
+        ],
+    )
+    async def test_an_update_whose_contact_moved_on_is_retried(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+        lost_contact: str,
+    ) -> None:
+        """Between the unlocked peek and the locks, a merge can take the contact.
+
+        The event must fail as transient - redelivered, it resolves the link
+        again onto the merge's survivor - never write the old contact, create
+        a new one, or be given up as permanently invalid.
+        """
+        existing = Contact(id=123, first_name="John", user_id=SYNC_OWNER)
+        mock_contact_service.find_contact_by_external_reference.return_value = existing
+        mock_contact_service.get_contact_by_id.return_value = existing
+        if lost_contact == "link_moved":
+            link = MagicMock()
+            link.internal_id = 456
+            mock_sync_metadata_repo.find_and_lock.side_effect = None
+            mock_sync_metadata_repo.find_and_lock.return_value = link
+        elif lost_contact == "link_gone":
+            mock_sync_metadata_repo.find_and_lock.side_effect = None
+            mock_sync_metadata_repo.find_and_lock.return_value = None
+        else:
+            # Gone under the lock, and the link re-read afterwards names the
+            # merge's survivor.
+            mock_contact_service.modify_contact.side_effect = ContactNotFoundError(123)
+            survivor_link = SyncMetadata(
+                internal_id=456,
+                integration_source="google",
+                external_id="people/c123456789",
+            )
+            peek = mock_sync_metadata_repo.find_by_external_id.side_effect
+            calls = 0
+
+            async def find_by_external_id(**kwargs: Any) -> Any:
+                nonlocal calls
+                calls += 1
+                return await peek(**kwargs) if calls == 1 else survivor_link
+
+            mock_sync_metadata_repo.find_by_external_id.side_effect = (
+                find_by_external_id
+            )
+
+        with pytest.raises(OutboxEventProcessingError) as failed:
+            await processor.process_event(contact_updated_event)
+
+        assert not isinstance(failed.value, PermanentOutboxEventProcessingError)
+        mock_contact_service.update_contact.assert_not_called()
+        mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_update_whose_contact_is_gone_but_still_linked_takes_the_create_path(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+    ) -> None:
+        """No merge moved the link, so a retry would find the same thing.
+
+        The create path decides, as for any link naming no contact of the
+        owner's: it finds the link and skips, writing nothing.
+        """
+        mock_contact_service.find_contact_by_external_reference.return_value = Contact(
+            id=123, first_name="John", user_id=SYNC_OWNER
+        )
+        mock_contact_service.modify_contact.side_effect = ContactNotFoundError(123)
+
+        result = await processor.process_event(contact_updated_event)
+
+        assert (result["status"], result["reason"]) == ("skipped", "already_processed")
+        mock_contact_service.create_contact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_conflict_is_not_recorded_over_a_newer_sync(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ) -> None:
+        """The failed save's rollback released the link; another sync used the gap.
+
+        Re-locked, the link carries a version this event never saw, so the
+        older event's conflict must not overwrite that success.
+        """
+        from app.core.contacts.models.exceptions import DuplicateEmailError
+
+        existing = Contact(id=123, first_name="John", user_id=SYNC_OWNER, tags=[])
+        mock_contact_service.find_contact_by_external_reference.return_value = existing
+        mock_contact_service.get_contact_by_id.return_value = existing
+        mock_contact_service.update_contact.side_effect = DuplicateEmailError(
+            "john.doe@example.com", 456
+        )
+        versions = iter(["etag-old", "etag-newer"])
+
+        async def find_and_lock(**_: Any) -> MagicMock:
+            link = MagicMock()
+            link.internal_id = 123
+            link.version_hash = next(versions)
+            return link
+
+        mock_sync_metadata_repo.find_and_lock.side_effect = find_and_lock
+
+        result = await processor.process_event(contact_updated_event)
+
+        assert (result["status"], result["reason"]) == ("skipped", "superseded")
+        mock_sync_metadata_repo.upsert.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_an_update_linked_to_another_users_contact_writes_nothing(
@@ -1447,10 +1630,9 @@ class TestOutboxEventProcessor:
         assert result["integration_source"] == "google"
 
         # Verify lookup used normalized 'google'
-        mock_contact_service.find_contact_by_external_reference.assert_called_once_with(
+        mock_sync_metadata_repo.find_by_external_id.assert_called_once_with(
             integration_source="google",
             external_id="people/c999888777",
-            transaction=mock_connection,
             user_id=SYNC_OWNER,
         )
 
