@@ -10,6 +10,8 @@ from fastmcp import Client, FastMCP
 
 from app.mcp.domains.integrations.tools import register_integration_tools
 
+pytestmark = pytest.mark.unit
+
 
 class TestIntegrationTools:
     """Test integration MCP tools registration and functionality."""
@@ -136,3 +138,49 @@ class TestIntegrationTools:
             assert "mapping_service" not in required
             assert "contact_id" not in required
             assert "strava_athlete_id" not in required
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_name", "fields"),
+        [
+            ("list_integrations", {"integrations", "total_count", "summary"}),
+            ("trigger_sync", {"integration_id", "job_id", "status"}),
+            ("get_strava_athlete_mappings", {"mappings", "total_count"}),
+            ("list_immich_conflicts", {"conflicts", "total_count"}),
+            (
+                "resolve_immich_conflict",
+                {"conflict_id", "action", "contact_id", "status"},
+            ),
+            (
+                "search_immich_photos_for_journal",
+                {"journal_id", "photos", "total_count"},
+            ),
+            (
+                "create_immich_album_for_journal",
+                {"journal_id", "album_id", "asset_count", "shared_link_url", "status"},
+            ),
+        ],
+    )
+    async def test_tool_publishes_its_result_shape(
+        self, mcp_server: FastMCP[None], tool_name: str, fields: set[str]
+    ) -> None:
+        """A client learns the result's fields from the outputSchema."""
+        async with Client(mcp_server) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+
+        schema = tools[tool_name].output_schema
+        assert schema is not None
+        assert set(schema["properties"]) == fields
+
+    @pytest.mark.asyncio
+    async def test_integration_status_is_an_enumerated_value(
+        self, mcp_server: FastMCP[None]
+    ) -> None:
+        """The status a client branches on is a closed set, and says so."""
+        async with Client(mcp_server) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+
+        schema = tools["list_integrations"].output_schema
+        assert schema is not None
+        integration = schema["properties"]["integrations"]["items"]
+        assert "connected" in integration["properties"]["status"]["enum"]

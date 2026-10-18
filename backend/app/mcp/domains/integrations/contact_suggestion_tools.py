@@ -31,7 +31,7 @@ from app.mcp.shared.dependencies import (
     get_current_user_id,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 class ContactSuggestionMCPEntry(BaseModel):
@@ -68,7 +68,7 @@ class IgnoredContactSuggestionMCPResponse(BaseModel):
 async def list_contact_suggestions(
     user_id: str = mcp_depends(get_current_user_id),
     service: ContactSuggestionService = mcp_depends(get_contact_suggestion_service),
-) -> str:
+) -> ContactSuggestionsMCPResponse:
     """
     List people who keep appearing on the user's events but are not contacts.
 
@@ -80,24 +80,22 @@ async def list_contact_suggestions(
     """
     suggestions = await service.list_suggestions(user_id)
     ignored = await service.list_ignored(user_id)
-    return MCPResponseBuilder.success_response(
-        ContactSuggestionsMCPResponse(
-            suggestions=[
-                ContactSuggestionMCPEntry(
-                    email=s.email,
-                    display_name=s.display_name,
-                    event_count=s.event_count,
-                    last_seen_at=s.last_seen_at,
-                )
-                for s in suggestions
-            ],
-            ignored_emails=[i.email for i in ignored],
-            total_count=len(suggestions),
-            summary=(
-                f"{len(suggestions)} contact suggestion(s); "
-                f"{len(ignored)} email(s) ignored."
-            ),
-        )
+    return ContactSuggestionsMCPResponse(
+        suggestions=[
+            ContactSuggestionMCPEntry(
+                email=s.email,
+                display_name=s.display_name,
+                event_count=s.event_count,
+                last_seen_at=s.last_seen_at,
+            )
+            for s in suggestions
+        ],
+        ignored_emails=[i.email for i in ignored],
+        total_count=len(suggestions),
+        summary=(
+            f"{len(suggestions)} contact suggestion(s); "
+            f"{len(ignored)} email(s) ignored."
+        ),
     )
 
 
@@ -120,7 +118,7 @@ async def accept_contact_suggestion(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     service: ContactSuggestionService = mcp_depends(get_contact_suggestion_service),
-) -> str:
+) -> AcceptedContactSuggestionMCPResponse:
     """
     Make a suggested email a contact's and link it to past events.
 
@@ -130,7 +128,7 @@ async def accept_contact_suggestion(
     attendance the integration reported, and the suggestion disappears.
     """
     if (contact_id is None) == (first_name is None or not first_name.strip()):
-        return MCPResponseBuilder.validation_error_response(
+        raise MCPErrors.validation(
             "contact_id",
             "Pass exactly one of contact_id (existing contact) or first_name "
             "(new contact).",
@@ -154,16 +152,14 @@ async def accept_contact_suggestion(
     saved_id = accepted.contact.id
     assert saved_id is not None  # a saved contact always has one
     normalised = normalise_participant_email(email)
-    return MCPResponseBuilder.success_response(
-        AcceptedContactSuggestionMCPResponse(
-            email=normalised,
-            contact_id=saved_id,
-            linked_journal_count=accepted.linked_journal_count,
-            summary=(
-                f"{normalised} now belongs to contact {saved_id}, linked to "
-                f"{accepted.linked_journal_count} journal(s)."
-            ),
-        )
+    return AcceptedContactSuggestionMCPResponse(
+        email=normalised,
+        contact_id=saved_id,
+        linked_journal_count=accepted.linked_journal_count,
+        summary=(
+            f"{normalised} now belongs to contact {saved_id}, linked to "
+            f"{accepted.linked_journal_count} journal(s)."
+        ),
     )
 
 
@@ -174,7 +170,7 @@ async def ignore_contact_suggestion(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     service: ContactSuggestionService = mcp_depends(get_contact_suggestion_service),
-) -> str:
+) -> IgnoredContactSuggestionMCPResponse:
     """
     Stop suggesting an email as a contact. Idempotent and persistent;
     reversible with ``unignore_contact_suggestion``. Rejects anything that is
@@ -183,13 +179,11 @@ async def ignore_contact_suggestion(
     ignored = await service.ignore(
         user_id, email, transaction=db_connection, provenance=Provenance.MCP
     )
-    return MCPResponseBuilder.success_response(
-        IgnoredContactSuggestionMCPResponse(
-            email=ignored.email,
-            ignored=True,
-            provenance=ignored.provenance.value,
-            summary=f"{ignored.email} will no longer be suggested as a contact.",
-        )
+    return IgnoredContactSuggestionMCPResponse(
+        email=ignored.email,
+        ignored=True,
+        provenance=ignored.provenance.value,
+        summary=f"{ignored.email} will no longer be suggested as a contact.",
     )
 
 
@@ -200,24 +194,22 @@ async def unignore_contact_suggestion(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     service: ContactSuggestionService = mcp_depends(get_contact_suggestion_service),
-) -> str:
+) -> IgnoredContactSuggestionMCPResponse:
     """
     Let an ignored email be suggested as a contact again. Idempotent:
     restoring an email that was not ignored succeeds with ``was_ignored`` false.
     """
     was_ignored = await service.unignore(user_id, email, transaction=db_connection)
     normalised = normalise_participant_email(email)
-    return MCPResponseBuilder.success_response(
-        IgnoredContactSuggestionMCPResponse(
-            email=normalised,
-            ignored=False,
-            was_ignored=was_ignored,
-            summary=(
-                f"{normalised} can be suggested again."
-                if was_ignored
-                else f"{normalised} was not ignored; nothing to undo."
-            ),
-        )
+    return IgnoredContactSuggestionMCPResponse(
+        email=normalised,
+        ignored=False,
+        was_ignored=was_ignored,
+        summary=(
+            f"{normalised} can be suggested again."
+            if was_ignored
+            else f"{normalised} was not ignored; nothing to undo."
+        ),
     )
 
 
