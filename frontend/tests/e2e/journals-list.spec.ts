@@ -1816,9 +1816,11 @@ test.describe('Journal List Page', () => {
       await dataManager.clearAllJournals();
 
       const targetDate = new Date();
-      // Ensure target date is the 15th of next month to absolutely prevent picking an overlapping 'outside day' from adjacent months in Shadcn/Radix calendars
-      targetDate.setMonth(targetDate.getMonth() + 1);
+      // The 15th of next month: never an 'outside day' of an adjacent month in
+      // the calendar grid. Pin the day before moving the month — from the
+      // 29th-31st, moving the month first overflows into the month after.
       targetDate.setDate(15);
+      targetDate.setMonth(targetDate.getMonth() + 1);
       const targetIso = targetDate.toISOString();
 
       const journals = await dataManager.createJournals([
@@ -1843,11 +1845,14 @@ test.describe('Journal List Page', () => {
         page.getByRole('heading', { name: targetJournalTitle })
       ).toBeHidden();
 
-      // Click Date Jump Calendar
+      // Click Date Jump Calendar. Assert it opened, so a lost click fails here
+      // rather than later on a calendar control that never appeared.
       const dateJumpBtn = page.getByTestId('jump-date-button');
       await dateJumpBtn.click();
+      await expect(dateJumpBtn).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.locator('[data-slot="calendar"]')).toBeVisible();
 
-      // Wait for calendar
+      // The target month's grid, named "<Month> <Year>" by react-day-picker
       const monthNames = [
         'January',
         'February',
@@ -1865,13 +1870,9 @@ test.describe('Journal List Page', () => {
       const targetMonthName = `${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
       const targetGrid = page.getByRole('grid', { name: targetMonthName });
 
-      while (!(await targetGrid.isVisible())) {
-        const currentGrids = await page.getByRole('grid').allTextContents();
-        await page.getByRole('button', { name: /next month/i }).click();
-        await expect(page.getByRole('grid')).not.toHaveText(currentGrids, {
-          timeout: 5000,
-        });
-      }
+      // The calendar opens on the current month; the target is the next one.
+      await page.getByRole('button', { name: /next month/i }).click();
+      await expect(targetGrid).toBeVisible();
 
       // 15 is always unique within a calendar grid because outside days can only be up to 6 days
       // from the start or end of the month (e.g., 25-31 or 1-6).

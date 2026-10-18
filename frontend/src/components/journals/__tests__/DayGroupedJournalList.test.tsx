@@ -754,4 +754,40 @@ describe('DayGroupedJournalList', () => {
       expect(scrollBy).toHaveBeenCalledWith(0, 120);
     });
   });
+
+  describe('empty state', () => {
+    // An empty list pages eagerly in both directions straight after it is
+    // ready. Unmounting the empty state for each fetch and mounting it again
+    // when the fetch settles moves the bottom sentinel by the card's height,
+    // which the prepend compensation then turns into a page scroll — the
+    // toolbar jumps out from under the pointer mid-click.
+    it.each([
+      ['previous', { isLoadingPrevious: true }],
+      ['next', { isLoadingNext: true }],
+    ])(
+      'stays mounted while the %s page of an empty list loads',
+      (_direction, loading) => {
+        const emptyState = <div data-testid='empty-state'>Nothing here</div>;
+        const { rerender } = render(
+          <DayGroupedJournalList
+            journals={[]}
+            collapseEmptyDays={false}
+            emptyState={emptyState}
+          />
+        );
+        expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+
+        rerender(
+          <DayGroupedJournalList
+            journals={[]}
+            collapseEmptyDays={false}
+            emptyState={emptyState}
+            {...loading}
+          />
+        );
+
+        expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+      }
+    );
+  });
 });
