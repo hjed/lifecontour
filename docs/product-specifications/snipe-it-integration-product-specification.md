@@ -52,7 +52,7 @@ Snipe-IT "Assets" map directly to the system's `gear_items` entity.
     - When periodic sync is enabled on the Snipe-IT worker (`ENABLE_PERIODIC_SYNC`), every `SYNC_INTERVAL_HOURS` (default 6) it syncs the assets and maintenance records of every user whose Snipe-IT connection works. Each sync appears in the user's sync history.
     - Each run fetches only the assets and maintenance records changed in Snipe-IT since the last sync that completed. At least once a week, and whenever a sync has no completed sync to resume from, a run re-imports everything instead, catching changes Snipe-IT does not date, such as a renamed model or manufacturer. Unchanged assets and maintenance records are skipped, so a run creates no duplicates and does not undo a local edit that Snipe-IT has not changed.
     - Maintenance records deleted in Snipe-IT are noticed on every run, and a maintenance record not yet imported — because its asset arrived in the same run, or its journal was deleted — is retried on every run whether or not it changed.
-    - Assets and maintenance records sync side by side, so a maintenance record logged on an asset that is new in the same run can arrive one run later, once its asset exists in the app.
+    - Assets and maintenance records sync side by side. A maintenance record logged on an asset that is new in the same run is imported in that run, once its asset exists in the app: the first sync of an asset also imports its maintenance records. If that fails, for example because Snipe-IT is rate limiting, the record arrives one run later.
 - **Text Encoding**: Snipe-IT HTML-escapes text in API responses but stores what it is sent, so asset names, models, manufacturers, serials and asset tags are decoded once on import and sent unescaped.
 
 ---

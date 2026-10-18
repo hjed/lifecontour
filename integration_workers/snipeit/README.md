@@ -140,8 +140,16 @@ their Snipe-IT traffic does not compete for the rate limit:
   maintenance records, so this is the only way those changes arrive without a
   manual sync. See [Smart and full syncs](#smart-and-full-syncs) for what each
   run fetches. The asset and maintenance syncs run concurrently, so a
-  maintenance record on an asset new in this run can be skipped as "gear item
-  not yet synced"; it is imported by the next run (#1563).
+  maintenance batch can skip a record as "gear item not yet synced" because its
+  asset is new in this run. The asset sync covers that: when it links an asset
+  for the first time (a batch or a webhook), it lists that asset's maintenance
+  records (`GET /maintenances?asset_id=`) and imports the ones not yet settled
+  (`import_asset_maintenances`), so the record arrives in the same run whichever
+  sync gets there first (#1563). The catch-up is best effort: if it fails, or
+  is rate limited, the record stays unsettled and the next maintenance run
+  imports it. A rate-limited batch that defers itself does not repeat the
+  catch-up for an asset it already linked, since that asset is unchanged on
+  the retry. Already-linked assets cost no extra call.
   Once the maintenance listing has run to the end, the sync rows of records it
   did not return are reconciled (`reconcile_deleted_maintenances`): each record
   is looked up, and the row of one Snipe-IT no longer has is deleted, except the

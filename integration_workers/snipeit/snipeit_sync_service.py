@@ -824,6 +824,9 @@ class SnipeItSyncService:
     ) -> dict[str, int]:
         """Process a batch of asset IDs, upserting gear_items.
 
+        Each asset goes through ``sync_asset``, so one linked here for the
+        first time also brings in its maintenance records.
+
         Args:
             asset_ids: Snipe-IT asset IDs to sync.
             session_factory: Async session factory for transactions.
@@ -837,7 +840,7 @@ class SnipeItSyncService:
 
         for asset_id in asset_ids:
             try:
-                await self._sync_single_asset_with_retry(asset_id, session_factory)
+                await self.sync_asset(asset_id, session_factory)
                 synced += 1
             except _AssetSkipped:
                 skipped += 1
@@ -853,11 +856,75 @@ class SnipeItSyncService:
         )
         return {"synced": synced, "skipped": skipped, "failed": failed}
 
+    async def sync_asset(self, asset_id: int, session_factory: Any) -> None:
+        """Upsert one asset's gear item, then catch up a new one's maintenances.
+
+        The asset and maintenance syncs run side by side, so a maintenance
+        batch can skip a record because its asset was not linked yet. Once
+        this links an asset for the first time, it imports the asset's
+        records not yet settled here (see ``import_asset_maintenances``), so
+        the record arrives whichever sync gets there first.
+
+        Raises:
+            _AssetSkipped: The asset is unchanged.
+            _AssetFailed: The asset could not be synced.
+        """
+        if await self._sync_single_asset_with_retry(asset_id, session_factory):
+            await self.import_asset_maintenances(asset_id, session_factory)
+
+    async def import_asset_maintenances(
+        self, asset_id: int, session_factory: Any
+    ) -> None:
+        """Import the asset's Snipe-IT maintenance records not yet settled here.
+
+        Only records ``unsettled_maintenance_ids`` selects are fetched, so one
+        a maintenance batch already imported is not fetched again; a record
+        both import at once is serialised by ``_sync_single_maintenance``.
+
+        Best effort: a failure, a rate limit included, is logged and leaves
+        the records unsettled, so the next maintenance sync imports them.
+        """
+        try:
+            listed = [
+                record
+                async for page in self.list_maintenance_batches(asset_id=asset_id)
+                for record in page
+            ]
+            unsettled = await self.unsettled_maintenance_ids(listed, session_factory)
+            if not unsettled:
+                return
+            result = await self.sync_maintenance_batch(
+                sorted(unsettled), session_factory
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not import a new asset's maintenance records; "
+                "the next maintenance sync will",
+                snipeit_asset_id=asset_id,
+                exc_info=True,
+            )
+            return
+        logger.info(
+            "Imported a new asset's maintenance records",
+            snipeit_asset_id=asset_id,
+            **result,
+        )
+
     async def _sync_single_asset_with_retry(
         self,
         asset_id: int,
         session_factory: Any,
-    ) -> None:
+    ) -> bool:
+        """Upsert one asset's gear item and its ``sync_metadata`` link.
+
+        Returns:
+            Whether this linked the asset for the first time: it had no link
+            row, or only one recording a failure.
+
+        Raises:
+            _AssetSkipped: The asset is unchanged.
+            _AssetFailed: The asset could not be synced.
+        """
         last_exc: Exception | None = None
         external_id = str(asset_id)
 
@@ -958,7 +1025,7 @@ class SnipeItSyncService:
                                 "internal_uuid": gear_id,
                             },
                         )
-                return
+                return not (existing_meta and existing_meta.internal_uuid)
 
             except _AssetSkipped:
                 raise
@@ -1135,8 +1202,13 @@ class SnipeItSyncService:
 
     # -- Maintenance Sync Methods ------------------------------------------
 
-    async def list_maintenance_batches(self) -> AsyncIterator[list[ListedRecord]]:
+    async def list_maintenance_batches(
+        self, asset_id: int | None = None
+    ) -> AsyncIterator[list[ListedRecord]]:
         """Yield pages of Snipe-IT maintenance records, with when each last changed.
+
+        Args:
+            asset_id: Only list this Snipe-IT asset's records.
 
         Yields:
             The listed maintenance records, one list per API page.
@@ -1144,6 +1216,7 @@ class SnipeItSyncService:
         page = 1
         while True:
             response = await self._api_client.list_maintenances(
+                asset_id=asset_id,
                 page=page,
                 per_page=_PAGE_SIZE,
             )
@@ -1239,7 +1312,8 @@ class SnipeItSyncService:
         unlike the asset listing, so most such records are another user's.
 
         Fetching a record lets ``_sync_single_maintenance`` decide, as a full
-        sync would. Only the database is read.
+        sync would. Only the database is read. ``import_asset_maintenances``
+        uses it too, on a newly linked asset's records.
 
         Args:
             listed: Maintenance records the listing returned, with their asset.
