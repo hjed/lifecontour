@@ -70,6 +70,7 @@ from app.core.journal.services import journal_type_data_helpers as helpers
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
+from app.core.journal.services.journal_write_guard import guard_journal_write
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, transactional
 
@@ -614,8 +615,14 @@ class JournalWriteService:
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> list[JournalType]:
         """Add a type (with dependencies), its default rows, and optional data."""
+        # The journal's lock first, before anything below reads what it will
+        # rewrite; and a stale precondition refused before anything is written.
+        await guard_journal_write(
+            self.journal_service.journal_repo, journal_id, expected_etags
+        )
         added_types = await self.journal_service.add_type_to_journal(
             journal_id,
             journal_type,
@@ -653,8 +660,14 @@ class JournalWriteService:
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> None:
         """Remove a type and delete its type-specific data row."""
+        # The journal's lock first, before anything below reads what it will
+        # rewrite; and a stale precondition refused before anything is written.
+        await guard_journal_write(
+            self.journal_service.journal_repo, journal_id, expected_etags
+        )
         announced = journal_type in _TYPES_ANNOUNCED_AS_UPDATES
         before = (
             await self._snapshot_collections(journal_type, journal_id)
@@ -688,6 +701,7 @@ class JournalWriteService:
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
     ) -> None:
         """Update the type-specific data for a single existing journal type.
 
@@ -698,6 +712,11 @@ class JournalWriteService:
         the Google Calendar outbound worker re-syncs (the history projection skips
         the non-pair marker and records only the real field diffs).
         """
+        # The journal's lock first, before anything below reads what it will
+        # rewrite; and a stale precondition refused before anything is written.
+        await guard_journal_write(
+            self.journal_service.journal_repo, journal_id, expected_etags
+        )
         repo = self._type_data_repo(journal_type)
         tracked = _TYPE_DATA_TRACKED_FIELDS.get(journal_type, ())
         before = (
@@ -711,8 +730,6 @@ class JournalWriteService:
 
         # Type-specific data is part of what a read of the journal returns, so
         # the aggregate's version has to move with it; see ``touch_journal``.
-        # Done *before* the child write so every writer takes the journal's lock
-        # first and none of them can deadlock against a conditional update.
         await self.journal_service.journal_repo.touch(journal_id)
 
         await self._apply_type_data_update(journal_id, journal_type, attrs)

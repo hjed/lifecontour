@@ -431,10 +431,16 @@ async def test_cleanup_contacts(
     await contact_service.bulk_delete_all_contacts(connection, user_id=user.id)
 
 
-@router.post("/{contact_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{contact_id}/tags",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=precondition_failed_responses("contact"),
+)
 @inject
 async def assign_tag_to_contact(
     contact_id: int,
+    request: Request,
+    response: Response,
     tag_request: TagAssignmentRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -453,20 +459,28 @@ async def assign_tag_to_contact(
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
-    await contact_service.assign_tag_to_contact(
+    written = await contact_service.assign_tag_to_contact(
         contact_id,
         tag_id,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    set_etag(response, "contacts", contact_id, written.updated_at)
 
 
-@router.delete("/{contact_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{contact_id}/tags/{tag_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=precondition_failed_responses("contact"),
+)
 @inject
 async def remove_tag_from_contact(
     contact_id: int,
+    request: Request,
+    response: Response,
     tag_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -483,14 +497,16 @@ async def remove_tag_from_contact(
     if not existing_contact:
         raise ContactNotFoundError(contact_id)
 
-    await contact_service.remove_tag_from_contact(
+    written = await contact_service.remove_tag_from_contact(
         contact_id,
         tag_id,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    set_etag(response, "contacts", contact_id, written.updated_at)
 
 
 @router.get("/{contact_id}/tags")
@@ -521,11 +537,14 @@ async def get_contact_tags(
     return TagListResponse(data=tag_resources)
 
 
-@router.post("/{contact_id}/favourite")
+@router.post(
+    "/{contact_id}/favourite", responses=precondition_failed_responses("contact")
+)
 @inject
 async def toggle_contact_favourite(
     contact_id: int,
     request: Request,
+    response: Response,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],
@@ -544,8 +563,10 @@ async def toggle_contact_favourite(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
+        set_etag(response, "contacts", contact_id, updated_contact.updated_at)
 
         return ContactResponse(
             data=ContactConverter.to_resource(updated_contact, base_url)

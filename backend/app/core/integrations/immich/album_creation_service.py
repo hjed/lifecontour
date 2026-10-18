@@ -169,9 +169,12 @@ class ImmichAlbumCreationService:
             # Serialise concurrent create-album requests for the same journal:
             # lock the journal row so two in-flight calls can't both pass the
             # "already linked" check below and create duplicate Immich albums.
-            # The lock is held until this unit of work commits.
+            # The lock is held until this unit of work commits - across the
+            # Immich call below, which is why it is the journal writers' own
+            # FOR NO KEY UPDATE: that serialises create-album requests without
+            # making a task link wait on an Immich round trip.
             await self.connection.execute(
-                text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+                text("SELECT 1 FROM journals WHERE id = :journal_id FOR NO KEY UPDATE"),
                 {"journal_id": journal_id},
             )
 

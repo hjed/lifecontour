@@ -1906,15 +1906,16 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> None:
+    ) -> Versioned[None]:
         """Assign a tag to a contact with transaction management."""
 
-        async def _assign_operation() -> None:
+        async def _assign_operation() -> Versioned[None]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -1946,10 +1947,13 @@ class ContactService:
                 user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
+            return Versioned(
+                None, await self.contact_repo.touch(contact_id, transaction)
+            )
 
         return cast(
-            None, await self._execute_with_retry(_assign_operation, transaction)
+            Versioned[None],
+            await self._execute_with_retry(_assign_operation, transaction),
         )
 
     async def remove_tag_from_contact(
@@ -1959,15 +1963,16 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> None:
+    ) -> Versioned[None]:
         """Remove a tag from a contact with transaction management."""
 
-        async def _remove_operation() -> None:
+        async def _remove_operation() -> Versioned[None]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -1993,10 +1998,13 @@ class ContactService:
                 user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
+            return Versioned(
+                None, await self.contact_repo.touch(contact_id, transaction)
+            )
 
         return cast(
-            None, await self._execute_with_retry(_remove_operation, transaction)
+            Versioned[None],
+            await self._execute_with_retry(_remove_operation, transaction),
         )
 
     async def add_contact_method(
@@ -2715,6 +2723,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> Contact:
@@ -2726,14 +2735,20 @@ class ContactService:
             transaction: Database transaction
 
         Returns:
-            Updated contact with toggled favourite status
+            Updated contact with toggled favourite status, at the version the
+            toggle committed
 
         Raises:
-            ContactValidationError: If contact not found
+            ContactNotFoundError: If contact not found
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from
         """
 
         async def _toggle_operation() -> Contact:
-            # Find the contact
+            # Lock before reading: the save below writes back every scalar it
+            # read, so an unlocked read would revert a concurrent edit - and a
+            # second toggle would flip the same stale value and lose the first.
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
             contact = await self.contact_repo.find_by_id(contact_id, user_id=user_id)
             if not contact:
                 raise ContactNotFoundError(contact_id)

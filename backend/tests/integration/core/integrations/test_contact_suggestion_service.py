@@ -28,6 +28,7 @@ from app.core.integrations.services.contact_suggestion_service import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.contact_seeding import seed_contact
@@ -64,6 +65,7 @@ def service(
             SqlJournalContactRelationshipRepository(async_connection),
             OutboxEventPublisher(async_connection),
             SqlContactRepository(async_connection),
+            SqlJournalRepository(async_connection),
         ),
     )
 

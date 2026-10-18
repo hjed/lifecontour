@@ -478,21 +478,28 @@ class SqlJournalRepository(JournalRepository):
     async def lock_and_get_updated_at(self, journal_id: int) -> datetime | None:
         """Lock the journal row and return its last-write timestamp.
 
-        ``FOR UPDATE`` rather than a plain read: see the port for the
-        lost-update window this closes.
+        Locked rather than a plain read: see the port for the lost-update
+        window this closes, and for why the mode is ``FOR NO KEY UPDATE``.
         """
         query = text(
             """
             SELECT updated_at
             FROM journals
             WHERE id = :journal_id
-            FOR UPDATE
+            FOR NO KEY UPDATE
             """
         )
         result = await self.conn.execute(query, {"journal_id": journal_id})
         row = result.fetchone()
 
         return row.updated_at if row else None
+
+    async def lock_hierarchy(self, user_id: str) -> None:
+        """Serialise hierarchy changes for one owner; see the port for why."""
+        await self.conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"journal_hierarchy:{user_id}"},
+        )
 
     async def get_types(self, journal_id: int) -> list[str]:
         """Get the types of a journal."""

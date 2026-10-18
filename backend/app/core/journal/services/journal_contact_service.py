@@ -1,5 +1,7 @@
 """Service for managing journal-contact relationships and associated events."""
 
+from collections.abc import Sequence
+
 import structlog
 from core_shared.models.journals import (
     JournalContactRelationship,
@@ -12,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.events import ContactSummaryRefreshRequested
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.models.repositories import ContactRepository
-from app.core.journal.models.repositories import JournalContactRelationshipRepository
+from app.core.journal.models.repositories import (
+    JournalContactRelationshipRepository,
+    JournalRepository,
+)
+from app.core.journal.services.journal_write_guard import guard_journal_write
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -36,6 +42,7 @@ class JournalContactService:
         contact_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: OutboxEventPublisher,
         contact_repo: ContactRepository,
+        journal_repo: JournalRepository,
     ):
         """
         Initialize the journal contact service.
@@ -44,10 +51,14 @@ class JournalContactService:
             contact_relationship_repo: Repository for contact relationships
             event_publisher: Publisher for domain events via outbox pattern
             contact_repo: Owner-scoped contact reads, for the ownership check
+            journal_repo: The journal's locking read, which every write to a
+                relationship takes first (the relationships are part of the
+                journal's version)
         """
         self.contact_relationship_repo = contact_relationship_repo
         self.event_publisher = event_publisher
         self.contact_repo = contact_repo
+        self.journal_repo = journal_repo
 
     @transactional
     async def add_contact_to_journal(
@@ -56,6 +67,7 @@ class JournalContactService:
         *,
         user_id: str,
         transaction: AsyncConnection,
+        expected_etags: Sequence[str] | None = None,
     ) -> JournalContactRelationship:
         """
         Add a contact relationship to a journal.
@@ -68,7 +80,12 @@ class JournalContactService:
 
         Raises:
             ContactNotFoundError: The contact is missing or another user's.
+            PreconditionFailedError: ``expected_etags`` names a version the
+                journal has moved on from.
         """
+        await guard_journal_write(
+            self.journal_repo, relationship.journal_id, expected_etags
+        )
         if not await self.contact_repo.contact_exists(
             relationship.contact_id, user_id=user_id
         ):
@@ -90,12 +107,14 @@ class JournalContactService:
         contact_id: int,
         relationship_type: JournalContactRelationshipType,
         transaction: AsyncConnection,
+        expected_etags: Sequence[str] | None = None,
     ) -> None:
         """
         Remove a contact relationship from a journal.
 
         Publishes ContactSummaryRefreshRequested for the contact.
         """
+        await guard_journal_write(self.journal_repo, journal_id, expected_etags)
         await self.contact_relationship_repo.delete(
             journal_id=journal_id,
             contact_id=contact_id,
@@ -118,10 +137,12 @@ class JournalContactService:
         role: ContactEventRole | None = None,
         update_status: bool = False,
         update_role: bool = False,
+        expected_etags: Sequence[str] | None = None,
     ) -> JournalContactRelationship | None:
         """
         Update specific attributes of a contact relationship.
         """
+        await guard_journal_write(self.journal_repo, journal_id, expected_etags)
         updated = await self.contact_relationship_repo.update_attributes(
             journal_id=journal_id,
             contact_id=contact_id,

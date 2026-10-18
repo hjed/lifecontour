@@ -12,6 +12,7 @@ that carries it, and deleting one publishes ``JournalTagDeleted`` once per
 journal that carried it.
 """
 
+from collections.abc import Sequence
 from dataclasses import replace
 from uuid import UUID
 
@@ -31,10 +32,11 @@ from app.core.journal.models.events import (
     JournalTagRenamed,
 )
 from app.core.journal.models.journal_tag import JournalTag
-from app.core.journal.models.repositories import JournalTagRepository
+from app.core.journal.models.repositories import JournalRepository, JournalTagRepository
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
+from app.core.journal.services.journal_write_guard import guard_journal_write
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -55,10 +57,14 @@ class JournalTagService:
         tag_repo: JournalTagRepository,
         hierarchy_service: JournalTagHierarchyService,
         event_publisher: OutboxEventPublisher,
+        journal_repo: JournalRepository,
     ) -> None:
         self.tag_repo = tag_repo
         self.hierarchy_service = hierarchy_service
         self.event_publisher = event_publisher
+        # Assigning a tag changes the journal's version, so an assignment
+        # takes the journal's lock first; see ``guard_journal_write``.
+        self.journal_repo = journal_repo
 
     @transactional
     async def create_tag(
@@ -373,6 +379,7 @@ class JournalTagService:
         user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        expected_etags: Sequence[str] | None = None,
     ) -> None:
         """Assign one of the user's tags to a journal as a committed unit of work.
 
@@ -385,7 +392,10 @@ class JournalTagService:
 
         Raises:
             JournalTagNotFoundError: The user has no tag with this id.
+            PreconditionFailedError: ``expected_etags`` names a version the
+                journal has moved on from.
         """
+        await guard_journal_write(self.journal_repo, journal_id, expected_etags)
         tag = await self._require_tag(tag_id, user_id)
 
         if not await self.tag_repo.assign_tag(journal_id, tag_id, user_id=user_id):
@@ -412,6 +422,7 @@ class JournalTagService:
         user_id: str,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        expected_etags: Sequence[str] | None = None,
     ) -> None:
         """Remove a tag from a journal as a committed unit of work.
 
@@ -423,6 +434,7 @@ class JournalTagService:
         exists but was not assigned, which the endpoint has always answered with
         a successful no-op.
         """
+        await guard_journal_write(self.journal_repo, journal_id, expected_etags)
         tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if tag is None:
             return

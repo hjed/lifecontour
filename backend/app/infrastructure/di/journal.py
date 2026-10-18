@@ -665,12 +665,14 @@ class JournalProvider(Provider):
         contact_relationship_repo: JournalContactRelationshipRepository,
         event_publisher: OutboxEventPublisher,
         contact_repo: ContactRepository,
+        journal_repo: JournalRepository,
     ) -> JournalContactService:
         """Provide a JournalContactService instance."""
         return JournalContactService(
             contact_relationship_repo=contact_relationship_repo,
             event_publisher=event_publisher,
             contact_repo=contact_repo,
+            journal_repo=journal_repo,
         )
 
     @provide(scope=Scope.REQUEST)
@@ -687,12 +689,14 @@ class JournalProvider(Provider):
         tag_repo: JournalTagRepository,
         hierarchy_service: JournalTagHierarchyService,
         event_publisher: OutboxEventPublisher,
+        journal_repo: JournalRepository,
     ) -> JournalTagService:
         """Provide a JournalTagService instance."""
         return JournalTagService(
             tag_repo=tag_repo,
             hierarchy_service=hierarchy_service,
             event_publisher=event_publisher,
+            journal_repo=journal_repo,
         )
 
     @provide(scope=Scope.REQUEST)

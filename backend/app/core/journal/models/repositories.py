@@ -145,11 +145,21 @@ class JournalRepository(ABC):
         """
         Lock a journal row for update and return its last-write timestamp.
 
-        Backs the optimistic-concurrency check on updates. Comparing an
-        entity-tag against an unlocked read leaves a lost-update window under
-        READ COMMITTED: two callers can both see the version they expected
-        before either of them writes. Taking the row lock here means the second
-        caller waits for the first to commit and then sees the new timestamp.
+        Every write to the journal or a row it renders takes this first,
+        through ``guard_journal_write``, with or without a precondition. With
+        one, it backs the optimistic-concurrency check: comparing an entity-tag
+        against an unlocked read leaves a lost-update window under READ
+        COMMITTED, where two callers both see the version they expected before
+        either writes. Without one, it stops a read-modify-write overwriting a
+        change committed between its read and its write.
+
+        The mode is ``FOR NO KEY UPDATE``, the one an ``UPDATE`` of the row
+        takes anyway: it queues journal writers behind each other and behind a
+        merge's ``FOR UPDATE``, but not behind the ``FOR KEY SHARE`` a task
+        link holds (see :meth:`find_and_lock_by_ids_for_user`), so an edit
+        never waits on somebody retargeting a task into the journal. A writer
+        must not take ``FOR UPDATE`` on the same row afterwards: two
+        transactions upgrading at once deadlock.
 
         Args:
             journal_id: The journal to lock
@@ -416,6 +426,20 @@ class JournalRepository(ABC):
 
         Returns:
             List of ancestor journals ordered from immediate parent to root
+        """
+        pass
+
+    @abstractmethod
+    async def lock_hierarchy(self, user_id: str) -> None:
+        """Serialise changes to ``user_id``'s journal hierarchy until commit.
+
+        Validating a new parent reads the journals above it without locking
+        them, and each write locks only its own row - so two overlapping
+        re-parents ("A under B", "B under A") would each see an acyclic tree
+        and both commit a cycle, or two new children each fit under a depth
+        limit they exceed together. Holding this before validating makes the
+        second wait, then validate against the first's committed parent.
+        Per owner: a hierarchy never spans two owners.
         """
         pass
 

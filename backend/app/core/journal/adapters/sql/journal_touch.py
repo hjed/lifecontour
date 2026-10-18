@@ -33,10 +33,11 @@ async def lock_journal(conn: AsyncConnection, journal_id: int) -> None:
     every writer take the locks in the same order, so they queue instead.
 
     Taking the lock here also means the closing ``touch_journal`` needs no lock
-    of its own — it already holds one.
+    of its own — it already holds one. ``FOR NO KEY UPDATE``, the mode every
+    journal writer takes; see ``JournalRepository.lock_and_get_updated_at``.
     """
     await conn.execute(
-        text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+        text("SELECT 1 FROM journals WHERE id = :journal_id FOR NO KEY UPDATE"),
         {"journal_id": journal_id},
     )
 

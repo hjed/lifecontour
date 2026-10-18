@@ -36,10 +36,10 @@ from app.core.journal.models.repositories import (
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
+from app.core.journal.services.journal_write_guard import guard_journal_write
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, transactional
-from app.shared.preconditions import enforce_etag_precondition
 
 logger = structlog.get_logger()
 
@@ -199,15 +199,11 @@ class JournalService:
         if journal.id is None:
             raise JournalValidationError("id", "Journal ID is required for update")
 
-        # Refuse a stale write before anything is read or written, holding the
+        # Lock before anything is read, and refuse a stale write, holding the
         # row lock for the rest of this unit of work so the version cannot move
-        # between the check and the save.
-        await enforce_etag_precondition(
-            resource_type="journals",
-            resource_id=journal.id,
-            expected_etags=expected_etags,
-            lock_and_get_updated_at=self.journal_repo.lock_and_get_updated_at,
-        )
+        # between the check and the save - or between the read below and the
+        # save, which an unconditional write needs just as much.
+        await guard_journal_write(self.journal_repo, journal.id, expected_etags)
 
         # Load the persisted journal so the service owns the change calculation.
         existing_journal = await self.journal_repo.find_by_id(journal.id)
@@ -719,6 +715,10 @@ class JournalService:
             JournalMaxDepthExceededError: If depth exceeds maximum
             JournalCycleError: If parent relationship would create a cycle
         """
+        # Overlapping hierarchy changes queue here, so the walks below read
+        # every earlier change committed; see ``lock_hierarchy``.
+        await self.journal_repo.lock_hierarchy(user_id)
+
         # Validate the parent exists *and is the caller's own*. Resolving it
         # unscoped accepted any id in the table, so a journal could be hung off
         # a stranger's: a child its owner can neither see nor delete, with the
