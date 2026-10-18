@@ -1,6 +1,5 @@
 """MCP tool returning the AI-generated summary of a day."""
 
-import json
 from datetime import date
 
 from fastmcp import FastMCP
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.services.daily_summary_service import DailySummaryService
 from app.mcp.domains.journals.schemas import (
     DailySummaryMCPResponse,
+    DailySummaryToolResponse,
 )
 from app.mcp.shared.annotations import (
     READ_ONLY_EXTERNAL,
@@ -21,7 +21,6 @@ from app.mcp.shared.dependencies import (
     get_daily_summary_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
 # These will be created when the user provides type_data
@@ -36,7 +35,7 @@ async def get_daily_summary(
     summary_date: str,
     daily_summary_service: DailySummaryService = mcp_depends(get_daily_summary_service),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> DailySummaryToolResponse:
     """Get the AI-generated daily summary for a specific date.
 
     Today (in the user's configured timezone) is always eligible for a summary,
@@ -70,7 +69,7 @@ async def get_daily_summary(
     )
 
     if result is None:
-        return json.dumps({"data": None})
+        return DailySummaryToolResponse(data=None)
 
     response = DailySummaryMCPResponse(
         summary_date=parsed_date.isoformat(),
@@ -85,7 +84,7 @@ async def get_daily_summary(
         summary=f"Daily summary for {parsed_date.isoformat()}: {result.status}. {result.journal_count} journals, {result.event_count} events.",
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return DailySummaryToolResponse(data=response)
 
 
 def register_daily_summary_tools(mcp: FastMCP[None]) -> None:

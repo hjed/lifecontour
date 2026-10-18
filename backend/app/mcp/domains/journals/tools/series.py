@@ -6,9 +6,6 @@ appointments). These tools let AI assistants create series, manage their
 members, and inspect them.
 """
 
-import json
-from typing import Any
-
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     JournalValidationError,
@@ -29,6 +26,18 @@ from app.core.journal.services.journal_series_service import (
     JournalSeriesService,
     parse_series_id,
 )
+from app.mcp.domains.journals.schemas import (
+    JournalSeriesDetailMCPResponse,
+    JournalSeriesListMCPResponse,
+    JournalSeriesMCPResponse,
+    SeriesDeletedMCPResponse,
+    SeriesMemberJournalMCP,
+    SeriesMembershipAddedMCPResponse,
+    SeriesMembershipRemovedMCPResponse,
+    SeriesMergeDayMCP,
+    SeriesMergeJournalMCP,
+    SeriesMergeReportMCPResponse,
+)
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
     DESTRUCTIVE_WRITE,
@@ -45,7 +54,7 @@ from app.mcp.shared.dependencies import (
 )
 
 
-def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
+def _series_fields(series: JournalSeries) -> dict[str, object]:
     return {
         "id": str(series.id),
         "name": series.name,
@@ -58,6 +67,10 @@ def _series_to_dict(series: JournalSeries) -> dict[str, Any]:
     }
 
 
+def _series(series: JournalSeries) -> JournalSeriesMCPResponse:
+    return JournalSeriesMCPResponse.model_validate(_series_fields(series))
+
+
 class SeriesMergePairArgument(BaseModel):
     """A same-day pair from ``preview_series_merge`` to merge."""
 
@@ -68,35 +81,35 @@ class SeriesMergePairArgument(BaseModel):
     destination_journal_id: int
 
 
-def _merge_report_to_dict(report: SeriesMergeReport) -> dict[str, Any]:
-    return {
-        "source_series_id": str(report.source_series.id),
-        "destination_series_id": str(report.destination_series.id),
-        "days": [
-            {
-                "date": day.date.isoformat(),
-                "kind": day.kind.value,
-                "source_journal_ids": list(day.source_journal_ids),
-                "destination_journal_ids": list(day.destination_journal_ids),
-                "differing_fields": [f.value for f in day.differing_fields],
-                "skip_reason": day.skip_reason.value if day.skip_reason else None,
-            }
+def _merge_report(report: SeriesMergeReport) -> SeriesMergeReportMCPResponse:
+    return SeriesMergeReportMCPResponse(
+        source_series_id=str(report.source_series.id),
+        destination_series_id=str(report.destination_series.id),
+        days=[
+            SeriesMergeDayMCP(
+                date=day.date,
+                kind=day.kind,
+                source_journal_ids=list(day.source_journal_ids),
+                destination_journal_ids=list(day.destination_journal_ids),
+                differing_fields=list(day.differing_fields),
+                skip_reason=day.skip_reason,
+            )
             for day in report.days
         ],
-        "journals": {
-            str(journal_id): {
-                "id": journal_id,
-                "title": member.journal.title,
-                "event_date_range_start": (
+        journals={
+            str(journal_id): SeriesMergeJournalMCP(
+                id=journal_id,
+                title=member.journal.title,
+                event_date_range_start=(
                     member.journal.event_date_range.start.isoformat()
                 ),
-                "location": (
+                location=(
                     member.calendar_info.location if member.calendar_info else None
                 ),
-            }
+            )
             for journal_id, member in report.members.items()
         },
-    }
+    )
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -106,7 +119,7 @@ async def create_series(
     description: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> JournalSeriesMCPResponse:
     """
     Create a journal series — a named group of related journal entries.
 
@@ -114,10 +127,6 @@ async def create_series(
     of medical appointments or a training block. Journals synced from recurring
     calendar events are grouped into series automatically; this tool is for
     manual grouping. Add members with add_journal_to_series.
-
-    Returns:
-        JSON string with the created series (id, name, description,
-        auto_created flag).
     """
     user_id = await get_current_user_id()
     try:
@@ -126,24 +135,20 @@ async def create_series(
         raise JournalValidationError("name", str(e)) from e
 
     created = await series_service.create_series(series, db_connection)
-    return json.dumps(_series_to_dict(created), indent=2)
+    return _series(created)
 
 
 @tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("list_series", "journal")
 async def list_series(
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> JournalSeriesListMCPResponse:
     """
     List all journal series for the current user, ordered by name.
-
-    Returns:
-        JSON string with a "series" list; each item has id, name, description,
-        and whether it was auto-created from a recurring calendar event.
     """
     user_id = await get_current_user_id()
     all_series = await series_service.list_series(user_id)
-    return json.dumps({"series": [_series_to_dict(s) for s in all_series]}, indent=2)
+    return JournalSeriesListMCPResponse(series=[_series(s) for s in all_series])
 
 
 @tool(annotations=READ_ONLY)
@@ -152,13 +157,9 @@ async def get_series(
     series_id: str,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> JournalSeriesDetailMCPResponse:
     """
     Get a journal series with its member journals.
-
-    Returns:
-        JSON string with the series fields plus "member_journals": a list of
-        {id, title, event_date_range_start} ordered by event date.
     """
     user_id = await get_current_user_id()
     parsed_id = parse_series_id(series_id)
@@ -169,21 +170,24 @@ async def get_series(
     members = await journal_repo.find_by_ids_for_user(user_id, member_ids)
     members_by_id = {j.id: j for j in members if j.id is not None}
 
-    result = _series_to_dict(series)
-    result["member_journals"] = [
+    return JournalSeriesDetailMCPResponse.model_validate(
         {
-            "id": journal_id,
-            "title": members_by_id[journal_id].title,
-            "event_date_range_start": (
-                members_by_id[journal_id].event_date_range.start.isoformat()
-                if members_by_id[journal_id].event_date_range
-                else None
-            ),
+            **_series_fields(series),
+            "member_journals": [
+                SeriesMemberJournalMCP(
+                    id=journal_id,
+                    title=members_by_id[journal_id].title,
+                    event_date_range_start=(
+                        members_by_id[journal_id].event_date_range.start.isoformat()
+                        if members_by_id[journal_id].event_date_range
+                        else None
+                    ),
+                )
+                for journal_id in member_ids
+                if journal_id in members_by_id
+            ],
         }
-        for journal_id in member_ids
-        if journal_id in members_by_id
-    ]
-    return json.dumps(result, indent=2)
+    )
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -194,12 +198,9 @@ async def update_series(
     description: str | None = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> JournalSeriesMCPResponse:
     """
     Rename or re-describe a journal series.
-
-    Returns:
-        JSON string with the updated series.
     """
     user_id = await get_current_user_id()
     updated = await series_service.update_series(
@@ -209,7 +210,7 @@ async def update_series(
         description=description,
         transaction=db_connection,
     )
-    return json.dumps(_series_to_dict(updated), indent=2)
+    return _series(updated)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -218,19 +219,16 @@ async def delete_series(
     series_id: str,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> SeriesDeletedMCPResponse:
     """
     Delete a journal series. Member journals are NOT deleted — only the
     grouping is removed.
-
-    Returns:
-        JSON string confirming the deletion.
     """
     user_id = await get_current_user_id()
     await series_service.delete_series(
         parse_series_id(series_id), user_id, db_connection
     )
-    return json.dumps({"deleted": True, "series_id": series_id}, indent=2)
+    return SeriesDeletedMCPResponse(deleted=True, series_id=series_id)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -240,15 +238,12 @@ async def add_journal_to_series(
     journal_id: int,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> SeriesMembershipAddedMCPResponse:
     """
     Add a journal entry to a series (idempotent — re-adding is a no-op).
 
     A journal may belong to multiple series (e.g. an auto-created calendar
     series plus a manual grouping).
-
-    Returns:
-        JSON string confirming the membership.
     """
     user_id = await get_current_user_id()
     await series_service.add_journal_to_series(
@@ -257,8 +252,8 @@ async def add_journal_to_series(
         user_id=user_id,
         transaction=db_connection,
     )
-    return json.dumps(
-        {"added": True, "series_id": series_id, "journal_id": journal_id}, indent=2
+    return SeriesMembershipAddedMCPResponse(
+        added=True, series_id=series_id, journal_id=journal_id
     )
 
 
@@ -269,13 +264,10 @@ async def remove_journal_from_series(
     journal_id: int,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     series_service: JournalSeriesService = mcp_depends(get_journal_series_service),
-) -> str:
+) -> SeriesMembershipRemovedMCPResponse:
     """
     Remove a journal entry from a series (idempotent). The journal itself is
     not deleted.
-
-    Returns:
-        JSON string confirming the removal.
     """
     user_id = await get_current_user_id()
     await series_service.remove_journal_from_series(
@@ -284,8 +276,8 @@ async def remove_journal_from_series(
         user_id=user_id,
         transaction=db_connection,
     )
-    return json.dumps(
-        {"removed": True, "series_id": series_id, "journal_id": journal_id}, indent=2
+    return SeriesMembershipRemovedMCPResponse(
+        removed=True, series_id=series_id, journal_id=journal_id
     )
 
 
@@ -298,7 +290,7 @@ async def preview_series_merge(
     merge_service: JournalSeriesMergeService = mcp_depends(
         get_journal_series_merge_service
     ),
-) -> str:
+) -> SeriesMergeReportMCPResponse:
     """
     Preview merging the source series into the destination series. Writes nothing.
 
@@ -314,14 +306,6 @@ async def preview_series_merge(
     "combine" (content only — its default — concatenating both). When only one
     journal of a pair is an event, its timing is kept whole whatever the timing
     policy: the other has no clock times to contribute.
-
-    Returns:
-        JSON string with "days" (date, kind, source_journal_ids,
-        destination_journal_ids, differing_fields, skip_reason) and "journals"
-        ({id: {title, event_date_range_start, location}}). A day's kind is
-        "candidate" (will merge), "skipped" (a skip_if_different field differs),
-        "ambiguous" (more than one journal on a side; not merged), "unpaired"
-        or "already_shared" (the journal is in both series).
     """
     user_id = await get_current_user_id()
     report = await merge_service.preview_merge(
@@ -330,7 +314,7 @@ async def preview_series_merge(
         user_id=user_id,
         policies=SeriesMergePolicies.from_mapping(policies),
     )
-    return json.dumps(_merge_report_to_dict(report), indent=2)
+    return _merge_report(report)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -344,7 +328,7 @@ async def merge_series(
     merge_service: JournalSeriesMergeService = mcp_depends(
         get_journal_series_merge_service
     ),
-) -> str:
+) -> SeriesMergeReportMCPResponse:
     """
     Merge the source series into the destination series, deleting the source.
 
@@ -356,11 +340,6 @@ async def merge_series(
     (the data changed since the preview) nothing is written and an error is
     returned: preview again. Later calendar syncs of a recurring source series
     add their instances to the destination.
-
-    Returns:
-        JSON string shaped like preview_series_merge's, where each merged day's
-        kind is "merged", a confirmed pair the journal merge refused is
-        "failed", and an unconfirmed candidate is "excluded".
     """
     user_id = await get_current_user_id()
     report = await merge_service.merge_series(
@@ -376,7 +355,7 @@ async def merge_series(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return json.dumps(_merge_report_to_dict(report), indent=2)
+    return _merge_report(report)
 
 
 def register_journal_series_tools(mcp: FastMCP[None]) -> None:

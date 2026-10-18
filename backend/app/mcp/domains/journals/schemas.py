@@ -8,9 +8,10 @@ All schemas include contextual summaries to help AI understand the data.
 from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import dataclass
+from datetime import date as date_type
 from datetime import datetime
 from functools import cache
-from typing import Any
+from typing import Any, Literal
 
 from core_shared.models.journals import (
     AnchorLocation,
@@ -20,6 +21,7 @@ from core_shared.models.journals import (
     PitchType,
 )
 from core_shared.models.journals.exceptions import JournalValidationError
+from core_shared.models.journals.review_item import ReviewReason
 from core_shared.models.journals.type_data_schemas import (
     TYPE_DATA_MODELS,
     TypeDataModel,
@@ -27,6 +29,8 @@ from core_shared.models.journals.type_data_schemas import (
 )
 from pydantic import BaseModel, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
+
+from app.core.journal.models.series_merge import SeriesDayOutcomeKind, SeriesMergeField
 
 # Field description constants
 JOURNAL_TITLE_DESC = "Journal title"
@@ -1142,3 +1146,196 @@ class RouteListMCPResponse(BaseModel):
     limit: int = Field(description="Maximum routes per page")
     offset: int = Field(description="Routes skipped before this page")
     summary: str = Field(description="AI-friendly summary")
+
+
+class JournalSeriesMCPResponse(BaseModel):
+    """A named group of journals, such as the occurrences of a recurring event."""
+
+    id: str = Field(description="Series id (UUID)")
+    name: str
+    description: str | None
+    calendar_id: str | None = Field(
+        description="Calendar the series was auto-created from, if any"
+    )
+    recurring_event_id: str | None = Field(
+        description="Google recurring master event id, for auto-created series"
+    )
+    auto_created: bool = Field(
+        description="Created by calendar sync rather than by the user"
+    )
+    created_at: str | None = Field(description="ISO 8601 instant")
+    updated_at: str | None = Field(description="ISO 8601 instant")
+
+
+class SeriesMemberJournalMCP(BaseModel):
+    """A journal in a series."""
+
+    id: int
+    title: str
+    event_date_range_start: str | None = Field(description="ISO 8601 instant")
+
+
+class JournalSeriesDetailMCPResponse(JournalSeriesMCPResponse):
+    """A series with its member journals, ordered by event date."""
+
+    member_journals: list[SeriesMemberJournalMCP]
+
+
+class JournalSeriesListMCPResponse(BaseModel):
+    """Every series the user has."""
+
+    series: list[JournalSeriesMCPResponse]
+
+
+class SeriesDeletedMCPResponse(BaseModel):
+    """A deleted series. Its journals are not deleted."""
+
+    deleted: Literal[True]
+    series_id: str
+
+
+class SeriesMembershipAddedMCPResponse(BaseModel):
+    """A journal added to a series."""
+
+    added: Literal[True]
+    series_id: str
+    journal_id: int
+
+
+class SeriesMembershipRemovedMCPResponse(BaseModel):
+    """A journal removed from a series. The journal itself is not deleted."""
+
+    removed: Literal[True]
+    series_id: str
+    journal_id: int
+
+
+class SeriesMergeDayMCP(BaseModel):
+    """What a series merge does on one local day."""
+
+    date: date_type = Field(description="The local day, in the user's timezone")
+    kind: SeriesDayOutcomeKind = Field(
+        description=(
+            "What happens on this day. In a preview: 'candidate' (will merge), "
+            "'skipped' (a skip_if_different field differs), 'ambiguous' (more "
+            "than one journal on a side; not merged), 'unpaired', or "
+            "'already_shared' (the journal is in both series). After "
+            "merge_series: 'merged', 'failed' (the journal merge refused a "
+            "confirmed pair) or 'excluded' (a candidate left out of pairs)."
+        )
+    )
+    source_journal_ids: list[int]
+    destination_journal_ids: list[int]
+    differing_fields: list[SeriesMergeField] = Field(
+        description="Fields on which a same-day pair disagree"
+    )
+    skip_reason: SeriesMergeField | None = Field(
+        description="The field that stops this day merging, if it is skipped"
+    )
+
+
+class SeriesMergeJournalMCP(BaseModel):
+    """A journal a series merge report refers to."""
+
+    id: int
+    title: str
+    event_date_range_start: str = Field(description="ISO 8601 instant")
+    location: str | None
+
+
+class SeriesMergeReportMCPResponse(BaseModel):
+    """A series merge, day by day: previewed, or as carried out."""
+
+    source_series_id: str
+    destination_series_id: str
+    days: list[SeriesMergeDayMCP]
+    journals: dict[str, SeriesMergeJournalMCP] = Field(
+        description="Every journal the days refer to, keyed by journal id"
+    )
+
+
+class ReviewItemJournalMCP(BaseModel):
+    """One side of a suspected duplicate."""
+
+    id: int
+    title: str
+
+
+class ReviewItemMCP(BaseModel):
+    """A pair of journals that may be the same thing."""
+
+    id: int | None
+    status: str = Field(description="pending, resolved or dismissed")
+    reason: ReviewReason = Field(description="Why the pair was flagged")
+    confidence_score: float = Field(description="Match confidence, 0.0 to 1.0")
+    details: dict[str, Any] | None = Field(
+        description="What matched, e.g. fields and similarity scores"
+    )
+    source_journal: ReviewItemJournalMCP = Field(
+        description="The newer journal, which would be merged away"
+    )
+    candidate_journal: ReviewItemJournalMCP = Field(
+        description="The existing journal it may match"
+    )
+
+
+class PageMetaMCP(BaseModel):
+    """Where a page sits in the full result."""
+
+    total_count: int
+    offset: int
+    limit: int
+
+
+class ReviewItemListMCPResponse(BaseModel):
+    """A page of the pending review queue."""
+
+    meta: PageMetaMCP
+    data: list[ReviewItemMCP]
+    summary: str
+
+
+class ReviewItemDismissedMCPResponse(BaseModel):
+    """A dismissed review item."""
+
+    success: Literal[True]
+    message: str
+    status: str
+
+
+class JournalTypeInfoMCP(BaseModel):
+    """One journal type and the type_data it accepts."""
+
+    name: str
+    description: str
+    dependencies: list[str] = Field(description="Types added with this one")
+    type_data_fields: dict[str, Any] | None = Field(
+        description=(
+            "Each type_data field's type, unit, whether it is required and its "
+            "limits, keyed by field name; null when the type takes no data"
+        )
+    )
+
+
+class ContactRelationshipEnumsMCP(BaseModel):
+    """The vocabularies for a journal's contacts."""
+
+    relationship_types: list[str]
+    attendee_statuses: list[str]
+    contact_event_roles: list[str]
+
+
+class JournalTypeCatalogueMCPResponse(BaseModel):
+    """Every journal type, with what to pass when creating or updating one."""
+
+    journal_types: list[JournalTypeInfoMCP]
+    contact_relationship_enums: ContactRelationshipEnumsMCP
+    enums: dict[str, list[str]] = Field(description="Every closed vocabulary")
+    units: dict[str, str] = Field(description="The unit each numeric field is in")
+    usage_hint: str
+
+
+class DailySummaryToolResponse(BaseModel):
+    """A day's summary, or null when the day has none."""
+
+    data: DailySummaryMCPResponse | None

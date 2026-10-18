@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.review_item_repository import SqlReviewItemRepository
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
+    extract_typed_tool_result,
+    post_mcp_tool,
 )
 
 OTHER_USER_ID = "other-user-456"
@@ -126,16 +129,45 @@ class TestReviewItemsToolsIntegration:
         clean_database: AsyncConnection,
     ) -> None:
         async with authenticated_lifespan_client() as authenticated_client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 authenticated_client,
                 "dismiss_review_item",
                 {"item_id": other_users_review_item.id},
             )
 
         assert payload == {
-            "error": f"Review item {other_users_review_item.id} not found."
+            "error": "Not found",
+            "message": f"Review item {other_users_review_item.id} not found.",
         }
 
         repo = SqlReviewItemRepository(clean_database)
         pending = await repo.find_pending_by_user(OTHER_USER_ID)
         assert [item.id for item in pending] == [other_users_review_item.id]
+
+    @pytest.mark.asyncio
+    async def test_list_review_items_is_sent_as_structured_content(
+        self,
+        authenticated_lifespan_client: Any,
+        own_review_item: ReviewItem,
+    ) -> None:
+        """The queue reaches a client as its response model, not a string."""
+        async with authenticated_lifespan_client() as authenticated_client:
+            response = await post_mcp_tool(
+                authenticated_client, "list_review_items", {}
+            )
+
+        payload = extract_typed_tool_result(response.text)
+        assert [item["id"] for item in payload["data"]] == [own_review_item.id]
+        assert payload["meta"]["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_review_items_refuses_an_unsupported_status(
+        self, authenticated_lifespan_client: Any
+    ) -> None:
+        async with authenticated_lifespan_client() as authenticated_client:
+            payload = await call_mcp_tool_error(
+                authenticated_client, "list_review_items", {"status": "dismissed"}
+            )
+
+        assert payload["error"] == "Validation error"
+        assert payload["field"] == "status"

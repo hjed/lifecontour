@@ -15,6 +15,7 @@ from app.core.journal.adapters.sql.journal_series_repository import (
 from app.core.journal.models.journal_series import JournalSeries
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
     post_mcp_tool,
 )
 from tests.integration.series_merge_seeding import (
@@ -182,7 +183,7 @@ class TestJournalSeriesToolsIntegration:
         journal_id = await _seed_journal(clean_database)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "add_journal_to_series",
                 {
@@ -220,7 +221,7 @@ class TestJournalSeriesToolsIntegration:
         series_id = await _seed_series(clean_database, name="Keep this name")
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "update_series",
                 {"series_id": series_id, "name": "   "},
@@ -262,6 +263,16 @@ def _pairs_arg(source_journal: int, destination_journal: int) -> list[dict[str, 
     ]
 
 
+def _series_pair_args(
+    source: UUID, destination: UUID, **arguments: object
+) -> dict[str, object]:
+    return {
+        "destination_series_id": str(destination),
+        "source_series_id": str(source),
+        **arguments,
+    }
+
+
 async def _call_series_tool(
     client: Any,
     name: str,
@@ -270,13 +281,7 @@ async def _call_series_tool(
     **arguments: object,
 ) -> dict[str, Any]:
     return await _call_tool(
-        client,
-        name,
-        {
-            "destination_series_id": str(destination),
-            "source_series_id": str(source),
-            **arguments,
-        },
+        client, name, _series_pair_args(source, destination, **arguments)
     )
 
 
@@ -318,8 +323,8 @@ class TestSeriesMergeToolsIntegration:
         series = await seed_series(clean_database, "Standup")
 
         async with authenticated_lifespan_client() as client:
-            payload = await _call_series_tool(
-                client, "preview_series_merge", series, series
+            payload = await call_mcp_tool_error(
+                client, "preview_series_merge", _series_pair_args(series, series)
             )
 
         assert "error" in payload
@@ -356,12 +361,14 @@ class TestSeriesMergeToolsIntegration:
 
         async with authenticated_lifespan_client() as client:
             # A pair that was never a candidate: a journal paired with itself.
-            payload = await _call_series_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "merge_series",
-                pair.source,
-                pair.destination,
-                pairs=_pairs_arg(pair.source_journal, pair.source_journal),
+                _series_pair_args(
+                    pair.source,
+                    pair.destination,
+                    pairs=_pairs_arg(pair.source_journal, pair.source_journal),
+                ),
             )
 
         assert "error" in payload
