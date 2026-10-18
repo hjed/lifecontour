@@ -7,6 +7,7 @@ It runs as a separate process from the main FastAPI application.
 """
 
 import asyncio
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -56,6 +57,7 @@ from core_shared.repositories import (
     UnmatchedParticipantRepository,
 )
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +67,11 @@ from api_models import GooglePerson, ListConnectionsResponse
 
 # Import worker-specific services
 from event_transformer import google_event_times
-from google_auth_service import GoogleAuthService, GoogleAuthTokensNotFoundError
+from google_auth_service import (
+    GoogleAuthService,
+    GoogleAuthTokensNotFoundError,
+    TokenRefreshFailedError,
+)
 from google_client import (
     GoogleAPIClient,
     GoogleContactNotFoundError,
@@ -4325,6 +4331,527 @@ async def _load_calendar_sync_token(
     return cast(str | None, result.scalar())
 
 
+def _is_account_level_failure(error: Exception) -> bool:
+    """Whether ``error`` is the account's, not one calendar's.
+
+    Without usable credentials every calendar fails the same way, so these
+    fail the whole sync instead of being skipped calendar by calendar - a
+    disconnected account must not read as a successful sync. A rejected access
+    token usually arrives as ``RefreshError``, not a 401: the client's
+    credentials hold no refresh token, so the transport's retry-with-refresh
+    raises before the 401 is returned.
+    """
+    if isinstance(
+        error,
+        GoogleAuthTokensNotFoundError | TokenRefreshFailedError | RefreshError,
+    ):
+        return True
+    return isinstance(error, HttpError) and error.resp.status == 401
+
+
+async def _sync_calendar_inbound(
+    session: Any,
+    client: Any,
+    cal_row: Any,
+    *,
+    user_id: str | int,
+    google_account_email: str,
+    sync_type: str,
+    metrics: Counter[str],
+) -> None:
+    """Sync one calendar's events inbound, adding its outbox events to ``session``.
+
+    Leaves committing to the caller, so the calendar's outbox events and its
+    sync token land together or not at all. ``metrics`` is this calendar's own
+    tally, for the caller to keep only if that commit succeeds.
+    """
+    from core_shared.models.outbox import OutboxEvent
+
+    from calendar_models import GoogleEvent
+    from event_identity import build_event_identity
+    from event_transformer import GoogleEventTransformer
+    from inbound_sync import InboundSyncAction, InboundSyncClassifier
+    from recurrence import root_recurring_event_id
+    from split_adoption import find_split_pairing
+
+    classifier = InboundSyncClassifier()
+    transformer = GoogleEventTransformer()
+
+    google_calendar_id = cal_row.google_calendar_id or "primary"
+    calendar_id = cal_row.calendar_id
+    user_timezone = _iana_zone_name(cal_row.user_timezone)
+
+    # Get existing per-calendar sync token
+    existing_sync_token = await _load_calendar_sync_token(
+        session, user_id, google_account_email, google_calendar_id
+    )
+
+    # Decide whether to use sync token or time_min
+    use_sync_token = sync_type != "full" and existing_sync_token is not None
+
+    list_kwargs: dict[str, Any] = {
+        "calendar_id": google_calendar_id,
+        "single_events": True,
+    }
+
+    time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
+
+    if use_sync_token:
+        list_kwargs["sync_token"] = existing_sync_token
+    else:
+        # Full sync: fetch events from 10 years ago indefinitely
+        list_kwargs["time_min"] = time_min
+
+    # Fetch all events with pagination
+    from googleapiclient.errors import HttpError
+
+    try:
+        all_raw_events, new_sync_token = await _fetch_all_calendar_events(
+            client, list_kwargs
+        )
+    except HttpError as e:
+        is_sync_token_error = e.resp.status == 410 or (
+            e.resp.status == 400 and "syncTokenInvalid" in google_error_reasons(e)
+        )
+        if is_sync_token_error:
+            logger.warning(
+                "Sync token invalid, falling back to full sync",
+                calendar_id=google_calendar_id,
+                error=str(e),
+            )
+            # Clear existing sync token and fallback to full sync
+            await session.execute(
+                text(
+                    "UPDATE calendar_sync_tokens "
+                    "SET sync_token = NULL "
+                    "WHERE user_id = :user_id "
+                    "AND google_account_email = :email "
+                    "AND google_calendar_id = :google_calendar_id"
+                ),
+                {
+                    "user_id": str(user_id),
+                    "email": google_account_email,
+                    "google_calendar_id": google_calendar_id,
+                },
+            )
+            await session.commit()
+
+            list_kwargs.pop("sync_token", None)
+            list_kwargs["time_min"] = time_min
+            (
+                all_raw_events,
+                new_sync_token,
+            ) = await _fetch_all_calendar_events(client, list_kwargs)
+        else:
+            raise
+
+    # A "this and following" edit under an unrelated id cancels
+    # the old recurrence's instances and starts a new recurrence in
+    # the same batch. Paired here, each new instance updates the
+    # old journal instead of duplicating it (``split_adoption``).
+    split_pairing = await find_split_pairing(
+        session, calendar_id, all_raw_events, user_timezone
+    )
+    # Old instances whose journal a new instance has adopted. Live
+    # events go first, so an old cancellation is only dropped once
+    # its partner really adopted the journal - not when the partner
+    # was sent elsewhere (the cross-calendar de-dupe, say).
+    adopted_old_event_ids: set[str] = set()
+    if split_pairing.targets:
+        all_raw_events = sorted(
+            all_raw_events, key=lambda e: e.get("status") == "cancelled"
+        )
+
+    # Process each event
+    calendar_errors = 0
+    for raw_event in all_raw_events:
+        try:
+            google_event = GoogleEvent.from_api_response(raw_event)
+
+            # The old half of an adopted split: cancelling it would
+            # cancel the journal its new instance now owns.
+            if google_event.id in adopted_old_event_ids:
+                metrics["events_skipped"] += 1
+                continue
+
+            # Lookup existing link
+            link_stmt = text("""
+                SELECT journal_id, external_event_id, external_version,
+                       sync_capability, sync_status, recurring_event_id,
+                       external_identity
+                FROM journal_external_event_links
+                WHERE calendar_id = :calendar_id
+                AND external_event_id = :external_event_id
+            """)
+            link_result = await session.execute(
+                link_stmt,
+                {
+                    "calendar_id": calendar_id,
+                    "external_event_id": google_event.id,
+                },
+            )
+            existing_link = link_result.fetchone()
+
+            # A cancelled, unlinked event id may be a recurring
+            # MASTER id (Google reports whole-series deletion as a
+            # single cancelled master under singleEvents=true).
+            # Instances point at it via recurring_event_id.
+            has_series_links = False
+            if google_event.status == "cancelled" and existing_link is None:
+                # Match the backfilled recurring id, plus a prefix
+                # fallback for legacy links synced before the id
+                # was recorded (instance ids are <master>_<time>;
+                # the extra-underscore guard excludes successor
+                # series created by "this and following" edits).
+                escaped_master = (
+                    google_event.id.replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                )
+                series_links_stmt = text("""
+                    SELECT 1
+                    FROM journal_external_event_links
+                    WHERE calendar_id = :calendar_id
+                      AND (recurring_event_id = :recurring_event_id
+                           OR (recurring_event_id IS NULL
+                               AND external_event_id
+                                   LIKE :instance_prefix ESCAPE '\\'
+                               AND external_event_id
+                                   NOT LIKE :deeper_prefix ESCAPE '\\'))
+                    LIMIT 1
+                """)
+                series_links_result = await session.execute(
+                    series_links_stmt,
+                    {
+                        "calendar_id": calendar_id,
+                        "recurring_event_id": google_event.id,
+                        "instance_prefix": f"{escaped_master}\\_%",
+                        "deeper_prefix": f"{escaped_master}\\_%\\_%",
+                    },
+                )
+                has_series_links = series_links_result.scalar() is not None
+
+            # An event with no link may be one a journal merge
+            # absorbed. The backend refuses to re-import it anyway;
+            # asking here keeps a full sync from sending a create
+            # for every event a merge ever absorbed.
+            is_merged_alias = (
+                existing_link is None
+                and await MergedAliasRepository(session).find_alias(
+                    user_id=str(user_id),
+                    payload_source="google",
+                    external_id=google_event.id,
+                    external_identity=build_event_identity(google_event),
+                )
+                is not None
+            )
+
+            # Classify the event
+            action = classifier.classify_inbound_event(
+                google_event=google_event,
+                existing_link=existing_link,
+                has_series_links=has_series_links,
+                is_merged_alias=is_merged_alias,
+            )
+
+            # Cross-calendar de-dupe. When one calendar invites
+            # another, both copies are real events with their own
+            # ids, so the lookup above legitimately found nothing
+            # and this reads as a brand-new event. The identity
+            # token is what the two copies share: a hit means the
+            # event is already journalled, and this calendar wants
+            # a link to that journal rather than a journal of its
+            # own. Turning the create into an update is what gets
+            # the backend to add the second link.
+            external_identity = build_event_identity(google_event)
+            deduped_journal_id: int | None = None
+            if action == InboundSyncAction.CREATE_JOURNAL and external_identity:
+                deduped_journal_id = await _find_journal_by_event_identity(
+                    session,
+                    user_id,
+                    external_identity,
+                    calendar_id,
+                )
+                if deduped_journal_id is not None:
+                    logger.info(
+                        "Event already journalled from another "
+                        "calendar, linking instead of duplicating",
+                        external_event_id=google_event.id,
+                        journal_id=deduped_journal_id,
+                        calendar_id=str(calendar_id),
+                    )
+                    action = InboundSyncAction.UPDATE_JOURNAL
+                    metrics["events_deduplicated"] = (
+                        metrics.get("events_deduplicated", 0) + 1
+                    )
+
+            split_target = split_pairing.targets.get(google_event.id)
+            if action == InboundSyncAction.CREATE_JOURNAL and split_target is not None:
+                deduped_journal_id = split_target.journal_id
+                action = InboundSyncAction.UPDATE_JOURNAL
+                metrics["events_split_adopted"] = (
+                    metrics.get("events_split_adopted", 0) + 1
+                )
+            split_adopted_from = (
+                split_target.adopted_from
+                if split_target is not None
+                and deduped_journal_id == split_target.journal_id
+                else None
+            )
+
+            # An unchanged event is skipped on its ETag, so its
+            # participants are re-synced once when that would
+            # change something: an attendee now matches a contact
+            # the journal is not linked to, or has an address the
+            # backend has not yet recorded as matching no contact
+            # (events synced before it recorded them).
+            if (
+                action == InboundSyncAction.SKIP_UNCHANGED
+                and existing_link is not None
+                and await _participants_need_resync(
+                    session,
+                    str(user_id),
+                    existing_link.journal_id,
+                    transformer.extract_contact_relationships(google_event),
+                )
+            ):
+                action = InboundSyncAction.UPDATE_JOURNAL
+
+            # Backfill promotion: an unchanged recurring instance
+            # whose link predates the series feature (no stored
+            # recurring id) is re-synced once so the backend can
+            # record the id and create the series membership.
+            if (
+                action == InboundSyncAction.SKIP_UNCHANGED
+                and google_event.recurring_event_id
+                and existing_link is not None
+                and existing_link.recurring_event_id is None
+            ):
+                action = InboundSyncAction.UPDATE_JOURNAL
+
+            # Same, for links made before events carried an
+            # identity token. Nothing else would ever give them
+            # one — an unchanged event is skipped on its ETag —
+            # so the de-dupe would otherwise only work for events
+            # first synced after this shipped. Once the backend
+            # stores the token the link stops qualifying, so this
+            # fires once per link rather than every sync.
+            if (
+                action == InboundSyncAction.SKIP_UNCHANGED
+                and external_identity
+                and existing_link is not None
+                and existing_link.external_identity is None
+            ):
+                action = InboundSyncAction.UPDATE_JOURNAL
+
+            if action == InboundSyncAction.SKIP_MERGED:
+                metrics["events_skipped_merged"] = (
+                    metrics.get("events_skipped_merged", 0) + 1
+                )
+                continue
+
+            if action in (
+                InboundSyncAction.SKIP_UNCHANGED,
+                InboundSyncAction.SKIP_ONE_WAY,
+                InboundSyncAction.SKIP_CANCELLED,
+            ):
+                metrics["events_skipped"] += 1
+                continue
+
+            # Whole-series deletion: fan out to the backend, which
+            # deletes far-future untouched instances and cancels
+            # the rest.
+            if action == InboundSyncAction.CANCEL_SERIES:
+                outbox_event = OutboxEvent.create_journal_series_cancelled_event(
+                    integration_source="google",
+                    calendar_id=str(calendar_id),
+                    recurring_event_id=google_event.id,
+                )
+                session.add(outbox_event)
+                metrics["series_cancellations"] = (
+                    metrics.get("series_cancellations", 0) + 1
+                )
+                metrics["events_processed"] += 1
+                continue
+
+            # Handle cancellation: mark linked journal as cancelled
+            # BUT skip if the event's end date is in the past — some calendars
+            # (e.g. shared/subscribed) don't preserve past events and return
+            # them as cancelled during incremental sync even though they already
+            # happened.
+            if action == InboundSyncAction.CANCEL_JOURNAL:
+                existing_journal_id = (
+                    existing_link.journal_id if existing_link else None
+                )
+
+                # Check if the event already ended (past event)
+                # Use a 1-day buffer to avoid edge cases with all-day
+                # events where event_date_range_end is midnight-normalised.
+                if existing_journal_id is not None:
+                    end_date_stmt = text("""
+                        SELECT event_date_range_end
+                        FROM journals
+                        WHERE id = :journal_id
+                    """)
+                    end_date_result = await session.execute(
+                        end_date_stmt,
+                        {"journal_id": existing_journal_id},
+                    )
+                    event_end_date = end_date_result.scalar()
+
+                    cancellation_cutoff = datetime.now(UTC) - timedelta(days=1)
+                    if (
+                        event_end_date is not None
+                        and event_end_date < cancellation_cutoff
+                    ):
+                        logger.info(
+                            "Skipping cancellation for past event",
+                            external_event_id=google_event.id,
+                            journal_id=existing_journal_id,
+                            event_end_date=event_end_date.isoformat(),
+                        )
+                        metrics["events_skipped"] += 1
+                        continue
+
+                outbox_event = OutboxEvent.create_journal_sync_event(
+                    journal_data={},
+                    calendar_info_data={},
+                    integration_source="google",
+                    external_event_id=google_event.id,
+                    calendar_id=str(calendar_id),
+                    sync_action="cancelled",
+                    etag=google_event.etag,
+                    existing_journal_id=existing_journal_id,
+                    contact_relationships=[],
+                    recurring_event_id=google_event.recurring_event_id,
+                    series_recurring_event_id=root_recurring_event_id(
+                        google_event.recurring_event_id
+                    ),
+                )
+                session.add(outbox_event)
+                metrics["events_cancelled"] = metrics.get("events_cancelled", 0) + 1
+                metrics["events_processed"] += 1
+                continue
+
+            import uuid
+
+            transform_result = transformer.transform_event(
+                google_event,
+                str(user_id),
+                uuid.UUID(str(calendar_id)),
+                self_email=google_account_email,
+                all_day_timezone=user_timezone,
+            )
+            if transform_result is None:
+                metrics["events_skipped"] += 1
+                continue
+
+            journal, calendar_info = transform_result
+
+            # Build journal data dict for outbox
+            journal_data = {
+                "title": journal.title,
+                "event_date_range_start": journal.event_date_range.start.isoformat(),
+                "event_date_range_end": journal.event_date_range.end.isoformat(),
+                "user_id": str(user_id),
+            }
+            # An adoption carries the content too, for the
+            # backend's fallback when the adopted journal has
+            # gone; it never overwrites the journal's notes.
+            if (
+                action == InboundSyncAction.CREATE_JOURNAL
+                or split_adopted_from is not None
+            ):
+                journal_data["content"] = journal.content
+            calendar_info_data = {
+                "calendar_id": str(calendar_id),
+                "is_all_day": calendar_info.is_all_day,
+                "location": calendar_info.location,
+                "start_time": calendar_info.start_time.isoformat()
+                if calendar_info.start_time
+                else None,
+                "end_time": calendar_info.end_time.isoformat()
+                if calendar_info.end_time
+                else None,
+                "timezone": calendar_info.timezone,
+                "event_state": calendar_info.event_state.value
+                if hasattr(calendar_info.event_state, "value")
+                else calendar_info.event_state,
+            }
+
+            # Extract attendee emails as contact relationships
+            contact_relationships = transformer.extract_contact_relationships(
+                google_event
+            )
+
+            # Determine sync action string
+            if action == InboundSyncAction.CREATE_JOURNAL:
+                sync_action = "created"
+                metrics["events_created"] += 1
+            elif action == InboundSyncAction.UPDATE_JOURNAL:
+                sync_action = "updated"
+                metrics["events_updated"] += 1
+            else:
+                metrics["events_skipped"] += 1
+                continue
+
+            existing_journal_id = (
+                existing_link.journal_id if existing_link else deduped_journal_id
+            )
+
+            # Create outbox event
+            outbox_event = OutboxEvent.create_journal_sync_event(
+                journal_data=journal_data,
+                calendar_info_data=calendar_info_data,
+                integration_source="google",
+                external_event_id=google_event.id,
+                calendar_id=str(calendar_id),
+                sync_action=sync_action,
+                etag=google_event.etag,
+                existing_journal_id=existing_journal_id,
+                contact_relationships=contact_relationships,
+                recurring_event_id=google_event.recurring_event_id,
+                external_identity=external_identity,
+                series_recurring_event_id=root_recurring_event_id(
+                    google_event.recurring_event_id
+                ),
+                split_adopted_from=split_adopted_from,
+            )
+            session.add(outbox_event)
+            metrics["events_processed"] += 1
+            # Only an adoption actually sent makes the old
+            # instance's cancellation redundant.
+            if split_target is not None and split_adopted_from:
+                adopted_old_event_ids.add(split_target.old_event_id)
+
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "Failed to process inbound calendar event",
+                event_id=raw_event.get("id"),
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            metrics["errors"] += 1
+            calendar_errors += 1
+
+    # Save sync token only when this calendar processed without errors
+    if new_sync_token and calendar_errors == 0:
+        await _save_calendar_sync_token(
+            session,
+            new_sync_token,
+            user_id,
+            google_account_email,
+            google_calendar_id,
+        )
+    elif new_sync_token and calendar_errors > 0:
+        logger.warning(
+            "Skipping sync token save due to processing errors",
+            calendar_errors=calendar_errors,
+            google_calendar_id=google_calendar_id,
+            google_account_email=google_account_email,
+        )
+
+
 @trace_arq_job
 async def sync_calendar_events(
     ctx: dict[str, Any],
@@ -4340,6 +4867,10 @@ async def sync_calendar_events(
     classifies them (new/updated/unchanged), and creates outbox events for the
     backend to process into journals.
 
+    Each calendar is its own unit of work: one that fails is logged, rolled
+    back and skipped so the rest still sync. Only a failure of the account's
+    credentials fails the whole task.
+
     Args:
         ctx: ARQ context dictionary
         google_account_email: Google account email to sync
@@ -4349,15 +4880,6 @@ async def sync_calendar_events(
     Returns:
         Task result dictionary with sync status and metrics
     """
-    from core_shared.models.outbox import OutboxEvent
-
-    from calendar_models import GoogleEvent
-    from event_identity import build_event_identity
-    from event_transformer import GoogleEventTransformer
-    from inbound_sync import InboundSyncAction, InboundSyncClassifier
-    from recurrence import root_recurring_event_id
-    from split_adoption import find_split_pairing
-
     job_id = ctx.get("job_id", "unknown")
     set_job_id(job_id)
     set_worker_id(settings.worker_id)
@@ -4372,8 +4894,6 @@ async def sync_calendar_events(
 
     session_factory = ctx["session_factory"]
     started_at = datetime.now(UTC)
-    classifier = InboundSyncClassifier()
-    transformer = GoogleEventTransformer()
 
     metrics: dict[str, Any] = {
         "events_processed": 0,
@@ -4381,6 +4901,7 @@ async def sync_calendar_events(
         "events_updated": 0,
         "events_skipped": 0,
         "errors": 0,
+        "calendars_failed": 0,
         "worker_id": settings.worker_id,
         "started_at": started_at.isoformat(),
     }
@@ -4405,6 +4926,7 @@ async def sync_calendar_events(
                 FROM calendars c
                 LEFT JOIN user_settings us ON us.user_id = c.user_id
                 WHERE c.user_id = :user_id AND c.is_synced_to_google = true
+                ORDER BY c.created_at, c.id
             """)
             cal_result = await session.execute(cal_stmt, {"user_id": str(user_id)})
             synced_calendars = cal_result.fetchall()
@@ -4418,495 +4940,36 @@ async def sync_calendar_events(
             for cal_row in synced_calendars:
                 if not cal_row.is_synced_to_google:
                     continue
-
-                google_calendar_id = cal_row.google_calendar_id or "primary"
-                calendar_id = cal_row.calendar_id
-                user_timezone = _iana_zone_name(cal_row.user_timezone)
-
-                # Get existing per-calendar sync token
-                existing_sync_token = await _load_calendar_sync_token(
-                    session, user_id, google_account_email, google_calendar_id
-                )
-
-                # Decide whether to use sync token or time_min
-                use_sync_token = sync_type != "full" and existing_sync_token is not None
-
-                list_kwargs: dict[str, Any] = {
-                    "calendar_id": google_calendar_id,
-                    "single_events": True,
-                }
-
-                time_min = (datetime.now(UTC) - timedelta(days=3650)).isoformat()
-
-                if use_sync_token:
-                    list_kwargs["sync_token"] = existing_sync_token
-                else:
-                    # Full sync: fetch events from 10 years ago indefinitely
-                    list_kwargs["time_min"] = time_min
-
-                # Fetch all events with pagination
-                from googleapiclient.errors import HttpError
-
+                # Counted apart so a rolled-back calendar reports none of the
+                # events it queued.
+                calendar_metrics: Counter[str] = Counter()
                 try:
-                    all_raw_events, new_sync_token = await _fetch_all_calendar_events(
-                        client, list_kwargs
-                    )
-                except HttpError as e:
-                    is_sync_token_error = e.resp.status == 410 or (
-                        e.resp.status == 400
-                        and "syncTokenInvalid" in google_error_reasons(e)
-                    )
-                    if is_sync_token_error:
-                        logger.warning(
-                            "Sync token invalid, falling back to full sync",
-                            calendar_id=google_calendar_id,
-                            error=str(e),
-                        )
-                        # Clear existing sync token and fallback to full sync
-                        await session.execute(
-                            text(
-                                "UPDATE calendar_sync_tokens "
-                                "SET sync_token = NULL "
-                                "WHERE user_id = :user_id "
-                                "AND google_account_email = :email "
-                                "AND google_calendar_id = :google_calendar_id"
-                            ),
-                            {
-                                "user_id": str(user_id),
-                                "email": google_account_email,
-                                "google_calendar_id": google_calendar_id,
-                            },
-                        )
-                        await session.commit()
-
-                        list_kwargs.pop("sync_token", None)
-                        list_kwargs["time_min"] = time_min
-                        (
-                            all_raw_events,
-                            new_sync_token,
-                        ) = await _fetch_all_calendar_events(client, list_kwargs)
-                    else:
-                        raise
-
-                # A "this and following" edit under an unrelated id cancels
-                # the old recurrence's instances and starts a new recurrence in
-                # the same batch. Paired here, each new instance updates the
-                # old journal instead of duplicating it (``split_adoption``).
-                split_pairing = await find_split_pairing(
-                    session, calendar_id, all_raw_events, user_timezone
-                )
-                # Old instances whose journal a new instance has adopted. Live
-                # events go first, so an old cancellation is only dropped once
-                # its partner really adopted the journal - not when the partner
-                # was sent elsewhere (the cross-calendar de-dupe, say).
-                adopted_old_event_ids: set[str] = set()
-                if split_pairing.targets:
-                    all_raw_events = sorted(
-                        all_raw_events, key=lambda e: e.get("status") == "cancelled"
-                    )
-
-                # Process each event
-                calendar_errors = 0
-                for raw_event in all_raw_events:
-                    try:
-                        google_event = GoogleEvent.from_api_response(raw_event)
-
-                        # The old half of an adopted split: cancelling it would
-                        # cancel the journal its new instance now owns.
-                        if google_event.id in adopted_old_event_ids:
-                            metrics["events_skipped"] += 1
-                            continue
-
-                        # Lookup existing link
-                        link_stmt = text("""
-                            SELECT journal_id, external_event_id, external_version,
-                                   sync_capability, sync_status, recurring_event_id,
-                                   external_identity
-                            FROM journal_external_event_links
-                            WHERE calendar_id = :calendar_id
-                            AND external_event_id = :external_event_id
-                        """)
-                        link_result = await session.execute(
-                            link_stmt,
-                            {
-                                "calendar_id": calendar_id,
-                                "external_event_id": google_event.id,
-                            },
-                        )
-                        existing_link = link_result.fetchone()
-
-                        # A cancelled, unlinked event id may be a recurring
-                        # MASTER id (Google reports whole-series deletion as a
-                        # single cancelled master under singleEvents=true).
-                        # Instances point at it via recurring_event_id.
-                        has_series_links = False
-                        if google_event.status == "cancelled" and existing_link is None:
-                            # Match the backfilled recurring id, plus a prefix
-                            # fallback for legacy links synced before the id
-                            # was recorded (instance ids are <master>_<time>;
-                            # the extra-underscore guard excludes successor
-                            # series created by "this and following" edits).
-                            escaped_master = (
-                                google_event.id.replace("\\", "\\\\")
-                                .replace("%", "\\%")
-                                .replace("_", "\\_")
-                            )
-                            series_links_stmt = text("""
-                                SELECT 1
-                                FROM journal_external_event_links
-                                WHERE calendar_id = :calendar_id
-                                  AND (recurring_event_id = :recurring_event_id
-                                       OR (recurring_event_id IS NULL
-                                           AND external_event_id
-                                               LIKE :instance_prefix ESCAPE '\\'
-                                           AND external_event_id
-                                               NOT LIKE :deeper_prefix ESCAPE '\\'))
-                                LIMIT 1
-                            """)
-                            series_links_result = await session.execute(
-                                series_links_stmt,
-                                {
-                                    "calendar_id": calendar_id,
-                                    "recurring_event_id": google_event.id,
-                                    "instance_prefix": f"{escaped_master}\\_%",
-                                    "deeper_prefix": f"{escaped_master}\\_%\\_%",
-                                },
-                            )
-                            has_series_links = series_links_result.scalar() is not None
-
-                        # An event with no link may be one a journal merge
-                        # absorbed. The backend refuses to re-import it anyway;
-                        # asking here keeps a full sync from sending a create
-                        # for every event a merge ever absorbed.
-                        is_merged_alias = (
-                            existing_link is None
-                            and await MergedAliasRepository(session).find_alias(
-                                user_id=str(user_id),
-                                payload_source="google",
-                                external_id=google_event.id,
-                                external_identity=build_event_identity(google_event),
-                            )
-                            is not None
-                        )
-
-                        # Classify the event
-                        action = classifier.classify_inbound_event(
-                            google_event=google_event,
-                            existing_link=existing_link,
-                            has_series_links=has_series_links,
-                            is_merged_alias=is_merged_alias,
-                        )
-
-                        # Cross-calendar de-dupe. When one calendar invites
-                        # another, both copies are real events with their own
-                        # ids, so the lookup above legitimately found nothing
-                        # and this reads as a brand-new event. The identity
-                        # token is what the two copies share: a hit means the
-                        # event is already journalled, and this calendar wants
-                        # a link to that journal rather than a journal of its
-                        # own. Turning the create into an update is what gets
-                        # the backend to add the second link.
-                        external_identity = build_event_identity(google_event)
-                        deduped_journal_id: int | None = None
-                        if (
-                            action == InboundSyncAction.CREATE_JOURNAL
-                            and external_identity
-                        ):
-                            deduped_journal_id = await _find_journal_by_event_identity(
-                                session,
-                                user_id,
-                                external_identity,
-                                calendar_id,
-                            )
-                            if deduped_journal_id is not None:
-                                logger.info(
-                                    "Event already journalled from another "
-                                    "calendar, linking instead of duplicating",
-                                    external_event_id=google_event.id,
-                                    journal_id=deduped_journal_id,
-                                    calendar_id=str(calendar_id),
-                                )
-                                action = InboundSyncAction.UPDATE_JOURNAL
-                                metrics["events_deduplicated"] = (
-                                    metrics.get("events_deduplicated", 0) + 1
-                                )
-
-                        split_target = split_pairing.targets.get(google_event.id)
-                        if (
-                            action == InboundSyncAction.CREATE_JOURNAL
-                            and split_target is not None
-                        ):
-                            deduped_journal_id = split_target.journal_id
-                            action = InboundSyncAction.UPDATE_JOURNAL
-                            metrics["events_split_adopted"] = (
-                                metrics.get("events_split_adopted", 0) + 1
-                            )
-                        split_adopted_from = (
-                            split_target.adopted_from
-                            if split_target is not None
-                            and deduped_journal_id == split_target.journal_id
-                            else None
-                        )
-
-                        # An unchanged event is skipped on its ETag, so its
-                        # participants are re-synced once when that would
-                        # change something: an attendee now matches a contact
-                        # the journal is not linked to, or has an address the
-                        # backend has not yet recorded as matching no contact
-                        # (events synced before it recorded them).
-                        if (
-                            action == InboundSyncAction.SKIP_UNCHANGED
-                            and existing_link is not None
-                            and await _participants_need_resync(
-                                session,
-                                str(user_id),
-                                existing_link.journal_id,
-                                transformer.extract_contact_relationships(google_event),
-                            )
-                        ):
-                            action = InboundSyncAction.UPDATE_JOURNAL
-
-                        # Backfill promotion: an unchanged recurring instance
-                        # whose link predates the series feature (no stored
-                        # recurring id) is re-synced once so the backend can
-                        # record the id and create the series membership.
-                        if (
-                            action == InboundSyncAction.SKIP_UNCHANGED
-                            and google_event.recurring_event_id
-                            and existing_link is not None
-                            and existing_link.recurring_event_id is None
-                        ):
-                            action = InboundSyncAction.UPDATE_JOURNAL
-
-                        # Same, for links made before events carried an
-                        # identity token. Nothing else would ever give them
-                        # one — an unchanged event is skipped on its ETag —
-                        # so the de-dupe would otherwise only work for events
-                        # first synced after this shipped. Once the backend
-                        # stores the token the link stops qualifying, so this
-                        # fires once per link rather than every sync.
-                        if (
-                            action == InboundSyncAction.SKIP_UNCHANGED
-                            and external_identity
-                            and existing_link is not None
-                            and existing_link.external_identity is None
-                        ):
-                            action = InboundSyncAction.UPDATE_JOURNAL
-
-                        if action == InboundSyncAction.SKIP_MERGED:
-                            metrics["events_skipped_merged"] = (
-                                metrics.get("events_skipped_merged", 0) + 1
-                            )
-                            continue
-
-                        if action in (
-                            InboundSyncAction.SKIP_UNCHANGED,
-                            InboundSyncAction.SKIP_ONE_WAY,
-                            InboundSyncAction.SKIP_CANCELLED,
-                        ):
-                            metrics["events_skipped"] += 1
-                            continue
-
-                        # Whole-series deletion: fan out to the backend, which
-                        # deletes far-future untouched instances and cancels
-                        # the rest.
-                        if action == InboundSyncAction.CANCEL_SERIES:
-                            outbox_event = (
-                                OutboxEvent.create_journal_series_cancelled_event(
-                                    integration_source="google",
-                                    calendar_id=str(calendar_id),
-                                    recurring_event_id=google_event.id,
-                                )
-                            )
-                            session.add(outbox_event)
-                            metrics["series_cancellations"] = (
-                                metrics.get("series_cancellations", 0) + 1
-                            )
-                            metrics["events_processed"] += 1
-                            continue
-
-                        # Handle cancellation: mark linked journal as cancelled
-                        # BUT skip if the event's end date is in the past — some calendars
-                        # (e.g. shared/subscribed) don't preserve past events and return
-                        # them as cancelled during incremental sync even though they already
-                        # happened.
-                        if action == InboundSyncAction.CANCEL_JOURNAL:
-                            existing_journal_id = (
-                                existing_link.journal_id if existing_link else None
-                            )
-
-                            # Check if the event already ended (past event)
-                            # Use a 1-day buffer to avoid edge cases with all-day
-                            # events where event_date_range_end is midnight-normalised.
-                            if existing_journal_id is not None:
-                                end_date_stmt = text("""
-                                    SELECT event_date_range_end
-                                    FROM journals
-                                    WHERE id = :journal_id
-                                """)
-                                end_date_result = await session.execute(
-                                    end_date_stmt,
-                                    {"journal_id": existing_journal_id},
-                                )
-                                event_end_date = end_date_result.scalar()
-
-                                if (
-                                    event_end_date is not None
-                                    and event_end_date
-                                    < datetime.now(UTC) - timedelta(days=1)
-                                ):
-                                    logger.info(
-                                        "Skipping cancellation for past event",
-                                        external_event_id=google_event.id,
-                                        journal_id=existing_journal_id,
-                                        event_end_date=event_end_date.isoformat(),
-                                    )
-                                    metrics["events_skipped"] += 1
-                                    continue
-
-                            outbox_event = OutboxEvent.create_journal_sync_event(
-                                journal_data={},
-                                calendar_info_data={},
-                                integration_source="google",
-                                external_event_id=google_event.id,
-                                calendar_id=str(calendar_id),
-                                sync_action="cancelled",
-                                etag=google_event.etag,
-                                existing_journal_id=existing_journal_id,
-                                contact_relationships=[],
-                                recurring_event_id=google_event.recurring_event_id,
-                                series_recurring_event_id=root_recurring_event_id(
-                                    google_event.recurring_event_id
-                                ),
-                            )
-                            session.add(outbox_event)
-                            metrics["events_cancelled"] = (
-                                metrics.get("events_cancelled", 0) + 1
-                            )
-                            metrics["events_processed"] += 1
-                            continue
-
-                        import uuid
-
-                        transform_result = transformer.transform_event(
-                            google_event,
-                            str(user_id),
-                            uuid.UUID(str(calendar_id)),
-                            self_email=google_account_email,
-                            all_day_timezone=user_timezone,
-                        )
-                        if transform_result is None:
-                            metrics["events_skipped"] += 1
-                            continue
-
-                        journal, calendar_info = transform_result
-
-                        # Build journal data dict for outbox
-                        journal_data = {
-                            "title": journal.title,
-                            "event_date_range_start": journal.event_date_range.start.isoformat(),
-                            "event_date_range_end": journal.event_date_range.end.isoformat(),
-                            "user_id": str(user_id),
-                        }
-                        # An adoption carries the content too, for the
-                        # backend's fallback when the adopted journal has
-                        # gone; it never overwrites the journal's notes.
-                        if (
-                            action == InboundSyncAction.CREATE_JOURNAL
-                            or split_adopted_from is not None
-                        ):
-                            journal_data["content"] = journal.content
-                        calendar_info_data = {
-                            "calendar_id": str(calendar_id),
-                            "is_all_day": calendar_info.is_all_day,
-                            "location": calendar_info.location,
-                            "start_time": calendar_info.start_time.isoformat()
-                            if calendar_info.start_time
-                            else None,
-                            "end_time": calendar_info.end_time.isoformat()
-                            if calendar_info.end_time
-                            else None,
-                            "timezone": calendar_info.timezone,
-                            "event_state": calendar_info.event_state.value
-                            if hasattr(calendar_info.event_state, "value")
-                            else calendar_info.event_state,
-                        }
-
-                        # Extract attendee emails as contact relationships
-                        contact_relationships = (
-                            transformer.extract_contact_relationships(google_event)
-                        )
-
-                        # Determine sync action string
-                        if action == InboundSyncAction.CREATE_JOURNAL:
-                            sync_action = "created"
-                            metrics["events_created"] += 1
-                        elif action == InboundSyncAction.UPDATE_JOURNAL:
-                            sync_action = "updated"
-                            metrics["events_updated"] += 1
-                        else:
-                            metrics["events_skipped"] += 1
-                            continue
-
-                        existing_journal_id = (
-                            existing_link.journal_id
-                            if existing_link
-                            else deduped_journal_id
-                        )
-
-                        # Create outbox event
-                        outbox_event = OutboxEvent.create_journal_sync_event(
-                            journal_data=journal_data,
-                            calendar_info_data=calendar_info_data,
-                            integration_source="google",
-                            external_event_id=google_event.id,
-                            calendar_id=str(calendar_id),
-                            sync_action=sync_action,
-                            etag=google_event.etag,
-                            existing_journal_id=existing_journal_id,
-                            contact_relationships=contact_relationships,
-                            recurring_event_id=google_event.recurring_event_id,
-                            external_identity=external_identity,
-                            series_recurring_event_id=root_recurring_event_id(
-                                google_event.recurring_event_id
-                            ),
-                            split_adopted_from=split_adopted_from,
-                        )
-                        session.add(outbox_event)
-                        metrics["events_processed"] += 1
-                        # Only an adoption actually sent makes the old
-                        # instance's cancellation redundant.
-                        if split_target is not None and split_adopted_from:
-                            adopted_old_event_ids.add(split_target.old_event_id)
-
-                    except Exception as e:  # noqa: BLE001
-                        logger.error(
-                            "Failed to process inbound calendar event",
-                            event_id=raw_event.get("id"),
-                            error=str(e),
-                            error_type=type(e).__name__,
-                        )
-                        metrics["errors"] += 1
-                        calendar_errors += 1
-
-                # Save sync token only when this calendar processed without errors
-                if new_sync_token and calendar_errors == 0:
-                    await _save_calendar_sync_token(
+                    await _sync_calendar_inbound(
                         session,
-                        new_sync_token,
-                        user_id,
-                        google_account_email,
-                        google_calendar_id,
-                    )
-                elif new_sync_token and calendar_errors > 0:
-                    logger.warning(
-                        "Skipping sync token save due to processing errors",
-                        calendar_errors=calendar_errors,
-                        google_calendar_id=google_calendar_id,
+                        client,
+                        cal_row,
+                        user_id=user_id,
                         google_account_email=google_account_email,
+                        sync_type=sync_type,
+                        metrics=calendar_metrics,
                     )
-
-            await session.commit()
+                    await session.commit()
+                except Exception as e:  # noqa: BLE001
+                    if _is_account_level_failure(e):
+                        raise
+                    logger.error(
+                        "Calendar sync failed, continuing with the rest",
+                        google_calendar_id=cal_row.google_calendar_id,
+                        google_account_email=google_account_email,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    await session.rollback()
+                    metrics["errors"] += 1
+                    metrics["calendars_failed"] += 1
+                    continue
+                for key, count in calendar_metrics.items():
+                    metrics[key] = metrics.get(key, 0) + count
 
         duration = (datetime.now(UTC) - started_at).total_seconds()
         metrics["completed_at"] = datetime.now(UTC).isoformat()

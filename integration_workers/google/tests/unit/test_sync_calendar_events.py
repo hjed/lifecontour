@@ -680,6 +680,174 @@ class TestSyncCalendarEvents:
         assert "time_min" in second_call_args
         assert second_call_args["single_events"] is True
 
+    @staticmethod
+    def _two_calendars_one_unreadable(
+        mock_session: AsyncMock, first_error: Exception
+    ) -> MagicMock:
+        """Script two synced calendars whose first ``events.list`` raises.
+
+        The failing calendar never reaches its link lookup or token save, so
+        the session sees: calendars, its token, the healthy calendar's token,
+        the healthy event's link lookup, and the healthy token save.
+        """
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [
+            _make_calendar_row(
+                calendar_id=uuid.uuid4(), google_calendar_id="gone@example.com"
+            ),
+            _make_calendar_row(google_calendar_id="healthy@example.com"),
+        ]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        mock_session.execute.side_effect = [
+            cal_result,
+            token_result,
+            token_result,
+            link_result,
+            MagicMock(),
+        ]
+
+        async def _list_events(**kwargs: Any) -> dict[str, Any]:
+            if kwargs["calendar_id"] == "gone@example.com":
+                raise first_error
+            return {"items": [_make_google_event()], "nextSyncToken": "tok"}
+
+        client = MagicMock()
+        client.list_events = AsyncMock(side_effect=_list_events)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_calendar_does_not_stop_its_siblings(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A calendar that 404s is skipped; the healthy one still syncs."""
+        from googleapiclient.errors import HttpError
+
+        from worker import sync_calendar_events
+
+        not_found = HttpError(
+            resp=MagicMock(status=404, reason="Not Found"),
+            content=b'{"error": {"code": 404}}',
+        )
+        client = self._two_calendars_one_unreadable(mock_session, not_found)
+
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        assert result["errors"] == 1
+        assert result["calendars_failed"] == 1
+        assert result["events_created"] == 1
+        mock_session.add.assert_called_once()
+        mock_session.rollback.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_any_calendar_failure_is_isolated_not_only_http_errors(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """A non-HTTP failure in one calendar is skipped the same way."""
+        from worker import sync_calendar_events
+
+        client = self._two_calendars_one_unreadable(
+            mock_session, RuntimeError("unexpected payload")
+        )
+
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        assert result["calendars_failed"] == 1
+        assert result["events_created"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_rolled_back_calendar_reports_none_of_its_events(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Events queued before the calendar failed were discarded, so not counted."""
+        from worker import sync_calendar_events
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        mock_session.execute.side_effect = [cal_result, token_result, link_result]
+
+        client = MagicMock()
+        client.list_events = AsyncMock(
+            return_value={"items": [_make_google_event()], "nextSyncToken": "tok"}
+        )
+
+        with (
+            patch("worker._create_google_client", return_value=client),
+            patch(
+                "worker._save_calendar_sync_token",
+                side_effect=RuntimeError("token save failed"),
+            ),
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        assert result["calendars_failed"] == 1
+        assert result["errors"] == 1
+        assert result["events_created"] == 0
+        assert result["events_processed"] == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "account_error_name",
+        ["revoked", "tokens_missing", "unauthorised", "refresh_rejected"],
+    )
+    async def test_an_account_level_failure_still_fails_the_sync(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        account_error_name: str,
+    ) -> None:
+        """Auth failures are the account's, not one calendar's: they fail the task.
+
+        ``refresh_rejected`` is how a real 401 surfaces: the client's
+        credentials carry no refresh token, so the transport's refresh attempt
+        raises ``RefreshError`` instead of returning the 401.
+        """
+        from google.auth.exceptions import RefreshError
+        from googleapiclient.errors import HttpError
+
+        from google_auth_service import (
+            GoogleAuthTokensNotFoundError,
+            TokenRevokedError,
+        )
+        from worker import sync_calendar_events
+
+        account_errors: dict[str, Exception] = {
+            "revoked": TokenRevokedError("revoked"),
+            "tokens_missing": GoogleAuthTokensNotFoundError("no tokens"),
+            "unauthorised": HttpError(
+                resp=MagicMock(status=401, reason="Unauthorized"), content=b"{}"
+            ),
+            "refresh_rejected": RefreshError("cannot refresh the access token"),
+        }
+        client = self._two_calendars_one_unreadable(
+            mock_session, account_errors[account_error_name]
+        )
+
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "error"
+
 
 class TestSyncRecurringSeries:
     """Recurring-series support: recurring id passthrough, master
