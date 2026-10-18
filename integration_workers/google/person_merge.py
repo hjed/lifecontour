@@ -5,13 +5,41 @@ field wholesale, while the payload is built from the local contact alone. The
 merge folds back the values of those fields the local model does not own, so a
 push changes only what the local contact can represent (#1732).
 
-Which entry the local model owns mirrors inbound sync (``transformer.py``): the
-primary name, else the first; the first current organization, else the first;
-the ``anniversary`` events. Values held by a person's profile rather than the
-contact itself are never copied into the contact.
+The local contact owns exactly what inbound sync (``transformer.py``) imports,
+and the merge asks the import itself: an entry its per-entry functions reject
+(an address with no country code, an invalid email, a text-only birthday) is
+one local never held, so the push keeps it (#1788). Every field a push can send
+has a policy in ``FIELD_POLICIES``; ``tests/unit/test_push_field_ownership.py``
+fails when one is added without. Values held by a person's profile rather than
+the contact itself are never copied into the contact.
 """
 
-from typing import Any
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Final, Literal, Protocol
+
+import structlog
+from pydantic import BaseModel, ValidationError
+
+from api_models import (
+    GoogleAddress,
+    GoogleBirthday,
+    GoogleEmailAddress,
+    GoogleNickname,
+    GooglePhoneNumber,
+)
+from transformer import (
+    import_address,
+    import_birthday,
+    import_email,
+    import_phone,
+    select_nickname,
+)
+
+logger = structlog.get_logger()
+
+type Entry = dict[str, Any]
 
 # Name parts the local model cannot represent, kept from Google's name; the
 # local contact owns given, family and middle name. unstructuredName is left out: Google formats the display name from the
@@ -42,23 +70,143 @@ _OUTPUT_ONLY_KEYS = frozenset({"metadata", "formattedType"})
 _PROFILE_SOURCE_TYPES = frozenset({"PROFILE", "DOMAIN_PROFILE"})
 
 
-def merge_with_current_person(
-    payload: dict[str, Any], current: dict[str, Any]
-) -> dict[str, Any]:
+class Omit(Enum):
+    """A merge result that takes the field out of the update mask."""
+
+    FIELD = "omit"
+
+
+type Merged = list[Entry] | Literal[Omit.FIELD]
+
+
+class FieldPolicy(Protocol):
+    """How one pushed field merges into the field as Google holds it."""
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        """The value to send, or ``Omit.FIELD`` to leave Google's untouched."""
+        ...
+
+
+@dataclass(frozen=True)
+class KeepUnimported:
+    """Local owns the entries inbound imports; every other one is kept."""
+
+    imports: Callable[[Entry], bool]
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        kept = [
+            _writable(entry)
+            for entry in current
+            if _is_contact_entry(entry) and not self.imports(entry)
+        ]
+        return [*pushed, *kept]
+
+
+@dataclass(frozen=True)
+class KeepUnchosen:
+    """Inbound reads one entry, which local owns; every other one is kept."""
+
+    choose: Callable[[list[Entry]], int | None]
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        owned = self.choose(current)
+        kept = [
+            _writable(entry)
+            for index, entry in enumerate(current)
+            if index != owned and _is_contact_entry(entry)
+        ]
+        return [*pushed, *kept]
+
+
+@dataclass(frozen=True)
+class SingletonLeaveUnimported:
+    """A field Google holds once per contact; one inbound cannot read stays.
+
+    Google cannot hold a kept entry beside a pushed one, so a pushed value
+    wins. With nothing pushed, a field whose entry inbound never imported
+    leaves the update mask instead, so Google keeps it as it is.
+    """
+
+    imports: Callable[[Entry], bool]
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        contact_entries = [entry for entry in current if _is_contact_entry(entry)]
+        if (
+            not pushed
+            and contact_entries
+            and not any(self.imports(entry) for entry in contact_entries)
+        ):
+            return Omit.FIELD
+        return pushed
+
+
+@dataclass(frozen=True)
+class MergedBy:
+    """A field whose owned entry keeps parts of Google's (names, organizations)."""
+
+    merge_entries: Callable[[list[Entry], list[Entry]], list[Entry]]
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        return self.merge_entries(pushed, current)
+
+
+@dataclass(frozen=True)
+class WhollyOwned:
+    """Local holds every entry inbound imports, and inbound imports them all."""
+
+    reason: str
+
+    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        return pushed
+
+
+def _imported_by[M: BaseModel](
+    model: type[M], import_entry: Callable[[M], object | None]
+) -> Callable[[Entry], bool]:
+    """Whether inbound imports a raw entry, read as inbound reads it.
+
+    An entry inbound cannot even parse is one it never imported.
+    """
+
+    def imports(entry: Entry) -> bool:
+        try:
+            parsed = model.model_validate(entry)
+        except ValidationError:
+            return False
+        return import_entry(parsed) is not None
+
+    return imports
+
+
+def _chosen_nickname(current: list[Entry]) -> int | None:
+    """The index of the nickname inbound reads into the contact."""
+    parsed: list[tuple[int, GoogleNickname]] = []
+    for index, entry in enumerate(current):
+        try:
+            parsed.append((index, GoogleNickname.model_validate(entry)))
+        except ValidationError:
+            continue
+    chosen = select_nickname([nickname for _, nickname in parsed])
+    return next((index for index, n in parsed if n is chosen), None)
+
+
+def merge_with_current_person(payload: Entry, current: Entry) -> Entry:
     """Return ``payload`` with the values it does not own kept from ``current``.
 
-    Only fields the payload already carries are merged, so the update mask is
-    unchanged. ``payload`` itself is left untouched.
+    Only fields the payload carries are merged, and a field leaves it only when
+    its policy leaves Google's value untouched. ``payload`` itself is left
+    untouched.
     """
-    merged = dict(payload)
-    if "names" in payload:
-        merged["names"] = _merge_names(payload["names"], current.get("names") or [])
-    if "events" in payload:
-        merged["events"] = _merge_events(payload["events"], current.get("events") or [])
-    if "organizations" in payload:
-        merged["organizations"] = _merge_organizations(
-            payload["organizations"], current.get("organizations") or []
-        )
+    merged: Entry = {}
+    for field, pushed in payload.items():
+        policy = FIELD_POLICIES.get(field)
+        if policy is None:
+            logger.warning("Pushed Google field has no merge policy", field=field)
+            merged[field] = pushed
+            continue
+        result = policy.merge(pushed, current.get(field) or [])
+        if result is not Omit.FIELD:
+            merged[field] = result
     return merged
 
 
@@ -131,3 +279,21 @@ def _merge_organizations(
         else:
             merged.append(_writable(org))
     return [*merged, *pushed[1:]]
+
+
+FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
+    "names": MergedBy(_merge_names),
+    "nicknames": KeepUnchosen(_chosen_nickname),
+    "emailAddresses": KeepUnimported(_imported_by(GoogleEmailAddress, import_email)),
+    "phoneNumbers": KeepUnimported(_imported_by(GooglePhoneNumber, import_phone)),
+    "addresses": KeepUnimported(_imported_by(GoogleAddress, import_address)),
+    "biographies": WhollyOwned("inbound imports every biography as a note"),
+    "organizations": MergedBy(_merge_organizations),
+    "memberships": WhollyOwned(
+        "the push rebuilds reserved groups, starred and every tag's group (#1821)"
+    ),
+    "birthdays": SingletonLeaveUnimported(
+        _imported_by(GoogleBirthday, import_birthday)
+    ),
+    "events": MergedBy(_merge_events),
+}

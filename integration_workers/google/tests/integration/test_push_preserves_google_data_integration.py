@@ -1,10 +1,12 @@
-"""A contact push keeps the Google data the local model cannot represent (#1732).
+"""A contact push keeps the Google data the local model cannot represent.
 
-The push names ``names``, ``events`` and ``organizations`` in
-``updatePersonFields``, and Google replaces each wholesale. Driven through the
-event push (the path that loads company and job title) against the real database, with only the Google client mocked, the
+Google replaces every field the push names in ``updatePersonFields``
+wholesale. Driven through the event push (the path that loads company and job
+title) against the real database, with only the Google client mocked, the
 update must carry the local contact's values merged into the person Google
-holds: its honorifics, custom events and other organizations survive.
+holds: its honorifics, custom events and other organizations survive (#1732),
+and so do the entries inbound sync never imported - an address with no country
+code, and a text-only birthday, which leaves the update mask (#1788).
 """
 
 from collections.abc import AsyncIterator
@@ -60,6 +62,15 @@ _CURRENT_PERSON: dict[str, Any] = {
         },
         {"metadata": _CONTACT_SOURCE, "name": "Previous Co", "current": False},
     ],
+    "addresses": [
+        {
+            "metadata": _CONTACT_SOURCE,
+            "streetAddress": "1 Old St",
+            "countryCode": "AU",
+        },
+        {"metadata": _CONTACT_SOURCE, "streetAddress": "2 Nowhere Rd", "city": "Leeds"},
+    ],
+    "birthdays": [{"metadata": _CONTACT_SOURCE, "text": "sometime in December"}],
 }
 
 
@@ -91,6 +102,16 @@ async def test_update_push_merges_into_the_person_google_holds(
             INSERT INTO contact_important_dates
                 (contact_id, date_type, precision, year, month, day)
             VALUES (:cid, 'marriage_anniversary', 'full', 1835, 7, 8)
+            """
+        ),
+        {"cid": contact_id},
+    )
+    await db_session.execute(
+        text(
+            """
+            INSERT INTO contact_addresses
+                (contact_id, street_line_1, country_code, is_primary)
+            VALUES (:cid, '12 St James Sq', 'GB', true)
             """
         ),
         {"cid": contact_id},
@@ -167,6 +188,15 @@ async def test_update_push_merges_into_the_person_google_holds(
         },
         {"name": "Previous Co", "current": False},
     ]
+    assert person["addresses"] == [
+        {
+            "streetAddress": "12 St James Sq",
+            "countryCode": "GB",
+            "metadata": {"primary": True},
+        },
+        {"streetAddress": "2 Nowhere Rd", "city": "Leeds"},
+    ]
+    assert "birthdays" not in person
     # A conflict retry merges the same local values into the person the client
     # refetches, keeping what Google gained after the first read.
     refetched = {**_CURRENT_PERSON, "names": [{"honorificPrefix": "Prof"}]}
