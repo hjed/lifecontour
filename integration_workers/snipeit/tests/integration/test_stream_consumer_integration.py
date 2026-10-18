@@ -7,8 +7,8 @@ and update the database.
 
 from __future__ import annotations
 
-import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -21,38 +21,112 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from snipeit_api_client import SnipeItAPIClient
 from stream_consumer_tasks import SnipeItWorkerStreamConsumer
 
+from .test_maintenance_sync_integration import _import_rows, _listed
 
-class MockTransport(httpx.AsyncBaseTransport):
-    def __init__(self) -> None:
-        self.responses: list[tuple[str, int, object, dict[str, str]]] = []
-
-    def add_response(
-        self,
-        url_pattern: str,
-        status_code: int = 200,
-        json_data: object = None,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.responses.append((url_pattern, status_code, json_data, headers or {}))
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        for i, (pattern, status, data, hdrs) in enumerate(self.responses):
-            if pattern in url:
-                self.responses.pop(i)
-                content = json.dumps(data).encode() if data is not None else b""
-                return httpx.Response(
-                    status_code=status,
-                    content=content,
-                    headers={**hdrs, "content-type": "application/json"},
-                    request=request,
-                )
-        raise ValueError(f"No mock response configured for {url}")
+# ``mock_transport`` is the shared fixture defined in ``conftest.py``.
 
 
-@pytest.fixture
-def mock_transport() -> MockTransport:
-    return MockTransport()
+async def _configure_snipeit(
+    async_connection: Any, user_id: str, snipeit_user_id: str
+) -> None:
+    """Give ``user_id`` Snipe-IT auth and settings."""
+    await async_connection.execute(
+        text("""
+            INSERT INTO user_snipe_it_auth (
+                user_id, encrypted_api_key,
+                created_at, updated_at
+            ) VALUES (
+                :user_id, 'enc-api-key',
+                now(), now()
+            )
+        """),
+        {"user_id": user_id},
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO snipeit_settings (
+                user_id, base_url, snipeit_user_id, webhook_token, created_at, updated_at
+            ) VALUES (
+                :user_id, 'https://snipeit.example.com', :snipeit_user_id,
+                :webhook_token, now(), now()
+            )
+        """),
+        {
+            "user_id": user_id,
+            "snipeit_user_id": snipeit_user_id,
+            "webhook_token": f"webhook-token-{user_id}",
+        },
+    )
+
+
+def _joined_session_factory(async_connection: Any) -> Any:
+    @asynccontextmanager
+    async def session_factory() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(
+            async_connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        ) as session:
+            yield session
+
+    return session_factory
+
+
+def _sync_service_on(mock_transport: Any) -> Callable[..., Any]:
+    """A ``_create_sync_service`` stand-in whose client calls ``mock_transport``.
+
+    The real one decrypts the API key, which needs a valid Fernet token.
+    """
+
+    def create_sync_service(
+        user_id: str,
+        auth_data: dict[str, Any],
+        base_url: str,
+        snipeit_user_id: str | None,
+        worker_settings: Any,
+        session_factory: Any,
+        **kwargs: Any,
+    ) -> Any:
+        from snipeit_sync_service import SnipeItSyncService
+
+        client = SnipeItAPIClient.create(base_url=base_url, api_key="test")
+        client._client = httpx.AsyncClient(
+            transport=mock_transport, base_url=f"{base_url.rstrip('/')}/api/v1/"
+        )
+        return SnipeItSyncService(
+            api_client=client, user_id=user_id, snipeit_user_id=snipeit_user_id
+        )
+
+    return create_sync_service
+
+
+def _webhook_event(asset_id: int, user_id: str) -> StreamEvent:
+    return StreamEvent(
+        message_id="123",
+        event_id="abc",
+        event_type="snipeit.webhook_received",
+        aggregate_id=0,
+        event_data={
+            "action": "hardware_created",
+            "item": {"id": asset_id},
+            "user_id": user_id,
+        },
+        occurred_at="2024-01-01T00:00:00Z",
+    )
+
+
+async def _handle(
+    consumer: SnipeItWorkerStreamConsumer, event: StreamEvent, mock_transport: Any
+) -> AsyncMock:
+    """Handle ``event`` against ``mock_transport``; return the auth lookup mock."""
+    with (
+        patch(
+            "worker._create_sync_service", side_effect=_sync_service_on(mock_transport)
+        ),
+        patch("worker._get_auth_data", return_value={"mock": "data"}) as get_auth_data,
+    ):
+        await consumer._handle_event(event)
+    return get_auth_data
 
 
 class TestStreamConsumerIntegration:
@@ -61,44 +135,16 @@ class TestStreamConsumerIntegration:
         self,
         db_session: AsyncSession,
         async_connection: Any,
-        mock_transport: MockTransport,
+        mock_transport: Any,
     ) -> None:
         """A webhook event upserts the asset for its owner and no other user."""
-
-        # 1. Setup DB state: two users with Snipe-IT auth and settings
         user_id = "test-user-for-webhook"
         other_user_id = "other-user-for-webhook"
         snipeit_user_id = "123"
-
         for configured_user_id in (user_id, other_user_id):
-            await async_connection.execute(
-                text("""
-                    INSERT INTO user_snipe_it_auth (
-                        user_id, encrypted_api_key,
-                        created_at, updated_at
-                    ) VALUES (
-                        :user_id, 'enc-api-key',
-                        now(), now()
-                    )
-                """),
-                {"user_id": configured_user_id},
+            await _configure_snipeit(
+                async_connection, configured_user_id, snipeit_user_id
             )
-            await async_connection.execute(
-                text("""
-                    INSERT INTO snipeit_settings (
-                        user_id, base_url, snipeit_user_id, webhook_token, created_at, updated_at
-                    ) VALUES (
-                        :user_id, 'https://snipeit.example.com', :snipeit_user_id,
-                        :webhook_token, now(), now()
-                    )
-                """),
-                {
-                    "user_id": configured_user_id,
-                    "snipeit_user_id": snipeit_user_id,
-                    "webhook_token": f"webhook-token-{configured_user_id}",
-                },
-            )
-        # 2. Setup mock API response
         asset_id = 142
         mock_transport.add_response(
             f"/hardware/{asset_id}",
@@ -110,80 +156,17 @@ class TestStreamConsumerIntegration:
                 "assigned_to": {"id": snipeit_user_id, "type": "user"},
             },
         )
-
-        # We need a session_factory to pass to the consumer
-        from contextlib import asynccontextmanager
-
-        from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
-
-        @asynccontextmanager
-        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
-            async with SqlAsyncSession(
-                async_connection,
-                expire_on_commit=False,
-                join_transaction_mode="create_savepoint",
-            ) as session:
-                yield session
-
-        mock_stream_client = AsyncMock()
+        session_factory = _joined_session_factory(async_connection)
         consumer = SnipeItWorkerStreamConsumer(
-            stream_client=mock_stream_client,
-            session_factory=mock_session_factory,
+            stream_client=AsyncMock(), session_factory=session_factory
         )
 
-        # 3. Create the event
-        event = StreamEvent(
-            message_id="123",
-            event_id="abc",
-            event_type="snipeit.webhook_received",
-            aggregate_id=0,
-            event_data={
-                "action": "hardware_created",
-                "item": {"id": asset_id},
-                "user_id": user_id,
-            },
-            occurred_at="2024-01-01T00:00:00Z",
+        get_auth_data = await _handle(
+            consumer, _webhook_event(asset_id, user_id), mock_transport
         )
-
-        # 4. Process event with mocked get_auth_data / API client
-        # worker uses fernet which requires a valid token, so we mock _get_auth_data or just mock _create_sync_service
-        # But wait, it's better to just mock `_create_sync_service` to return an API client that uses our mock_transport
-
-        def mock_create_service(
-            user_id: str,
-            auth_data: dict[str, Any],
-            base_url: str,
-            snipeit_user_id: str | None,
-            worker_settings: Any,
-            session_factory: Any,
-        ) -> Any:
-            from snipeit_sync_service import SnipeItSyncService
-
-            client = SnipeItAPIClient.create(
-                base_url=base_url,
-                api_key="test",
-            )
-            client._client = httpx.AsyncClient(
-                transport=mock_transport,
-                base_url=f"{base_url.rstrip('/')}/api/v1/",
-            )
-            return SnipeItSyncService(
-                api_client=client,
-                user_id=user_id,
-                snipeit_user_id=snipeit_user_id,
-            )
-
-        with patch("worker._create_sync_service", side_effect=mock_create_service):
-            # We also need to mock _get_auth_data since it's called
-            with patch(
-                "worker._get_auth_data", return_value={"mock": "data"}
-            ) as mock_get_auth_data:
-                await consumer._handle_event(event)
 
         # Only the webhook's owner is synced
-        mock_get_auth_data.assert_called_once_with(mock_session_factory, user_id)
-
-        # 5. Verify the gear item was inserted
+        get_auth_data.assert_called_once_with(session_factory, user_id)
         gear_result = await db_session.execute(
             text(
                 "SELECT id, name, serial_number FROM gear_items WHERE user_id = :user_id"
@@ -201,11 +184,40 @@ class TestStreamConsumerIntegration:
         assert other_gear.fetchall() == []
 
     @pytest.mark.asyncio
+    async def test_webhook_linking_a_new_asset_imports_its_maintenances(
+        self,
+        async_connection: Any,
+        mock_transport: Any,
+    ) -> None:
+        """A record skipped while its asset was unlinked arrives with the asset (#1563)."""
+        user_id = "user-123"
+        await _configure_snipeit(async_connection, user_id, "5")
+        mock_transport.add_response(
+            "/hardware/51",
+            json_data={"id": 51, "name": "Canyoneroo 50m", "asset_tag": "00051"},
+            method="GET",
+        )
+        mock_transport.add_response(
+            "asset_id=51", json_data={"total": 1, "rows": [_listed(301)]}, method="GET"
+        )
+        mock_transport.add_response(
+            "/maintenances/301", json_data=_listed(301), method="GET"
+        )
+        consumer = SnipeItWorkerStreamConsumer(
+            stream_client=AsyncMock(),
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        await _handle(consumer, _webhook_event(51, user_id), mock_transport)
+
+        assert await _import_rows(async_connection, 301) == 1
+
+    @pytest.mark.asyncio
     async def test_gear_item_updated_event_pushes_to_snipeit(
         self,
         db_session: AsyncSession,
         async_connection: Any,
-        mock_transport: MockTransport,
+        mock_transport: Any,
     ) -> None:
         """Verify that receiving a GearItemUpdated event triggers push to Snipe-IT."""
         user_id = "test-user-for-export"
@@ -213,24 +225,7 @@ class TestStreamConsumerIntegration:
         gear_item_uuid = "00000000-0000-0000-0000-000000000001"
         asset_id = 456
 
-        await async_connection.execute(
-            text("""
-                INSERT INTO user_snipe_it_auth (user_id, encrypted_api_key, created_at, updated_at)
-                VALUES (:user_id, 'enc-api-key', now(), now())
-            """),
-            {"user_id": user_id},
-        )
-        await async_connection.execute(
-            text("""
-                INSERT INTO snipeit_settings (user_id, base_url, snipeit_user_id, webhook_token, created_at, updated_at)
-                VALUES (:user_id, 'https://snipeit.example.com', :snipeit_user_id, :webhook_token, now(), now())
-            """),
-            {
-                "user_id": user_id,
-                "snipeit_user_id": snipeit_user_id,
-                "webhook_token": f"webhook-token-{user_id}",
-            },
-        )
+        await _configure_snipeit(async_connection, user_id, snipeit_user_id)
         await async_connection.execute(
             text("""
                 INSERT INTO gear_items (id, user_id, name, serial_number, created_at, updated_at)
@@ -282,18 +277,7 @@ class TestStreamConsumerIntegration:
             json_data={"status": "success", "payload": updated_asset_json},
         )
 
-        from contextlib import asynccontextmanager
-
-        from sqlalchemy.ext.asyncio import AsyncSession as SqlAsyncSession
-
-        @asynccontextmanager
-        async def mock_session_factory() -> AsyncIterator[SqlAsyncSession]:
-            async with SqlAsyncSession(
-                async_connection,
-                expire_on_commit=False,
-                join_transaction_mode="create_savepoint",
-            ) as session:
-                yield session
+        mock_session_factory = _joined_session_factory(async_connection)
 
         mock_stream_client = AsyncMock()
         consumer = SnipeItWorkerStreamConsumer(
@@ -316,30 +300,7 @@ class TestStreamConsumerIntegration:
             occurred_at="2024-01-01T00:00:00Z",
         )
 
-        def mock_create_service(
-            user_id: str,
-            auth_data: dict[str, Any],
-            base_url: str,
-            snipeit_user_id: str | None,
-            worker_settings: Any,
-            session_factory: Any,
-            **kwargs: Any,
-        ) -> Any:
-            from snipeit_sync_service import SnipeItSyncService
-
-            client = SnipeItAPIClient.create(base_url=base_url, api_key="test")
-            client._client = httpx.AsyncClient(
-                transport=mock_transport, base_url=f"{base_url.rstrip('/')}/api/v1/"
-            )
-            return SnipeItSyncService(
-                api_client=client, user_id=user_id, snipeit_user_id=snipeit_user_id
-            )
-
-        with patch("worker._create_sync_service", side_effect=mock_create_service):
-            with patch(
-                "worker._get_auth_data", return_value={"mock": "data"}
-            ) as mock_get_auth_data:
-                await consumer._handle_event(event)
+        mock_get_auth_data = await _handle(consumer, event, mock_transport)
 
         # Only the webhook's owner is synced
         mock_get_auth_data.assert_called_once_with(mock_session_factory, user_id)

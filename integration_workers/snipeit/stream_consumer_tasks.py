@@ -119,8 +119,9 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         so an unauthenticated notification can never fan out across users.
         The item is always an asset: the backend publishes only notifications
         that link an asset, and Snipe-IT sends no maintenance notifications, so
-        maintenance records are imported only by the maintenance sync job
-        (``sync_snipeit_maintenances``).
+        maintenance records are imported by the maintenance sync job
+        (``sync_snipeit_maintenances``), and by ``sync_asset`` for an asset
+        this links for the first time.
         """
         self._log_processed(event)
 
@@ -185,7 +186,7 @@ class SnipeItWorkerStreamConsumer(StreamConsumer):
         )
 
         try:
-            await sync_service._sync_single_asset_with_retry(
+            await sync_service.sync_asset(
                 asset_id=asset_id,
                 session_factory=self._session_factory,
             )

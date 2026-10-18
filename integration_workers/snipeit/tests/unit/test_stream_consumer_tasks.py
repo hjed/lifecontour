@@ -171,7 +171,7 @@ async def test_handle_event_processes_asset(
 
     # Mock sync service creation and execution
     mock_sync_service = AsyncMock()
-    mock_sync_service._sync_single_asset_with_retry = AsyncMock()
+    mock_sync_service.sync_asset = AsyncMock()
     mock_sync_service._api_client = AsyncMock()
 
     with (
@@ -189,7 +189,7 @@ async def test_handle_event_processes_asset(
         assert mock_create_service.call_args.kwargs["user_id"] == "user1"
 
         # Verify it tries to sync asset 42
-        mock_sync_service._sync_single_asset_with_retry.assert_called_once_with(
+        mock_sync_service.sync_asset.assert_called_once_with(
             asset_id=42,
             session_factory=mock_session_factory,
         )
@@ -291,7 +291,7 @@ async def test_handle_event_syncs_asset_when_action_mentions_maintenance(
 
     # Mock sync service
     mock_sync_service = AsyncMock()
-    mock_sync_service._sync_single_asset_with_retry = AsyncMock()
+    mock_sync_service.sync_asset = AsyncMock()
     mock_sync_service.sync_maintenance_batch = AsyncMock(
         return_value={"synced": 1, "skipped": 0, "failed": 0}
     )
@@ -303,7 +303,7 @@ async def test_handle_event_syncs_asset_when_action_mentions_maintenance(
     ):
         await consumer._handle_event(event)
 
-        mock_sync_service._sync_single_asset_with_retry.assert_called_once_with(
+        mock_sync_service.sync_asset.assert_called_once_with(
             asset_id=77,
             session_factory=mock_session_factory,
         )
