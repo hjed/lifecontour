@@ -12,7 +12,7 @@ from core_shared.models.journals import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.integrations.link_sources import (
@@ -36,7 +36,11 @@ from app.infrastructure.events.outbox_event_publisher import OutboxEventPublishe
 from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
-from app.mcp.domains.journals.schemas import JournalTypeCatalogueMCPResponse
+from app.mcp.domains.journals.schemas import (
+    JournalDeletedMCPResponse,
+    JournalResponse,
+    JournalTypeCatalogueMCPResponse,
+)
 from app.mcp.domains.journals.tools._shared import (
     fetch_parent_journal,
 )
@@ -53,7 +57,7 @@ from app.mcp.shared.dependencies import (
     get_outbox_event_publisher,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 @tool(annotations=READ_ONLY)
@@ -78,7 +82,7 @@ async def _build_journal_response(
     enrichment_service: JournalEnrichmentService,
     *,
     include_children: bool = False,
-) -> str:
+) -> JournalResponse:
     """Full owner-scoped journal payload shared by the get_journal* tools."""
     journal_repo = SqlJournalRepository(db_connection)
 
@@ -99,7 +103,7 @@ async def _build_journal_response(
         external_links=await link_service.links_for_journal(journal_id, user_id),
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -122,7 +126,7 @@ async def get_journal(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalResponse:
     """
     Get journal details by ID for AI analysis.
 
@@ -133,15 +137,6 @@ async def get_journal(
     Args:
         journal_id: The unique identifier of the journal
         include_children: Optional flag to include child journals
-
-    Returns:
-        JSON string containing AI-friendly journal information including:
-        - Journal details (title, content, date range)
-        - Types and type-specific data
-        - Contact relationships
-        - Tags
-        - Optional child journals
-        - Contextual summary for AI understanding
 
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
@@ -189,7 +184,7 @@ async def get_journal_by_external_id(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalResponse:
     """
     Find the journal linked to an external system's record.
 
@@ -212,7 +207,7 @@ async def get_journal_by_external_id(
         user_id, source_filter, normalized_id
     )
     if journal_id is None:
-        return MCPResponseBuilder.error_response(
+        raise MCPErrors.error(
             error_type="Not found",
             message=f"No journal is linked to {source_filter} id '{normalized_id}'",
             context={"source": source_filter, "external_id": normalized_id},
@@ -242,7 +237,7 @@ async def delete_journal(
     ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
-) -> str:
+) -> JournalDeletedMCPResponse:
     """
     Delete a journal entry.
 
@@ -269,9 +264,6 @@ async def delete_journal(
     Args:
         journal_id: The unique identifier of the journal to delete
         delete_children: Optional flag to delete child journals
-
-    Returns:
-        JSON string containing deletion confirmation
 
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
@@ -308,18 +300,13 @@ async def delete_journal(
         journal_id, db_connection, changed_by="mcp", source=Provenance.MCP
     )
 
-    class DeleteResponse(BaseModel):
-        journal_id: int
-        deleted: bool
-        summary: str
-
-    response = DeleteResponse(
+    response = JournalDeletedMCPResponse(
         journal_id=journal_id,
         deleted=True,
         summary=f"Successfully deleted journal {journal_id}",
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_read_tools(mcp: FastMCP[None]) -> None:

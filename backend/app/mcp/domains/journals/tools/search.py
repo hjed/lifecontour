@@ -57,7 +57,7 @@ from app.mcp.shared.dependencies import (
     get_journal_tag_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 def _parse_integration_source_filter(value: str | None) -> str | None:
@@ -190,7 +190,7 @@ async def search_journals(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalSearchResponse:
     """
     Search journals with filtering options.
 
@@ -217,12 +217,6 @@ async def search_journals(
         parent_id: Optional parent journal whose direct children to return
         limit: Maximum number of results to return
         offset: Number of results to skip, for paging
-
-    Returns:
-        JSON string containing AI-friendly search results with:
-        - List of matching journals with excerpts
-        - Search metadata (total hits, processing time)
-        - Contextual summary for AI understanding
 
     Raises:
         ValueError: If invalid filter values are provided
@@ -274,11 +268,11 @@ async def search_journals(
             read_types=read_types,
         )
     except SearchServiceUnavailableError as exc:
-        return MCPResponseBuilder.error_response(
+        raise MCPErrors.error(
             error_type="Search unavailable",
             message=exc.message,
             context={"query": query, "hint": SEARCH_UNAVAILABLE_HINT},
-        )
+        ) from exc
 
     source_journal_ids = outcome.source_journal_ids
     if source_filter is not None and not source_journal_ids:
@@ -304,7 +298,7 @@ async def search_journals(
                 ],
             ),
         )
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     summary_suffix = f" linked to {source_filter}" if source_filter else ""
     total_hits = outcome.total_hits
@@ -347,7 +341,7 @@ async def search_journals(
         if total_hits == 0
         else None,
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -416,7 +410,7 @@ async def browse_journals_by_date_window(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalDateWindowResponse:
     """
     Browse journals within a date window anchored on a given date.
 
@@ -439,9 +433,6 @@ async def browse_journals_by_date_window(
         search: Text search query
         limit: Page size
         offset: Pagination offset
-
-    Returns:
-        JSON with journals in the window, window boundaries, and pagination info
     """
     user_id = await get_current_user_id()
     repos = create_journal_tool_repositories(db_connection)
@@ -471,11 +462,11 @@ async def browse_journals_by_date_window(
             offset=offset,
         )
     except SearchServiceUnavailableError as exc:
-        return MCPResponseBuilder.error_response(
+        raise MCPErrors.error(
             error_type="Search unavailable",
             message=exc.message,
             context={"search": search, "hint": SEARCH_UNAVAILABLE_HINT},
-        )
+        ) from exc
 
     results = (
         [_search_hit_to_result(hit) for hit in window.hits]
@@ -523,7 +514,7 @@ async def browse_journals_by_date_window(
         else None,
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_search_tools(mcp: FastMCP[None]) -> None:

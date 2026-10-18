@@ -8,13 +8,19 @@ from core_shared.models.journals import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.calendar_repository import SqlCalendarRepository
 from app.core.journal.services.calendar_service import (
     CalendarInUseError,
     CalendarService,
+)
+from app.mcp.domains.journals.schemas import (
+    CalendarDeletedMCPResponse,
+    CalendarListMCPResponse,
+    CalendarMCPListItem,
+    CalendarMCPResponse,
 )
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
@@ -29,7 +35,7 @@ from app.mcp.shared.dependencies import (
     get_current_user_id,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 # EVENT and PHOTO_ALBUM types require additional data (calendar_id, immich_album_id)
 # These will be created when the user provides type_data
@@ -57,7 +63,7 @@ def _parse_calendar_id(calendar_id: Any) -> UUID | None:
 @mcp_unified_error_handler("list_calendars", "journal")
 async def list_calendars(
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> CalendarListMCPResponse:
     """
     List all calendars available for EVENT journals.
     """
@@ -66,18 +72,9 @@ async def list_calendars(
 
     calendars = await calendar_repo.get_all(user_id=user_id)
 
-    class CalendarListItem(BaseModel):
-        id: str
-        name: str
-        description: str | None = None
-        color: str | None = None
-
-    class CalendarListResponse(BaseModel):
-        calendars: list[CalendarListItem]
-
-    response = CalendarListResponse(
+    response = CalendarListMCPResponse(
         calendars=[
-            CalendarListItem(
+            CalendarMCPListItem(
                 id=str(c.id),
                 name=c.name,
                 description=c.description,
@@ -87,7 +84,7 @@ async def list_calendars(
         ]
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -102,7 +99,7 @@ async def create_calendar(
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     calendar_service: CalendarService = mcp_depends(get_calendar_service),
-) -> str:
+) -> CalendarMCPResponse:
     """
     Create a new calendar to be used with EVENT journals.
     """
@@ -121,17 +118,10 @@ async def create_calendar(
         new_calendar, transaction=db_connection
     )
 
-    class CalendarResponse(BaseModel):
-        id: str
-        name: str
-        summary: str
-
-    return MCPResponseBuilder.success_response(
-        CalendarResponse(
-            id=str(saved_calendar.id),
-            name=saved_calendar.name,
-            summary=f"Created calendar '{saved_calendar.name}'",
-        )
+    return CalendarMCPResponse(
+        id=str(saved_calendar.id),
+        name=saved_calendar.name,
+        summary=f"Created calendar '{saved_calendar.name}'",
     )
 
 
@@ -150,7 +140,7 @@ async def update_calendar(
     ] = None,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     calendar_service: CalendarService = mcp_depends(get_calendar_service),
-) -> str:
+) -> CalendarMCPResponse:
     """
     Update an existing calendar.
     """
@@ -163,7 +153,7 @@ async def update_calendar(
 
     calendar = await calendar_repo.find_by_id(calendar_uuid)
     if not calendar or calendar.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+        raise MCPErrors.not_found("Calendar", calendar_id)
 
     if name is not None:
         calendar.name = name
@@ -176,17 +166,10 @@ async def update_calendar(
         calendar, transaction=db_connection
     )
 
-    class CalendarResponse(BaseModel):
-        id: str
-        name: str
-        summary: str
-
-    return MCPResponseBuilder.success_response(
-        CalendarResponse(
-            id=str(saved_calendar.id),
-            name=saved_calendar.name,
-            summary=f"Updated calendar '{saved_calendar.name}'",
-        )
+    return CalendarMCPResponse(
+        id=str(saved_calendar.id),
+        name=saved_calendar.name,
+        summary=f"Updated calendar '{saved_calendar.name}'",
     )
 
 
@@ -196,7 +179,7 @@ async def delete_calendar(
     calendar_id: Annotated[str, Field(description="Calendar UUID")],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     calendar_service: CalendarService = mcp_depends(get_calendar_service),
-) -> str:
+) -> CalendarDeletedMCPResponse:
     """
     Delete a calendar. Will fail if the calendar is in use.
     """
@@ -209,7 +192,7 @@ async def delete_calendar(
 
     calendar = await calendar_repo.find_by_id(calendar_uuid)
     if not calendar or calendar.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Calendar", calendar_id)
+        raise MCPErrors.not_found("Calendar", calendar_id)
 
     if calendar.id is not None:
         try:
@@ -217,17 +200,12 @@ async def delete_calendar(
                 calendar, user_id, transaction=db_connection
             )
         except CalendarInUseError as exc:
-            return MCPResponseBuilder.error_response(
+            raise MCPErrors.error(
                 "CONFLICT",
                 f"Calendar is in use by {exc.usage_count} journal(s)",
-            )
+            ) from exc
 
-    class DeleteCalendarResponse(BaseModel):
-        summary: str
-
-    return MCPResponseBuilder.success_response(
-        DeleteCalendarResponse(summary=f"Deleted calendar '{calendar.name}'")
-    )
+    return CalendarDeletedMCPResponse(summary=f"Deleted calendar '{calendar.name}'")
 
 
 def register_calendar_tools(mcp: FastMCP[None]) -> None:

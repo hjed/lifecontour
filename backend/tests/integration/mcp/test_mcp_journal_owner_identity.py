@@ -29,6 +29,7 @@ from app.core.journal.models.journal_tag import JournalTag
 from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
     extract_mcp_json_payload,
     post_mcp_tool,
 )
@@ -72,8 +73,11 @@ def oauth_authenticated_mcp(test_user: Any) -> Callable[..., Any]:
     return _acting_as
 
 
-async def _create_journal_via_mcp(client: Any, title: str) -> dict[str, Any]:
-    return await call_mcp_tool(
+async def _create_journal_via_mcp(
+    client: Any, title: str, *, refused: bool = False
+) -> dict[str, Any]:
+    call = call_mcp_tool_error if refused else call_mcp_tool
+    return await call(
         client,
         "create_journal_entry",
         {
@@ -154,7 +158,7 @@ class TestMCPWritesBelongToTheAuthenticatedUser:
         async with oauth_authenticated_mcp(None):
             async with authenticated_lifespan_client() as client:
                 payload = await _create_journal_via_mcp(
-                    client, "Should never be created"
+                    client, "Should never be created", refused=True
                 )
 
         assert "error" in payload, (

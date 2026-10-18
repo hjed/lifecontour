@@ -31,7 +31,6 @@ from app.mcp.shared.dependencies import (
     get_journal_enrichment_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
 async def _build_hierarchy_node(
@@ -100,7 +99,7 @@ async def get_journal_hierarchy(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalHierarchyResponse:
     """
     Get a hierarchical view of journals.
 
@@ -113,9 +112,6 @@ async def get_journal_hierarchy(
         end_date: Optional end date
         types: Optional comma-separated list of journal types
         limit: Maximum number of journals to retrieve
-
-    Returns:
-        JSON string containing the journal hierarchy tree and summary.
     """
     import time
 
@@ -182,7 +178,7 @@ async def get_journal_hierarchy(
         summary=summary,
     )
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_hierarchy_tools(mcp: FastMCP[None]) -> None:

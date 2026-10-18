@@ -22,6 +22,7 @@ from app.infrastructure.search.search_service import SearchService
 from tests.integration.contact_seeding import seed_contact
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
+    call_mcp_tool_error,
 )
 
 USER_ID = "test-user-123"
@@ -182,7 +183,7 @@ class TestSearchJournalsViaMeili:
 
         async with authenticated_lifespan_client() as client:
             with patch.object(SearchService, "search_journals", boom):
-                payload = await call_mcp_tool(
+                payload = await call_mcp_tool_error(
                     client, "search_journals", {"query": "Zion"}
                 )
 
@@ -508,7 +509,7 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client, "search_journals", {"tags": "no-such-tag"}
             )
 
@@ -647,7 +648,7 @@ class TestSearchJournalsRelationalFilters:
         self, authenticated_lifespan_client, zion_journals: dict[str, int]
     ) -> None:
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client, "search_journals", {"start_date": "last tuesday"}
             )
 

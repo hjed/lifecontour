@@ -29,7 +29,7 @@ from app.mcp.shared.dependencies import (
     get_current_user_id,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 def _journal_history_entry_to_schema(
@@ -74,7 +74,7 @@ async def get_journal_history(
     page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
     limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalHistoryResponse:
     """Return a journal's field-level change history with provenance.
 
     Provides AI-agent parity with the REST ``GET /api/journals/{id}/history``
@@ -92,7 +92,7 @@ async def get_journal_history(
     # get_route_history and the REST endpoint).
     journal = await repos.journal_repo.find_by_id(journal_id)
     if journal is None or journal.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Journal", journal_id)
+        raise MCPErrors.not_found("Journal", journal_id)
 
     history_service = JournalHistoryService(SqlFieldHistoryRepository(db_connection))
 
@@ -119,7 +119,7 @@ async def get_journal_history(
             f"showing {len(entries)} on page {page}."
         ),
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_journal_history_tools(mcp: FastMCP[None]) -> None:

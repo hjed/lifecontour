@@ -9,13 +9,15 @@ from core_shared.models.journals import (
 )
 from fastmcp import FastMCP
 from fastmcp.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.mcp.domains.journals.schemas import (
+    JournalTagDeletedMCPResponse,
     JournalTagInfo,
     JournalTagListMCPResponse,
+    JournalTagMergedMCPResponse,
 )
 from app.mcp.domains.journals.tools._shared import (
     create_journal_tool_repositories,
@@ -35,7 +37,6 @@ from app.mcp.shared.dependencies import (
     get_journal_tag_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
 
 
 @tool(annotations=READ_ONLY)
@@ -45,7 +46,7 @@ async def list_journal_tags(
         int, Field(description="Maximum number of tags to return", ge=1, le=100)
     ] = 50,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalTagListMCPResponse:
     """
     List your journal tags for organising journal entries.
 
@@ -55,10 +56,6 @@ async def list_journal_tags(
 
     Args:
         limit: Maximum number of tags to return (1-100, default: 50)
-
-    Returns:
-        JSON string containing journal tags ordered by name, each with its
-        colour, description, and parent_id for reconstructing the hierarchy.
     """
     user_id = await get_current_user_id()
     repos = create_journal_tool_repositories(db_connection)
@@ -90,7 +87,7 @@ async def list_journal_tags(
         ],
     )
 
-    return MCPResponseBuilder.success_response(response_data)
+    return response_data
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -115,7 +112,7 @@ async def update_journal_tag(
     ] = False,
     tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalTagInfo:
     """
     Update an existing journal tag's name, colour, description, or parent.
 
@@ -134,9 +131,6 @@ async def update_journal_tag(
         description: New description of what the tag is for
         parent_id: UUID of the new parent tag
         move_to_root: Clear the parent instead of setting one
-
-    Returns:
-        JSON string containing the updated tag.
     """
     try:
         tag_uuid = UUID(tag_id)
@@ -175,7 +169,7 @@ async def update_journal_tag(
         created_at=updated.created_at.isoformat() if updated.created_at else None,
     )
 
-    return MCPResponseBuilder.success_response(response_data)
+    return response_data
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -184,7 +178,7 @@ async def delete_journal_tag(
     tag_id: Annotated[str, Field(description="UUID of the journal tag to delete")],
     tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalTagDeletedMCPResponse:
     """
     Delete a journal tag, removing it from every journal it is assigned to.
 
@@ -197,9 +191,6 @@ async def delete_journal_tag(
 
     Args:
         tag_id: UUID of the tag to delete
-
-    Returns:
-        JSON string confirming the deletion.
     """
     try:
         tag_uuid = UUID(tag_id)
@@ -215,15 +206,9 @@ async def delete_journal_tag(
         changed_by="mcp",
     )
 
-    class DeleteJournalTagResponse(BaseModel):
-        status: str
-        summary: str
-
-    return MCPResponseBuilder.success_response(
-        DeleteJournalTagResponse(
-            status="success",
-            summary=f"Deleted journal tag {tag_id} and removed it from all journals",
-        )
+    return JournalTagDeletedMCPResponse(
+        status="success",
+        summary=f"Deleted journal tag {tag_id} and removed it from all journals",
     )
 
 
@@ -238,7 +223,7 @@ async def merge_journal_tag(
     ],
     tag_service: JournalTagService = mcp_depends(get_journal_tag_service),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> JournalTagMergedMCPResponse:
     """
     Merge one journal tag into another, consolidating duplicates.
 
@@ -256,9 +241,6 @@ async def merge_journal_tag(
     Args:
         source_tag_id: UUID of the tag to merge away and delete
         target_tag_id: UUID of the tag that survives the merge
-
-    Returns:
-        JSON string confirming the merge.
     """
     try:
         source_uuid = UUID(source_tag_id)
@@ -284,18 +266,12 @@ async def merge_journal_tag(
         changed_by="mcp",
     )
 
-    class MergeJournalTagResponse(BaseModel):
-        status: str
-        summary: str
-
-    return MCPResponseBuilder.success_response(
-        MergeJournalTagResponse(
-            status="success",
-            summary=(
-                f"Merged journal tag {source_tag_id} into {target_tag_id}; "
-                "the source tag was deleted"
-            ),
-        )
+    return JournalTagMergedMCPResponse(
+        status="success",
+        summary=(
+            f"Merged journal tag {source_tag_id} into {target_tag_id}; "
+            "the source tag was deleted"
+        ),
     )
 
 
