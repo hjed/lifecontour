@@ -278,7 +278,9 @@ shape for the next owned entity:
   table cannot show that a refused request moved or deleted one. Seeded `updated_at` values are
   backdated, and a test asserts they stick: seeding and request share one transaction, so `now()`
   is the same instant in both and a premature touch would write the value already there.
-- **`CROSS_USER_REQUESTS`**, one entry per by-id route. Each must answer 404, echo none of the
+- **`CROSS_USER_REQUESTS`**, one entry per by-id route. An owned lookup table whose routes carry no
+  aggregate id (journal tags, contact tags) gets its own table (`CROSS_USER_TAG_REQUESTS`) and its
+  own `{tag_id}` coverage guard in the same suite. Each must answer 404, echo none of the
   row's text, and leave a `to_jsonb` snapshot of every reachable table byte-identical.
 - **A coverage guard** that compares the table with `app.openapi()`: every mounted route carrying
   the id placeholder is listed, or recorded in `COVERED_ELSEWHERE` with its reason, and no entry

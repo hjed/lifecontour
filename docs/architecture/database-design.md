@@ -108,15 +108,27 @@ CREATE TABLE contact_notes (
 ```sql
 CREATE TABLE tags (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
+    user_id VARCHAR(50) NOT NULL, -- the owner; set on create, never changed
+    name VARCHAR(100) NOT NULL,
     parent_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
     color VARCHAR(7), -- Hex color code
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT tag_name_format CHECK (name ~ '^[a-zA-Z0-9_&-]+$')
+    CONSTRAINT ck_tags_name_format CHECK (name ~ '^[a-zA-Z0-9_&-]+(/[a-zA-Z0-9_&-]+)*$')
 );
+CREATE INDEX idx_tags_user_id ON tags (user_id);
+-- Names are unique per owner, case-insensitively.
+CREATE UNIQUE INDEX uq_tags_user_id_name_lower ON tags (user_id, LOWER(name));
 ```
+
+Contact tags are owned. A tag's `parent_id` names a tag of the same owner only (a hierarchy never
+links two owners). Migration `0135` added the owner: a tag carried by contacts takes their owner;
+an uncarried tag takes the site's one user (`owner_derivation`,
+`alembic -x tags_owner=<user_id>` when the data cannot choose); a tag carried by contacts of more
+than one owner, or one under another owner's tag, refuses, naming it. `0136`, landing with the
+owner-scoped reads, replaced the global `uq_tags_name_lower`; its downgrade refuses while two
+owners share a name.
 
 #### Custom Date Types Table
 ```sql
@@ -153,6 +165,9 @@ CREATE TABLE contact_tags (
     UNIQUE(contact_id, tag_id)
 );
 ```
+
+A contact only ever holds its owner's tags: `ContactRepository.assign_tag` inserts its row only
+when the contact and the tag share an owner.
 
 #### Field History Table (shared, entity-agnostic)
 

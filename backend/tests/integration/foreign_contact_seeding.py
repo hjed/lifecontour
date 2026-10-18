@@ -203,6 +203,7 @@ class ForeignContact:
     unassigned_tag_id: int
     relationship_id: int
     own_contact_id: int
+    own_tag_id: int
 
     def placeholders(self) -> dict[str, str]:
         return {
@@ -221,6 +222,7 @@ class ForeignContact:
             "unassigned_tag_id": str(self.unassigned_tag_id),
             "relationship_id": str(self.relationship_id),
             "own_contact_id": str(self.own_contact_id),
+            "own_tag_id": str(self.own_tag_id),
         }
 
 
@@ -432,4 +434,5 @@ async def seed_foreign_contact(async_connection: AsyncConnection) -> ForeignCont
         unassigned_tag_id=unassigned_tag_id,
         relationship_id=relationship.id,
         own_contact_id=own_contact_id,
+        own_tag_id=own_tag.id,
     )

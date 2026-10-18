@@ -69,6 +69,7 @@ from tests.integration.foreign_contact_seeding import (
     OTHER_JOURNAL_TITLE,
     OWN_FIRST_NAME,
     SEEDED_LONG_AGO,
+    TAG_NAME,
     UNCHANGED_ROWS,
     ForeignContact,
     assert_nothing_leaked,
@@ -870,3 +871,96 @@ class TestMcpOwnershipCoverageIsComplete:
         )
 
         assert not named - tools, f"no longer registered: {sorted(named - tools)}"
+
+
+MISSING_TAG_ID = 999_999
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestMcpContactTagsAreTheActingUsers:
+    """The contact tag tools see and change only the acting user's tags.
+
+    The foreign contact carries its owner's tag and the caller's contact the
+    caller's own, so a refused write that touched an assignment, a contact or
+    the outbox shows in the whole-table snapshot, not only in ``tags``.
+    """
+
+    async def test_listing_shows_only_your_tags(
+        self,
+        authenticated_lifespan_client: Callable[..., Any],
+        owned_state: OwnedState,
+    ) -> None:
+        payload = await _call(authenticated_lifespan_client, "list_contact_tags", {})
+
+        assert [tag["id"] for tag in payload["tags"]] == [
+            str(owned_state.contact.own_tag_id)
+        ]
+
+    @pytest.mark.parametrize(
+        ("tool", "arguments"),
+        [
+            ("update_contact_tag", {"tag_id": "{tag}", "name": "renamed"}),
+            ("delete_contact_tag", {"tag_id": "{tag}"}),
+            ("merge_contact_tags", {"source_id": "{tag}", "target_id": "{mine}"}),
+            ("merge_contact_tags", {"source_id": "{mine}", "target_id": "{tag}"}),
+        ],
+    )
+    async def test_their_tag_answers_as_a_missing_one_and_changes_nothing(
+        self,
+        authenticated_lifespan_client: Callable[..., Any],
+        async_connection: AsyncConnection,
+        owned_state: OwnedState,
+        tool: str,
+        arguments: dict[str, str],
+    ) -> None:
+        theirs = owned_state.contact.tag_id
+        mine = owned_state.contact.own_tag_id
+
+        async def call(tag_id: int) -> dict[str, Any]:
+            filled = {
+                name: value.format(tag=tag_id, mine=mine)
+                for name, value in arguments.items()
+            }
+            return await _call(authenticated_lifespan_client, tool, filled)
+
+        before = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
+        foreign = await call(theirs)
+        after_foreign = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
+        missing = await call(MISSING_TAG_ID)
+
+        assert _is_error(foreign), f"{tool} acted on another user's tag: {foreign}"
+        assert _masked(foreign, theirs, MISSING_TAG_ID) == _masked(
+            missing, theirs, MISSING_TAG_ID
+        )
+        assert TAG_NAME not in repr(foreign)
+        assert after_foreign == before
+
+    async def test_a_tag_name_they_hold_gives_your_contact_your_own_tag(
+        self,
+        authenticated_lifespan_client: Callable[..., Any],
+        async_connection: AsyncConnection,
+        owned_state: OwnedState,
+    ) -> None:
+        own_contact_id = owned_state.contact.own_contact_id
+
+        payload = await _call(
+            authenticated_lifespan_client,
+            "update_contact",
+            {"request": {"contact_id": own_contact_id, "tags": [TAG_NAME]}},
+        )
+
+        assert not _is_error(payload), payload
+        held = await async_connection.execute(
+            text(
+                "SELECT t.id, t.name, t.user_id FROM contact_tags ct "
+                "JOIN tags t ON t.id = ct.tag_id WHERE ct.contact_id = :id"
+            ),
+            {"id": own_contact_id},
+        )
+        # The tag set is replaced by the named tag: a new one of the caller's,
+        # not the foreign tag of that name (nor the contact's previous tag).
+        assert [
+            (row.name, row.user_id, row.id == owned_state.contact.tag_id)
+            for row in held
+        ] == [(TAG_NAME, TEST_USER_ID, False)]

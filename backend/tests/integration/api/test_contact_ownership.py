@@ -46,13 +46,14 @@ from app.core.contacts.adapters.sql import (
     SqlCustomDateTypeRepository,
 )
 from app.main import create_app
-from tests.integration.contact_seeding import TEST_USER_ID
+from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 from tests.integration.foreign_contact_seeding import (
     EMPTY_UNTIL_WRITTEN,
     EVERY_UPDATED_AT,
     IMMICH_PERSON_ID,
     OWN_FIRST_NAME,
     SEEDED_LONG_AGO,
+    TAG_NAME,
     ForeignContact,
     assert_nothing_leaked,
     hand_foreign_rows_to_caller,
@@ -138,7 +139,12 @@ def _fill(template: str, values: dict[str, str]) -> str:
 
 
 # Request schemas type these as integers; JSON:API resource ids stay strings.
-_INTEGER_ATTRIBUTES = {"from_contact_id", "to_contact_id", "source_contact_id"}
+_INTEGER_ATTRIBUTES = {
+    "from_contact_id",
+    "to_contact_id",
+    "source_contact_id",
+    "target_tag_id",
+}
 
 
 def _ids_as_ints(obj: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +316,47 @@ COVERED_ELSEWHERE: dict[tuple[str, str], str] = {
         "test_task_endpoints.py (unlinking another user's task)"
     ),
 }
+
+
+# Contact tags are owned too, and their management routes are keyed by the tag
+# rather than by a contact, so the guard above never sees them. Each request
+# names the foreign contact's tag; a refusal must answer 404 and leave every
+# snapshotted row as it was.
+TAG_ROUTE = "/api/tags/{tag_id}"
+
+CROSS_USER_TAG_REQUESTS: tuple[CrossUserRequest, ...] = (
+    CrossUserRequest("GET", TAG_ROUTE),
+    CrossUserRequest(
+        "PATCH",
+        TAG_ROUTE,
+        body={
+            "data": {
+                "type": "tags",
+                "id": "{tag_id}",
+                "attributes": {"name": "renamed-by-a-stranger", "color": "#000000"},
+            }
+        },
+    ),
+    CrossUserRequest("DELETE", TAG_ROUTE),
+    CrossUserRequest(
+        "POST",
+        TAG_ROUTE + "/merge",
+        body={
+            "data": {"type": "tags", "attributes": {"target_tag_id": "{own_tag_id}"}}
+        },
+    ),
+)
+
+
+def _mounted_tag_id_routes(app: Any) -> set[tuple[str, str]]:
+    """Every ``(method, path)`` under ``/api/tags`` that carries a tag id."""
+    return {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        if path.startswith("/api/tags/") and "{tag_id}" in path
+        for method in operations
+        if method.upper() not in {"HEAD", "OPTIONS"}
+    }
 
 
 def _mounted_contact_id_routes(app: Any) -> set[tuple[str, str]]:
@@ -874,3 +921,168 @@ class TestAnImportantDateUsesOnlyYourCustomTypes:
             {"type_id": own_type.id},
         )
         assert stored.scalar_one() == 1
+
+
+@pytest.mark.integration
+class TestContactTagOwnershipIsEnforced:
+    """Another user's contact tag reads, and refuses writes, as a missing one."""
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_TAG_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_another_users_tag_reads_as_an_absent_one(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.request(
+            request_spec.method,
+            request_spec.path(foreign_contact),
+            json=request_spec.filled_body(foreign_contact),
+        )
+
+        assert response.status_code == 404, (
+            f"{request_spec.method} {request_spec.route} answered "
+            f"{response.status_code} for another user's tag: {response.text[:400]}"
+        )
+        assert TAG_NAME not in response.text
+        assert await snapshot(async_connection) == before
+
+    @pytest.mark.parametrize(
+        "request_spec",
+        CROSS_USER_TAG_REQUESTS,
+        ids=lambda spec: f"{spec.method} {spec.route}",
+    )
+    async def test_the_same_request_succeeds_for_the_owner(
+        self,
+        request_spec: CrossUserRequest,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        """Each refusal above is the ownership check, not a bad request."""
+        await hand_foreign_rows_to_caller(async_connection)
+
+        response = await integration_api_client.request(
+            request_spec.method,
+            request_spec.path(foreign_contact),
+            json=request_spec.filled_body(foreign_contact),
+        )
+
+        assert response.is_success, (
+            f"{request_spec.method} {request_spec.route} answered "
+            f"{response.status_code} for the owner: {response.text[:400]}"
+        )
+
+    async def test_merging_your_tag_into_theirs_is_refused(
+        self,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        """The merge *target* is owner-checked too, and your tag survives."""
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.post(
+            f"/api/tags/{foreign_contact.own_tag_id}/merge",
+            json={
+                "data": {
+                    "type": "tags",
+                    "attributes": {"target_tag_id": foreign_contact.tag_id},
+                }
+            },
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert await snapshot(async_connection) == before
+
+    async def test_their_tag_cannot_be_assigned_to_your_contact(
+        self,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.post(
+            f"/api/contacts/{foreign_contact.own_contact_id}/tags",
+            json={"data": {"type": "tags", "id": str(foreign_contact.tag_id)}},
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert await snapshot(async_connection) == before
+
+    async def test_a_tag_cannot_be_created_under_their_tag(
+        self,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        before = await snapshot(async_connection)
+
+        response = await integration_api_client.post(
+            "/api/tags",
+            json={
+                "data": {
+                    "type": "tags",
+                    "attributes": {
+                        "name": "under-a-stranger",
+                        "parent_id": foreign_contact.tag_id,
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 404, response.text[:400]
+        assert await snapshot(async_connection) == before
+
+    async def test_your_tag_list_holds_only_your_tags(
+        self, integration_api_client: AsyncClient, foreign_contact: ForeignContact
+    ) -> None:
+        response = await integration_api_client.get("/api/tags")
+
+        assert response.status_code == 200, response.text[:400]
+        assert [tag["id"] for tag in response.json()["data"]] == [
+            str(foreign_contact.own_tag_id)
+        ]
+
+    async def test_their_tag_name_is_free_for_you(
+        self,
+        integration_api_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_contact: ForeignContact,
+    ) -> None:
+        """Names are unique per owner: yours is a new tag, theirs is untouched."""
+        response = await integration_api_client.post(
+            "/api/tags",
+            json={"data": {"type": "tags", "attributes": {"name": TAG_NAME}}},
+        )
+
+        assert response.status_code == 201, response.text[:400]
+        assert response.json()["data"]["id"] != str(foreign_contact.tag_id)
+        owners = await async_connection.execute(
+            text("SELECT user_id FROM tags WHERE name = :name ORDER BY user_id"),
+            {"name": TAG_NAME},
+        )
+        assert [row.user_id for row in owners] == sorted([OTHER_USER_ID, TEST_USER_ID])
+
+
+@pytest.mark.integration
+class TestContactTagOwnershipCoverageIsComplete:
+    """Every route keyed by a contact tag id has a cross-user test."""
+
+    def test_every_tag_id_route_is_covered(self, test_settings: Any) -> None:
+        mounted = _mounted_tag_id_routes(create_app(settings=test_settings))
+        tested = {(spec.method, spec.route) for spec in CROSS_USER_TAG_REQUESTS}
+
+        assert not mounted - tested, (
+            "these tag-by-id operations have no ownership test: "
+            f"{sorted(mounted - tested)}. Add each to CROSS_USER_TAG_REQUESTS."
+        )
+        assert not tested - mounted, f"no longer served: {sorted(tested - mounted)}"

@@ -297,7 +297,8 @@ The rule is enforced in SQL by the owner-scoped repositories (see
 isolation suite whose coverage guard fails when a new by-id route lacks an ownership test:
 `backend/tests/integration/api/test_journal_ownership.py` (journals and journal tags) and
 `test_contact_ownership.py` (contacts and their methods, addresses, notes, important dates, tags,
-relationships, summary, history, avatar and merge). MCP tools follow the same rule: another user's
+relationships, summary, history, avatar and merge; and the contact tag routes under
+`/api/tags`). MCP tools follow the same rule: another user's
 contact gets exactly the payload a missing id gets, proven by
 `backend/tests/integration/mcp/test_mcp_contact_ownership.py`, whose guard requires every tool with
 a contact-id argument to be in its tables or exempted in `COVERED_ELSEWHERE` with a reason. See
