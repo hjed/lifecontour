@@ -806,7 +806,7 @@ class TestSyncCalendarEvents:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "account_error_name",
-        ["revoked", "tokens_missing", "unauthorised"],
+        ["revoked", "tokens_missing", "unauthorised", "refresh_rejected"],
     )
     async def test_an_account_level_failure_still_fails_the_sync(
         self,
@@ -814,7 +814,13 @@ class TestSyncCalendarEvents:
         mock_session: AsyncMock,
         account_error_name: str,
     ) -> None:
-        """Auth failures are the account's, not one calendar's: they fail the task."""
+        """Auth failures are the account's, not one calendar's: they fail the task.
+
+        ``refresh_rejected`` is how a real 401 surfaces: the client's
+        credentials carry no refresh token, so the transport's refresh attempt
+        raises ``RefreshError`` instead of returning the 401.
+        """
+        from google.auth.exceptions import RefreshError
         from googleapiclient.errors import HttpError
 
         from google_auth_service import (
@@ -829,6 +835,7 @@ class TestSyncCalendarEvents:
             "unauthorised": HttpError(
                 resp=MagicMock(status=401, reason="Unauthorized"), content=b"{}"
             ),
+            "refresh_rejected": RefreshError("cannot refresh the access token"),
         }
         client = self._two_calendars_one_unreadable(
             mock_session, account_errors[account_error_name]

@@ -14,12 +14,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import split_adoption
 import worker
+from google_auth_service import TokenRevokedError
 from worker import sync_calendar_events
 
 USER_ID = "22222222-2222-2222-2222-222222222222"
@@ -208,3 +210,24 @@ class TestCalendarFailureIsolation:
             calendars["after@example.com"]
         }
         assert await _calendars_with_tokens(db_session) == {"after@example.com"}
+
+    @pytest.mark.parametrize(
+        "account_error",
+        [
+            RefreshError("cannot refresh the access token"),
+            TokenRevokedError("revoked"),
+        ],
+        ids=["refresh_rejected", "revoked"],
+    )
+    async def test_a_credential_failure_fails_the_sync_rather_than_one_calendar(
+        self, db_session: AsyncSession, account_error: Exception
+    ) -> None:
+        """Lost credentials fail every calendar alike, so the task reports it."""
+        await _seed_calendars(db_session, ["before@example.com", "denied@example.com"])
+
+        result = await _run_sync(
+            db_session, _client_failing_on("denied@example.com", account_error)
+        )
+
+        assert result["status"] == "error"
+        assert result["error_type"] == type(account_error).__name__

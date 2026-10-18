@@ -57,6 +57,7 @@ from core_shared.repositories import (
     UnmatchedParticipantRepository,
 )
 from core_shared.telemetry import setup_telemetry, trace_arq_job
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -4335,9 +4336,15 @@ def _is_account_level_failure(error: Exception) -> bool:
 
     Without usable credentials every calendar fails the same way, so these
     fail the whole sync instead of being skipped calendar by calendar - a
-    disconnected account must not read as a successful sync.
+    disconnected account must not read as a successful sync. A rejected access
+    token usually arrives as ``RefreshError``, not a 401: the client's
+    credentials hold no refresh token, so the transport's retry-with-refresh
+    raises before the 401 is returned.
     """
-    if isinstance(error, GoogleAuthTokensNotFoundError | TokenRefreshFailedError):
+    if isinstance(
+        error,
+        GoogleAuthTokensNotFoundError | TokenRefreshFailedError | RefreshError,
+    ):
         return True
     return isinstance(error, HttpError) and error.resp.status == 401
 
