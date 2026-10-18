@@ -213,7 +213,10 @@ Simply run `pnpm test:e2e` in `frontend/` or `python scripts/run_integration_tes
 
 - Use `pyproject.toml` for pytest configuration with UV dependency management
 - Focus on critical business logic rather than arbitrary coverage percentages
-- Organize tests with clear markers (unit, integration, e2e)
+- Organize tests with clear markers (unit, integration, e2e). Every test under
+  `backend/tests/unit` is marked `unit` automatically by the collection hook in
+  `backend/tests/unit/conftest.py`, so CI's `pytest -m unit` job runs it; a
+  module-level `pytestmark = pytest.mark.unit` there is optional
 - Use descriptive test file naming patterns
 - Configure coverage reporting for CI/CD pipeline integration
 
