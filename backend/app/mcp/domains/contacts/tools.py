@@ -61,8 +61,11 @@ from app.mcp.domains.contacts.schemas import (
     ContactFieldKind,
     ContactListResponse,
     ContactRelationshipListResponse,
+    ContactRelationshipSchema,
+    ContactResponse,
     ContactSearchResponse,
     ContactUpdateRequest,
+    GlobalSearchResponse,
     UpcomingImportantDateResponse,
     UpcomingImportantDatesResponse,
     UpcomingImportantDatesWindow,
@@ -95,7 +98,7 @@ from app.mcp.shared.dependencies import (
     get_upcoming_important_dates_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 logger = structlog.get_logger()
 
@@ -159,9 +162,6 @@ def _convert_field_value(field_name: str, field_value: str) -> str | bool:
         field_name: Name of the field being updated
         field_value: String value to convert
 
-    Returns:
-        Converted value with appropriate type
-
     Raises:
         ContactValidationError: If the value cannot be converted to the expected type
     """
@@ -190,7 +190,7 @@ async def _build_contact_response(
     user_id: str,
     include_history: bool,
     include_archived: bool = False,
-) -> str:
+) -> ContactResponse:
     """Full contact payload (links, summary, optional history) for get_contact*."""
     from app.core.integrations.external_link_helpers import (
         build_contact_external_links,
@@ -236,7 +236,7 @@ async def _build_contact_response(
         )
         response.summary = f"{response.summary}\n\n{history_summary}"
 
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def _upcoming_date_response(date: UpcomingContactDate) -> UpcomingImportantDateResponse:
@@ -331,7 +331,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Get contact details by ID for AI analysis.
 
@@ -345,13 +345,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Args:
             contact_id: The unique identifier of the contact
             include_history: Optional flag to include field change history
-
-        Returns:
-            JSON string containing AI-friendly contact information including:
-            - Basic contact details (name, email, phone)
-            - Associated tags for categorization
-            - Contextual summary for AI understanding
-            - Optional field change history if requested
 
         Raises:
             ContactNotFoundError: If the contact with the given ID does not exist
@@ -400,7 +393,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Find the contact linked to an external system's record.
 
@@ -410,7 +403,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Raises:
             ValueError: If ``source`` is not a recognised contact integration
 
-        Returns a "Not found" error payload when no contact is linked to that id.
+        Refuses with a "Not found" error when no contact is linked to that id.
         """
         normalized_source = resolve_contact_source(source)
         normalized_id = external_id.strip()
@@ -421,7 +414,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             normalized_source, normalized_id, connection, user_id=user_id
         )
         if contact is None or contact.id is None:
-            return MCPResponseBuilder.error_response(
+            raise MCPErrors.error(
                 error_type="Not found",
                 message=(
                     f"No contact is linked to {normalized_source} id '{normalized_id}'"
@@ -466,7 +459,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         merge_service: ContactMergeService = mcp_depends(get_contact_merge_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Merge a source contact into a surviving contact.
 
@@ -482,9 +475,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             survivor_contact_id: ID of the contact to keep
             source_contact_id: ID of the contact to absorb (deleted on success)
             overrides: Optional per-field conflict resolution overrides
-
-        Returns:
-            JSON string containing the unified surviving contact
         """
         merged = await merge_service.merge_contacts(
             survivor_contact_id,
@@ -497,7 +487,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         )
 
         response = ContactConverter.to_contact_response(merged)
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("search_contacts", "search")
@@ -509,7 +499,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tags: Annotated[list[str] | None, Field(description="Filter by tags")] = None,
         search_service: SearchService = mcp_depends(get_search_service),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactSearchResponse:
         """
         Search contacts using MeiliSearch for AI analysis.
 
@@ -521,13 +511,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             query: Search query string
             limit: Maximum number of results to return (1-50)
             tags: Optional list of tags to filter by
-
-        Returns:
-            JSON string containing AI-friendly search results including:
-            - Matching contacts with highlighting
-            - Search metadata and processing time
-            - Available tags for further filtering
-            - Contextual summary for AI understanding
         """
         # Build filters
         filters = {}
@@ -576,7 +559,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             summary=search_summary,
         )
 
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=ADDITIVE_WRITE)
     @mcp_unified_error_handler("create_contact", "management")
@@ -585,18 +568,12 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Create a new contact for AI-managed relationship building.
 
         Creates a new contact with validation and returns AI-friendly confirmation.
         Supports adding contact methods, tags, and initial notes.
-
-        Returns:
-            JSON string containing AI-friendly contact creation confirmation including:
-            - Created contact details with assigned ID
-            - Validation results and any warnings
-            - Contextual summary for AI understanding
         """
         logger.info("MCP: Creating contact", request=request.model_dump())
 
@@ -698,7 +675,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact_name=final_contact.get_full_name(),
         )
 
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=IDEMPOTENT_WRITE)
     @mcp_unified_error_handler("update_contact", "management")
@@ -721,7 +698,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Update an existing contact for AI-managed relationship maintenance.
 
@@ -745,12 +722,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         update modes.
 
 
-
-        Returns:
-            JSON string containing AI-friendly contact update confirmation including:
-            - Updated contact details with changes highlighted
-            - Validation results and any warnings
-            - Contextual summary for AI understanding
         """
         logger.info("MCP: Updating contact", request=request.model_dump())
 
@@ -891,7 +862,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             contact_name=final_contact.get_full_name(),
         )
 
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("list_contacts", "contact")
@@ -900,7 +871,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         limit: Annotated[int, Field(description="Contacts per page", ge=1, le=50)] = 20,
         contact_service: ContactService = mcp_depends(get_contact_service),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactListResponse:
         """
         List contacts with pagination for AI analysis.
 
@@ -910,12 +881,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Args:
             page: Page number (starting from 1)
             limit: Number of contacts per page (1-50)
-
-        Returns:
-            JSON string containing AI-friendly contact list including:
-            - Paginated contact list with summaries
-            - Pagination metadata
-            - Overall context and insights
         """
         logger.info("MCP: Listing contacts", page=page, limit=limit)
 
@@ -969,7 +934,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             total_count=total_count,
         )
 
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=READ_ONLY)
     @mcp_unified_error_handler("global_search", "search")
@@ -986,7 +951,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = None,
         search_service: SearchService = mcp_depends(get_search_service),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> GlobalSearchResponse:
         """
         Perform global search across all entity types for AI analysis.
 
@@ -997,13 +962,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             query: Global search query string
             limit: Maximum number of results to return (1-50)
             entity_types: Optional list of entity types to search
-
-        Returns:
-            JSON string containing AI-friendly global search results including:
-            - Unified search results across entity types
-            - Search metadata and processing time
-            - Available entity types for context
-            - Contextual summary for AI understanding
         """
         logger.info(
             "MCP: Performing global search",
@@ -1033,7 +991,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             processing_time_ms=results.get("processing_time_ms", 0),
         )
 
-        return MCPResponseBuilder.success_response(response)
+        return response
 
     @mcp.tool(annotations=ADDITIVE_WRITE)
     @mcp_unified_error_handler("toggle_contact_favourite", "management")
@@ -1044,7 +1002,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Toggle the favourite status of a contact for AI-managed relationship prioritization.
 
@@ -1054,12 +1012,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             contact_id: The ID of the contact to toggle favourite status
-
-        Returns:
-            JSON string containing AI-friendly contact information with updated favourite status including:
-            - Updated contact details with new favourite status
-            - Confirmation of the favourite status change
-            - Contextual summary for AI understanding
         """
         logger.info("MCP: Toggling contact favourite status", contact_id=contact_id)
 
@@ -1085,7 +1037,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 is_favourite=updated_contact.is_favourite,
             )
 
-            return MCPResponseBuilder.success_response(response)
+            return response
 
         except ContactNotFoundError as e:
             logger.warning(
@@ -1118,7 +1070,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         contact_service: ContactService = mcp_depends(get_contact_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactResponse:
         """
         Archive or restore one of a contact's emails, phones or addresses.
 
@@ -1174,7 +1126,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             get_contact_relationship_service
         ),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactRelationshipListResponse:
         """
         List all relationships for a specific contact.
 
@@ -1182,9 +1134,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             contact_id: The ID of the contact to get relationships for
-
-        Returns:
-            JSON string containing the contact's relationships
         """
         logger.info("MCP: Getting contact relationships", contact_id=contact_id)
 
@@ -1219,7 +1168,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 contact_id=contact_id,
                 count=len(relationship_schemas),
             )
-            return MCPResponseBuilder.success_response(response_data)
+            return response_data
 
         except ContactNotFoundError:
             raise
@@ -1240,7 +1189,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactRelationshipSchema:
         """
         Add a new relationship between two contacts.
 
@@ -1248,9 +1197,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             request: Contact relationship creation details
-
-        Returns:
-            JSON string containing the newly created relationship
         """
         logger.info(
             "MCP: Adding contact relationship",
@@ -1291,7 +1237,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 "MCP: Contact relationship added successfully",
                 relationship_id=created_relationship.id,
             )
-            return MCPResponseBuilder.success_response(schema)
+            return schema
 
         except Exception as e:
             logger.error(
@@ -1310,7 +1256,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactRelationshipSchema:
         """
         Update an existing contact relationship.
 
@@ -1318,9 +1264,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             request: Contact relationship update details
-
-        Returns:
-            JSON string containing the updated relationship
         """
         logger.info(
             "MCP: Updating contact relationship",
@@ -1366,7 +1309,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 "MCP: Contact relationship updated successfully",
                 relationship_id=updated_relationship.id,
             )
-            return MCPResponseBuilder.success_response(schema)
+            return schema
 
         except Exception as e:
             logger.error(
@@ -1388,7 +1331,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactActionResponse:
         """
         Remove a relationship between two contacts.
 
@@ -1397,9 +1340,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Args:
             contact_id: The ID of the contact
             relationship_id: The ID of the relationship to remove
-
-        Returns:
-            Success message matching MCP conventions
         """
         logger.info(
             "MCP: Removing contact relationship", relationship_id=relationship_id
@@ -1428,7 +1368,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 status="success",
                 message=f"Relationship {relationship_id} successfully removed",
             )
-            return MCPResponseBuilder.success_response(response)
+            return response
 
         except Exception as e:
             logger.error(
@@ -1446,7 +1386,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         ] = 50,
         tag_repo: TagRepository = mcp_depends(get_tag_repository),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> TagListResponse:
         """
         List the current user's tags for AI-managed contact categorization.
 
@@ -1457,12 +1397,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             limit: Maximum number of tags to return (1-100, default: 50)
-
-        Returns:
-            JSON string containing AI-friendly tag information including:
-            - List of all available tags with names and usage counts
-            - Tag categorization suggestions for AI understanding
-            - Contextual summary of the tag system
         """
         logger.info("MCP: Listing tags", limit=limit)
 
@@ -1506,7 +1440,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 limit=limit,
             )
 
-            return MCPResponseBuilder.success_response(response_data)
+            return response_data
 
         except Exception as e:
             logger.error(
@@ -1539,7 +1473,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> UpdatedTagInfo:
         """
         Update an existing contact tag's name, colour, description, or parent.
 
@@ -1558,9 +1492,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             description: New description of what the tag is for
             parent_id: ID of the new parent tag
             move_to_root: Clear the parent instead of setting one
-
-        Returns:
-            JSON string containing the updated tag
         """
         logger.info("MCP: Updating contact tag", tag_id=tag_id)
 
@@ -1592,7 +1523,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     str(updated.parent_id) if updated.parent_id is not None else None
                 ),
             )
-            return MCPResponseBuilder.success_response(response)
+            return response
 
         except Exception as e:
             logger.error(
@@ -1607,7 +1538,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactActionResponse:
         """
         Delete a contact tag, removing it from every contact it is assigned to.
 
@@ -1620,9 +1551,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             tag_id: The ID of the tag to delete
-
-        Returns:
-            JSON string confirming the deletion
         """
         logger.info("MCP: Deleting contact tag", tag_id=tag_id)
 
@@ -1639,7 +1567,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                 status="success",
                 message=(f"Tag {parsed_tag_id} deleted and removed from all contacts"),
             )
-            return MCPResponseBuilder.success_response(response)
+            return response
 
         except Exception as e:
             logger.error(
@@ -1659,7 +1587,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         tag_service: TagService = mcp_depends(get_tag_service),
         connection: AsyncConnection = mcp_depends(get_async_connection),
         user_id: str = mcp_depends(get_current_user_id),
-    ) -> str:
+    ) -> ContactActionResponse:
         """
         Merge a source contact tag into a target contact tag.
 
@@ -1672,9 +1600,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         Args:
             source_id: The ID of the tag to merge and delete
             target_id: The ID of the tag to merge into
-
-        Returns:
-            Success message matching MCP conventions
         """
         logger.info("MCP: Merging tags", source_id=source_id, target_id=target_id)
 
@@ -1695,7 +1620,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
                     f"into tag {parsed_target_id}"
                 ),
             )
-            return MCPResponseBuilder.success_response(response)
+            return response
 
         except Exception as e:
             logger.error(
@@ -1723,7 +1648,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         upcoming_dates_service: UpcomingImportantDatesService = mcp_depends(
             get_upcoming_important_dates_service
         ),
-    ) -> str:
+    ) -> UpcomingImportantDatesResponse:
         """
         List the important contact dates coming up: birthdays and anniversaries.
 
@@ -1762,12 +1687,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
 
         Args:
             days_ahead: How far ahead to look, 0 to 90, defaulting to 7.
-
-        Returns:
-            JSON string with a window object naming start_date, end_date and
-            days_ahead; a total_count; and dates, each with the contact's id and
-            name, the date type, occurs_on, days_away, years and
-            observed_for_leap_day.
         """
         user_id = await get_current_user_id()
 
@@ -1781,15 +1700,13 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             user_id, days_ahead=days_ahead
         )
 
-        return MCPResponseBuilder.success_response(
-            UpcomingImportantDatesResponse(
-                window=UpcomingImportantDatesWindow(
-                    start_date=upcoming.window.first_day,
-                    end_date=upcoming.window.last_day,
-                    days_ahead=upcoming.window.days_ahead,
-                ),
-                total_count=upcoming.total,
-                dates=[_upcoming_date_response(date) for date in upcoming.dates],
-                summary=_upcoming_dates_summary(upcoming),
-            )
+        return UpcomingImportantDatesResponse(
+            window=UpcomingImportantDatesWindow(
+                start_date=upcoming.window.first_day,
+                end_date=upcoming.window.last_day,
+                days_ahead=upcoming.window.days_ahead,
+            ),
+            total_count=upcoming.total,
+            dates=[_upcoming_date_response(date) for date in upcoming.dates],
+            summary=_upcoming_dates_summary(upcoming),
         )

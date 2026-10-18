@@ -8,6 +8,7 @@ import pytest
 from tests.integration.mcp.http_helpers import (
     extract_mcp_json_payload,
     extract_mcp_tool_error,
+    extract_typed_tool_result,
 )
 
 pytestmark = pytest.mark.unit
@@ -83,3 +84,29 @@ class TestExtractMcpToolError:
 
         with pytest.raises(AssertionError, match="isError"):
             extract_mcp_tool_error(response_body)
+
+
+class TestExtractTypedToolResult:
+    """A typed success carries the same payload in both halves."""
+
+    def test_returns_the_structured_content(self) -> None:
+        payload = {"id": "5", "name": "Jane Doe"}
+        response_body = _sse(
+            {"content": _text(payload), "structuredContent": payload, "isError": False}
+        )
+
+        assert extract_typed_tool_result(response_body) == payload
+
+    def test_rejects_a_wrapped_string_result(self) -> None:
+        payload = {"id": "5"}
+        response_body = _sse(
+            {
+                "content": _text(payload),
+                "structuredContent": {"result": json.dumps(payload)},
+                "isError": False,
+                "_meta": {"fastmcp": {"wrap_result": True}},
+            }
+        )
+
+        with pytest.raises(AssertionError, match="not a typed result"):
+            extract_typed_tool_result(response_body)

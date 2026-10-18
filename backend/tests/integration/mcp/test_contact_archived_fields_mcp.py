@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.contact_seeding import seed_contact
-from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.mcp.http_helpers import call_mcp_tool, call_mcp_tool_error
 
 
 async def _insert_contact(conn: AsyncConnection) -> dict[str, int]:
@@ -154,7 +154,7 @@ class TestContactFieldsMcp:
         ids = await _insert_contact(clean_database)
 
         async with authenticated_lifespan_client() as client:
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "set_contact_field_archived",
                 {
