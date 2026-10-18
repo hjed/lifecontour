@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import split_adoption
+import worker
 from worker import sync_calendar_events
 
 USER_ID = "22222222-2222-2222-2222-222222222222"
@@ -172,6 +173,37 @@ class TestCalendarFailureIsolation:
 
         assert result["status"] == "success"
         assert result["calendars_failed"] == 1
+        assert await _synced_calendar_ids(db_session) == {
+            calendars["after@example.com"]
+        }
+        assert await _calendars_with_tokens(db_session) == {"after@example.com"}
+
+    async def test_a_calendar_failing_after_queuing_events_keeps_none_of_them(
+        self, db_session: AsyncSession
+    ) -> None:
+        """A failed token save discards the calendar's events, and their counts."""
+        calendars = await _seed_calendars(
+            db_session, ["unsaved@example.com", "after@example.com"]
+        )
+        real_save_token = worker._save_calendar_sync_token
+
+        async def _save_failing_for_one(
+            session: AsyncSession, token: str, *args: Any
+        ) -> None:
+            if args[-1] == "unsaved@example.com":
+                raise RuntimeError("token save failed")
+            await real_save_token(session, token, *args)
+
+        with patch(
+            "worker._save_calendar_sync_token", side_effect=_save_failing_for_one
+        ):
+            result = await _run_sync(
+                db_session, _client_failing_on("none", RuntimeError())
+            )
+
+        assert result["status"] == "success"
+        assert result["calendars_failed"] == 1
+        assert result["events_created"] == 1
         assert await _synced_calendar_ids(db_session) == {
             calendars["after@example.com"]
         }

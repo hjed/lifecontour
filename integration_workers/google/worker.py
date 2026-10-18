@@ -7,6 +7,7 @@ It runs as a separate process from the main FastAPI application.
 """
 
 import asyncio
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -4349,12 +4350,13 @@ async def _sync_calendar_inbound(
     user_id: str | int,
     google_account_email: str,
     sync_type: str,
-    metrics: dict[str, Any],
+    metrics: Counter[str],
 ) -> None:
     """Sync one calendar's events inbound, adding its outbox events to ``session``.
 
     Leaves committing to the caller, so the calendar's outbox events and its
-    sync token land together or not at all.
+    sync token land together or not at all. ``metrics`` is this calendar's own
+    tally, for the caller to keep only if that commit succeeds.
     """
     from core_shared.models.outbox import OutboxEvent
 
@@ -4931,6 +4933,9 @@ async def sync_calendar_events(
             for cal_row in synced_calendars:
                 if not cal_row.is_synced_to_google:
                     continue
+                # Counted apart so a rolled-back calendar reports none of the
+                # events it queued.
+                calendar_metrics: Counter[str] = Counter()
                 try:
                     await _sync_calendar_inbound(
                         session,
@@ -4939,7 +4944,7 @@ async def sync_calendar_events(
                         user_id=user_id,
                         google_account_email=google_account_email,
                         sync_type=sync_type,
-                        metrics=metrics,
+                        metrics=calendar_metrics,
                     )
                     await session.commit()
                 except Exception as e:  # noqa: BLE001
@@ -4955,6 +4960,9 @@ async def sync_calendar_events(
                     await session.rollback()
                     metrics["errors"] += 1
                     metrics["calendars_failed"] += 1
+                    continue
+                for key, count in calendar_metrics.items():
+                    metrics[key] = metrics.get(key, 0) + count
 
         duration = (datetime.now(UTC) - started_at).total_seconds()
         metrics["completed_at"] = datetime.now(UTC).isoformat()

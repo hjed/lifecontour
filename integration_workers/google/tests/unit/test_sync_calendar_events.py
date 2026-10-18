@@ -766,6 +766,44 @@ class TestSyncCalendarEvents:
         assert result["events_created"] == 1
 
     @pytest.mark.asyncio
+    async def test_a_rolled_back_calendar_reports_none_of_its_events(
+        self, mock_ctx: dict[str, Any], mock_session: AsyncMock
+    ) -> None:
+        """Events queued before the calendar failed were discarded, so not counted."""
+        from worker import sync_calendar_events
+
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = None
+        link_result = MagicMock()
+        link_result.fetchone.return_value = None
+        mock_session.execute.side_effect = [cal_result, token_result, link_result]
+
+        client = MagicMock()
+        client.list_events = AsyncMock(
+            return_value={"items": [_make_google_event()], "nextSyncToken": "tok"}
+        )
+
+        with (
+            patch("worker._create_google_client", return_value=client),
+            patch(
+                "worker._save_calendar_sync_token",
+                side_effect=RuntimeError("token save failed"),
+            ),
+        ):
+            result = await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", "full"
+            )
+
+        assert result["status"] == "success"
+        mock_session.add.assert_called_once()
+        assert result["calendars_failed"] == 1
+        assert result["errors"] == 1
+        assert result["events_created"] == 0
+        assert result["events_processed"] == 0
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "account_error_name",
         ["revoked", "tokens_missing", "unauthorised"],
