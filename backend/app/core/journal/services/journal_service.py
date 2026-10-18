@@ -1,6 +1,7 @@
 """Main journal service with transaction management and type dependency resolution."""
 
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
@@ -33,6 +34,7 @@ from app.core.journal.models.repositories import (
     JournalContactRelationshipRepository,
     JournalRepository,
 )
+from app.core.journal.services.journal_patch import JournalMutation, JournalPatch
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
@@ -165,7 +167,76 @@ class JournalService:
         expected_etags: Sequence[str] | None = None,
     ) -> Journal:
         """
-        Update an existing journal.
+        Replace a journal's own fields with the whole state the caller sends.
+
+        For a caller that holds the whole resource - a REST ``PUT``, an
+        integration sync. A caller changing some fields should name them in a
+        :class:`JournalPatch` and use :meth:`patch_journal`, or a field it
+        copied from an older read will overwrite a newer value. See
+        :meth:`modify_journal` for the write itself.
+        """
+        if journal.id is None:
+            raise JournalValidationError("id", "Journal ID is required for update")
+
+        async def _replace(_stored: Journal) -> Journal:
+            return journal
+
+        return await self.modify_journal(
+            journal.id,
+            _replace,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            expected_etags=expected_etags,
+        )
+
+    @transactional
+    async def patch_journal(
+        self,
+        journal_id: int,
+        patch: JournalPatch,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
+    ) -> Journal:
+        """Change the fields ``patch`` names, and nothing else.
+
+        Applied to the journal as read under its row lock, so a change somebody
+        else committed to a field the patch does not name is kept, whenever it
+        landed. See :meth:`modify_journal`.
+        """
+
+        async def _apply(stored: Journal) -> Journal:
+            return patch.applied_to(stored)
+
+        return await self.modify_journal(
+            journal_id,
+            _apply,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            expected_etags=expected_etags,
+        )
+
+    @transactional
+    async def modify_journal(
+        self,
+        journal_id: int,
+        mutate: JournalMutation,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
+    ) -> Journal:
+        """
+        Read-modify-write a journal's own fields under its row lock.
+
+        The one write path every update of the journal row goes through:
+        lock it (refusing a stale ``expected_etags``), read it, have ``mutate``
+        build the journal to save from that read, and save. Because the read
+        happens under the lock, nothing ``mutate`` builds on can have moved by
+        the time it is written. ``mutate`` is handed a copy.
 
         Computes field-level ``changed_fields`` as ``{field: (old, new)}`` pairs by
         diffing the persisted journal against ``journal`` (mirroring the contact
@@ -175,8 +246,8 @@ class JournalService:
         field; an update that changes nothing produces no history.
 
         Args:
-            journal: The journal to update (must have id set), already merged with
-                the caller's requested changes
+            journal_id: The journal to update
+            mutate: Builds the journal to save from the stored one
             transaction: Database transaction
             changed_by: Who/what made the change (for history provenance)
             source: Provenance of the change (for history provenance)
@@ -196,19 +267,23 @@ class JournalService:
             JournalMaxDepthExceededError: If hierarchy depth exceeds maximum
             JournalCycleError: If parent relationship would create a cycle
         """
-        if journal.id is None:
-            raise JournalValidationError("id", "Journal ID is required for update")
-
         # Lock before anything is read, and refuse a stale write, holding the
         # row lock for the rest of this unit of work so the version cannot move
         # between the check and the save - or between the read below and the
         # save, which an unconditional write needs just as much.
-        await guard_journal_write(self.journal_repo, journal.id, expected_etags)
+        await guard_journal_write(self.journal_repo, journal_id, expected_etags)
 
         # Load the persisted journal so the service owns the change calculation.
-        existing_journal = await self.journal_repo.find_by_id(journal.id)
+        existing_journal = await self.journal_repo.find_by_id(journal_id)
         if existing_journal is None:
-            raise JournalNotFoundError(journal.id)
+            raise JournalNotFoundError(journal_id)
+
+        journal = await mutate(deepcopy(existing_journal))
+        if journal.id != journal_id:
+            raise JournalValidationError(
+                "id",
+                f"A mutation of journal {journal_id} returned journal {journal.id}",
+            )
 
         # An update may not move a journal to a different user. ``_update``
         # writes user_id straight from the entity it is handed and

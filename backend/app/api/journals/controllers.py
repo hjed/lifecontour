@@ -12,6 +12,7 @@ from uuid import UUID
 import structlog
 from core_shared.models.history import Provenance
 from core_shared.models.journals import (
+    EventDateRange,
     IncompleteOutdoorActivity,
     Journal,
     JournalContactRelationship,
@@ -109,6 +110,7 @@ from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
 from app.core.journal.services.journal_merge_service import JournalMergeService
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_type_data_helpers import parse_journal_type
@@ -130,6 +132,7 @@ from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
 from app.infrastructure.di.auth import AdminAccess
 from app.infrastructure.search.search_service import SearchService
+from app.shared.patch import UNSET
 
 logger = structlog.get_logger()
 
@@ -1658,64 +1661,36 @@ async def partial_update_journal(
     """
     base_url = get_request_base_url(request)
 
-    existing_journal = await _require_owned_journal(
-        journal_service, user.id, journal_id
-    )
+    # Verify the journal exists *and* is the caller's, before anything reads or
+    # writes it. Somebody else's is reported as missing, never as forbidden.
+    await _require_owned_journal(journal_service, user.id, journal_id)
 
-    # For partial update, merge with existing values
-    # Only update fields that are provided in the request
-    from core_shared.models.journals import EventDateRange
-
-    # Use existing values if not provided (use is not None to allow empty strings)
-    title = (
-        journal_request.data.attributes.title
-        if journal_request.data.attributes.title is not None
-        else existing_journal.title
-    )
-    content = (
-        journal_request.data.attributes.content
-        if journal_request.data.attributes.content is not None
-        else existing_journal.content
-    )
-
-    event_date_range = EventDateRange(
-        start=(
-            journal_request.data.attributes.event_date_range.start
-            if journal_request.data.attributes.event_date_range
-            else existing_journal.event_date_range.start
+    # Only the fields the request names are handed over: the service applies
+    # them to the journal as it reads it under the row lock, so a field somebody
+    # else changed meanwhile keeps its value. An attribute sent as null leaves
+    # its field alone, as it always has here.
+    attributes = journal_request.data.attributes
+    patch = JournalPatch(
+        title=attributes.title if attributes.title is not None else UNSET,
+        content=attributes.content if attributes.content is not None else UNSET,
+        event_date_range=(
+            EventDateRange(
+                start=attributes.event_date_range.start,
+                end=attributes.event_date_range.end,
+            )
+            if attributes.event_date_range
+            else UNSET
         ),
-        end=(
-            journal_request.data.attributes.event_date_range.end
-            if journal_request.data.attributes.event_date_range
-            else existing_journal.event_date_range.end
-        ),
-    )
-
-    updated_journal = Journal(
-        id=existing_journal.id,
-        user_id=existing_journal.user_id,
-        title=title,
-        content=content,
-        event_date_range=event_date_range,
-        parent_id=(
-            journal_request.data.attributes.parent_id
-            if journal_request.data.attributes.parent_id is not None
-            else existing_journal.parent_id
-        ),
-        order=(
-            journal_request.data.attributes.order
-            if journal_request.data.attributes.order is not None
-            else existing_journal.order
-        ),
-        created_at=existing_journal.created_at,
-        updated_at=existing_journal.updated_at,
+        parent_id=attributes.parent_id if attributes.parent_id is not None else UNSET,
+        order=attributes.order if attributes.order is not None else UNSET,
     )
 
     # The precondition is handed to the service untouched: it is checked inside
     # the write's unit of work, under the row lock, so a comparison made here
     # would be one the write could not honour.
-    saved_journal = await journal_write_service.update_journal(
-        updated_journal,
+    saved_journal = await journal_write_service.patch_journal(
+        journal_id,
+        patch,
         connection,
         changed_by="ui",
         source=Provenance.UI,

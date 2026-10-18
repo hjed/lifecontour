@@ -45,7 +45,7 @@ from app.core.contacts.services import (
     TagService,
 )
 from app.core.contacts.services.contact_merge_service import ContactMergeService
-from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
+from app.core.contacts.services.contact_patch import ContactFieldsPatch, ContactPatch
 from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
@@ -66,6 +66,7 @@ from app.mcp.domains.contacts.schemas import (
     ContactSearchResponse,
     ContactUpdateRequest,
     GlobalSearchResponse,
+    ImportantDateInfo,
     UpcomingImportantDateResponse,
     UpcomingImportantDatesResponse,
     UpcomingImportantDatesWindow,
@@ -99,6 +100,7 @@ from app.mcp.shared.dependencies import (
     mcp_depends,
 )
 from app.mcp.shared.response_builders import MCPErrors
+from app.shared.patch import UNSET, Unset
 
 logger = structlog.get_logger()
 
@@ -302,6 +304,81 @@ def _require_contact_field(
         raise ContactValidationError(
             "field_id", f"No {kind} with id {field_id} found on contact {contact.id}"
         )
+
+
+def contact_patch_from_request(request: ContactUpdateRequest) -> ContactPatch:
+    """What an ``update_contact`` request changes, and nothing else.
+
+    The tool's input rules, unchanged from when it built a whole contact:
+
+    - ``first_name``, ``last_name``, ``middle_name`` and ``nick_name`` change
+      only when given a non-empty value - an empty string leaves them alone;
+    - ``company`` and ``job_title`` change whenever given, so an empty string
+      clears them;
+    - ``email`` and ``phone`` set the primary value of their type, ``notes``
+      adds a note, ``important_dates`` replaces the dates and ``tags`` the
+      tags.
+
+    Raises:
+        ContactValidationError: For a custom important-date type, which MCP
+            cannot name.
+    """
+
+    def non_empty(value: str | None) -> str | Unset:
+        return value or UNSET
+
+    def given(value: str | None) -> str | None | Unset:
+        return value if value is not None else UNSET
+
+    primary_methods: dict[MethodType, str] = {}
+    if request.email:
+        primary_methods[MethodType.EMAIL] = request.email
+    if request.phone:
+        primary_methods[MethodType.PHONE] = request.phone
+
+    return ContactPatch(
+        fields=ContactFieldsPatch(
+            first_name=non_empty(request.first_name),
+            last_name=non_empty(request.last_name),
+            middle_name=non_empty(request.middle_name),
+            nick_name=non_empty(request.nick_name),
+            company=given(request.company),
+            job_title=given(request.job_title),
+        ),
+        primary_methods=primary_methods,
+        new_notes=(request.notes,) if request.notes else (),
+        important_dates=(
+            [
+                _important_date_from_request(request.contact_id, date_data)
+                for date_data in request.important_dates
+            ]
+            if request.important_dates is not None
+            else None
+        ),
+        tag_names=request.tags,
+    )
+
+
+def _important_date_from_request(
+    contact_id: int, date_data: ImportantDateInfo
+) -> ImportantDate:
+    date_type = ImportantDateType(date_data.date_type)
+    if date_type == ImportantDateType.CUSTOM:
+        raise ContactValidationError(
+            field="important_dates",
+            message="Custom important date types are not currently supported via MCP. "
+            "Please use a built-in date_type.",
+        )
+    return ImportantDate(
+        contact_id=contact_id,
+        date_type=date_type,
+        precision=DatePrecision(date_data.precision),
+        year=date_data.year,
+        month=date_data.month,
+        day=date_data.day,
+        custom_date_type_id=None,
+        custom_date_type_name=date_data.custom_type_name,
+    )
 
 
 def register_contact_tools(mcp: FastMCP[None]) -> None:
@@ -732,13 +809,6 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             [request.expected_version] if request.expected_version is not None else None
         )
 
-        # Get existing contact
-        existing_contact = await contact_service.get_contact_by_id(
-            request.contact_id, user_id=user_id
-        )
-        if not existing_contact:
-            raise ContactNotFoundError(request.contact_id)
-
         # Validate field-level update parameters
         if (field_name is None) != (field_value is None):
             # One is provided but not the other - this is an error
@@ -773,81 +843,17 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
             if not final_contact:
                 raise ContactNotFoundError(request.contact_id)
         else:
-            # Handle full contact update
-            # Create updated contact entity with only changed fields
-            updated_contact = Contact(
-                id=request.contact_id,
-                first_name=request.first_name or existing_contact.first_name,
-                user_id=existing_contact.user_id,
-                last_name=request.last_name or existing_contact.last_name,
-                middle_name=request.middle_name or existing_contact.middle_name,
-                nick_name=request.nick_name or existing_contact.nick_name,
-                company=request.company
-                if request.company is not None
-                else existing_contact.company,
-                job_title=request.job_title
-                if request.job_title is not None
-                else existing_contact.job_title,
-                methods=None,
-                addresses=None,
-                notes=None,
-                tags=None,
-                important_dates=None,
-            )
-
-            # The service treats a sub-resource list as the whole desired state,
-            # so the email, phone and note are named as changes instead, and
-            # the service applies them to the contact as it reads it under the
-            # row lock. A list holding just the new email would delete the
-            # phone beside it (#1524); one built from existing_contact would
-            # delete anything added since that read.
-            primary_methods: dict[MethodType, str] = {}
-            if request.email:
-                primary_methods[MethodType.EMAIL] = request.email
-            if request.phone:
-                primary_methods[MethodType.PHONE] = request.phone
-            subresource_merge = SubResourceMerge(
-                primary_methods=primary_methods,
-                new_notes=[request.notes] if request.notes else [],
-            )
-
-            # Handle important dates if provided (replacement strategy)
-            if request.important_dates is not None:
-                if updated_contact.important_dates is None:
-                    updated_contact.important_dates = []
-                for date_data in request.important_dates:
-                    date_type_val = ImportantDateType(date_data.date_type)
-                    if date_type_val == ImportantDateType.CUSTOM:
-                        raise ContactValidationError(
-                            field="important_dates",
-                            message="Custom important date types are not currently supported via MCP. "
-                            "Please use a built-in date_type.",
-                        )
-                    important_date = ImportantDate(
-                        contact_id=request.contact_id,
-                        date_type=date_type_val,
-                        precision=DatePrecision(date_data.precision),
-                        year=date_data.year,
-                        month=date_data.month,
-                        day=date_data.day,
-                        custom_date_type_id=None,
-                        custom_date_type_name=date_data.custom_type_name,
-                    )
-                    updated_contact.important_dates.append(important_date)
-
-            # Update the contact, resolving any tag names (replacement strategy:
-            # request.tags replaces all existing tags; None leaves them untouched)
-            # and writing everything as one committed unit of work in the service
-            # layer (issue #945). This tool opens no transaction itself — the
-            # @transactional service owns the commit (see AGENTS.md "Transactions").
-            final_contact = await contact_service.update_contact(
-                updated_contact,
+            # Only what the request names is handed over. The service applies
+            # it to the contact as it reads it under the row lock, so a field
+            # somebody else changed after this request began - and every field
+            # this tool cannot name, like the photo - keeps its value (#1557).
+            final_contact = await contact_service.patch_contact(
+                request.contact_id,
+                contact_patch_from_request(request),
                 connection,
                 changed_by="mcp",
                 source=Provenance.MCP,
-                tag_names=request.tags,
                 expected_etags=expected_etags,
-                subresource_merge=subresource_merge,
                 user_id=user_id,
             )
 

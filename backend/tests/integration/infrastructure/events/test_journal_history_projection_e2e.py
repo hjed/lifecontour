@@ -41,6 +41,7 @@ from app.core.journal.adapters.sql.journal_tag_repository import SqlJournalTagRe
 from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataRepository
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
@@ -844,7 +845,8 @@ class TestJournalTagHistoryProjectionE2E:
         )
 
         await write_service.update_journal_composite(
-            created,
+            journal_id,
+            JournalPatch(),
             async_connection,
             tags=[tag_name],
             changed_by="mcp",
@@ -860,7 +862,8 @@ class TestJournalTagHistoryProjectionE2E:
 
         # Re-send the same list: nothing changed, so nothing new may be recorded.
         await write_service.update_journal_composite(
-            created,
+            journal_id,
+            JournalPatch(),
             async_connection,
             tags=[tag_name],
             changed_by="mcp",

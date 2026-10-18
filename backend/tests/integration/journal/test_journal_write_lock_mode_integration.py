@@ -16,10 +16,8 @@ are a property of the lock manager, not of the code's shape.
 
 import asyncio
 from collections.abc import AsyncIterator
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -31,35 +29,21 @@ from tests.integration.concurrency_helpers import (
     bounded,
     wait_until_blocked_on_a_lock,
 )
-from tests.integration.tasks.task_seeding import create_journal
+from tests.integration.journal.committed_journal import committed_journal
 
 
 @pytest.fixture
-async def committed_journal(
-    async_engine: AsyncEngine,
-) -> AsyncIterator[tuple[str, int]]:
-    """A journal committed under a one-off owner, deleted afterwards."""
-    user_id = f"race-{uuid4()}"
-    async with async_engine.connect() as setup:
-        journal_id = await create_journal(SqlJournalRepository(setup), user_id=user_id)
-        await setup.commit()
-    try:
-        yield user_id, journal_id
-    finally:
-        async with async_engine.connect() as cleanup:
-            await cleanup.execute(
-                text("DELETE FROM journals WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            )
-            await cleanup.commit()
+async def journal(async_engine: AsyncEngine) -> AsyncIterator[tuple[str, int]]:
+    async with committed_journal(async_engine) as committed:
+        yield committed
 
 
 @pytest.mark.integration
 class TestJournalWriteLockMode:
     async def test_a_journal_write_does_not_wait_behind_a_task_link(
-        self, async_engine: AsyncEngine, committed_journal: tuple[str, int]
+        self, async_engine: AsyncEngine, journal: tuple[str, int]
     ) -> None:
-        user_id, journal_id = committed_journal
+        user_id, journal_id = journal
         async with async_engine.connect() as linking, async_engine.connect() as writing:
             async with unit_of_work(linking):
                 await SqlJournalRepository(linking).find_and_lock_by_ids_for_user(
@@ -76,9 +60,9 @@ class TestJournalWriteLockMode:
                     await bounded(lock_journal(writing, journal_id), timeout=5)
 
     async def test_two_journal_writes_queue(
-        self, async_engine: AsyncEngine, committed_journal: tuple[str, int]
+        self, async_engine: AsyncEngine, journal: tuple[str, int]
     ) -> None:
-        _, journal_id = committed_journal
+        _, journal_id = journal
         async with async_engine.connect() as first, async_engine.connect() as second:
 
             async def second_write() -> None:

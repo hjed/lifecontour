@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_write_service import JournalWriteService
 from tests.integration.contact_seeding import OTHER_USER_ID, TEST_USER_ID
 from tests.integration.tasks.task_seeding import (
@@ -160,7 +161,8 @@ class TestCompositeWritesSkipTheirContacts:
         theirs = await create_contact(async_connection, user_id=OTHER_USER_ID)
 
         await service.update_journal_composite(
-            journal,
+            journal_id,
+            JournalPatch(),
             async_connection,
             relationships=[_participant(yours), _participant(theirs)],
         )

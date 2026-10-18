@@ -35,6 +35,7 @@ from app.core.journal.services.journal_enrichment_service import (
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.template_application import (
     apply_template_to_type_data,
@@ -65,6 +66,7 @@ from app.mcp.shared.dependencies import (
     get_journal_write_service,
     mcp_depends,
 )
+from app.shared.patch import UNSET
 
 
 def _external_links_preserved(
@@ -487,19 +489,24 @@ async def update_journal_entry(
     # destroyed link).
     links_before = await link_service.links_for_journal(journal_id, user_id)
 
-    # Apply the requested core-field changes to the loaded journal.
-    if request.title is not None:
-        existing_journal.title = request.title
-    if request.content is not None:
-        existing_journal.content = request.content
-    if request.event_date_range is not None:
-        existing_journal.event_date_range = EventDateRange(
-            start=request.event_date_range.start,
-            end=request.event_date_range.end,
-        )
-
-    if "parent_id" in request.model_fields_set:
-        existing_journal.parent_id = request.parent_id
+    # Only the core fields the request names are handed over: the service
+    # applies them to the journal as it reads it under the row lock, so a
+    # field somebody else changed after this read keeps its value (#1557).
+    patch = JournalPatch(
+        title=request.title if request.title is not None else UNSET,
+        content=request.content if request.content is not None else UNSET,
+        event_date_range=(
+            EventDateRange(
+                start=request.event_date_range.start,
+                end=request.event_date_range.end,
+            )
+            if request.event_date_range is not None
+            else UNSET
+        ),
+        parent_id=(
+            request.parent_id if "parent_id" in request.model_fields_set else UNSET
+        ),
+    )
 
     # Delegate the whole composite update (core fields + replace-all types /
     # type-data / relationships / tags) to the @transactional service, which
@@ -511,7 +518,8 @@ async def update_journal_entry(
         else None
     )
     update_result = await write_service.update_journal_composite(
-        existing_journal,
+        journal_id,
+        patch,
         db_connection,
         types=request.types,
         type_data=validated_type_data,
