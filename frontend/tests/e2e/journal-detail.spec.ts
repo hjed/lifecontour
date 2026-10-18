@@ -296,19 +296,14 @@ test.describe('Journal Detail Page', () => {
       // Register dialog handler BEFORE the action that triggers it
       page.on('dialog', dialog => dialog.accept());
 
-      // Open PLAN's manage popover the way each device's user would. A real
-      // touch tap matters on mobile: it fires no hover and no compatibility
-      // mouse events, so it fails if the controls only open on hover.
-      if (isMobile) {
-        await page.getByTestId(`manage-type-${JournalType.PLAN}`).tap();
-      } else {
-        await page.getByTestId(`manage-type-${JournalType.PLAN}`).click();
-      }
+      // The Add Type menu stays mounted through its exit animation, and when it
+      // unmounts Radix hands focus back to its trigger. A popover opened before
+      // then sees that focus leave it and dismisses itself, detaching Remove.
+      // Wait the animation out so the common path opens the popover once.
+      await expect(page.getByRole('menu')).toBeHidden();
 
-      // Wait for the popover to fully appear before clicking
-      await expect(
-        page.getByTestId(`remove-type-${JournalType.PLAN}`)
-      ).toBeVisible();
+      const managePlan = page.getByTestId(`manage-type-${JournalType.PLAN}`);
+      const removePlan = page.getByTestId(`remove-type-${JournalType.PLAN}`);
 
       // Click remove and wait for both DELETE and the subsequent GET refetch
       await Promise.all([
@@ -328,7 +323,20 @@ test.describe('Journal Detail Page', () => {
             resp.request().method() === 'GET' &&
             resp.ok()
         ),
-        page.getByTestId(`remove-type-${JournalType.PLAN}`).click(),
+        // The focus hand-back runs in a timer after the menu unmounts, so it
+        // can still close the popover under the click. Reopen only while it
+        // is closed: a click that fails here never dispatched, so no DELETE
+        // was sent and retrying is safe.
+        //
+        // Open it the way each device's user would. A real touch tap matters
+        // on mobile: it fires no hover and no compatibility mouse events, so
+        // it fails if the controls only open on hover.
+        expect(async () => {
+          if ((await managePlan.getAttribute('aria-expanded')) !== 'true') {
+            await (isMobile ? managePlan.tap() : managePlan.click());
+          }
+          await removePlan.click({ timeout: 2_000 });
+        }).toPass({ timeout: 20_000 }),
       ]);
 
       // Verify it was removed successfully
