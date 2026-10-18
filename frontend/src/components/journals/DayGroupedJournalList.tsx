@@ -310,8 +310,14 @@ export function DayGroupedJournalList({
     collapseEmpty: collapseEmptyDays,
   });
 
-  const isTotallyEmpty =
-    journals.length === 0 && !isLoadingNext && !isLoadingPrevious;
+  // Deliberately blind to the paging flags. The list only mounts once its
+  // first chunk has loaded, and an empty list pages eagerly in both directions
+  // straight away — hiding the empty state for each fetch and showing it again
+  // when the fetch settles moves the bottom sentinel by the card's height,
+  // which the prepend compensation above turns into a page scroll that pulls
+  // the toolbar out from under the pointer. The sentinel spinners already say
+  // that more is loading.
+  const isTotallyEmpty = journals.length === 0;
 
   return (
     <div
