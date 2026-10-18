@@ -558,7 +558,7 @@ class SqlContactRepository(ContactRepository):
                         company = :company, job_title = :job_title,
                         photo_url = :photo_url,
                         is_favourite = :is_favourite, updated_at = NOW()
-                    WHERE id = :id
+                    WHERE id = :id AND user_id = :user_id
                     RETURNING updated_at
                 """
                 )
@@ -566,6 +566,7 @@ class SqlContactRepository(ContactRepository):
                     query,
                     {
                         "id": contact.id,
+                        "user_id": contact.user_id,
                         "first_name": contact.first_name,
                         "last_name": contact.last_name,
                         "middle_name": contact.middle_name,
@@ -578,7 +579,7 @@ class SqlContactRepository(ContactRepository):
                 )
                 row = result.fetchone()
                 if row is None:
-                    raise RuntimeError("Failed to update contact")
+                    raise ContactNotFoundError(contact.id)
                 contact.updated_at = row.updated_at
 
             return contact

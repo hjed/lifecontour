@@ -147,7 +147,11 @@ class ContactRepository(ABC):
 
     @abstractmethod
     async def save(self, contact: Contact) -> Contact:
-        """Save a contact (insert or update)."""
+        """Save a contact (insert or update), owned by ``contact.user_id``.
+
+        An update matches only a contact that owner holds and raises
+        ``ContactNotFoundError`` otherwise; it never re-owns one.
+        """
         pass
 
     @abstractmethod
@@ -533,9 +537,9 @@ class ContactFieldHistoryRepository(FieldHistoryRepository):
     ) -> list[FieldHistoryEntry]:
         """Get field history for a specific contact with pagination.
 
-        ``reader_user_id`` scopes the one kind of row on this aggregate that has
-        an owner: a linked task's. Contacts themselves have none, so without it
-        a shared contact would hand one user another user's commitments. It
+        ``reader_user_id`` scopes the one kind of row on this aggregate that
+        records its own owner: a linked task's. The contact rows need no filter,
+        because the caller has already read the contact under its owner. It
         defaults to ``None``, which matches no row — forgetting it costs those
         entries rather than exposing them.
         """

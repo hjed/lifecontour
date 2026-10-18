@@ -76,29 +76,11 @@ domain/
 - **Domain Services**: ContactValidationService, TagHierarchyService, ContactHistoryService, AddressValidationService, UpcomingImportantDatesService
   (see *[Upcoming important dates](#upcoming-important-dates)*)
 - **Ports**: ContactRepository, TagRepository, ContactHistoryRepository, ContactEventPublisher, ContactImportanceRepository, UpcomingImportantDateRepository
-- **Ownership**: every contact has exactly one owner (`contacts.user_id`), set at creation and
-  never changed. **Every aggregate-level `ContactRepository` method takes the acting user's id
-  and filters on it in SQL** — `find_by_id`, `contact_exists`, `find_names_by_ids`,
-  `find_by_email`, `find_by_external_reference`, `search`, `get_all`, `get_count`,
-  `get_contacts_by_filters`, `get_contacts_count_by_filters`, `delete`, `bulk_delete_all` — so
-  another user's contact is indistinguishable from a missing one (`None`, absent from a list, not
-  counted, `ContactNotFoundError` on delete). Child-row methods (methods, addresses, notes, tags,
-  important dates, links) and `lock` / `touch` / `lock_and_get_updated_at` stay keyed by the
-  contact id: the service proves the contact is the user's first, through
-  `ContactValidationService.validate_contact_exists`. Every `ContactService`,
-  `ContactRelationshipService` and `ContactMergeService` method that reads or acts on a contact
-  takes a keyword-only `user_id` (REST passes the session user, MCP the authenticated user, the
-  inbound consumer the sync event's owner); `create_contact` is the exception, because the new
-  contact carries its owner. The one read with no acting user is `find_owner_id`, for the summary
-  consumer: it resolves the owner, then reads the contact as that owner
-- **Links stay within one owner.** A relationship's two contacts, a merge's survivor and source,
-  a task's contacts and a journal's people all belong to the acting user; another user's contact is
-  `ContactNotFoundError` and nothing is written. `ContactHistoryService` proves the contact is the
-  reader's before either history read, so neither REST nor MCP can read a foreign contact's history
-- **Custom date types are owned.** A type (`CustomDateType.user_id`) belongs to one user and
-  names are unique per owner (case-sensitive). Every `CustomDateTypeRepository` method takes the
-  acting user and filters in SQL, so another user's type is absent from the list and
-  `CustomDateTypeNotFoundError` (404) on delete. An important date may carry only a type its
+- **Ownership**: contacts, tags and custom date types follow the [Ownership](#ownership) contract,
+  including its `ContactRepository` exceptions. The child-row check is
+  `ContactValidationService.validate_contact_exists`. `ContactHistoryService` proves the contact
+  is the reader's before either history read
+- **Custom date types**: an important date may carry only a type its
   contact's owner owns: `add_important_date` / `update_important_date` check it in the write SQL
   and write nothing otherwise, so a foreign type is `CUSTOM_DATE_TYPE_NOT_FOUND` on every surface
   that stores a date (add, edit, whole-contact create and update). Reads that join a date to its
@@ -152,24 +134,11 @@ See [Journal System Specification](../journal-system-specification.md) for compr
     contact holds is recorded as an unmatched participant
   - Integration conflict resolution
   - Route tracking and reuse
-  - **Contact tags are owned** the same way. A `Tag` read from the database carries its owner
-    (`Tag.user_id`; a tag parsed from a sync payload is a name only, owned by the contact it is
-    resolved for). Every `TagRepository` method takes the acting user and filters in SQL, the
-    descendant walk at every level; `TagService` and `TagHierarchyService` act for one user, so
-    another user's tag, parent or merge target is `TagNotFoundError` (404), exactly as a missing
-    one is. `save` never re-owns, `delete` and `merge_into` report whether they wrote, and
-    `ContactRepository.assign_tag` writes only when the tag and the contact share an owner. Tag
-    names given on contact create/update, and inbound Google group names, resolve among the
-    contact's (event's) owner's tags; a foreign tag id in the contact tag filter is kept, so it
-    matches nothing. `TagUpdated` / `TagDeleted` carry the owner.
-  - **Journal tags are owned.** A tag (`JournalTag.user_id`) belongs to one user and names are
-    unique per owner, case-insensitively. Every `JournalTagRepository` read of the tag namespace
-    takes the acting user and filters in SQL; another user's tag is `JournalTagNotFoundError`
-    (404) on update, delete, merge, assignment and as a parent, exactly as a missing one is.
-    `assign_tag` writes only when the user owns both the journal and the tag, and a tag hierarchy
-    never links two owners. Reads keyed by an owned journal (`get_tags_for_journal`, the agenda
-    join) stay unscoped. A journal's tag-name list (MCP create/update) resolves among the journal
-    owner's tags; a foreign tag id in a list filter is kept, so it matches nothing
+  - **Contact and journal tags** follow the [Ownership](#ownership) contract (the tag
+    hierarchy's descendant walk is scoped at every level). A `Tag` parsed from a sync payload is a
+    name only, owned by the contact it is resolved for. Tag names given on contact or journal
+    create/update, and inbound Google group names, resolve among that entity's owner's tags. A
+    foreign tag id in a list filter is kept, so it matches nothing
 
 #### Tasks Domain
 See [Home Dashboard & Tasks Specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks)
@@ -539,6 +508,41 @@ domain/adapters/
 - **Value Objects**: Immutable objects representing domain concepts
 - **Domain Events**: Pure Python classes representing business events
 - **Domain Enums**: Python enums for fixed domain values with type safety
+### Ownership
+
+Every owned aggregate ([schema](database-design.md#ownership)) follows one contract, whatever the
+domain:
+
+- **Aggregate methods are scoped in the port.** A repository method that reads, lists, counts,
+  updates or deletes the aggregate takes the acting user's id and filters on it in SQL — never
+  fetch-then-compare.
+- **Another user's entity is a missing one:** `None`, absent from a list, not counted, or the
+  domain's *NotFound* error. Surfaces answer 404
+  ([API Design](api-design.md#another-users-entity-is-a-404)).
+- **Child rows are reached through the parent.** Methods keyed by a parent id (a contact's
+  methods, addresses, notes, important dates and tag assignments; a journal's tags; a task's
+  links; link-store reads by internal id) stay unscoped. The service proves the parent is the
+  user's first.
+- **Links stay within one owner.** A relationship's two contacts, a merge's survivor and source, a
+  task's contacts, a journal's people, and a tag or date type assigned to a contact: the second
+  entity is checked under the same owner, and a foreign one is not found with nothing written.
+- **Services take `user_id` keyword-only.** REST passes the session user, MCP the authenticated
+  user, a consumer the event's `user_id`. A create is the exception, because the new entity
+  carries its owner.
+- **Events carry the owner.** A payload that identifies an owned aggregate carries `user_id`. A
+  consumer that needs it and gets none fails the event permanently rather than guessing, and
+  workers push only to the owner's accounts
+  ([Integration Architecture](integration-architecture.md#contact-sync-events-name-the-owner)).
+
+`ContactRepository` methods without a `user_id` parameter, and what makes each safe:
+
+| Method | Why |
+|---|---|
+| `save` | The update is scoped by the entity's own `user_id`, which callers load under the acting user; naming another owner raises `ContactNotFoundError`. |
+| `lock`, `touch`, `lock_and_get_updated_at` | Keyed by id and run before the service's check (lock ordering). A foreign id briefly takes the row lock, then answers 404 with nothing written. |
+| `get_external_references` | A child read keyed by contact id; `ContactService` proves ownership first. |
+| `find_owner_id` | For consumers with no acting user (the summary consumer): it resolves the owner, then reads as that owner. |
+
 ### Application Layer Guidelines
 
 - **Use Cases**: Orchestrate domain operations, no business logic

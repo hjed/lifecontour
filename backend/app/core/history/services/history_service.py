@@ -851,7 +851,7 @@ def _owner_for(entity_type: str, data: dict[str, Any]) -> str | None:
 
     ``field_history`` has no ownership column for most of its rows and needs
     none. Journal and contact history reads authorise by loading the aggregate
-    and comparing ``user_id``, which works because neither is hard-deleted.
+    under its owner first (a hard-deleted contact's history is unreachable).
 
     **A task is**, and that is the whole reason this exists. Once
     ``delete_task`` has run there is no row left to load, so a task's

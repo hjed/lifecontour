@@ -177,7 +177,7 @@ Paginated contact list with summaries, pagination metadata, and overall context.
   "total_count": 1,
   "page": 1,
   "limit": 20,
-  "summary": "Retrieved 1 contacts from page 1 of 1. Total contacts in system: 1. Tags represented: friend, work."
+  "summary": "Retrieved 1 contacts from page 1 of 1. Total contacts: 1. Tags represented: friend, work."
 }
 ```
 

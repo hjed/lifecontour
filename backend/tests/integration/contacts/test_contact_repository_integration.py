@@ -24,6 +24,7 @@ from app.core.contacts.adapters.sql.custom_date_type_repository import (
     SqlCustomDateTypeRepository,
 )
 from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
     CustomDateTypeNotFoundError,
     DuplicateBirthdayError,
     DuplicateEmailError,
@@ -671,17 +672,20 @@ class TestContactOwnerPersistence:
     async def test_saving_an_existing_contact_never_changes_its_owner(
         self, contact_repo: SqlContactRepository
     ) -> None:
-        """A contact's owner is set at creation; an update cannot re-own it."""
+        """A contact's owner is set at creation. An update is scoped by the
+        entity's owner, so one naming another owner matches no row: it is
+        refused and writes nothing, rather than re-owning the contact."""
         saved = await contact_repo.save(Contact(first_name="Ada", user_id=TEST_USER_ID))
         assert saved.id is not None
 
         saved.user_id = self.OTHER_OWNER
         saved.last_name = "Lovelace"
-        await contact_repo.save(saved)
+        with pytest.raises(ContactNotFoundError):
+            await contact_repo.save(saved)
 
         found = await contact_repo.find_by_id(saved.id, user_id=TEST_USER_ID)
         assert found is not None
-        assert (found.last_name, found.user_id) == ("Lovelace", TEST_USER_ID)
+        assert (found.last_name, found.user_id) == (None, TEST_USER_ID)
 
 
 @pytest.mark.integration

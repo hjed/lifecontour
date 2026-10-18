@@ -242,8 +242,9 @@ class AlbumSyncReadRepository:
         an Immich album; ``thumbnail_asset_id`` is ``None`` when the album has no
         cover photo recorded.
 
-        **Scoped to the journal's owner.** ``sync_metadata`` carries no owner of
-        its own, so the join onto ``journals`` is what supplies one. Without it
+        **Scoped to the journal's owner,** through the join onto ``journals``:
+        the journal, not the link row, is what the caller was authorised for.
+        Without it
         the proxy resolved *any* journal's album and then fetched the thumbnail
         with the **caller's** Immich credentials — so on a server both users
         share, one could stream another's album cover by id (#1267).

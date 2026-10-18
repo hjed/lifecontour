@@ -1604,8 +1604,8 @@ class TestLinkClaimedMaintenance:
     async def test_keeps_the_claim_when_the_record_was_recorded_meanwhile(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Sync rows are keyed globally, so another user's sync can record the same
-        maintenance id under another asset's lock."""
+        """The asset lock does not cover every writer of the sync row, so it can be
+        recorded between the check and the insert."""
         service = SnipeItSyncService(api_client=_mock_api_client(), user_id="user-1")
         claim = MaintenanceClaim(
             asset_id=51, title="Split Canyoneroo 50 -> 34 + 15", start_date="2026-09-11"

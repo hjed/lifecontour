@@ -10,6 +10,63 @@ This document outlines the database approach and initial schema for Lifecontour.
 - **Explicit SQL**: Use SQLAlchemy Core with readable SQL queries
 - **Migration-Driven**: Schema changes through Alembic migrations
 
+### Ownership
+
+Every row a user creates or syncs has exactly one owner. The rules below are not visible in any one
+table's DDL:
+
+- **The owner is a string, not a foreign key.** `user_id` holds the OAuth subject (`VARCHAR(50)`;
+  `VARCHAR(255)` on `strava_athlete_mappings` and `journal_merged_aliases`). There is no `users`
+  table. The owner is set on insert and never changed.
+- **Aggregates carry the owner; their children inherit it.** A table keyed by its parent's id has
+  no `user_id`: contact methods, addresses, notes, important dates, relationships and summaries;
+  the journal type-data tables; `template_pitches`; `task_intermediate_journals`. A read proves the
+  parent is the user's first. A row joining two aggregates (`contact_tags`,
+  `journal_tag_assignments`, `journal_contact_relationships`, `task_contacts`) only ever joins two
+  of one owner, and a tag hierarchy (`parent_id`) never crosses owners.
+- **Two polymorphic tables carry their own owner.** `sync_metadata` names its entity by type and id
+  with no foreign key, so it records `user_id` and is unique on
+  `(user_id, integration_source, external_id)`: two users' integrations may hold the same external
+  id. `field_history.user_id` is set on task rows only (see [Field History](#field-history-table-shared-entity-agnostic)).
+- **Names are unique per owner:** `tags` and `journal_tags` case-insensitively, `custom_date_types`
+  exactly.
+
+| Area | Owner-bearing tables |
+|---|---|
+| Contacts | `contacts`, `tags`, `custom_date_types`, `contact_suggestion_ignores` |
+| Journals | `journals`, `journal_tags`, `journal_series`, `journal_series_recurrence_aliases`, `journal_merged_aliases`, `journal_review_items`, `journal_daily_summaries`, `outdoor_activity_dismissals`, `activity_templates`, `gear_items`, `calendars` |
+| Tasks | `tasks`; `field_history` (task rows) |
+| Integrations | `sync_metadata`, `sync_jobs`, `pending_entity_mappings`, `strava_athlete_mappings`, `calendar_sync_tokens`, and the per-user credentials and settings: `user_google_auth`, `user_google_integration`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`, `user_immich_auth` |
+| Settings | `user_settings` |
+
+**Known gap:** email uniqueness on `contact_methods` (`0027`, `LOWER(BTRIM(value))`) is
+system-wide, because the table has no owner. A second user cannot store an address another user's
+contact holds, and the 409 reveals that it exists somewhere. Fixing it needs the owner in the index.
+
+#### Assigning owners to existing rows
+
+Iteration 20 gave already-populated tables an owner. Where a row's use names an owner, that owner
+wins, and a row used by two owners makes the migration refuse, naming it. Otherwise
+`app/migrations/owner_derivation.py` derives the site's owner from the tables that already record
+one (each revision pins its own evidence list):
+
+- exactly one real owner → that owner;
+- only synthetic owners (`dev-user`, `debug-client`: local dev, CI, e2e) → that owner, preferring
+  `dev-user`;
+- no evidence, or more than one real owner → the migration refuses and names what it found. The
+  operator then names the owner: `alembic -x <key>=<user_id> upgrade head`.
+
+| Table | Migrations | Owner taken from | `-x` key |
+|---|---|---|---|
+| `contacts` | `0123` assign, `0124` `NOT NULL` | derivation | `contacts_owner` |
+| `sync_metadata` | `0126` assign + per-owner key, `0130` `NOT NULL` + drop the global key | the linked contact, journal or gear item | `sync_metadata_owner` |
+| `journal_tags` | `0127` assign, `0128` `NOT NULL`, `0129` per-owner name | the journals carrying it | `journal_tags_owner` |
+| `custom_date_types` | `0133` assign, `0134` `NOT NULL` + per-owner name | the contacts whose dates use it | `custom_date_types_owner` |
+| `tags` | `0135` assign + `NOT NULL`, `0136` per-owner name | the contacts carrying it | `tags_owner` |
+
+Each key-swap downgrade refuses while two owners share a name or external id, rather than dropping
+a row. Earlier, `0106` reassigned rows owned by the synthetic owners to the one real owner.
+
 ### Initial Core Tables (Iteration 1)
 
 #### Contacts Table
@@ -27,29 +84,10 @@ CREATE TABLE contacts (
 CREATE INDEX idx_contacts_user_id ON contacts(user_id);
 ```
 
-**Ownership.** A contact belongs to exactly one user. `SqlContactRepository.save` writes
-`user_id` only when it inserts a contact, so no update re-owns one. Migration `0123` added the
-column and assigned every existing contact to the site's one user, derived by
-`app/migrations/owner_derivation.py` from every table that already records a `user_id` (the
-content tables `0106` repaired, the credential, settings and integration-state tables, and the
-records that can outlive them — daily summaries, task history, series aliases; a test pins the
-list to the schema):
-
-- exactly one real owner → that owner;
-- only synthetic owners (`dev-user`, `debug-client`: local dev, CI, e2e) → that owner, preferring
-  `dev-user` when both are present;
-- no contacts → nothing to assign;
-- contacts but no owner evidence, or more than one real owner → the migration refuses and names
-  what it found. The operator then names the owner: `alembic -x contacts_owner=<user_id> upgrade head`.
-
-Migration `0124` then assigned, by the same rule (owned contacts now counting as evidence), any
-contact created while the column was nullable, and made it `NOT NULL`. Every creation path stamps
-the acting user: REST and MCP the signed-in user, the inbound consumer the sync event's
-`user_id`, suggestion accept and Immich-conflict "create" the acting user, a merge the survivor's
-owner.
-
-Later revisions that give an unowned table an owner reuse the same helper, each with its own
-literal list of evidence tables.
+**Owner** ([Ownership](#ownership)). `SqlContactRepository.save` writes `user_id` only on insert,
+and its update matches only a contact that owner holds. Every creation path stamps the acting
+user: REST and MCP the signed-in user, the inbound consumer the sync event's `user_id`,
+suggestion accept and Immich-conflict "create" the acting user, a merge the survivor's owner.
 
 #### Contact Methods Table
 ```sql
@@ -122,13 +160,8 @@ CREATE INDEX idx_tags_user_id ON tags (user_id);
 CREATE UNIQUE INDEX uq_tags_user_id_name_lower ON tags (user_id, LOWER(name));
 ```
 
-Contact tags are owned. A tag's `parent_id` names a tag of the same owner only (a hierarchy never
-links two owners). Migration `0135` added the owner: a tag carried by contacts takes their owner;
-an uncarried tag takes the site's one user (`owner_derivation`,
-`alembic -x tags_owner=<user_id>` when the data cannot choose); a tag carried by contacts of more
-than one owner, or one under another owner's tag, refuses, naming it. `0136`, landing with the
-owner-scoped reads, replaced the global `uq_tags_name_lower`; its downgrade refuses while two
-owners share a name.
+Contact tags are owned, and a tag's `parent_id` names a tag of the same owner only
+([Ownership](#ownership)).
 
 #### Custom Date Types Table
 ```sql
@@ -148,12 +181,6 @@ when `date_type = 'custom'`). Each type has one owner, and names are unique per 
 case-sensitive, so two users may each hold a `Sobriety` type. A date may only carry a type its
 contact's owner owns; the important-date INSERT and UPDATE check that in SQL and write nothing
 otherwise.
-
-Migrations `0133` / `0134` assigned the existing rows: a type takes the owner of the contacts
-whose dates use it, an unused type the site's one user (`owner_derivation`,
-`alembic -x custom_date_types_owner=<user_id>` when the data cannot choose). Both refuse, naming
-the type, when contacts of two owners use one type. `0134` then requires the column and replaced
-the global `custom_date_types_name_key (name)`; its downgrade refuses while two owners share a name.
 
 #### Contact Tags Junction Table
 ```sql
@@ -207,9 +234,9 @@ CREATE INDEX idx_field_history_entity ON field_history (entity_type, entity_id);
 ```
 
 **`user_id` is deliberately half-populated, and the reason is deletion.** Every
-history read authorises the same way — load the aggregate, compare `user_id` —
-and that works for journals and contacts because neither is ever hard-deleted.
-**A task is.** `TaskService.delete_task` removes the row while the `TaskDeleted`
+history read authorises the same way — load the aggregate under its owner — and
+for journals and contacts that is enough: a hard-deleted contact's history is
+meant to be unreachable. **A task's is not.** `TaskService.delete_task` removes the row while the `TaskDeleted`
 event projects a `__deleted__` marker, so a task-scoped read has to answer *"is
 this yours?"* with nothing left to load. The owner therefore rides on the row,
 stamped by the projection from the event payload (every task event carries
@@ -272,13 +299,9 @@ row (falling back to its `__created__` marker) in one query. It reads
 join it: the entry that most needs a name is the one a hard-deleted task left
 behind. `entity_label` is never stored, and is null wherever a row names itself.
 
-*The branch carries no owner filter, deliberately and with a stated assumption.*
-Every other branch reaches contact-domain rows, which have no owner — `contacts`
-has no `user_id` column and neither does the read that serves this predicate.
-Task rows are the one kind that *does* carry one, so in a multi-tenant
-deployment this branch would surface another user's task on a shared contact's
-feed. Narrowing it means giving the contact domain an owner first, which is not
-a read-only change; recorded as a follow-up.
+Both task branches, and the delete branch's subquery, filter on
+`user_id = :reader_user_id`: task rows record their owner, while the contact rows
+are reached only after the contact was read under its owner.
 
 On contact merge (ITER13-004), `FieldHistoryRepository.repoint_entity_history` moves the
 source contact's top-level (`entity_type='contact'`) rows onto the survivor so the unified
@@ -426,14 +449,8 @@ See [Journal System Specification](../journal-system-specification.md) for compl
   names are unique per owner and case-insensitive through
   `uq_journal_tags_user_id_name_lower (user_id, LOWER(name))`. `journal_tag_assignments`
   (`journal_id`, `tag_id` pk, both FKs cascade) only ever pairs a journal and a tag of one owner:
-  the repository's insert selects its row only when the acting user owns both. Migration `0127`
-  added the owner: a tag carried by journals takes their owner; an uncarried tag takes the
-  site's one user (`owner_derivation`, `alembic -x journal_tags_owner=<user_id>` when the data
-  cannot choose); a tag carried by journals of more than one owner refuses, naming it. `0128`
-  owned any straggler the same way, refused while a journal carried another owner's tag or a
-  tag sat under another owner's tag (a hierarchy never links two owners), and made
-  the column `NOT NULL`. `0129`, landing with the owner-scoped reads, replaced the global
-  `uq_journal_tags_name_lower`; its downgrade refuses while two owners share a name
+  the repository's insert selects its row only when the acting user owns both (owner migrations
+  in [Ownership](#assigning-owners-to-existing-rows))
 - Proper foreign key constraints and indexes for search/filtering
 - Merged aliases: `journal_merged_aliases` (migration `0132`, bigint pk; `journal_id` FK cascade, `user_id`, `integration_source` + `external_id` named as the link store names them, unique per owner through `uq_journal_merged_aliases_user_source_external`; optional `calendar_id` FK `ON DELETE SET NULL`, `external_identity` (partial index with `user_id`) and `recurring_event_id` carried over from a calendar link). A row is an inbound record a merge absorbed but could not keep as a live link, so the sync recognises it instead of importing it again. Written, and looked up by record, only through `core_shared`'s `MergedAliasRepository`; the link-source registry and journal deletion join it read-only. See [Integration Architecture → Merged Aliases](integration-architecture.md#merged-aliases-a-sync-never-undoes-a-merge)
 - Template system: `activity_templates` (UUID pk, user-owned, `template_type` ∈ {`abseiling`, `canyoning`, `caving`, `climbing`} enforced by `ck_activity_templates_type`, type-specific columns for canyoning/caving/climbing; an `abseiling` template uses only the common fields — name, region, description, standard pitches), `template_pitches` (FK to activity_templates, cascade delete, unique template_id+pitch_number)
@@ -634,8 +651,7 @@ is the design:
 2. re-point what is left.
 
 Both carry `RETURNING`, joined back to `tasks` for the owner id: the merge reached these tasks through
-a contact and never read the task row — and could not have supplied an owner in any case, since
-`contacts` has no `user_id` column. Unlike the journal re-point there is **no pre-read**, because
+a contact and never read the task row. Unlike the journal re-point there is **no pre-read**, because
 nothing here becomes unreadable once the statements run: which statement touched a task *is* the fact
 the summary carries, so the two `RETURNING` sets are the whole answer.
 
@@ -812,6 +828,7 @@ MeiliSearch runs as a separate Docker container and provides fast, typo-tolerant
 // Contacts Index (contacts_index)
 {
   "id": 1,
+  "user_id": "oauth-subject",
   "first_name": "John",
   "last_name": "Smith",
   "full_name": "John Smith",
@@ -856,6 +873,7 @@ CONTACT_INDEX_SETTINGS = {
         "notes_content"
     ],
     "filterableAttributes": [
+        "user_id",  # every contact query filters on the owner
         "tags",
         "entity_type",
         "created_at"
