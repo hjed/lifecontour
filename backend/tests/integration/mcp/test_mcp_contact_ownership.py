@@ -921,19 +921,18 @@ class TestMcpContactTagsAreTheActingUsers:
         theirs = owned_state.contact.tag_id
         mine = owned_state.contact.own_tag_id
 
-        async def call(tag_id: int) -> dict[str, Any]:
+        async def refused(tag_id: int) -> dict[str, Any]:
             filled = {
                 name: value.format(tag=tag_id, mine=mine)
                 for name, value in arguments.items()
             }
-            return await _call(authenticated_lifespan_client, tool, filled)
+            return await _refused(authenticated_lifespan_client, tool, filled)
 
         before = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
-        foreign = await call(theirs)
+        foreign = await refused(theirs)
         after_foreign = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
-        missing = await call(MISSING_TAG_ID)
+        missing = await refused(MISSING_TAG_ID)
 
-        assert _is_error(foreign), f"{tool} acted on another user's tag: {foreign}"
         assert _masked(foreign, theirs, MISSING_TAG_ID) == _masked(
             missing, theirs, MISSING_TAG_ID
         )
@@ -948,13 +947,13 @@ class TestMcpContactTagsAreTheActingUsers:
     ) -> None:
         own_contact_id = owned_state.contact.own_contact_id
 
-        payload = await _call(
+        # ``_call`` fails on a refusal, so the update going through is asserted.
+        await _call(
             authenticated_lifespan_client,
             "update_contact",
             {"request": {"contact_id": own_contact_id, "tags": [TAG_NAME]}},
         )
 
-        assert not _is_error(payload), payload
         held = await async_connection.execute(
             text(
                 "SELECT t.id, t.name, t.user_id FROM contact_tags ct "
