@@ -22,7 +22,7 @@ The base journal entity represents any recorded entry in the system.
 
 **Required Fields:**
 - `id` (UUID, primary key)
-- `user_id` (FK to users, hardcoded for single user currently)
+- `user_id` (the owner's OAuth subject; set on create, never changed)
 - `title` (string, max 500 chars)
 - `content` (markdown text)
 - `event_date_range` (start_date, end_date as UTC timestamps)

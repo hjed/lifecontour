@@ -339,7 +339,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Open-Source Release & Branding Product Specification](./product-specifications/open-source-release-and-branding-product-specification.md)
 
 ### [Iteration 20: Entity Ownership (user_id)](./tasks/iteration-20-entity-ownership.md)
-**Status:** 🔴 PLANNED — 5 sub-iterations, 17 phases (one PR each); per-phase progress is tracked in the [iteration document](./tasks/iteration-20-entity-ownership.md)
+**Status:** 🟢 COMPLETE — 5 sub-iterations, 17 phases (one PR each); per-phase detail in the [iteration document](./tasks/iteration-20-entity-ownership.md)
 **Dependencies:** Iteration 15 (`sync_metadata` as the sole link store), Iteration 18 (owner-scoped repository contract; recorded contact-ownership divergence), Iteration 13 (contact merge), Iteration 12 (event-driven history), Iteration 14 (shared worker fixtures), migration `0106` (owner derivation)
 **Goal:** Give every user-created or user-synced entity exactly one owner, enforced in SQL on every read and write across REST, MCP, search, history, dashboards and all four integration workers — starting with **contacts** — and assign every existing row to the site's one real user
 

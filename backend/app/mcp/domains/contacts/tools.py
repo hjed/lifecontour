@@ -903,7 +903,7 @@ def register_contact_tools(mcp: FastMCP[None]) -> None:
         total_pages = (total_count + limit - 1) // limit
         summary_parts = [
             f"Retrieved {len(contact_responses)} contacts from page {page} of {total_pages}",
-            f"Total contacts in system: {total_count}",
+            f"Total contacts: {total_count}",
         ]
 
         if contact_responses:

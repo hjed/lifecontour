@@ -31,8 +31,6 @@ class TaskContactRepointing:
         task_id: The task whose links moved.
         user_id: Its owner. Carried because the event needs it and the merge —
             which reached this task through a contact — never read the task row.
-            It could not have supplied it in any case: ``contacts`` has no owner
-            column, so the contacts domain has no acting user to pass down.
         survivor_link_added: The task now references the survivor and did not
             before. ``False`` means it already did, and the absorbed contact's
             link was collapsed into it rather than moved onto it — the task lost

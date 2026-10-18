@@ -1,6 +1,6 @@
 # Iteration 20: Entity Ownership (user_id)
 
-**Status:** 🔴 PLANNED — 5 sub-iterations, 17 phases (one PR each). Each phase is marked ✅ DONE where it is described below; there is deliberately no running count, because parallel phase PRs would each bump it and git merges those edits silently into a wrong total.
+**Status:** 🟢 COMPLETE — 5 sub-iterations, 17 phases (one PR each), all delivered.
 
 **Dependencies:** Iteration 15 (`sync_metadata` is the sole integration link store), Iteration 18 (tasks' owner-scoped repository contract; the recorded contact-ownership divergence), Iteration 13 (contact merge; the same divergence), Iteration 12 (event-driven history), Iteration 14 (worker standardisation; `core_shared/testing` fixtures), migration `0106` (owner derivation).
 
@@ -328,7 +328,7 @@ syncing user in `event_data.user_id` and `contact_data.user_id`; the backend sti
 
 ---
 
-#### Phase 3: Owned contacts — schema and writers (migrate + contract on the entity)
+#### Phase 3: Owned contacts — schema and writers (migrate + contract on the entity) ✅ DONE
 
 **PR Size:** ~500 lines. **If over budget, split so that `NOT NULL` lands with the writers, never
 before them:** 3a = migration adding the column **nullable**, the backfill, the index, the table /
@@ -874,8 +874,8 @@ uniqueness and owner-scoped management operations across REST, MCP and the inbou
 **Specification Reference:** Part 3.
 
 **Acceptance Criteria (task-level):**
-- [ ] `tags`, `custom_date_types`, `journal_tags` carry `user_id NOT NULL` and `UNIQUE(user_id, name)`; existing rows assigned per the `0106` derivation.
-- [ ] Two users can each own a tag / date type of the same name; a foreign tag answers 404 everywhere; assignment requires the tag and the entity to share an owner.
+- [x] `tags`, `custom_date_types`, `journal_tags` carry `user_id NOT NULL` and `UNIQUE(user_id, name)`; existing rows assigned per the `0106` derivation.
+- [x] Two users can each own a tag / date type of the same name; a foreign tag answers 404 everywhere; assignment requires the tag and the entity to share an owner.
 - [x] Inbound Google group→tag sync matches and creates tags only within the owner's tags. (Phase 8)
 
 ---
@@ -1414,7 +1414,7 @@ is keyed by the owner; no runtime single-user fallback remains.
 
 ---
 
-#### Phase 13: Outbound pushes go to the owner only; per-user worker reads
+#### Phase 13: Outbound pushes go to the owner only; per-user worker reads ✅ DONE
 
 **PR Size:** ~350 lines (Google + Immich workers)
 
@@ -1513,7 +1513,7 @@ name-match read only the owner's contacts.
 
 ---
 
-#### Phase 14: Per-user link store — expand and backfill
+#### Phase 14: Per-user link store — expand and backfill ✅ DONE
 
 **PR Size:** ~400 lines estimated (`core_shared`, backend, all four workers' upserts); ~1,850
 measured, shipped as one PR (see *Decisions*)
@@ -1621,7 +1621,7 @@ refused instead of re-pointed. Lookups are unchanged until Phase 15.
 
 ---
 
-#### Phase 15: Per-user link store — contract and scoped lookups
+#### Phase 15: Per-user link store — contract and scoped lookups ✅ DONE
 
 **PR Size:** ~300 lines
 
@@ -1802,20 +1802,48 @@ the owner named by the event or contact, and nothing falls back to another user'
 
 ### ITER20-005: Closure
 
-#### Phase 17: Architecture documents, divergence resolution, grep gates
+#### Phase 17: Architecture documents, divergence resolution, grep gates ✅ DONE
 
-**PR Size:** ~250 lines (docs)
+**PR Size:** ~250 lines (docs) estimated; ~390 delivered, two small code fixes included (see *Decisions*)
 
-- [ ] `docs/architecture/database-design.md` — an *Ownership* section listing every owner-bearing
-  table, the child-through-parent rule, and the owner-derivation migrations (`0106`, `0121`–`0127`).
-- [ ] `docs/architecture/domain-architecture.md` — one *Ownership* section stating the repository
+- [x] `docs/architecture/database-design.md` — an *Ownership* section listing every owner-bearing
+  table, the child-through-parent rule, and the owner-derivation migrations (`0106`, `0123`/`0124`,
+  `0126`/`0130`, `0127`–`0129`, `0133`/`0134`, `0135`/`0136`; the planned `0121`–`0127` range
+  predated the real numbers).
+- [x] `docs/architecture/domain-architecture.md` — one *Ownership* section stating the repository
   contract for contacts, tags and journal tags; remove the last "single-user" wording.
-- [ ] `docs/architecture/api-design.md`, `integration-architecture.md` — consistency pass.
-- [ ] `docs/tasks.md` — Iteration 20 status to COMPLETE.
-- [ ] Verification checklist in the PR: grep gates for `get_default_timezone`, "single-user",
+- [x] `docs/architecture/api-design.md`, `integration-architecture.md` — consistency pass.
+- [x] `docs/tasks.md` — Iteration 20 status to COMPLETE.
+- [x] Verification checklist in the PR: grep gates for `get_default_timezone`, "single-user",
   "no `user_id` column", and for any `ContactRepository` aggregate method without a `user_id`
-  parameter; the full backend, worker and e2e suites green; a manual check on a deployed instance
-  that a second OAuth identity sees empty contacts, tags and search.
+  parameter; the full backend, worker and e2e suites green (CI).
+- [ ] A manual check on a deployed instance that a second OAuth identity sees empty contacts, tags
+  and search (the owner's, after deploy).
+
+**Decisions (recorded during implementation):**
+- **The grep gates found two code gaps, fixed here rather than filed.** `SqlContactRepository.save`
+  updated `WHERE id = :id`; it now also matches `user_id` (from the entity, which every caller
+  loads scoped) and raises `ContactNotFoundError` on no row. The Phase 3 test that an update
+  "never re-owns" now expects that refusal. `ContactService.bulk_delete_all_contacts` lost an
+  unreachable branch that called `bulk_delete_all` without an owner.
+- **`save` takes its owner from the entity, not a parameter.** `Contact.user_id` is required, so a
+  second parameter could only disagree with it. It is listed with `lock` / `touch` /
+  `lock_and_get_updated_at`, `get_external_references` and `find_owner_id` as the named
+  `ContactRepository` exceptions in `domain-architecture.md`, each with why it is safe.
+- **Link reads keyed by an owned internal id stay unscoped** (`find_external_by_internal`, album and
+  Strava/logbook link reads): the child-through-parent rule covers them.
+- **Docs state each fact once.** The per-table owner-migration paragraphs (contacts, tags, custom
+  date types, journal tags) and the per-domain contract bullets collapsed into the two
+  *Ownership* sections. Iteration 13 and 18 phase records stay as history; the two unresolved
+  iteration-18 dashboard divergences gained *Resolved* pointers.
+- Stale "contacts have no owner" / "keyed globally" comments in `history/models.py`,
+  `contacts/models/repositories.py`, `contact_repointing.py`, `album_sync_read_repository.py`,
+  `history_service.py` and the Snipe-IT maintenance link were rewritten.
+
+**Follow-ups:**
+- The Phase 4 email-uniqueness gap (system-wide `ix_contact_methods_email_unique`) and the Phase 3
+  permanent-error retry remain open; the former is documented as a known gap in
+  `database-design.md` → *Ownership*.
 
 ---
 

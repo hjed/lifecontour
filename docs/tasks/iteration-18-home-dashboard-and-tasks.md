@@ -10537,6 +10537,8 @@ MeiliSearch unavailable. No e2e.
   a `user_id`** — recorded here rather than left as a silent inconsistency. Scoping the journal half alone
   would have changed what the indexer counts, which the second criterion forbids. When contacts gain an
   owner, this port and its two callers are the place to apply it.
+  > **Resolved:** the port takes the user's id since [iteration 20](./iteration-20-entity-ownership.md)
+  > Phase 4c.
 - **The precedence is derived, not merely checked.** `CONTACTS_INDEX_SETTINGS["rankingRules"]` builds its
   custom rules from `CONTACT_IMPORTANCE_ORDER` rather than restating them, so drift is impossible rather
   than detectable. Nothing else in the index settings changed — `is_favourite` is still absent from
@@ -10693,6 +10695,8 @@ dates yield twelve, at three layers — plus a mutation that caps the payload at
 - **The read is not user-scoped**, because `contacts` has no owner column in this schema — Phase 10's
   recorded divergence, carried forward rather than solved for one query. This port joins the list of places
   to change when contacts gain an owner.
+  > **Resolved:** the port takes the user's id since [iteration 20](./iteration-20-entity-ownership.md)
+  > Phase 4c.
 - **The payload publishes no importance signals.** They decide the order and are otherwise not the user's
   business: the specification requires importance to stay inferred and unconfigured, and a payload carrying
   the numbers would invite a surface to show them. Pinned by a test over the exact key set of a row.

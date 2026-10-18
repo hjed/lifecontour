@@ -390,12 +390,9 @@ non-empty) and is the one the backend reads:
   the external reference on `contact.updated`, email reconciliation on
   `contact.created`, the re-read of the stored contact — is owner-scoped to the
   event's `user_id`, so it only ever updates or reconciles that user's
-  contacts. When a link resolves to *another* user's contact (the link store is
-  still keyed globally), the scoped lookup misses, `contact.updated` falls
-  through to the create path, and that path's link-store idempotency check
-  finds the link and skips the event: neither user's contact is written and the
-  link is not re-pointed. Giving each user their own link is the per-user link
-  store ([Iteration 20](../tasks/iteration-20-entity-ownership.md), Phases 14–15).
+  contacts. Its links are that user's too ([the per-user link
+  store](#link-storage-consolidation-canonical-link-store)), so two users syncing the same external
+  contact each get their own contact.
 
 The other direction carries the owner too. Every contact domain event that workers push
 (`CONTACT_PUSH_EVENT_TYPES`: the lifecycle events, `ContactMerged`, tag membership, methods,
@@ -617,10 +614,11 @@ class BaseIntegrationService(Protocol):
 
 #### Idempotency Pattern
 ```python
-async def sync_external_entity(external_id: str, integration_source: str):
+async def sync_external_entity(user_id: str, external_id: str, integration_source: str):
     with session_factory() as session:
         # 1. Check if work is already done
         existing = session.query(SyncMetadata).filter_by(
+            user_id=user_id,  # links are per owner
             integration_source=integration_source,
             external_id=external_id
         ).first()
@@ -641,7 +639,7 @@ async def sync_external_entity(external_id: str, integration_source: str):
             existing.version_hash = current_hash
             existing.last_synced_at = datetime.utcnow()
         else:
-            session.add(SyncMetadata(...))
+            session.add(SyncMetadata(user_id=user_id, ...))
         session.commit()
 ```
 
@@ -1363,7 +1361,7 @@ it), so `import core_shared` works without `arq` installed.
 
 #### Idempotency Strategy
 ```python
-async def sync_external_entity(external_id: str, integration_source: str):
+async def sync_external_entity(user_id: str, external_id: str, integration_source: str):
     """
     Idempotent sync operation using SyncMetadata for state tracking.
     Safe to retry - will not create duplicates or corrupt data.
@@ -1373,6 +1371,7 @@ async def sync_external_entity(external_id: str, integration_source: str):
         with session.begin():
             # 2. Check existing sync state
             sync_metadata = session.query(SyncMetadata).filter_by(
+                user_id=user_id,  # links are per owner
                 integration_source=integration_source,
                 external_id=external_id
             ).with_for_update().first()  # Lock for concurrent safety
@@ -1399,6 +1398,7 @@ async def sync_external_entity(external_id: str, integration_source: str):
                     sync_metadata.error_message = None
                 else:
                     session.add(SyncMetadata(
+                        user_id=user_id,
                         integration_source=integration_source,
                         external_id=external_id,
                         internal_id=internal_entity.id,
@@ -1416,6 +1416,7 @@ async def sync_external_entity(external_id: str, integration_source: str):
                     sync_metadata.error_message = str(e)
                 else:
                     session.add(SyncMetadata(
+                        user_id=user_id,
                         integration_source=integration_source,
                         external_id=external_id,
                         sync_status=SyncStatus.FAILED,

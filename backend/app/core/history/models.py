@@ -141,8 +141,8 @@ class HistoryAggregationStrategy:
     string concatenation would ask PostgreSQL to infer two types for one parameter.
 
     ``:reader_user_id`` is **who is asking**. It exists because the contact aggregate
-    reaches rows that are owned — a task's — while contacts themselves are not, and
-    it defaults to ``None``. That default is deliberate and is what makes the design
+    reaches rows that record their own owner — a task's — and it defaults to
+    ``None``. That default is deliberate and is what makes the design
     safe: ``user_id = NULL`` is never true in SQL, so a caller that forgets to say
     who is reading loses the owned rows rather than exposing them.
     """
@@ -244,13 +244,10 @@ def contact_owned_history_predicate(
 # reads as a sequence rather than as a contradiction.
 #
 # **Both task branches are owner-scoped, and they are the only branches here that
-# are.** Every other branch reaches contact-domain rows, which have no owner:
-# ``contacts`` has no ``user_id`` column and neither does the read that serves this
-# predicate, so a contact is readable by any authenticated user. Task rows are the
-# one kind that *does* carry an owner (``field_history.user_id``, stamped by
-# ``HistoryService._owner_for``) — which means that without a filter, a shared
-# contact would hand one user another user's commitments, and since ITER18-003
-# Phase 9 names them, their text as well.
+# are.** Every other branch reaches contact-domain rows, which carry no owner of
+# their own: the caller reads the contact under its owner before this predicate
+# runs. Task rows are the one kind that record an owner (``field_history.user_id``,
+# stamped by ``HistoryService._owner_for``), so they are filtered by the reader.
 #
 # ``:reader_user_id`` defaults to ``None`` at the repository, and that is the
 # safety property rather than an oversight: ``user_id = NULL`` is never true, so a

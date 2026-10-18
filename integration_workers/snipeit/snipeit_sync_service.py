@@ -2197,9 +2197,9 @@ class SnipeItSyncService:
                     )
                     return True
                 [journal_id] = claimants
-                # Sync rows are keyed globally, so another user's sync may have
-                # recorded this maintenance id under another asset's lock; the
-                # journal then keeps its claim.
+                # The asset lock does not cover every writer of this key, so the
+                # row may have been recorded meanwhile; the journal then keeps
+                # its claim.
                 if (
                     await _insert_push_row(
                         session,
