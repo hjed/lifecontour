@@ -639,7 +639,7 @@ async def sync_external_entity(user_id: str, external_id: str, integration_sourc
             existing.version_hash = current_hash
             existing.last_synced_at = datetime.utcnow()
         else:
-            session.add(SyncMetadata(...))
+            session.add(SyncMetadata(user_id=user_id, ...))
         session.commit()
 ```
 
@@ -1398,6 +1398,7 @@ async def sync_external_entity(user_id: str, external_id: str, integration_sourc
                     sync_metadata.error_message = None
                 else:
                     session.add(SyncMetadata(
+                        user_id=user_id,
                         integration_source=integration_source,
                         external_id=external_id,
                         internal_id=internal_entity.id,
@@ -1415,6 +1416,7 @@ async def sync_external_entity(user_id: str, external_id: str, integration_sourc
                     sync_metadata.error_message = str(e)
                 else:
                     session.add(SyncMetadata(
+                        user_id=user_id,
                         integration_source=integration_source,
                         external_id=external_id,
                         sync_status=SyncStatus.FAILED,

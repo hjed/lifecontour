@@ -539,7 +539,8 @@ domain:
 | Method | Why |
 |---|---|
 | `save` | The update is scoped by the entity's own `user_id`, which callers load under the acting user; naming another owner raises `ContactNotFoundError`. |
-| `lock`, `touch`, `lock_and_get_updated_at` | Keyed by id and run before the service's check (lock ordering). A foreign id briefly takes the row lock, then answers 404 with nothing written. |
+| `lock`, `lock_and_get_updated_at` | Keyed by id and run before the service's check (lock ordering). A foreign id briefly takes the row lock, then answers 404 with nothing written. |
+| `touch` | A write keyed by id, so it runs only after the service's scoped read has proved the contact is the user's. |
 | `get_external_references` | A child read keyed by contact id; `ContactService` proves ownership first. |
 | `find_owner_id` | For consumers with no acting user (the summary consumer): it resolves the owner, then reads as that owner. |
 
