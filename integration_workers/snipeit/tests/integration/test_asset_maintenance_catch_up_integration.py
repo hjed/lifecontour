@@ -17,6 +17,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from snipeit_sync_service import _lock_asset_maintenances
+
 from .test_maintenance_sync_integration import (
     _import_rows,
     _joined_session_factory,
@@ -206,3 +208,75 @@ class TestNewlyLinkedAssetImportsItsMaintenances:
         assert await _asset_link(async_connection) is not None
         assert _maintenance_listings(mock_transport) == [[str(_ASSET_ID)]] * attempts
         assert await _journal_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_a_record_a_batch_imported_meanwhile_is_not_imported_again(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The losing side of the race, made deterministic.
+
+        A maintenance batch imported the record after the asset was linked and
+        before the catch-up listed it. Its journal has not arrived yet, so the
+        record still reads as unsettled and the catch-up fetches it, but the
+        import's sync row makes it skip rather than write a second journal.
+        """
+        session_factory = _joined_session_factory(async_connection)
+        _queue_asset(mock_transport)
+        await snipeit_sync_service.sync_asset_batch([_ASSET_ID], session_factory)
+        mock_transport.add_response(
+            "/maintenances/301", json_data=_listed(301), method="GET"
+        )
+        imported = await snipeit_sync_service.sync_maintenance_batch(
+            [301], session_factory
+        )
+        assert imported["synced"] == 1
+
+        _queue_asset_maintenances(mock_transport, _listed(301))
+        mock_transport.add_response(
+            "/maintenances/301", json_data=_listed(301), method="GET"
+        )
+        await snipeit_sync_service.import_asset_maintenances(_ASSET_ID, session_factory)
+
+        assert _maintenance_fetches(mock_transport) == [
+            "/api/v1/maintenances/301",
+            "/api/v1/maintenances/301",
+        ]
+        assert await _journal_events(async_connection) == ["journal_event.created"]
+        assert await _import_rows(async_connection, 301) == 1
+
+
+_TRY_LOCK = text("SELECT pg_try_advisory_xact_lock(hashtext(:key))")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_imports_on_one_asset_are_serialised(
+    async_engine: Any,
+) -> None:
+    """The catch-up and a maintenance batch can import one record at once.
+
+    Each takes the asset's maintenance lock before reading the record's sync
+    row, so the second waits for the first to commit and then sees its row.
+    Uses two real connections and writes no data: advisory locks live outside
+    any table, and both transactions are rolled back.
+    """
+    async with async_engine.connect() as holder, async_engine.connect() as rival:
+        await holder.begin()
+        await rival.begin()
+        try:
+            await _lock_asset_maintenances(holder, _ASSET_ID)
+
+            same = await rival.execute(
+                _TRY_LOCK, {"key": f"snipeit_maintenance:{_ASSET_ID}"}
+            )
+            other = await rival.execute(
+                _TRY_LOCK, {"key": f"snipeit_maintenance:{_ASSET_ID + 1}"}
+            )
+
+            assert same.scalar_one() is False
+            assert other.scalar_one() is True
+        finally:
+            await holder.rollback()
+            await rival.rollback()
