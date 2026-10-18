@@ -25,36 +25,6 @@ pytestmark = pytest.mark.unit
 #: The marker fastmcp sets on a schema it had to wrap in ``{"result": ...}``.
 WRAPPED_MARKER = "x-fastmcp-wrap-result"
 
-#: Tools that still return a JSON string, pending conversion to a response
-#: model. Only ever shrinks: a new tool returns its model from the start.
-UNTYPED_TOOLS = frozenset(
-    {
-        "add_gear_usage_item",
-        "analyze_activity_trends",
-        "create_gear_item",
-        "create_journal_route",
-        "create_template",
-        "delete_journal_route",
-        "dismiss_incomplete_outdoor_activity",
-        "get_activity_stats",
-        "get_gear_item",
-        "get_journal_template",
-        "get_outdoor_dashboard",
-        "get_route_history",
-        "get_template",
-        "list_gear_items",
-        "list_incomplete_outdoor_activities",
-        "list_journal_routes",
-        "remove_gear_usage_item",
-        "search_activities",
-        "search_templates",
-        "undismiss_incomplete_outdoor_activity",
-        "update_gear_item",
-        "update_journal_route",
-        "update_template",
-    }
-)
-
 
 @pytest.fixture
 async def registered_tools() -> dict[str, MCPTool]:
@@ -93,9 +63,7 @@ def test_every_tool_returns_one_response_model(
     registered_tools: dict[str, MCPTool],
 ) -> None:
     untyped = sorted(
-        name
-        for name, tool in registered_tools.items()
-        if name not in UNTYPED_TOOLS and not _is_typed(tool)
+        name for name, tool in registered_tools.items() if not _is_typed(tool)
     )
 
     assert not untyped, (
@@ -103,18 +71,3 @@ def test_every_tool_returns_one_response_model(
         f"list, Optional or union, which fastmcp wraps in {{'result': ...}}: "
         f"{untyped}"
     )
-
-
-def test_the_untyped_allowlist_is_not_stale(
-    registered_tools: dict[str, MCPTool],
-) -> None:
-    """A converted or removed tool must leave the allowlist with it."""
-    converted = sorted(
-        name
-        for name in UNTYPED_TOOLS & registered_tools.keys()
-        if _is_typed(registered_tools[name])
-    )
-    removed = sorted(UNTYPED_TOOLS - registered_tools.keys())
-
-    assert not converted, f"remove these typed tools from UNTYPED_TOOLS: {converted}"
-    assert not removed, f"UNTYPED_TOOLS names tools that do not exist: {removed}"

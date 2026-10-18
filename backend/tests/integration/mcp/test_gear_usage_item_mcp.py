@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.mcp.http_helpers import call_mcp_tool, call_mcp_tool_error
 from tests.integration.tasks.task_seeding import OTHER_USER_ID, create_journal
 
 
@@ -183,7 +183,7 @@ class TestGearUsageItemTools:
                 {"journal_id": journal_id, "gear_item_id": rope},
             )
 
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "remove_gear_usage_item",
                 {"journal_id": journal_id, "gear_item_id": helmet},
@@ -199,7 +199,7 @@ class TestGearUsageItemTools:
         async with authenticated_lifespan_client() as client:
             journal_id = await _journal(client)
 
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "add_gear_usage_item",
                 {
@@ -222,7 +222,7 @@ class TestGearUsageItemTools:
         async with authenticated_lifespan_client() as client:
             rope = await _gear_item(client, "Rope")
 
-            payload = await call_mcp_tool(
+            payload = await call_mcp_tool_error(
                 client,
                 "add_gear_usage_item",
                 {"journal_id": theirs, "gear_item_id": rope},

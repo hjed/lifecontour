@@ -55,7 +55,7 @@ from app.mcp.shared.dependencies import (
     get_journal_enrichment_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 def _activity_filters(
@@ -108,7 +108,7 @@ async def search_activities(
     enrichment_service: JournalEnrichmentService = mcp_depends(
         get_journal_enrichment_service
     ),
-) -> str:
+) -> JournalSearchResponse:
     """Search activity journals with effective activity-type filtering."""
     user_id = await get_current_user_id()
     filters = _activity_filters(
@@ -142,7 +142,7 @@ async def search_activities(
         processing_time_ms=0,
         summary=f"Found {total_hits} activity journal(s)",
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -163,7 +163,7 @@ async def get_activity_stats(
     activity_stats_repo: ActivityStatsRepository = mcp_depends(
         get_activity_stats_repository
     ),
-) -> str:
+) -> ActivityStatsResponse:
     """Aggregate activity totals, breakdowns, and personal records."""
     user_id = await get_current_user_id()
     filters = _activity_filters(
@@ -228,7 +228,7 @@ async def get_activity_stats(
             f"{len(activity_type_stats)} activity type(s)"
         ),
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -256,7 +256,7 @@ async def analyze_activity_trends(
     activity_stats_repo: ActivityStatsRepository = mcp_depends(
         get_activity_stats_repository
     ),
-) -> str:
+) -> ActivityTrendsResponse:
     """Analyse activity trends by day, week, month, or year buckets."""
     normalized_interval = interval.strip().lower()
     try:
@@ -294,7 +294,7 @@ async def analyze_activity_trends(
             f"{len(periods)} {normalized_interval} bucket(s)"
         ),
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -302,7 +302,7 @@ async def analyze_activity_trends(
 async def get_route_history(
     route_id: Annotated[str, Field(description="Route UUID")],
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> RouteHistoryResponse:
     """Return route usage history across route-aware activity journals."""
     user_id = await get_current_user_id()
     repos = create_journal_tool_repositories(db_connection)
@@ -316,11 +316,11 @@ async def get_route_history(
 
     route = await repos.route_repo.find_by_id(route_uuid)
     if route is None:
-        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+        raise MCPErrors.not_found("Route", route_id)
 
     journal = await repos.journal_repo.find_by_id(route.journal_id)
     if journal is None or journal.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Route", route_id)
+        raise MCPErrors.not_found("Route", route_id)
 
     history_rows = await repos.route_repo.find_usage_history(user_id, route_uuid)
     entries = [
@@ -355,7 +355,7 @@ async def get_route_history(
             f"{len(activity_types)} activity type(s)"
         ),
     )
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_activity_tools(mcp: FastMCP[None]) -> None:

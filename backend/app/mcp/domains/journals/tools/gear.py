@@ -16,6 +16,10 @@ from app.core.journal.services.gear_item_service import GearItemService
 from app.mcp.domains.journals.converters import (
     GearItemMCPConverter,
 )
+from app.mcp.domains.journals.schemas import (
+    GearItemListMCPResponse,
+    GearItemMCPResponse,
+)
 from app.mcp.domains.journals.tools._shared import (
     create_journal_tool_repositories,
 )
@@ -34,7 +38,7 @@ from app.mcp.shared.dependencies import (
     get_gear_item_service,
     mcp_depends,
 )
-from app.mcp.shared.response_builders import MCPResponseBuilder
+from app.mcp.shared.response_builders import MCPErrors
 
 
 @tool(annotations=ADDITIVE_WRITE)
@@ -56,7 +60,7 @@ async def create_gear_item(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     gear_item_service: GearItemService = mcp_depends(get_gear_item_service),
-) -> str:
+) -> GearItemMCPResponse:
     """
     Create a new gear item for tracking equipment (ropes, harnesses, helmets, etc.).
     """
@@ -65,9 +69,9 @@ async def create_gear_item(
         try:
             parsed_purchase_date = date.fromisoformat(purchase_date)
         except ValueError:
-            return MCPResponseBuilder.validation_error_response(
+            raise MCPErrors.validation(
                 "purchase_date", "Invalid date format, use YYYY-MM-DD"
-            )
+            ) from None
 
     item = GearItem(
         user_id=user_id,
@@ -81,7 +85,7 @@ async def create_gear_item(
     saved_item = await gear_item_service.create(item, transaction=db_connection)
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -89,7 +93,7 @@ async def create_gear_item(
 async def list_gear_items(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> GearItemListMCPResponse:
     """
     List all gear items for the current user.
     """
@@ -98,7 +102,7 @@ async def list_gear_items(
     items = await repos.gear_item_repo.find_by_user(user_id)
 
     response = GearItemMCPConverter.to_mcp_list_response(items)
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 @tool(annotations=READ_ONLY)
@@ -107,7 +111,7 @@ async def get_gear_item(
     gear_item_id: Annotated[str, Field(description="Gear item UUID")],
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
-) -> str:
+) -> GearItemMCPResponse:
     """
     Get a specific gear item by ID.
     """
@@ -119,16 +123,12 @@ async def get_gear_item(
         uuid_mod.UUID(gear_item_id)
         item = await repos.gear_item_repo.find_by_id(gear_item_id)
         if not item or item.user_id != user_id:
-            return MCPResponseBuilder.not_found_error_response(
-                "Gear item", gear_item_id
-            )
+            raise MCPErrors.not_found("Gear item", gear_item_id)
 
         response = GearItemMCPConverter.to_mcp_response(item)
-        return MCPResponseBuilder.success_response(response)
+        return response
     except ValueError:
-        return MCPResponseBuilder.validation_error_response(
-            "gear_item_id", "Invalid UUID"
-        )
+        raise MCPErrors.validation("gear_item_id", "Invalid UUID") from None
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -164,7 +164,7 @@ async def update_gear_item(
     user_id: str = mcp_depends(get_current_user_id),
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     gear_item_service: GearItemService = mcp_depends(get_gear_item_service),
-) -> str:
+) -> GearItemMCPResponse:
     """
     Update an existing gear item.
     """
@@ -175,13 +175,11 @@ async def update_gear_item(
 
         uuid_mod.UUID(gear_item_id)
     except ValueError:
-        return MCPResponseBuilder.validation_error_response(
-            "gear_item_id", "Invalid UUID"
-        )
+        raise MCPErrors.validation("gear_item_id", "Invalid UUID") from None
 
     item = await repos.gear_item_repo.find_by_id(gear_item_id)
     if not item or item.user_id != user_id:
-        return MCPResponseBuilder.not_found_error_response("Gear item", gear_item_id)
+        raise MCPErrors.not_found("Gear item", gear_item_id)
 
     if name is not None:
         item.name = name
@@ -196,16 +194,16 @@ async def update_gear_item(
             try:
                 item.purchase_date = date.fromisoformat(purchase_date)
             except ValueError:
-                return MCPResponseBuilder.validation_error_response(
+                raise MCPErrors.validation(
                     "purchase_date", "Invalid date format, use YYYY-MM-DD"
-                )
+                ) from None
     if manufacturer is not None:
         item.manufacturer = None if manufacturer == "" else manufacturer
 
     try:
         item.__post_init__()
     except Exception as e:  # noqa: BLE001
-        return MCPResponseBuilder.validation_error_response("gear_item", str(e))
+        raise MCPErrors.validation("gear_item", str(e)) from e
 
     # The service computes the changed-fields diff against the persisted state
     # and publishes GearItemUpdated with MCP provenance.
@@ -217,7 +215,7 @@ async def update_gear_item(
     )
 
     response = GearItemMCPConverter.to_mcp_response(saved_item)
-    return MCPResponseBuilder.success_response(response)
+    return response
 
 
 def register_gear_tools(mcp: FastMCP[None]) -> None:
