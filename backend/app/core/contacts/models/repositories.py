@@ -155,8 +155,13 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def touch(self, contact_id: int, transaction: Any = None) -> None:
-        """Update the updated_at timestamp of a contact."""
+    async def touch(self, contact_id: int, transaction: Any = None) -> datetime:
+        """Mark a contact as changed, returning the version that leaves it at.
+
+        Every write to a row the contact renders ends here, so the contact's
+        entity-tag moves with anything a client would see. The returned
+        ``updated_at`` is what such a write reports as its new version.
+        """
         pass
 
     @abstractmethod
@@ -174,8 +179,14 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
-        """Lock a contact row for update and return its last-write timestamp.
+    async def lock_and_get_updated_at(
+        self, contact_id: int, *, user_id: str
+    ) -> datetime | None:
+        """Lock ``user_id``'s contact row for update and return its last-write timestamp.
+
+        Owner-scoped, unlike ``lock`` and ``touch``, because its answer reaches
+        the caller: a refused precondition names the current version, which
+        must not be handed out for somebody else's contact.
 
         Backs the optimistic-concurrency check on updates. Comparing an
         entity-tag against an unlocked read leaves a lost-update window under
@@ -184,7 +195,8 @@ class ContactRepository(ABC):
         caller waits for the first to commit and then sees the new timestamp.
 
         Returns:
-            The contact's ``updated_at``, or None if no such contact exists.
+            The contact's ``updated_at``, or None if ``user_id`` has no such
+            contact.
         """
         pass
 

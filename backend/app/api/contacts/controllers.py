@@ -5,7 +5,6 @@ Handles contact-related HTTP endpoints following JSON API specification.
 Controllers act as adapters between HTTP and domain services.
 """
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -17,13 +16,16 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.common.etag import get_if_match, set_etag
+from app.api.common.etag import (
+    get_if_match,
+    precondition_failed_responses,
+    set_etag,
+)
 from app.api.common.schemas import (
     ExternalLinkAttributes,
     ExternalLinkResource,
     ExternalLinksResponse,
     PaginationParams,
-    PreconditionFailedErrorResponse,
     create_pagination_links,
     create_pagination_meta,
     get_request_base_url,
@@ -346,21 +348,7 @@ async def create_contact(
     return ContactResponse(data=contact_resource)
 
 
-@router.put(
-    "/{contact_id}",
-    responses={
-        412: {
-            "model": PreconditionFailedErrorResponse,
-            "description": (
-                "The `If-Match` precondition named a version this contact has "
-                "already moved on from — somebody else wrote to it since the "
-                "caller read it. Nothing was written. The JSON:API error "
-                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
-                "to retry with after re-reading and re-applying the change."
-            ),
-        },
-    },
-)
+@router.put("/{contact_id}", responses=precondition_failed_responses("contact"))
 @inject
 async def update_contact(
     contact_id: int,
@@ -568,10 +556,15 @@ async def toggle_contact_favourite(
         raise
 
 
-@router.patch("/{contact_id}/fields/{field_name}")
+@router.patch(
+    "/{contact_id}/fields/{field_name}",
+    responses=precondition_failed_responses("contact"),
+)
 @inject
 async def update_contact_field(
     contact_id: int,
+    request: Request,
+    response: Response,
     field_name: str,
     field_request: FieldUpdateRequest,
     contact_service: FromDishka[ContactService],
@@ -593,15 +586,18 @@ async def update_contact_field(
         raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id,
             field_name,
             field_value,
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
+        old_value, new_value = written.value
+        set_etag(response, "contacts", contact_id, written.updated_at)
 
         # Create response
         field_resource = ContactFieldResource(
@@ -611,7 +607,7 @@ async def update_contact_field(
                 field_type="basic",
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(tz=UTC),
+                updated_at=written.updated_at,
             ),
         )
 
@@ -625,10 +621,13 @@ async def update_contact_field(
 
 @router.patch(
     "/{contact_id}/methods/{method_id}/fields/{field_name}",
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def update_contact_method_field(
     contact_id: int,
+    request: Request,
+    response: Response,
     method_id: int,
     field_name: str,
     field_request: MethodFieldUpdateRequest,
@@ -648,7 +647,7 @@ async def update_contact_method_field(
         raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
-        old_value, new_value = await contact_service.update_contact_method_field(
+        written = await contact_service.update_contact_method_field(
             contact_id,
             method_id,
             field_name,
@@ -656,8 +655,11 @@ async def update_contact_method_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
+        old_value, new_value = written.value
+        set_etag(response, "contacts", contact_id, written.updated_at)
 
         # Create response
         field_resource = ContactFieldResource(
@@ -668,7 +670,7 @@ async def update_contact_method_field(
                 entity_id=method_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(tz=UTC),
+                updated_at=written.updated_at,
             ),
         )
 
@@ -682,10 +684,13 @@ async def update_contact_method_field(
 
 @router.patch(
     "/{contact_id}/addresses/{address_id}/fields/{field_name}",
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def update_contact_address_field(
     contact_id: int,
+    request: Request,
+    response: Response,
     address_id: int,
     field_name: str,
     field_request: AddressFieldUpdateRequest,
@@ -705,7 +710,7 @@ async def update_contact_address_field(
         raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
-        old_value, new_value = await contact_service.update_contact_address_field(
+        written = await contact_service.update_contact_address_field(
             contact_id,
             address_id,
             field_name,
@@ -713,8 +718,11 @@ async def update_contact_address_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
+        old_value, new_value = written.value
+        set_etag(response, "contacts", contact_id, written.updated_at)
 
         # Create response
         field_resource = ContactFieldResource(
@@ -725,7 +733,7 @@ async def update_contact_address_field(
                 entity_id=address_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(tz=UTC),
+                updated_at=written.updated_at,
             ),
         )
 
@@ -739,10 +747,13 @@ async def update_contact_address_field(
 
 @router.patch(
     "/{contact_id}/notes/{note_id}/fields/{field_name}",
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def update_contact_note_field(
     contact_id: int,
+    request: Request,
+    response: Response,
     note_id: int,
     field_name: str,
     field_request: NoteFieldUpdateRequest,
@@ -762,7 +773,7 @@ async def update_contact_note_field(
         raise ContactValidationError("value", FIELD_VALUE_REQUIRED_ERROR)
 
     try:
-        old_value, new_value = await contact_service.update_contact_note_field(
+        written = await contact_service.update_contact_note_field(
             contact_id,
             note_id,
             field_name,
@@ -770,8 +781,11 @@ async def update_contact_note_field(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
+        old_value, new_value = written.value
+        set_etag(response, "contacts", contact_id, written.updated_at)
 
         # Create response
         field_resource = ContactFieldResource(
@@ -782,7 +796,7 @@ async def update_contact_note_field(
                 entity_id=note_id,
                 old_value=old_value,
                 new_value=new_value,
-                updated_at=datetime.now(tz=UTC),
+                updated_at=written.updated_at,
             ),
         )
 
@@ -857,11 +871,13 @@ async def get_contact_history(
 @router.post(
     "/{contact_id}/methods",
     status_code=status.HTTP_201_CREATED,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def add_contact_method(
     contact_id: int,
     request: Request,
+    response: Response,
     method_request: ContactMethodCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -891,18 +907,13 @@ async def add_contact_method(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
 
-        # Get updated contact
-        updated_contact = await contact_service.get_contact_by_id(
-            contact_id, user_id=user.id
+        return await _contact_response(
+            contact_service, response, contact_id, base_url, user_id=user.id
         )
-        if not updated_contact:
-            raise ContactNotFoundError(contact_id)
-
-        contact_resource = ContactConverter.to_resource(updated_contact, base_url)
-        return ContactResponse(data=contact_resource)
 
     except ContactValidationError as e:
         if CONTACT_NOT_FOUND_ERROR in str(e):
@@ -911,11 +922,15 @@ async def add_contact_method(
 
 
 @router.delete(
-    "/{contact_id}/methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{contact_id}/methods/{method_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def delete_contact_method(
     contact_id: int,
+    request: Request,
+    response: Response,
     method_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -926,23 +941,36 @@ async def delete_contact_method(
 
     Removes the specified contact method from the contact.
     """
-    await contact_service.delete_contact_method(
+    written = await contact_service.delete_contact_method(
         contact_id,
         method_id,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    set_etag(response, "contacts", contact_id, written.updated_at)
 
 
 async def _contact_response(
-    contact_service: ContactService, contact_id: int, base_url: str, *, user_id: str
+    contact_service: ContactService,
+    response: Response,
+    contact_id: int,
+    base_url: str,
+    *,
+    user_id: str,
 ) -> ContactResponse:
     """Re-read the contact and render it, for the sub-resource writes.
 
     They answer with the whole contact rather than the sub-resource, so a client
     can replace its cached contact from the response of a write to one date.
+
+    The ``ETag`` is the re-read's own, so it never names a version newer than
+    the body. The contact row is read before its child rows, so under READ
+    COMMITTED the body can be the *newer* of the two; the worst that does is
+    refuse the client's next conditional write, never let it overwrite a
+    change it has not seen.
     """
     updated_contact = await contact_service.get_contact_by_id(
         contact_id, user_id=user_id
@@ -950,6 +978,7 @@ async def _contact_response(
     if not updated_contact:
         raise ContactNotFoundError(contact_id)
 
+    set_etag(response, "contacts", contact_id, updated_contact.updated_at)
     return ContactResponse(data=ContactConverter.to_resource(updated_contact, base_url))
 
 
@@ -959,11 +988,13 @@ async def _contact_response(
 @router.post(
     "/{contact_id}/addresses",
     status_code=status.HTTP_201_CREATED,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def add_contact_address(
     contact_id: int,
     request: Request,
+    response: Response,
     address_request: ContactAddressCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -993,18 +1024,13 @@ async def add_contact_address(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
 
-        # Get updated contact
-        updated_contact = await contact_service.get_contact_by_id(
-            contact_id, user_id=user.id
+        return await _contact_response(
+            contact_service, response, contact_id, base_url, user_id=user.id
         )
-        if not updated_contact:
-            raise ContactNotFoundError(contact_id)
-
-        contact_resource = ContactConverter.to_resource(updated_contact, base_url)
-        return ContactResponse(data=contact_resource)
 
     except ContactValidationError as e:
         if CONTACT_NOT_FOUND_ERROR in str(e):
@@ -1013,11 +1039,15 @@ async def add_contact_address(
 
 
 @router.delete(
-    "/{contact_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{contact_id}/addresses/{address_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def delete_contact_address(
     contact_id: int,
+    request: Request,
+    response: Response,
     address_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -1028,14 +1058,16 @@ async def delete_contact_address(
 
     Removes the specified contact address from the contact.
     """
-    await contact_service.delete_contact_address(
+    written = await contact_service.delete_contact_address(
         contact_id,
         address_id,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    set_etag(response, "contacts", contact_id, written.updated_at)
 
 
 # Contact Important Dates Management Endpoints
@@ -1051,11 +1083,13 @@ async def delete_contact_address(
 @router.post(
     "/{contact_id}/important-dates",
     status_code=status.HTTP_201_CREATED,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def add_contact_important_date(
     contact_id: int,
     request: Request,
+    response: Response,
     date_request: ImportantDateCreateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -1079,6 +1113,7 @@ async def add_contact_important_date(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
     except ContactValidationError as e:
@@ -1087,16 +1122,20 @@ async def add_contact_important_date(
         raise
 
     return await _contact_response(
-        contact_service, contact_id, base_url, user_id=user.id
+        contact_service, response, contact_id, base_url, user_id=user.id
     )
 
 
-@router.put("/{contact_id}/important-dates/{date_id}")
+@router.put(
+    "/{contact_id}/important-dates/{date_id}",
+    responses=precondition_failed_responses("contact"),
+)
 @inject
 async def update_contact_important_date(
     contact_id: int,
     date_id: int,
     request: Request,
+    response: Response,
     date_request: ImportantDateUpdateRequest,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -1121,6 +1160,7 @@ async def update_contact_important_date(
             connection,
             changed_by="ui",
             source=Provenance.UI,
+            expected_etags=get_if_match(request),
             user_id=user.id,
         )
     except ContactValidationError as e:
@@ -1129,16 +1169,20 @@ async def update_contact_important_date(
         raise
 
     return await _contact_response(
-        contact_service, contact_id, base_url, user_id=user.id
+        contact_service, response, contact_id, base_url, user_id=user.id
     )
 
 
 @router.delete(
-    "/{contact_id}/important-dates/{date_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{contact_id}/important-dates/{date_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=precondition_failed_responses("contact"),
 )
 @inject
 async def delete_contact_important_date(
     contact_id: int,
+    request: Request,
+    response: Response,
     date_id: int,
     contact_service: FromDishka[ContactService],
     connection: FromDishka[AsyncConnection],
@@ -1149,14 +1193,16 @@ async def delete_contact_important_date(
 
     Removes the specified date from the contact.
     """
-    await contact_service.delete_contact_important_date(
+    written = await contact_service.delete_contact_important_date(
         contact_id,
         date_id,
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    set_etag(response, "contacts", contact_id, written.updated_at)
 
 
 @router.get("/{contact_id}/journals")

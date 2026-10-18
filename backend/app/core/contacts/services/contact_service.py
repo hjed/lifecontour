@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
+from datetime import datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -76,7 +79,8 @@ from app.core.contacts.services.contact_validation_service import (
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
 from app.infrastructure.unit_of_work import unit_of_work
-from app.shared.preconditions import enforce_etag_precondition
+from app.shared.preconditions import guard_aggregate_write
+from app.shared.versioned import Versioned
 
 if TYPE_CHECKING:
     from app.core.contacts.services.tag_service import TagService
@@ -248,6 +252,36 @@ class ContactService:
             history_repo, contact_repo
         )
         self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
+
+    async def _guard_write(
+        self,
+        contact_id: int,
+        expected_etags: Sequence[str] | None,
+        *,
+        user_id: str,
+    ) -> datetime:
+        """Lock ``user_id``'s contact for a write, refusing a stale precondition.
+
+        The first thing every write to the contact or any row it renders does,
+        inside its unit of work: see :func:`guard_aggregate_write`.
+
+        Returns:
+            The contact's version as locked.
+
+        Raises:
+            ContactNotFoundError: If ``user_id`` has no such contact.
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from.
+        """
+        return await guard_aggregate_write(
+            resource_type="contacts",
+            resource_id=contact_id,
+            expected_etags=expected_etags,
+            lock_and_get_updated_at=partial(
+                self.contact_repo.lock_and_get_updated_at, contact_id, user_id=user_id
+            ),
+            not_found=ContactNotFoundError,
+        )
 
     async def _execute_with_retry(
         self, operation: Any, transaction: AsyncConnection
@@ -477,19 +511,9 @@ class ContactService:
             # per-item writer takes it first: a method or note added
             # concurrently cannot land between the read below and the write,
             # where the reconcile would delete it for being missing from the
-            # list.
-            await self.contact_repo.lock(contact.id)
-
-            # Refuse a stale write first: tag resolution below find-or-creates
-            # rows, so checking any later would leave a refused update having
-            # written something. The row lock is held for the rest of this unit
-            # of work, so the version cannot move between check and save.
-            await enforce_etag_precondition(
-                resource_type="contacts",
-                resource_id=contact.id,
-                expected_etags=expected_etags,
-                lock_and_get_updated_at=self.contact_repo.lock_and_get_updated_at,
-            )
+            # list. A stale write is refused here too, before tag resolution
+            # below find-or-creates rows, so a refused update writes nothing.
+            await self._guard_write(contact.id, expected_etags, user_id=user_id)
 
             # Resolve any tag names to existing-or-new tags inside this unit of
             # work (replacement strategy: the resolved set replaces all existing
@@ -567,7 +591,7 @@ class ContactService:
         expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> Versioned[tuple[str | None, str | None]]:
         """
         Update a single contact field with transaction management.
 
@@ -582,7 +606,8 @@ class ContactService:
             transaction: Database transaction
 
         Returns:
-            Tuple of (old_value, new_value) for the updated field
+            Tuple of (old_value, new_value) for the updated field, with the
+            contact version the write left behind
 
         Raises:
             ContactValidationError: If contact not found or field name invalid
@@ -593,16 +618,13 @@ class ContactService:
         # Validate field name
         _validate_contact_field_name(field_name)
 
-        async def _update_field_operation() -> tuple[str | None, str | None]:
+        async def _update_field_operation() -> Versioned[tuple[str | None, str | None]]:
             # A single-field edit is guarded the same way a whole-contact one
             # is: the MCP tool offers ``expected_version`` in both modes, and a
             # precondition honoured in only one of them would be worse than
             # none at all.
-            await enforce_etag_precondition(
-                resource_type="contacts",
-                resource_id=contact_id,
-                expected_etags=expected_etags,
-                lock_and_get_updated_at=self.contact_repo.lock_and_get_updated_at,
+            version = await self._guard_write(
+                contact_id, expected_etags, user_id=user_id
             )
 
             # Get current contact
@@ -616,27 +638,28 @@ class ContactService:
             # Convert field_value to appropriate type
             new_value = _convert_contact_field_value(field_name, field_value)
 
-            # Skip update if value hasn't changed (normalize for comparison)
-            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (
-                    str(old_value) if old_value is not None else None,
-                    str(new_value) if new_value is not None else None,
-                )
-
-            # Create updated contact with only the changed field
-            updated_contact = Contact(
-                id=current_contact.id,
-                first_name=current_contact.first_name,
-                user_id=current_contact.user_id,
-                last_name=current_contact.last_name,
-                middle_name=current_contact.middle_name,
-                nick_name=current_contact.nick_name,
-                is_favourite=current_contact.is_favourite,
-                created_at=current_contact.created_at,
-                updated_at=current_contact.updated_at,
+            values = (
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
             )
 
-            # Update the specific field
+            # Skip update if value hasn't changed (normalize for comparison)
+            if _normalize_field_value(old_value) == _normalize_field_value(new_value):
+                return Versioned(values, version)
+
+            # The stored contact with the one field changed. Every scalar comes
+            # from the stored row: ``save`` writes them all, so one left at its
+            # default would be cleared. The child rows are not written here.
+            updated_contact = replace(
+                current_contact,
+                methods=None,
+                addresses=None,
+                notes=None,
+                tags=None,
+                relationships=None,
+                important_dates=None,
+                summary=None,
+            )
             setattr(updated_contact, field_name, new_value)
 
             # Validate the updated contact
@@ -648,7 +671,11 @@ class ContactService:
             )
 
             # Save the updated contact
-            await self.contact_repo.save(updated_contact)
+            saved_contact = await self.contact_repo.save(updated_contact)
+            if saved_contact.updated_at is None:
+                raise ContactValidationError(
+                    "updated_at", "Contact version is required after save"
+                )
 
             # Publish update event; the history projection records the change.
             changed_fields = {field_name: (old_value, new_value)}
@@ -662,13 +689,10 @@ class ContactService:
             )
             await self.event_publisher.publish(event)
 
-            return (
-                str(old_value) if old_value is not None else None,
-                str(new_value) if new_value is not None else None,
-            )
+            return Versioned(values, saved_contact.updated_at)
 
         return cast(
-            tuple[str | None, str | None],
+            Versioned[tuple[str | None, str | None]],
             await self._execute_with_retry(_update_field_operation, transaction),
         )
 
@@ -681,9 +705,10 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> Versioned[tuple[str | None, str | None]]:
         """
         Update a single contact method field.
 
@@ -703,10 +728,14 @@ class ContactService:
         # Validate field name
         _validate_method_field_name(field_name)
 
-        async def _update_method_field_operation() -> tuple[str | None, str | None]:
+        async def _update_method_field_operation() -> Versioned[
+            tuple[str | None, str | None]
+        ]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            version = await self._guard_write(
+                contact_id, expected_etags, user_id=user_id
+            )
 
             # Get current contact with methods
             current_contact = await self._get_existing_contact(
@@ -733,9 +762,12 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (
-                    str(old_value) if old_value is not None else None,
-                    str(new_value) if new_value is not None else None,
+                return Versioned(
+                    (
+                        str(old_value) if old_value is not None else None,
+                        str(new_value) if new_value is not None else None,
+                    ),
+                    version,
                 )
 
             changed = _apply_subentity_field(
@@ -762,15 +794,17 @@ class ContactService:
                 user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
 
-            return (
-                str(old_value) if old_value is not None else None,
-                str(new_value) if new_value is not None else None,
+            return Versioned(
+                (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                ),
+                await self.contact_repo.touch(contact_id, transaction),
             )
 
         return cast(
-            tuple[str | None, str | None],
+            Versioned[tuple[str | None, str | None]],
             await self._execute_with_retry(_update_method_field_operation, transaction),
         )
 
@@ -783,9 +817,10 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> Versioned[tuple[str | None, str | None]]:
         """
         Update a single contact address field.
 
@@ -802,10 +837,14 @@ class ContactService:
         # Validate field name
         _validate_address_field_name(field_name)
 
-        async def _update_address_field_operation() -> tuple[str | None, str | None]:
+        async def _update_address_field_operation() -> Versioned[
+            tuple[str | None, str | None]
+        ]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            version = await self._guard_write(
+                contact_id, expected_etags, user_id=user_id
+            )
 
             # Get current contact with addresses
             current_contact = await self._get_existing_contact(
@@ -832,9 +871,12 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (
-                    str(old_value) if old_value is not None else None,
-                    str(new_value) if new_value is not None else None,
+                return Versioned(
+                    (
+                        str(old_value) if old_value is not None else None,
+                        str(new_value) if new_value is not None else None,
+                    ),
+                    version,
                 )
 
             changed = _apply_subentity_field(
@@ -858,15 +900,17 @@ class ContactService:
                 user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
 
-            return (
-                str(old_value) if old_value is not None else None,
-                str(new_value) if new_value is not None else None,
+            return Versioned(
+                (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                ),
+                await self.contact_repo.touch(contact_id, transaction),
             )
 
         return cast(
-            tuple[str | None, str | None],
+            Versioned[tuple[str | None, str | None]],
             await self._execute_with_retry(
                 _update_address_field_operation, transaction
             ),
@@ -881,9 +925,10 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> Versioned[tuple[str | None, str | None]]:
         """
         Update a single contact note field.
 
@@ -900,10 +945,14 @@ class ContactService:
         # Validate field name
         _validate_note_field_name(field_name)
 
-        async def _update_note_field_operation() -> tuple[str | None, str | None]:
+        async def _update_note_field_operation() -> Versioned[
+            tuple[str | None, str | None]
+        ]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            version = await self._guard_write(
+                contact_id, expected_etags, user_id=user_id
+            )
 
             # Get current contact with notes
             current_contact = await self._get_existing_contact(
@@ -928,9 +977,12 @@ class ContactService:
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
-                return (
-                    str(old_value) if old_value is not None else None,
-                    str(new_value) if new_value is not None else None,
+                return Versioned(
+                    (
+                        str(old_value) if old_value is not None else None,
+                        str(new_value) if new_value is not None else None,
+                    ),
+                    version,
                 )
 
             # Update the note field
@@ -953,15 +1005,17 @@ class ContactService:
                 user_id=current_contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
 
-            return (
-                str(old_value) if old_value is not None else None,
-                str(new_value) if new_value is not None else None,
+            return Versioned(
+                (
+                    str(old_value) if old_value is not None else None,
+                    str(new_value) if new_value is not None else None,
+                ),
+                await self.contact_repo.touch(contact_id, transaction),
             )
 
         return cast(
-            tuple[str | None, str | None],
+            Versioned[tuple[str | None, str | None]],
             await self._execute_with_retry(_update_note_field_operation, transaction),
         )
 
@@ -1952,6 +2006,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> ContactMethod:
@@ -1979,7 +2034,7 @@ class ContactService:
         async def _add_method_operation() -> ContactMethod:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2033,6 +2088,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> ContactAddress:
@@ -2059,7 +2115,7 @@ class ContactService:
         async def _add_address_operation() -> ContactAddress:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2112,6 +2168,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> ContactNote:
@@ -2137,7 +2194,7 @@ class ContactService:
         async def _add_note_operation() -> ContactNote:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2178,6 +2235,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> ImportantDate:
@@ -2188,7 +2246,7 @@ class ContactService:
         async def _add_date_operation() -> ImportantDate:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2232,9 +2290,10 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> None:
+    ) -> Versioned[None]:
         """
         Delete a contact method with transaction management.
 
@@ -2247,10 +2306,10 @@ class ContactService:
             ContactValidationError: If contact or method doesn't exist
         """
 
-        async def _delete_method_operation() -> None:
+        async def _delete_method_operation() -> Versioned[None]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2277,10 +2336,13 @@ class ContactService:
                 user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
+            return Versioned(
+                None, await self.contact_repo.touch(contact_id, transaction)
+            )
 
         return cast(
-            None, await self._execute_with_retry(_delete_method_operation, transaction)
+            Versioned[None],
+            await self._execute_with_retry(_delete_method_operation, transaction),
         )
 
     async def delete_contact_address(
@@ -2290,9 +2352,10 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> None:
+    ) -> Versioned[None]:
         """
         Delete a contact address with transaction management.
 
@@ -2305,10 +2368,10 @@ class ContactService:
             ContactValidationError: If contact or address doesn't exist
         """
 
-        async def _delete_address_operation() -> None:
+        async def _delete_address_operation() -> Versioned[None]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2334,10 +2397,13 @@ class ContactService:
                 user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
+            return Versioned(
+                None, await self.contact_repo.touch(contact_id, transaction)
+            )
 
         return cast(
-            None, await self._execute_with_retry(_delete_address_operation, transaction)
+            Versioned[None],
+            await self._execute_with_retry(_delete_address_operation, transaction),
         )
 
     async def update_contact_important_date(
@@ -2348,6 +2414,7 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
     ) -> ImportantDate:
@@ -2362,7 +2429,7 @@ class ContactService:
         async def _update_date_operation() -> ImportantDate:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2407,17 +2474,18 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
         *,
         user_id: str,
-    ) -> None:
+    ) -> Versioned[None]:
         """
         Delete an important date with transaction management.
         """
 
-        async def _delete_date_operation() -> None:
+        async def _delete_date_operation() -> Versioned[None]:
             # Parent lock before the child write, so this cannot deadlock
             # against a conditional update that locks the contact first.
-            await self.contact_repo.lock(contact_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
 
             # Validate contact exists
             contact = await self.contact_validation.validate_contact_exists(
@@ -2444,10 +2512,13 @@ class ContactService:
                 user_id=contact.user_id,
             )
             await self.event_publisher.publish(event)
-            await self.contact_repo.touch(contact_id, transaction)
+            return Versioned(
+                None, await self.contact_repo.touch(contact_id, transaction)
+            )
 
         return cast(
-            None, await self._execute_with_retry(_delete_date_operation, transaction)
+            Versioned[None],
+            await self._execute_with_retry(_delete_date_operation, transaction),
         )
 
     # Read operations (no transaction management needed)

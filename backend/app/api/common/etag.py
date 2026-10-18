@@ -9,9 +9,12 @@ straight to the service, which checks it inside the write's unit of work.
 """
 
 from datetime import datetime
+from typing import Any
 
 from core_shared.etag import parse_if_match, resource_etag
 from fastapi import Request, Response
+
+from app.api.common.schemas import PreconditionFailedErrorResponse
 
 
 def get_if_match(request: Request) -> list[str] | None:
@@ -49,3 +52,24 @@ def set_etag(
     etag = resource_etag(resource_type, resource_id, updated_at)
     if etag is not None:
         response.headers["ETag"] = etag
+
+
+def precondition_failed_responses(resource: str) -> dict[int | str, dict[str, Any]]:
+    """The OpenAPI ``responses`` entry for a route that honours ``If-Match``.
+
+    Args:
+        resource: The aggregate the tag versions, as prose, e.g. ``"contact"``.
+            A write to one of its rows is guarded by the aggregate's tag.
+    """
+    return {
+        412: {
+            "model": PreconditionFailedErrorResponse,
+            "description": (
+                f"The `If-Match` precondition named a version this {resource} "
+                "has already moved on from — somebody else wrote to it since "
+                "the caller read it. Nothing was written. The JSON:API error "
+                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
+                "to retry with after re-reading and re-applying the change."
+            ),
+        },
+    }
