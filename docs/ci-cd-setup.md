@@ -21,7 +21,11 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 
 **Jobs:**
 - `backend-lint`: Runs Ruff, Black, and MyPy on Python code
-- `backend-test`: Runs pytest with PostgreSQL service
+- `backend-unit-test`: Runs `pytest -m unit` with a PostgreSQL service. Every
+  test under `backend/tests/unit` carries the `unit` marker automatically (a
+  collection hook in `backend/tests/unit/conftest.py`), so none is deselected
+- `backend-integration-test`: Runs `pytest tests/integration/` against the
+  Docker services
 - `core-shared-unit-test`: Runs the `core_shared` unit suite (includes the worker
   tooling-standardisation governance test); runs on every PR
 - `worker-lint`: Per-worker matrix — `ruff check`, `ruff format --check`, and

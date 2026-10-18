@@ -29,9 +29,10 @@ Added `@pytest.mark.integration` to all integration test classes:
 - `test_field_history_repository_integration.py`
 - `test_event_repository_integration.py`
 
-Added `@pytest.mark.unit` to unit test classes:
-- `test_health.py`
-- `test_entities.py` (and other unit test files)
+Unit tests are marked `unit` automatically: a `pytest_collection_modifyitems`
+hook in `backend/tests/unit/conftest.py` marks every test under `tests/unit`.
+Adding `@pytest.mark.unit` by hand is not needed. Before the hook, unmarked unit
+tests were silently deselected by the CI job's `-m unit` filter.
 
 ### 2. Updated CI Workflow
 
@@ -39,7 +40,8 @@ Split the backend tests into two separate jobs:
 
 #### Backend Unit Tests Job
 - Uses GitHub Actions PostgreSQL service
-- Runs: `pytest -m unit --cov=app --cov-report=xml --cov-report=term-missing`
+- Runs: `pytest -m unit --cov=app --cov-report=xml --cov-report=term-missing`,
+  which selects every test under `tests/unit` (auto-marked, see above)
 - Fast execution (~1-2 minutes)
 - Provides unit test coverage
 
