@@ -1815,12 +1815,17 @@ test.describe('Journal List Page', () => {
 
       await dataManager.clearAllJournals();
 
-      const targetDate = new Date();
-      // The 15th of next month: never an 'outside day' of an adjacent month in
-      // the calendar grid. Pin the day before moving the month — from the
-      // 29th-31st, moving the month first overflows into the month after.
-      targetDate.setDate(15);
-      targetDate.setMonth(targetDate.getMonth() + 1);
+      // Noon UTC on the 15th of the month after the one the calendar opens on.
+      // The 15th is never an 'outside day' of an adjacent month in the grid.
+      // "Next month" is read from the browser's clock, not the runner's: the
+      // browser runs in UTC, so near a month boundary the runner's local month
+      // can already be the next one. Date.UTC rolls month 12 into January.
+      const targetDate = new Date(
+        await page.evaluate(() => {
+          const now = new Date();
+          return Date.UTC(now.getFullYear(), now.getMonth() + 1, 15, 12);
+        })
+      );
       const targetIso = targetDate.toISOString();
 
       const journals = await dataManager.createJournals([
@@ -1867,7 +1872,7 @@ test.describe('Journal List Page', () => {
         'November',
         'December',
       ];
-      const targetMonthName = `${monthNames[targetDate.getMonth()]} ${targetDate.getFullYear()}`;
+      const targetMonthName = `${monthNames[targetDate.getUTCMonth()]} ${targetDate.getUTCFullYear()}`;
       const targetGrid = page.getByRole('grid', { name: targetMonthName });
 
       // The calendar opens on the current month; the target is the next one.
@@ -1876,7 +1881,7 @@ test.describe('Journal List Page', () => {
 
       // 15 is always unique within a calendar grid because outside days can only be up to 6 days
       // from the start or end of the month (e.g., 25-31 or 1-6).
-      const dayLocator = targetGrid.getByText(String(targetDate.getDate()), {
+      const dayLocator = targetGrid.getByText(String(targetDate.getUTCDate()), {
         exact: true,
       });
 
