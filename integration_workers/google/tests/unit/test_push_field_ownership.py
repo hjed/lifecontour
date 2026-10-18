@@ -9,6 +9,7 @@ not import. These tests stop the next field from being added without one:
   keeps every one of them in Google.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -181,3 +182,68 @@ def test_an_unchanged_round_trip_keeps_what_inbound_skipped(
     merged = merge_with_current_person(payload, current)
 
     assert field not in merged or _writable(entry) in merged[field]
+
+
+def _pull(person: dict[str, Any]) -> Contact:
+    """The contact inbound sync builds from a person."""
+    return GoogleContactTransformer(user_id="1").transform_person(
+        GooglePerson.model_validate(person)
+    )
+
+
+def _set_nickname(value: str | None) -> Callable[[Contact], None]:
+    def edit(contact: Contact) -> None:
+        contact.nick_name = value
+
+    return edit
+
+
+def _clear_addresses(contact: Contact) -> None:
+    contact.addresses = []
+
+
+def _clear_methods(contact: Contact) -> None:
+    contact.methods = []
+
+
+def _unchanged(contact: Contact) -> None:
+    return None
+
+
+@pytest.mark.parametrize("with_organization", [False, True], ids=["cron", "event"])
+@pytest.mark.parametrize(
+    "edit",
+    [
+        _unchanged,
+        _set_nickname("Countess"),
+        _set_nickname(None),
+        _clear_addresses,
+        _clear_methods,
+    ],
+    ids=["unchanged", "nickname-renamed", "nickname-cleared", "addresses", "methods"],
+)
+def test_a_pull_after_the_push_reads_back_what_was_pushed(
+    edit: Callable[[Contact], None], with_organization: bool
+) -> None:
+    """Keeping an entry must not make it the value the next pull imports.
+
+    A kept entry inbound would read as the contact's own (a surviving nickname
+    after the local one is cleared) undoes the local edit on the next pull.
+    Pushing the same contact again must leave Google as the first push did.
+    """
+    current = _current_person()
+    contact = _pull(current)
+    edit(contact)
+    pushed = _push_contact(contact, with_organization=with_organization)
+    payload = _transform_contact_to_google_person(pushed)
+
+    after_push = {**current, **merge_with_current_person(payload, current)}
+    after_second_push = {
+        **after_push,
+        **merge_with_current_person(payload, after_push),
+    }
+
+    assert _push_contact(_pull(after_push), with_organization=with_organization) == (
+        pushed
+    )
+    assert after_second_push == after_push

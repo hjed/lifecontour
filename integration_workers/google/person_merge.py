@@ -104,11 +104,18 @@ class KeepUnimported:
 
 @dataclass(frozen=True)
 class KeepUnchosen:
-    """Inbound reads one entry, which local owns; every other one is kept."""
+    """Inbound reads one entry, which local owns; the others are kept beside it.
+
+    The pushed entry leads the list, so it is the one inbound and the next push
+    choose. With nothing pushed every entry goes: inbound would read a survivor
+    as the contact's own, undoing the local clear on the next pull.
+    """
 
     choose: Callable[[list[Entry]], int | None]
 
     def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+        if not pushed:
+            return pushed
         owned = self.choose(current)
         kept = [
             _writable(entry)

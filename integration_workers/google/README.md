@@ -178,7 +178,7 @@ fails when a pushed field has none:
 | Field | Local contact owns | Kept from Google |
 |---|---|---|
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
-| `nicknames` | the one inbound reads (primary, else first) | every other nickname |
+| `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
 | `emailAddresses`, `phoneNumbers` | the entries inbound imports | entries it rejects (invalid values) |
 | `addresses` | the entries inbound imports | entries it rejects (no street, or no country code — #1820) |
 | `birthdays` | a birthday with a usable date | a text-only birthday: with no local birthday the field leaves the update mask, so Google keeps it |

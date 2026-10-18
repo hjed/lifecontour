@@ -429,7 +429,8 @@ class TestNicknames:
             {"value": "AL", "type": "INITIALS"},
         ]
 
-    def test_nickname_cleared_locally_drops_only_the_owned_one(self) -> None:
+    def test_nickname_cleared_locally_clears_them_all(self) -> None:
+        """A survivor would be the nickname inbound reads next, undoing the clear."""
         current = {
             "nicknames": [
                 {"metadata": CONTACT_SOURCE, "value": "Ada"},
@@ -439,4 +440,19 @@ class TestNicknames:
 
         merged = merge_with_current_person({"nicknames": []}, current)
 
-        assert merged["nicknames"] == [{"value": "AL"}]
+        assert merged["nicknames"] == []
+
+    def test_a_second_push_replaces_the_same_nickname(self) -> None:
+        """The pushed nickname leads, so inbound and the next push both read it."""
+        current = {
+            "nicknames": [
+                {"metadata": {"primary": True, **CONTACT_SOURCE}, "value": "Ada"},
+                {"metadata": CONTACT_SOURCE, "value": "AL"},
+            ]
+        }
+        payload = {"nicknames": [{"value": "Countess"}]}
+        first = merge_with_current_person(payload, current)
+
+        second = merge_with_current_person(payload, first)
+
+        assert second["nicknames"] == [{"value": "Countess"}, {"value": "AL"}]
