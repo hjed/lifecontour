@@ -208,12 +208,17 @@ async def call_mcp_tool(
     """Call one MCP tool as a sessionless client and return its payload.
 
     Every mounted-MCP test builds the same ``tools/call`` request, so it lives
-    here rather than being copied per test.
+    here rather than being copied per test. A refusal fails the call: a test
+    that expects one uses ``call_mcp_tool_error``, which asserts it.
     """
     response = await post_mcp_tool(
         authenticated_client, tool_name, arguments, request_id=request_id
     )
     assert response.status_code == 200, response.text
+    result = _tool_call_result(response.text)
+    assert result is None or not result.get("isError"), (
+        f"{tool_name} refused: {response.text}"
+    )
     return extract_mcp_json_payload(response.text)
 
 

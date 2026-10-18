@@ -77,7 +77,7 @@ from tests.integration.foreign_contact_seeding import (
     seed_foreign_contact,
     snapshot,
 )
-from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.mcp.http_helpers import call_mcp_tool, call_mcp_tool_error
 from tests.integration.tasks.task_seeding import create_journal, create_task
 
 # What an absent id looks like, for each kind of id a call can vary.
@@ -494,6 +494,16 @@ async def _call(
         return await call_mcp_tool(client, tool, arguments)
 
 
+async def _refused(
+    authenticated_lifespan_client: Callable[..., Any],
+    tool: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Call ``tool`` expecting a refusal; the payload of its ``isError`` result."""
+    async with authenticated_lifespan_client() as client:
+        return await call_mcp_tool_error(client, tool, arguments)
+
+
 def _masked(payload: dict[str, Any], *ids: int | str) -> str:
     """The payload as text, with each named id replaced by ``<id>``.
 
@@ -519,10 +529,6 @@ def _flat_values(value: Any) -> list[object]:
     return [value]
 
 
-def _is_error(payload: dict[str, Any]) -> bool:
-    return "error" in payload
-
-
 @pytest.mark.integration
 class TestMcpContactOwnershipIsEnforced:
     """No MCP tool acts on, or reveals, a contact the caller does not own."""
@@ -540,17 +546,16 @@ class TestMcpContactOwnershipIsEnforced:
         foreign_value = values[call.varies]
         before = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
 
-        foreign = await _call(
+        foreign = await _refused(
             authenticated_lifespan_client, call.tool, call.filled(values)
         )
         after_foreign = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
-        missing = await _call(
+        missing = await _refused(
             authenticated_lifespan_client,
             call.tool,
             call.filled({**values, call.varies: call.missing_value()}),
         )
 
-        assert _is_error(foreign), f"{call.id} acted on another user's row: {foreign}"
         masked = _masked(foreign, foreign_value, call.missing_value())
         assert masked == _masked(missing, foreign_value, call.missing_value())
         # On the unmasked payload: masking a small id could erase a digit of
@@ -604,11 +609,10 @@ class TestMcpContactOwnershipIsEnforced:
         """
         await _hand_everything_to_caller(async_connection)
 
-        payload = await _call(
+        # ``_call`` fails on a refusal, so reaching the end is the assertion.
+        await _call(
             authenticated_lifespan_client, call.tool, call.filled(owned_state.values())
         )
-
-        assert not _is_error(payload), f"{call.id} failed for the owner: {payload}"
 
     @pytest.mark.parametrize("call", NO_RESULT_CALLS, ids=lambda call: call.id)
     async def test_the_same_filter_finds_the_owners_rows(
@@ -648,7 +652,7 @@ class TestMcpContactOwnershipIsEnforced:
         As over REST: naming their contact answers that the contact is not
         found, not that the relationship is foreign to it.
         """
-        payload = await _call(
+        payload = await _refused(
             authenticated_lifespan_client, call.tool, call.filled(owned_state.values())
         )
 
@@ -917,19 +921,18 @@ class TestMcpContactTagsAreTheActingUsers:
         theirs = owned_state.contact.tag_id
         mine = owned_state.contact.own_tag_id
 
-        async def call(tag_id: int) -> dict[str, Any]:
+        async def refused(tag_id: int) -> dict[str, Any]:
             filled = {
                 name: value.format(tag=tag_id, mine=mine)
                 for name, value in arguments.items()
             }
-            return await _call(authenticated_lifespan_client, tool, filled)
+            return await _refused(authenticated_lifespan_client, tool, filled)
 
         before = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
-        foreign = await call(theirs)
+        foreign = await refused(theirs)
         after_foreign = await snapshot(async_connection, MCP_UNCHANGED_ROWS)
-        missing = await call(MISSING_TAG_ID)
+        missing = await refused(MISSING_TAG_ID)
 
-        assert _is_error(foreign), f"{tool} acted on another user's tag: {foreign}"
         assert _masked(foreign, theirs, MISSING_TAG_ID) == _masked(
             missing, theirs, MISSING_TAG_ID
         )
@@ -944,13 +947,13 @@ class TestMcpContactTagsAreTheActingUsers:
     ) -> None:
         own_contact_id = owned_state.contact.own_contact_id
 
-        payload = await _call(
+        # ``_call`` fails on a refusal, so the update going through is asserted.
+        await _call(
             authenticated_lifespan_client,
             "update_contact",
             {"request": {"contact_id": own_contact_id, "tags": [TAG_NAME]}},
         )
 
-        assert not _is_error(payload), payload
         held = await async_connection.execute(
             text(
                 "SELECT t.id, t.name, t.user_id FROM contact_tags ct "

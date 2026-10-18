@@ -168,6 +168,7 @@ class TestCreateJournalWithTypes:
         self,
         authenticated_lifespan_client,
         _create_journal_via_mcp,
+        async_connection: AsyncConnection,
     ) -> None:
         """Creating with an invalid type name (TRIP) should return a clear error.
 
@@ -194,17 +195,15 @@ class TestCreateJournalWithTypes:
             assert "error" in payload
             assert "TRIP" in payload.get("message", "")
 
-            # Verify no journal was persisted (no partial commit)
-            search_payload = await call_mcp_tool(
-                authenticated_client,
-                "search_journals",
-                {"query": "Utah Trip 2025"},
-                request_id=3,
-            )
-            journals = search_payload.get("journals", [])
-            assert not any(j.get("title") == "Utah Trip 2025" for j in journals), (
-                "Journal should not be persisted when types are invalid"
-            )
+        # No journal was persisted (no partial commit). Read from the table:
+        # a search would refuse without an index, and a refusal read as an
+        # empty result would pass this whether or not the row was written.
+        written = await async_connection.execute(
+            text("SELECT COUNT(*) FROM journals WHERE title = 'Utah Trip 2025'")
+        )
+        assert written.scalar_one() == 0, (
+            "Journal should not be persisted when types are invalid"
+        )
 
     @pytest.mark.asyncio
     async def test_create_journal_with_iso_datetime_event_date_range(
@@ -455,6 +454,7 @@ class TestCreateJournalWithParent:
                     "types": ["NOTE"],
                     "parent_id": 999999,
                 },
+                refused=True,
             )
 
         # Refused, and refused in the words an id that never existed gets, so

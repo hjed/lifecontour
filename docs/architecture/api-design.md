@@ -57,8 +57,8 @@ This document provides comprehensive API design patterns for both REST and MCP i
 - Define clear function names and docstrings
 - Use Pydantic `Field` with `Annotated` for parameter descriptions
 - Don't rely on `StrictBool` or other `Strict*` types: fastmcp validates arguments with `strict=False`, which overrides them, so `"true"` arrives as `True`. For a boolean that confirms an action, use `JsonBool` from `app/mcp/shared/arguments.py`, which refuses anything but a JSON `true`/`false`
-- Return JSON strings for structured data
-- Include comprehensive error handling with try/catch blocks
+- Return **one Pydantic response model** — see [Response Format](#response-format)
+- Refuse by raising `MCPErrors.*`, never by returning an error payload — see [Errors](#errors)
 - Provide AI-friendly responses with context and summaries
 - Declare behaviour annotations — see below; a tool without them fails CI
 
@@ -102,12 +102,12 @@ Apply the preset with whichever registration pattern the domain uses:
 # Module-level tool registered via mcp.add_tool() — journals, series, tasks
 @tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_task_text", "task")
-async def update_task_text(...) -> str: ...
+async def update_task_text(...) -> TaskMCP: ...
 
 # Closure registered inside register_*_tools() — contacts, integrations
 @mcp.tool(annotations=DESTRUCTIVE_WRITE)
 @mcp_unified_error_handler("delete_contact_tag", "tag")
-async def delete_contact_tag(...) -> str: ...
+async def delete_contact_tag(...) -> ContactActionResponse: ...
 ```
 
 `tests/unit/mcp/test_tool_annotations.py` enforces this against the assembled
@@ -127,11 +127,51 @@ destructive tool cannot be introduced without someone saying so.
 
 ### Response Format
 
-- Return JSON strings with structured, AI-friendly data
+A tool's return annotation is its contract. fastmcp derives the tool's
+`outputSchema` from it and sends the returned model as `structuredContent`,
+with the same JSON as a text block for clients that ignore structured
+content. The schema is the only description of the result a client gets:
+fastmcp strips `Returns:` sections from tool descriptions, so put what an
+agent needs to read the answer in the model's docstring and its fields'
+`Field(description=...)`, not in the tool's docstring.
+
+- Return exactly **one** response model from the domain's `schemas.py` — never
+  `str`, a list, a dict, an `Optional` or a union. fastmcp wraps those in a
+  `{"result": ...}` envelope that tells a client nothing about the fields. A
+  list goes in a field of a list-response model, and "maybe nothing" is a
+  nullable field (`get_daily_summary` answers `{"data": <summary> | null}`)
+- Use domain enums for closed sets (`TaskStatus`, `IntegrationStatus`), so the
+  schema lists the values
+- Define the model at module level and import it at runtime, not under
+  `TYPE_CHECKING`: fastmcp must be able to resolve the annotation
 - Include contextual summaries for AI understanding
 - Provide clear error messages with helpful context
 - Use consistent field naming across all tools
 - Add metadata like IDs, tags, and relationship information
+
+`tests/unit/mcp/test_tool_output_schemas.py` enforces this against the
+assembled server: a tool that publishes no `outputSchema`, or a wrapped one,
+fails it.
+
+### Errors
+
+A tool refuses by **raising** — `raise MCPErrors.not_found("Tag", tag_id)` —
+and `mcp_unified_error_handler` (`app/mcp/shared/decorators.py`) does the same
+for the domain errors a service raises. Both are an `MCPToolError`, a fastmcp
+`ToolError`, which reaches the client as an `isError: true` result. Returning
+an error payload instead would answer a refusal as a success, in a shape its
+`outputSchema` does not describe.
+
+The error's text is a JSON payload — `error`, `message`, and whatever context
+the refusal carries for an agent to act on: `field` on a validation error,
+`code` (`PRECONDITION_FAILED`, `JOURNAL_HAS_ANCHORED_TASKS`, …) where REST
+sends the same code, `current_version` on a stale `expected_version`. Use the
+factories in `app/mcp/shared/response_builders.py` (`error`, `validation`,
+`not_found`, `internal`) so every tool's refusals share that shape.
+
+In integration tests, `call_mcp_tool` fails on a refusal and
+`call_mcp_tool_error` (`tests/integration/mcp/http_helpers.py`) asserts one
+and returns its payload.
 
 ### Authentication Integration
 

@@ -11,23 +11,10 @@ import logging
 
 import pytest
 from fastmcp.exceptions import ToolError
-from pydantic import BaseModel
 
-from app.mcp.shared.response_builders import (
-    MCPErrors,
-    MCPResponseBuilder,
-    MCPToolError,
-)
+from app.mcp.shared.response_builders import MCPErrors, MCPToolError
 
 pytestmark = pytest.mark.unit
-
-
-class SampleResponse(BaseModel):
-    """Sample response model for testing."""
-
-    id: str
-    name: str
-    status: str
 
 
 class TestMCPToolError:
@@ -120,29 +107,3 @@ class TestMCPErrors:
 
         assert error.payload["error"] == "Internal error"
         assert error.payload["operation_type"] == "c"
-
-
-class TestLegacyStringBuilders:
-    """Kept only until every tool raises; they render the same payloads."""
-
-    def test_success_response_is_indented_json(self) -> None:
-        data = SampleResponse(id="123", name="Test Item", status="active")
-
-        response = MCPResponseBuilder.success_response(data)
-
-        assert json.loads(response) == data.model_dump(mode="json")
-        assert response == json.dumps(data.model_dump(mode="json"), indent=2)
-
-    def test_error_builders_render_the_raised_payloads(self) -> None:
-        assert MCPResponseBuilder.error_response("E", "m", {"k": 1}) == str(
-            MCPErrors.error("E", "m", {"k": 1})
-        )
-        assert MCPResponseBuilder.validation_error_response("f", "m") == str(
-            MCPErrors.validation("f", "m")
-        )
-        assert MCPResponseBuilder.not_found_error_response("Tag", 3) == str(
-            MCPErrors.not_found("Tag", 3)
-        )
-        assert MCPResponseBuilder.internal_error_response("op") == str(
-            MCPErrors.internal("op")
-        )
