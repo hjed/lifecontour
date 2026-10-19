@@ -743,6 +743,15 @@ in the Immich sync service), so a field added to contacts later is safe from eve
 sync until a source claims it. Immich owns only the avatar and birthday of a
 linked contact; its names apply only when it creates the contact.
 
+**Push field ownership (Google).** The outbound push mirrors the scope per
+entry. Google's `updatePersonFields` replaces each named field wholesale, so
+`person_merge.merge_with_current_person` keeps every entry of a pushed field that
+inbound sync would not import, judged by the transformer's own per-entry
+functions rather than a second list. Each pushed field declares a policy in
+`FIELD_POLICIES`, and a round-trip test (import a person, push it back
+unchanged) fails if anything inbound skipped is lost. See the Google worker
+README for the per-field table.
+
 **Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
 than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy
 the backend no later than the workers.

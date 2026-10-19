@@ -1103,8 +1103,8 @@ async def _update_or_recreate_contact_in_google(
 
     The update replaces every field the payload names, so the person is read
     first and the payload merged into it: Google values the local model cannot
-    represent (honorifics, custom events, other organizations) survive the
-    push. The update goes out against the etag of the version merged with, and
+    represent (honorifics, custom events, other organizations, entries inbound
+    sync never imported) survive the push. The update goes out against the etag of the version merged with, and
     a conflict retry merges again into the person the client refetches, so a
     Google edit landing between the read and the write is not reverted.
 

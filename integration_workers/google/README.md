@@ -168,13 +168,26 @@ An update push **merges into** the person rather than replacing it (#1732).
 `updatePersonFields` replaces each named field wholesale, but the local model
 cannot represent everything Google holds, so `_update_or_recreate_contact_in_google`
 reads the person first and `person_merge.merge_with_current_person` keeps what
-the local contact does not own:
+the local contact does not own. The local contact owns exactly what inbound sync
+imports, and the merge asks the import's own per-entry functions
+(`import_email`, `import_address`, `import_birthday`, … in `transformer.py`), so
+the two cannot drift apart (#1788). Every pushed field has a policy in
+`person_merge.FIELD_POLICIES`, and `tests/unit/test_push_field_ownership.py`
+fails when a pushed field has none:
 
 | Field | Local contact owns | Kept from Google |
 |---|---|---|
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
+| `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
+| `emailAddresses`, `phoneNumbers` | the entries inbound imports | entries it rejects (invalid values) |
+| `addresses` | the entries inbound imports | entries it rejects (no street, or no country code — #1820) |
+| `birthdays` | a birthday with a usable date | a text-only birthday: with no local birthday the field leaves the update mask, so Google keeps it |
 | `events` | `anniversary` events | every other event (custom, untyped) |
 | `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
+| `biographies`, `memberships` | everything | nothing (memberships: see #1821) |
+
+Parts of an owned entry the local model cannot hold (an address's type, a
+phone's formatting) are still replaced (#1823).
 
 The owned entry is chosen exactly as the import chooses it, and values from a
 linked profile (rather than the contact) are never copied into the contact. The

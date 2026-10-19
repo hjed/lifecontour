@@ -26,11 +26,14 @@ from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSync
 from core_shared.models.contacts.value_objects import TagName
 
 from api_models import (
+    GoogleAddress,
     GoogleBirthday,
     GoogleDate,
+    GoogleEmailAddress,
     GoogleNickname,
     GooglePerson,
     GooglePersonEvent,
+    GooglePhoneNumber,
 )
 from group_translator import GoogleGroupNameTranslator
 
@@ -106,7 +109,12 @@ class GoogleContactTransformer:
         )
 
         first_name, last_name, middle_name = self._extract_names(google_person.names)
-        nick_name = self._extract_nickname(google_person.nicknames)
+        chosen_nickname = select_nickname(google_person.nicknames)
+        nick_name = (
+            chosen_nickname.value.strip()
+            if chosen_nickname and chosen_nickname.value
+            else None
+        )
 
         if not first_name:
             first_name = "Unknown"
@@ -194,118 +202,23 @@ class GoogleContactTransformer:
             getattr(primary_name, "middle_name", None),
         )
 
-    @staticmethod
-    def _extract_nickname(nicknames: list[GoogleNickname]) -> str | None:
-        """The primary nickname, else the first one with a value.
-
-        The contact holds one nickname; the push sends it back as Google's only
-        one.
-        """
-        values = [n for n in nicknames if n.value and n.value.strip()]
-        primary = next((n for n in values if n.metadata.primary), None)
-        chosen = primary or (values[0] if values else None)
-        return chosen.value.strip() if chosen and chosen.value else None
-
     def _transform_email_addresses(
-        self, email_addresses: list[Any]
+        self, email_addresses: list[GoogleEmailAddress]
     ) -> list[ContactMethod]:
         """Transform Google email addresses to ContactMethod entities."""
-        return self._transform_contact_methods(email_addresses, MethodType.EMAIL)
+        return [m for m in map(import_email, email_addresses) if m is not None]
 
-    def _transform_phone_numbers(self, phone_numbers: list[Any]) -> list[ContactMethod]:
-        """Transform Google phone numbers to ContactMethod entities."""
-        return self._transform_contact_methods(
-            phone_numbers,
-            MethodType.PHONE,
-            preferred_value_attr="canonical_form",
-        )
-
-    def _transform_contact_methods(
-        self,
-        contact_values: list[Any],
-        method_type: MethodType,
-        preferred_value_attr: str | None = None,
+    def _transform_phone_numbers(
+        self, phone_numbers: list[GooglePhoneNumber]
     ) -> list[ContactMethod]:
-        """Transform Google contact methods into validated ContactMethod entities."""
-        contact_methods = []
+        """Transform Google phone numbers to ContactMethod entities."""
+        return [m for m in map(import_phone, phone_numbers) if m is not None]
 
-        for contact_value in contact_values:
-            value = self._extract_contact_method_value(
-                contact_value, preferred_value_attr=preferred_value_attr
-            )
-            if not value:
-                continue
-
-            contact_method = self._create_contact_method(
-                method_type=method_type,
-                value=value,
-                label=self._extract_field_label(contact_value),
-                is_primary=self._is_primary_field(contact_value),
-            )
-            if contact_method:
-                contact_methods.append(contact_method)
-
-        return contact_methods
-
-    def _extract_contact_method_value(
-        self,
-        contact_value: Any,
-        preferred_value_attr: str | None = None,
-    ) -> str | None:
-        """Extract the most useful method value from a Google field."""
-        if preferred_value_attr:
-            preferred_value = getattr(contact_value, preferred_value_attr, None)
-            if isinstance(preferred_value, str) and preferred_value:
-                return preferred_value
-
-        value = getattr(contact_value, "value", None)
-        if isinstance(value, str) and value:
-            return value
-
-        return None
-
-    def _extract_field_label(self, field_value: Any) -> str | None:
-        """Extract a display label from a Google field value."""
-        formatted_type = getattr(field_value, "formatted_type", None)
-        if isinstance(formatted_type, str) and formatted_type:
-            return formatted_type
-
-        fallback_type = getattr(field_value, "type", None)
-        if isinstance(fallback_type, str) and fallback_type:
-            return fallback_type
-
-        return None
-
-    def _is_primary_field(self, field_value: Any) -> bool:
-        """Return whether a Google field is marked as primary."""
-        metadata = getattr(field_value, "metadata", None)
-        return bool(getattr(metadata, "primary", False))
-
-    def _transform_addresses(self, addresses: list[Any]) -> list[ContactAddress]:
+    def _transform_addresses(
+        self, addresses: list[GoogleAddress]
+    ) -> list[ContactAddress]:
         """Transform Google addresses to ContactAddress entities."""
-        contact_addresses = []
-
-        for address in addresses:
-            is_primary = self._is_primary_field(address)
-
-            street_line_1 = getattr(address, "street_address", None)
-            if not street_line_1 and hasattr(address, "formatted_value"):
-                street_line_1 = address.formatted_value
-
-            if street_line_1 and getattr(address, "country_code", None):
-                contact_address = self._create_contact_address(
-                    street_line_1=street_line_1,
-                    country_code=address.country_code,
-                    street_line_2=getattr(address, "extended_address", None),
-                    locality=getattr(address, "city", None),
-                    region=getattr(address, "region", None),
-                    postal_code=getattr(address, "postal_code", None),
-                    is_primary=is_primary,
-                )
-                if contact_address:
-                    contact_addresses.append(contact_address)
-
-        return contact_addresses
+        return [a for a in map(import_address, addresses) if a is not None]
 
     def _transform_biographies(self, biographies: list[Any]) -> list[ContactNote]:
         """Transform Google biographies to ContactNote entities."""
@@ -320,63 +233,6 @@ class GoogleContactTransformer:
                 notes.append(note)
 
         return notes
-
-    def _create_contact_method(
-        self,
-        method_type: MethodType,
-        value: str,
-        label: str | None,
-        is_primary: bool,
-    ) -> ContactMethod | None:
-        """Create a validated contact method, skipping invalid values."""
-        try:
-            return ContactMethod(
-                method_type=method_type,
-                value=value,
-                label=label,
-                is_primary=is_primary,
-                contact_id=0,
-            )
-        except ValueError as exc:
-            logger.warning(
-                "Skipping invalid Google contact method",
-                method_type=method_type.value,
-                value=value,
-                label=label,
-                error=str(exc),
-            )
-            return None
-
-    def _create_contact_address(
-        self,
-        street_line_1: str,
-        country_code: str,
-        street_line_2: str | None,
-        locality: str | None,
-        region: str | None,
-        postal_code: str | None,
-        is_primary: bool,
-    ) -> ContactAddress | None:
-        """Create a validated contact address, skipping invalid values."""
-        try:
-            return ContactAddress(
-                street_line_1=street_line_1,
-                country_code=country_code,
-                street_line_2=street_line_2,
-                locality=locality,
-                region=region,
-                postal_code=postal_code,
-                is_primary=is_primary,
-                contact_id=0,
-            )
-        except ValueError as exc:
-            logger.warning(
-                "Skipping invalid Google contact address",
-                street_line_1=street_line_1,
-                country_code=country_code,
-                error=str(exc),
-            )
-            return None
 
     def _create_contact_note(self, content: str) -> ContactNote | None:
         """Create a validated contact note, skipping invalid values."""
@@ -588,16 +444,7 @@ class GoogleContactTransformer:
         self, birthdays: list[GoogleBirthday]
     ) -> list[ImportantDate]:
         """Transform Google birthday entries to ImportantDate entities."""
-        results: list[ImportantDate] = []
-        for birthday in birthdays:
-            if birthday.date is None:
-                continue
-            important_date = self._google_date_to_important_date(
-                birthday.date, ImportantDateType.BIRTHDAY
-            )
-            if important_date:
-                results.append(important_date)
-        return results
+        return [b for b in map(import_birthday, birthdays) if b is not None]
 
     def _transform_events(self, events: list[GooglePersonEvent]) -> list[ImportantDate]:
         """Transform Google event entries to ImportantDate entities.
@@ -661,3 +508,105 @@ class GoogleContactTransformer:
             month=month,
             day=day,
         )
+
+
+# ── Per-entry import ────────────────────────────────────────────────────
+#
+# Whether one Google entry becomes part of the local contact. The push merge
+# (``person_merge.py``) asks the same functions, so an entry a push treats as
+# owned is exactly one the import reads: whatever these reject, the push keeps
+# in Google (#1788).
+
+
+def select_nickname(nicknames: list[GoogleNickname]) -> GoogleNickname | None:
+    """The primary nickname, else the first one with a value.
+
+    The contact holds one nickname; the push sends it back in that one's place.
+    """
+    values = [n for n in nicknames if n.value and n.value.strip()]
+    primary = next((n for n in values if n.metadata.primary), None)
+    return primary or (values[0] if values else None)
+
+
+def import_email(email: GoogleEmailAddress) -> ContactMethod | None:
+    """The email as a contact method, or None when it is not a valid one."""
+    return _import_contact_method(email, MethodType.EMAIL, email.value)
+
+
+def import_phone(phone: GooglePhoneNumber) -> ContactMethod | None:
+    """The phone as a contact method, read from its canonical form when set."""
+    return _import_contact_method(
+        phone, MethodType.PHONE, phone.canonical_form or phone.value
+    )
+
+
+def import_address(address: GoogleAddress) -> ContactAddress | None:
+    """The address, or None without a street and a country code (see #1820)."""
+    street_line_1 = getattr(address, "street_address", None)
+    if not street_line_1 and hasattr(address, "formatted_value"):
+        street_line_1 = address.formatted_value
+    country_code = getattr(address, "country_code", None)
+    if not street_line_1 or not country_code:
+        return None
+    try:
+        return ContactAddress(
+            street_line_1=street_line_1,
+            country_code=country_code,
+            street_line_2=getattr(address, "extended_address", None),
+            locality=getattr(address, "city", None),
+            region=getattr(address, "region", None),
+            postal_code=getattr(address, "postal_code", None),
+            is_primary=_is_primary_field(address),
+            contact_id=0,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "Skipping invalid Google contact address",
+            street_line_1=street_line_1,
+            country_code=country_code,
+            error=str(exc),
+        )
+        return None
+
+
+def import_birthday(birthday: GoogleBirthday) -> ImportantDate | None:
+    """The birthday's date, or None when it has no usable date (text only)."""
+    if birthday.date is None:
+        return None
+    return GoogleContactTransformer._google_date_to_important_date(
+        birthday.date, ImportantDateType.BIRTHDAY
+    )
+
+
+def _import_contact_method(
+    entry: GoogleEmailAddress | GooglePhoneNumber,
+    method_type: MethodType,
+    value: str | None,
+) -> ContactMethod | None:
+    """A validated contact method, or None for a missing or invalid value."""
+    if not value:
+        return None
+    label = entry.formatted_type or entry.type or None
+    try:
+        return ContactMethod(
+            method_type=method_type,
+            value=value,
+            label=label,
+            is_primary=_is_primary_field(entry),
+            contact_id=0,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "Skipping invalid Google contact method",
+            method_type=method_type.value,
+            value=value,
+            label=label,
+            error=str(exc),
+        )
+        return None
+
+
+def _is_primary_field(field_value: Any) -> bool:
+    """Whether a Google field is marked as primary."""
+    metadata = getattr(field_value, "metadata", None)
+    return bool(getattr(metadata, "primary", False))
