@@ -209,6 +209,28 @@ collide across them.
 |---|---|
 | `GET /api/journals/{id}`, `GET /api/contacts/{id}` | Return an `ETag` response header |
 | `PUT`/`PATCH /api/journals/{id}`, `PUT /api/contacts/{id}` | Honour `If-Match`, and stamp the new `ETag` on the 200 |
+| Writes to a contact's rows: `PATCH /api/contacts/{id}/fields/{field}`; `POST .../methods`, `DELETE .../methods/{method_id}`, `PATCH .../methods/{method_id}/fields/{field}`; the same three for `addresses`; `PATCH .../notes/{note_id}/fields/{field}`; `POST .../important-dates`, `PUT`/`DELETE .../important-dates/{date_id}` | Honour `If-Match` against the **contact's** tag, and stamp the contact's new `ETag` on the response — including a `204` |
+
+A write to one of a contact's rows is guarded by the contact's tag, not one of
+its own: the tag covers the whole aggregate (below), so a client holding the
+contact's tag can guard a write to any row the contact renders. The cost is
+that two concurrent edits to *different* rows of one contact conflict, which a
+client resolves exactly as any other 412 — re-read and re-apply.
+
+**Which version a write answers with.** A route whose body is the re-read
+contact stamps the tag from that same read, so the tag never names a version
+newer than the body; the contact row is read before its child rows, so under
+READ COMMITTED the body can only be the newer of the two, and the worst that
+does is refuse the client's next conditional write. A route with no such body
+— a field edit, a `204` — stamps the version its own write committed, captured
+inside its unit of work (`Versioned`, `backend/app/shared/versioned.py`). It is
+never re-read after the commit: that read could already include somebody
+else's change, and a client handed its tag would overwrite the change without
+having seen it.
+
+`test_subresource_preconditions.py` checks the table against the app's routes:
+a new write under `/api/contacts/{contact_id}` fails until it is guarded or
+exempted with its reason.
 
 `If-Match` semantics: absent means write unconditionally; `*` means the resource
 need only exist; a list matches if any tag does. Weak tags (`W/"..."`) compare
@@ -244,8 +266,16 @@ and retry rather than treating it as a server fault.
 ### Where the check lives
 
 In the **service layer**, never the controller, so both surfaces share one
-implementation (`enforce_etag_precondition`, `backend/app/shared/preconditions.py`).
+implementation (`guard_aggregate_write`, `backend/app/shared/preconditions.py`).
 Controllers pass the caller's precondition through untouched.
+
+**Every write to an aggregate starts with the guard, with or without a
+precondition.** It takes the aggregate's row lock, refuses a row that is gone
+(404, before any 412 — a refusal never invents a version), and only then
+compares the tag. The lock is not just for the comparison: an unconditional
+read-modify-write races too, and taking the parent's lock first is what keeps
+every writer in the same lock order. The contact's locking read is
+owner-scoped, so a 412 never reveals the version of somebody else's contact.
 
 The comparison reads the row with `SELECT updated_at ... FOR UPDATE` inside the
 write's unit of work. An unlocked read would leave a lost-update window under

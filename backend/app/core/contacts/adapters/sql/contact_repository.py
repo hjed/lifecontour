@@ -1,6 +1,7 @@
 """SQL implementation of ContactRepository."""
 
 from datetime import datetime
+from typing import cast
 
 from core_shared.models.contacts.entities import (
     Contact,
@@ -594,19 +595,23 @@ class SqlContactRepository(ContactRepository):
 
     async def touch(
         self, contact_id: int, transaction: AsyncConnection | None = None
-    ) -> None:
-        """Update the updated_at timestamp of a contact."""
+    ) -> datetime:
+        """Mark a contact as changed; see the port for what the result is for."""
         query = text(
             """
             UPDATE contacts
             SET updated_at = NOW()
             WHERE id = :contact_id
+            RETURNING updated_at
             """
         )
         conn = transaction or self.conn
-        result = await conn.execute(query, {"contact_id": contact_id})
-        if result.rowcount == 0:
+        updated_at = (
+            await conn.execute(query, {"contact_id": contact_id})
+        ).scalar_one_or_none()
+        if updated_at is None:
             raise ContactNotFoundError(contact_id)
+        return cast(datetime, updated_at)
 
     async def lock(self, contact_id: int) -> None:
         """Take the contact's row lock; see the port for the ordering it fixes."""
@@ -615,7 +620,9 @@ class SqlContactRepository(ContactRepository):
             {"contact_id": contact_id},
         )
 
-    async def lock_and_get_updated_at(self, contact_id: int) -> datetime | None:
+    async def lock_and_get_updated_at(
+        self, contact_id: int, *, user_id: str
+    ) -> datetime | None:
         """Lock the contact row and return its last-write timestamp.
 
         ``FOR UPDATE`` rather than a plain read: see the port for the
@@ -625,11 +632,13 @@ class SqlContactRepository(ContactRepository):
             """
             SELECT updated_at
             FROM contacts
-            WHERE id = :contact_id
+            WHERE id = :contact_id AND user_id = :user_id
             FOR UPDATE
             """
         )
-        result = await self.conn.execute(query, {"contact_id": contact_id})
+        result = await self.conn.execute(
+            query, {"contact_id": contact_id, "user_id": user_id}
+        )
         row = result.fetchone()
 
         return row.updated_at if row else None

@@ -767,8 +767,8 @@ class TestContactService:
         )
 
         calls = [name for name, *_ in mock_contact_repo.method_calls]
-        assert "lock" in calls
-        assert calls.index("lock") < calls.index("find_by_id")
+        assert "lock_and_get_updated_at" in calls
+        assert calls.index("lock_and_get_updated_at") < calls.index("find_by_id")
 
     @pytest.mark.asyncio
     async def test_update_contact_refuses_a_list_and_a_merge_for_one_resource(

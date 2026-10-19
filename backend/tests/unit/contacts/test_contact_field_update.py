@@ -1,5 +1,7 @@
 """Unit tests for contact field update functionality."""
 
+from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,6 +16,13 @@ from tests.fixtures.contact_fixtures import (
     create_contact_with_methods,
 )
 from tests.integration.contact_seeding import TEST_USER_ID
+
+# The versions the repository reports: as locked before a write, as a contact
+# save leaves it, and as a child-row write's touch leaves it. Distinct, so a
+# write that reports the wrong one is caught.
+LOCKED = datetime(2026, 1, 1, tzinfo=UTC)
+SAVED = datetime(2026, 1, 2, tzinfo=UTC)
+TOUCHED = datetime(2026, 1, 3, tzinfo=UTC)
 
 
 class TestContactFieldUpdate:
@@ -105,18 +114,25 @@ class TestContactFieldUpdate:
     ):
         """Test updating first name field."""
         mock_contact_repo.find_by_id.return_value = sample_contact
+        mock_contact_repo.lock_and_get_updated_at.return_value = LOCKED
+        mock_contact_repo.save.side_effect = lambda contact: replace(
+            contact, updated_at=SAVED
+        )
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id=1,
             field_name="first_name",
             field_value="Jonathan",
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "John"
         assert new_value == "Jonathan"
+        # The version the save committed: the client's next precondition.
+        assert written.updated_at == SAVED
 
         # Verify contact was saved with updated value
         mock_contact_repo.save.assert_called_once()
@@ -142,13 +158,14 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id=1,
             field_name="is_favourite",
             field_value="true",
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "False"
         assert new_value == "True"
@@ -165,13 +182,14 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id=1,
             field_name="is_favourite",
             field_value=True,
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "False"
         assert new_value == "True"
@@ -190,18 +208,22 @@ class TestContactFieldUpdate:
     ):
         """Test updating field with same value (no change)."""
         mock_contact_repo.find_by_id.return_value = sample_contact
+        mock_contact_repo.lock_and_get_updated_at.return_value = LOCKED
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id=1,
             field_name="first_name",
             field_value="John",  # Same as current value
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "John"
         assert new_value == "John"
+        # Nothing was written, so the version is the one locked.
+        assert written.updated_at == LOCKED
 
         # Verify no save, history, or event operations were performed
         mock_contact_repo.save.assert_not_called()
@@ -216,13 +238,14 @@ class TestContactFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_field(
+        written = await contact_service.update_contact_field(
             contact_id=1,
             field_name="middle_name",
             field_value=None,
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "William"
         assert new_value is None
@@ -384,9 +407,11 @@ class TestContactMethodFieldUpdate:
     ):
         """Test updating method value field."""
         mock_contact_repo.find_by_id.return_value = sample_contact_with_method
+        mock_contact_repo.lock_and_get_updated_at.return_value = LOCKED
+        mock_contact_repo.touch.return_value = TOUCHED
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_method_field(
+        written = await contact_service.update_contact_method_field(
             contact_id=1,
             method_id=1,
             field_name="value",
@@ -394,9 +419,12 @@ class TestContactMethodFieldUpdate:
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "john.doe@example.com"
         assert new_value == "newemail@example.com"
+        # A child-row write's version is the one its touch of the contact left.
+        assert written.updated_at == TOUCHED
 
         # Verify method was updated
         mock_contact_repo.update_method.assert_called_once()
@@ -420,7 +448,7 @@ class TestContactMethodFieldUpdate:
         mock_contact_repo.find_by_id.return_value = sample_contact_with_method
         mock_transaction = AsyncMock()
 
-        old_value, new_value = await contact_service.update_contact_method_field(
+        written = await contact_service.update_contact_method_field(
             contact_id=1,
             method_id=1,
             field_name="is_primary",
@@ -428,6 +456,7 @@ class TestContactMethodFieldUpdate:
             transaction=mock_transaction,
             user_id=TEST_USER_ID,
         )
+        old_value, new_value = written.value
 
         assert old_value == "True"
         assert new_value == "False"
