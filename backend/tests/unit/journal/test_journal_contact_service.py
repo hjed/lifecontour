@@ -39,6 +39,7 @@ def _service(
         contact_relationship_repo=relationship_repo,
         event_publisher=publisher,
         contact_repo=contact_repo,
+        journal_repo=AsyncMock(),
     )
     return service, contact_repo, relationship_repo, publisher
 

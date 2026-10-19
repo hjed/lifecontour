@@ -64,8 +64,8 @@ class ContactRepository(ABC):
     deletes the aggregate takes the acting user's id and filters on it in SQL,
     so another user's contact is indistinguishable from a missing one. The
     child-row methods (methods, addresses, notes, tags, important dates, links)
-    and ``lock`` / ``touch`` / ``lock_and_get_updated_at`` stay keyed by the
-    contact id: the service proves the contact is the user's first.
+    and ``touch`` stay keyed by the contact id: the service proves the contact
+    is the user's first, through the owner-scoped ``lock_and_get_updated_at``.
     """
 
     @abstractmethod
@@ -165,20 +165,6 @@ class ContactRepository(ABC):
         pass
 
     @abstractmethod
-    async def lock(self, contact_id: int) -> None:
-        """Take a contact's row lock before writing any of its child rows.
-
-        Every child-write path ends by touching the contact, and a conditional
-        write takes the contact's lock *first* (see
-        :meth:`lock_and_get_updated_at`). Without this the two orders invert —
-        one holds the parent and wants the child, the other the reverse — and
-        PostgreSQL breaks the cycle by aborting one with a deadlock, which
-        nothing retries. Locking the parent up front makes every writer take
-        the locks in the same order, so they queue instead.
-        """
-        pass
-
-    @abstractmethod
     async def lock_and_get_updated_at(
         self, contact_id: int, *, user_id: str
     ) -> datetime | None:
@@ -188,7 +174,13 @@ class ContactRepository(ABC):
         the caller: a refused precondition names the current version, which
         must not be handed out for somebody else's contact.
 
-        Backs the optimistic-concurrency check on updates. Comparing an
+        Every write to the contact or a row it renders takes this lock first
+        (through ``guard_aggregate_write``). Without a common first lock, a
+        writer holding the parent and wanting a child, and one holding a child
+        and wanting the parent, deadlock - PostgreSQL aborts one, and nothing
+        retries it. Taking the parent up front makes them queue instead.
+
+        It also backs the optimistic-concurrency check. Comparing an
         entity-tag against an unlocked read leaves a lost-update window under
         READ COMMITTED: two callers can both see the version they expected
         before either of them writes. Taking the row lock here means the second

@@ -14,6 +14,7 @@ from core_shared.models.contacts.entities import Contact, ContactMethod, MethodT
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import Email
 from core_shared.models.history import Provenance
+from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.journals.journal_contact_relationship import (
     JournalContactRelationship,
 )
@@ -166,6 +167,13 @@ class ContactSuggestionService:
                 # that link is the better record, so it is kept as it is.
                 logger.info(
                     "Contact already linked to journal, keeping the link",
+                    journal_id=row.journal_id,
+                    contact_id=contact.id,
+                )
+            except JournalNotFoundError:
+                # Deleted since the suggestion listed it: nothing to link.
+                logger.info(
+                    "Suggested journal no longer exists, skipping it",
                     journal_id=row.journal_id,
                     contact_id=contact.id,
                 )

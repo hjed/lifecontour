@@ -353,6 +353,7 @@ class TestTheOtherWaysADayChanges:
             ),
             event_publisher=OutboxEventPublisher(async_connection),
             contact_repo=SqlContactRepository(async_connection),
+            journal_repo=SqlJournalRepository(async_connection),
         )
         await contact_service.add_contact_to_journal(
             JournalContactRelationship(

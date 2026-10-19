@@ -63,6 +63,9 @@ GUARDED: frozenset[tuple[str, str]] = frozenset(
         ("POST", CONTACT_ROUTE + "/important-dates"),
         ("PUT", IMPORTANT_DATE_ROUTE),
         ("DELETE", IMPORTANT_DATE_ROUTE),
+        ("POST", CONTACT_ROUTE + "/tags"),
+        ("DELETE", CONTACT_ROUTE + "/tags/{tag_id}"),
+        ("POST", CONTACT_ROUTE + "/favourite"),
     }
 )
 
@@ -95,16 +98,6 @@ UNGUARDED_BY_DESIGN: dict[tuple[str, str], str] = {
     ("PUT", RELATIONSHIPS_ROUTE + "/{relationship_id}"): OWN_RESOURCE,
     ("DELETE", RELATIONSHIPS_ROUTE + "/{relationship_id}"): OWN_RESOURCE,
 }
-
-# Guarded in the next change of this series; listed so the coverage test holds
-# meanwhile. Must be empty once that change lands.
-PENDING: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("POST", CONTACT_ROUTE + "/tags"),
-        ("DELETE", CONTACT_ROUTE + "/tags/{tag_id}"),
-        ("POST", CONTACT_ROUTE + "/favourite"),
-    }
-)
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -215,7 +208,7 @@ class TestPreconditionCoverageIsComplete:
         self, test_settings: Any
     ) -> None:
         mounted = _mounted_contact_writes(create_app(settings=test_settings))
-        unaccounted = mounted - GUARDED - set(UNGUARDED_BY_DESIGN) - PENDING
+        unaccounted = mounted - GUARDED - set(UNGUARDED_BY_DESIGN)
 
         assert not unaccounted, (
             "these contact writes take no If-Match: "
@@ -228,7 +221,7 @@ class TestPreconditionCoverageIsComplete:
     ) -> None:
         """A renamed route must not leave a test passing vacuously."""
         mounted = _mounted_contact_writes(create_app(settings=test_settings))
-        listed = GUARDED | set(UNGUARDED_BY_DESIGN) | PENDING
+        listed = GUARDED | set(UNGUARDED_BY_DESIGN)
 
         assert not listed - mounted, f"no longer served: {sorted(listed - mounted)}"
         assert {(s.method, s.route) for s in GUARDED_REQUESTS} == GUARDED

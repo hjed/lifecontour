@@ -209,10 +209,11 @@ collide across them.
 |---|---|
 | `GET /api/journals/{id}`, `GET /api/contacts/{id}` | Return an `ETag` response header |
 | `PUT`/`PATCH /api/journals/{id}`, `PUT /api/contacts/{id}` | Honour `If-Match`, and stamp the new `ETag` on the 200 |
-| Writes to a contact's rows: `PATCH /api/contacts/{id}/fields/{field}`; `POST .../methods`, `DELETE .../methods/{method_id}`, `PATCH .../methods/{method_id}/fields/{field}`; the same three for `addresses`; `PATCH .../notes/{note_id}/fields/{field}`; `POST .../important-dates`, `PUT`/`DELETE .../important-dates/{date_id}` | Honour `If-Match` against the **contact's** tag, and stamp the contact's new `ETag` on the response — including a `204` |
+| Writes to a contact's rows: `PATCH /api/contacts/{id}/fields/{field}`; `POST .../methods`, `DELETE .../methods/{method_id}`, `PATCH .../methods/{method_id}/fields/{field}`; the same three for `addresses`; `PATCH .../notes/{note_id}/fields/{field}`; `POST .../important-dates`, `PUT`/`DELETE .../important-dates/{date_id}`; `POST .../tags`, `DELETE .../tags/{tag_id}`; `POST .../favourite` | Honour `If-Match` against the **contact's** tag, and stamp the contact's new `ETag` on the response — including a `204` |
+| Writes to a journal's rows: `POST /api/journals/{id}/types`, `DELETE .../types/{type}`, `PUT .../types/{type}/data`; `POST .../relationships/contacts`, `PATCH`/`DELETE .../relationships/contacts/{contact_id}/{type}`; `POST .../relationships/tags`, `DELETE .../relationships/tags/{tag_id}` | Honour `If-Match` against the **journal's** tag, and stamp the journal's new `ETag` on the response |
 
-A write to one of a contact's rows is guarded by the contact's tag, not one of
-its own: the tag covers the whole aggregate (below), so a client holding the
+A write to one of an aggregate's rows is guarded by the aggregate's tag, not
+one of its own: the tag covers the whole aggregate (below), so a client holding the
 contact's tag can guard a write to any row the contact renders. The cost is
 that two concurrent edits to *different* rows of one contact conflict, which a
 client resolves exactly as any other 412 — re-read and re-apply.
@@ -230,7 +231,11 @@ having seen it.
 
 `test_subresource_preconditions.py` checks the table against the app's routes:
 a new write under `/api/contacts/{contact_id}` fails until it is guarded or
-exempted with its reason.
+exempted with its reason; `test_journal_subresource_preconditions.py` does the
+same for every write naming a journal. The exemptions are writes to resources
+outside the aggregate's version (contact relationships and summary; journal
+routes, series membership and outdoor-activity dismissals), whole-aggregate
+deletes, and merges, which lock both aggregates under their own protocol.
 
 `If-Match` semantics: absent means write unconditionally; `*` means the resource
 need only exist; a list matches if any tag does. Weak tags (`W/"..."`) compare
@@ -336,13 +341,30 @@ concurrent inbound sync. Fixing that properly means giving merge protection its
 own column so `updated_at` is free to be purely a version, which is a migration
 and a change to both integrations — worth doing, but not here.
 
-**Lock ordering matters.** A conditional write takes the journal's lock first
-and then writes child rows. A child write that touched the parent afterwards
+**Lock ordering matters.** Every write takes the journal's lock first — through
+`guard_journal_write`, conditional or not — and then writes child rows. A child write that touched the parent afterwards
 would take the same two locks in the opposite order, and PostgreSQL would break
 the resulting cycle by aborting one transaction with a deadlock — which
 `@transactional` does not retry. So every child-write path takes the parent lock
-**up front** (`lock_journal`, or the touch itself where it is unconditional),
-and all writers queue instead of deadlocking.
+**up front** (`guard_journal_write`, `lock_journal`, or the touch itself where
+it is unconditional), and all writers queue instead of deadlocking.
+
+**Lock modes are the aggregate's choice.** Contacts lock `FOR UPDATE`. Journals
+lock `FOR NO KEY UPDATE` — the mode a plain `UPDATE` of the row takes anyway —
+because a task link holds `FOR KEY SHARE` on the journal it anchors to, and an
+ordinary journal edit must never wait behind somebody retargeting a task into
+it; `FOR NO KEY UPDATE` still queues journal writers behind each other and
+behind a merge's `FOR UPDATE`. A transaction must not take the guard and then
+`FOR UPDATE` on the same row: two doing so at once deadlock on the upgrade. The
+journal merge takes `FOR UPDATE` directly and never goes through the guard.
+
+**Hierarchy changes queue on a lock of their own.** A write locks only its own
+journal, but validating a new parent reads the journals above it, unlocked —
+so two overlapping re-parents ("A under B", "B under A") would each see an
+acyclic tree and commit a cycle between them. `_validate_hierarchy` first takes
+`lock_hierarchy(user_id)`, a transaction-scoped advisory lock per owner, so the
+second waits and then validates against the first's committed parent. A
+hierarchy never spans two owners, so one owner's lock is enough.
 
 ## Error Handling Guidelines
 

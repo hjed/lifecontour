@@ -691,6 +691,7 @@ class TestJournalTagHistoryProjectionE2E:
             tag_repo=tag_repo,
             hierarchy_service=JournalTagHierarchyService(tag_repo=tag_repo),
             event_publisher=OutboxEventPublisher(conn),
+            journal_repo=SqlJournalRepository(conn),
         )
 
     async def _journal_id(self, conn: AsyncConnection, title: str) -> int:

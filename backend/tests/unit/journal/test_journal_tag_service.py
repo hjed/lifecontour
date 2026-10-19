@@ -57,7 +57,9 @@ def mock_event_publisher():
 @pytest.fixture
 def tag_service(mock_tag_repo, hierarchy_service, mock_event_publisher):
     """Create a JournalTagService instance."""
-    return JournalTagService(mock_tag_repo, hierarchy_service, mock_event_publisher)
+    return JournalTagService(
+        mock_tag_repo, hierarchy_service, mock_event_publisher, AsyncMock()
+    )
 
 
 def _owned_by(tag: JournalTag | None, user_id: str) -> JournalTag | None:

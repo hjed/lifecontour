@@ -26,14 +26,17 @@ from meilisearch.errors import MeilisearchError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.common.etag import get_if_match, set_etag
+from app.api.common.etag import (
+    get_if_match,
+    precondition_failed_responses,
+    set_etag,
+)
 from app.api.common.schemas import (
     ExternalLinkAttributes,
     ExternalLinkResource,
     ExternalLinksResponse,
     JsonApiLinks,
     PaginationParams,
-    PreconditionFailedErrorResponse,
     create_pagination_links,
     create_pagination_meta,
     get_request_base_url,
@@ -270,6 +273,7 @@ async def _journal_resource_with_hierarchy(
 
 
 async def _enriched_journal_response(
+    response: Response,
     journal_id: int,
     user_id: str,
     base_url: str,
@@ -278,11 +282,16 @@ async def _enriched_journal_response(
 ) -> JournalResponse:
     """The journal a write endpoint answers with, re-read after the write.
 
-    Rendered from its enrichment, like every other journal response.
+    Rendered from its enrichment, like every other journal response, and
+    stamped with the ``ETag`` of that same read: the journal row is read
+    before the rows enrichment adds, so the body can be the newer of the two,
+    never the older - the worst that does is refuse the client's next
+    conditional write, never let it overwrite a change it has not seen.
     """
     journal = await journal_service.get_journal(journal_id)
     if not journal:
         raise JournalNotFoundError(journal_id)
+    set_etag(response, "journals", journal_id, journal.updated_at)
     enrichment = await enrichment_service.enrich(journal_id, user_id)
     return JournalResponse(
         data=JournalConverter.to_enriched_resource(journal, base_url, enrichment)
@@ -1580,18 +1589,7 @@ async def create_journal(
 
 @router.put(
     "/{journal_id}",
-    responses={
-        412: {
-            "model": PreconditionFailedErrorResponse,
-            "description": (
-                "The `If-Match` precondition named a version this journal has "
-                "already moved on from — somebody else wrote to it since the "
-                "caller read it. Nothing was written. The JSON:API error "
-                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
-                "to retry with after re-reading and re-applying the change."
-            ),
-        },
-    },
+    responses=precondition_failed_responses("journal"),
 )
 @inject
 async def update_journal(
@@ -1639,18 +1637,7 @@ async def update_journal(
 
 @router.patch(
     "/{journal_id}",
-    responses={
-        412: {
-            "model": PreconditionFailedErrorResponse,
-            "description": (
-                "The `If-Match` precondition named a version this journal has "
-                "already moved on from — somebody else wrote to it since the "
-                "caller read it. Nothing was written. The JSON:API error "
-                "carries code `PRECONDITION_FAILED` and a `meta.current_etag` "
-                "to retry with after re-reading and re-applying the change."
-            ),
-        },
-    },
+    responses=precondition_failed_responses("journal"),
 )
 @inject
 async def partial_update_journal(
@@ -1882,11 +1869,15 @@ async def merge_journal(
 
 
 # Type Management Endpoints
-@router.post("/{journal_id}/types")
+@router.post(
+    "/{journal_id}/types",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def add_type_to_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     type_request: JournalTypeAddRequest,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
@@ -1949,19 +1940,24 @@ async def add_type_to_journal(
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.delete("/{journal_id}/types/{journal_type}")
+@router.delete(
+    "/{journal_id}/types/{journal_type}",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def remove_type_from_journal(
     journal_id: int,
     journal_type: str,
     request: Request,
+    response: Response,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
     journal_write_service: FromDishka[JournalWriteService],
@@ -2003,20 +1999,29 @@ async def remove_type_from_journal(
     # Remove the type and delete its type-specific data row as one unit of work.
     # (CASCADE only fires when the whole journal is deleted, not on type removal.)
     await journal_write_service.remove_type(
-        journal_id, jtype, connection, changed_by="ui", source=Provenance.UI
+        journal_id,
+        jtype,
+        connection,
+        changed_by="ui",
+        source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.put("/{journal_id}/types/{journal_type}/data")
+@router.put(
+    "/{journal_id}/types/{journal_type}/data",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def update_type_data(
     journal_id: int,
     journal_type: str,
     request: Request,
+    response: Response,
     type_data_request: JournalTypeDataUpdateRequest,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
@@ -2056,19 +2061,24 @@ async def update_type_data(
         connection,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
 # Relationship Management Endpoints
-@router.post("/{journal_id}/relationships/contacts")
+@router.post(
+    "/{journal_id}/relationships/contacts",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def add_contact_to_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     contact_request: JournalContactAddRequest,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
@@ -2136,7 +2146,10 @@ async def add_contact_to_journal(
     # contact deleted since that check.
     try:
         await journal_contact_service.add_contact_to_journal(
-            relationship, user_id=user.id, transaction=connection
+            relationship,
+            user_id=user.id,
+            transaction=connection,
+            expected_etags=get_if_match(request),
         )
     except IntegrityError as e:
         raise JournalValidationError(
@@ -2145,17 +2158,21 @@ async def add_contact_to_journal(
         ) from e
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.patch("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
+@router.patch(
+    "/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def update_journal_contact_relationship(
     journal_id: int,
     contact_id: int,
     relationship_type: str,
     request: Request,
+    response: Response,
     update_request: JournalContactRelationshipUpdateRequest,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
@@ -2232,6 +2249,7 @@ async def update_journal_contact_relationship(
         role=role,
         update_status=update_status,
         update_role=update_role,
+        expected_etags=get_if_match(request),
     )
     if updated is None:
         raise JournalValidationError(
@@ -2241,17 +2259,21 @@ async def update_journal_contact_relationship(
         )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.delete("/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}")
+@router.delete(
+    "/{journal_id}/relationships/contacts/{contact_id}/{relationship_type}",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def remove_contact_from_journal(
     journal_id: int,
     contact_id: int,
     relationship_type: str,
     request: Request,
+    response: Response,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
     connection: FromDishka[AsyncConnection],
@@ -2290,19 +2312,27 @@ async def remove_contact_from_journal(
 
     # Delete the relationship
     await journal_contact_service.remove_contact_from_journal(
-        journal_id, contact_id_int, relationship_type_enum, transaction=connection
+        journal_id,
+        contact_id_int,
+        relationship_type_enum,
+        transaction=connection,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.post("/{journal_id}/relationships/tags")
+@router.post(
+    "/{journal_id}/relationships/tags",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def add_tag_to_journal(
     journal_id: int,
     request: Request,
+    response: Response,
     tag_request: JournalTagAddRequest,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
@@ -2341,19 +2371,24 @@ async def add_tag_to_journal(
         user_id=user.id,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
 
 
-@router.delete("/{journal_id}/relationships/tags/{tag_id}")
+@router.delete(
+    "/{journal_id}/relationships/tags/{tag_id}",
+    responses=precondition_failed_responses("journal"),
+)
 @inject
 async def remove_tag_from_journal(
     journal_id: int,
     tag_id: str,
     request: Request,
+    response: Response,
     journal_service: FromDishka[JournalService],
     enrichment_service: FromDishka[JournalEnrichmentService],
     journal_tag_service: FromDishka[JournalTagService],
@@ -2388,8 +2423,9 @@ async def remove_tag_from_journal(
         user_id=user.id,
         changed_by="ui",
         source=Provenance.UI,
+        expected_etags=get_if_match(request),
     )
 
     return await _enriched_journal_response(
-        journal_id, user.id, base_url, journal_service, enrichment_service
+        response, journal_id, user.id, base_url, journal_service, enrichment_service
     )
