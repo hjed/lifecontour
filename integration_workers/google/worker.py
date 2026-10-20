@@ -8,6 +8,7 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -36,6 +37,7 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.contacts.value_objects import TagName
 from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncCapability,
@@ -81,6 +83,7 @@ from google_client import (
 )
 from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
+from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
 from person_merge import merge_with_current_person
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
@@ -752,24 +755,16 @@ def _transform_tags_to_memberships(
 
     Args:
         tag_names: List of local tag names
-        group_name_to_resource: Mapping of tag name to Google group resource name
+        group_name_to_resource: Mapping of tag path to Google group resource name,
+            keyed as ``_build_reverse_group_mapping`` keys it
 
     Returns:
         List of membership dictionaries in Google format
     """
-    # Tag identity is case-insensitive locally (LOWER(name) unique index), so
-    # match group names case-insensitively too. An exact-case match wins;
-    # otherwise the first case-variant in sorted-name order wins, so the pick
-    # is stable across Google API listing order when duplicate case-variant
-    # groups exist.
-    lower_name_to_resource: dict[str, str] = {}
-    for name in sorted(group_name_to_resource):
-        lower_name_to_resource.setdefault(name.lower(), group_name_to_resource[name])
+    resolve = _group_resolver(group_name_to_resource)
     memberships = []
     for tag_name in tag_names:
-        resource_name = group_name_to_resource.get(
-            tag_name
-        ) or lower_name_to_resource.get(tag_name.lower())
+        resource_name = resolve(tag_name)
         if resource_name:
             memberships.append(
                 {"contactGroupMembership": {"contactGroupResourceName": resource_name}}
@@ -777,36 +772,98 @@ def _transform_tags_to_memberships(
     return memberships
 
 
+def _group_resolver(
+    group_name_to_resource: dict[str, str],
+) -> Callable[[str], str | None]:
+    """Look a tag path up in a tag path → group resource mapping.
+
+    Tag identity is case-insensitive locally (LOWER(name) unique index), so
+    group names match case-insensitively too. An exact-case match wins;
+    otherwise the first case-variant in sorted-name order wins, so the pick is
+    stable across Google API listing order when duplicate case-variant groups
+    exist.
+    """
+    lower_name_to_resource: dict[str, str] = {}
+    for name in sorted(group_name_to_resource):
+        lower_name_to_resource.setdefault(name.lower(), group_name_to_resource[name])
+
+    def resolve(tag_name: str) -> str | None:
+        return group_name_to_resource.get(tag_name) or lower_name_to_resource.get(
+            tag_name.lower()
+        )
+
+    return resolve
+
+
 def _build_reverse_group_mapping(
     forward_mapping: dict[str, str],
 ) -> dict[str, str]:
     """
-    Build a name→resource_name mapping from a resource_name→name mapping.
+    Build a tag path→resource_name mapping from a resource_name→name mapping.
 
     The forward mapping (used for pull) maps Google group resource names to
-    display names. The reverse mapping (used for push) maps display names
-    back to resource names.
+    display names. The reverse mapping (used for push) maps each group back
+    from the tag paths that can name it:
 
-    Note: Google allows duplicate group display names. When duplicates exist,
-    the last resource name seen wins. A warning is logged for visibility.
+    * the path inbound names it by (``group_tag_path``): inbound sanitises
+      "Family Friends" into the tag ``Family-Friends``, so a display-name key
+      alone would never match that tag (#1821);
+    * its display name itself, when that is a valid tag path: the push creates
+      groups under the tag's own name, and ``TagName`` allows hyphen runs that
+      sanitising collapses (``A--B``), so the group must be found by it again.
+
+    A group named exactly like a tag beats one that only sanitises to it, and
+    otherwise the last group seen wins (Google allows duplicate names); a
+    warning is logged when a group loses a key. Groups no tag can name are left
+    out, as are the system groups inbound never makes a tag of (the reserved
+    groups and starred): the push sends those from
+    ``_with_reserved_group_memberships``, and a tag must not resolve to one.
 
     Args:
         forward_mapping: resource_name → display_name mapping
 
     Returns:
-        display_name → resource_name mapping
+        tag path → resource_name mapping
     """
+    system_groups = {
+        f"contactGroups/{group_id}" for group_id in settings.google_reserved_groups
+    } | {STARRED_GROUP_RESOURCE}
+    groups = [
+        (resource_name, name)
+        for resource_name, name in forward_mapping.items()
+        if resource_name not in system_groups
+    ]
     reverse: dict[str, str] = {}
-    for resource_name, name in forward_mapping.items():
-        if name in reverse:
+
+    def assign(key: str, resource_name: str) -> None:
+        previous = reverse.get(key)
+        if previous is not None and previous != resource_name:
             logger.warning(
-                "Duplicate Google Contact Group name detected, last resource wins",
-                group_name=name,
-                previous_resource=reverse[name],
+                "Google Contact Groups share a tag name, one resource wins",
+                tag_name=key,
+                previous_resource=previous,
                 new_resource=resource_name,
             )
-        reverse[name] = resource_name
+        reverse[key] = resource_name
+
+    for resource_name, name in groups:
+        path = group_tag_path(name)
+        if path is not None:
+            assign(path, resource_name)
+    # Second, so a group named exactly like a tag wins that key.
+    for resource_name, name in groups:
+        if _is_tag_path(name):
+            assign(name, resource_name)
     return reverse
+
+
+def _is_tag_path(name: str) -> bool:
+    """Whether a group's display name is itself a valid local tag path."""
+    try:
+        TagName(name)
+    except ValueError:
+        return False
+    return True
 
 
 def _transform_important_dates_to_google(
@@ -869,6 +926,29 @@ def _precision_to_google_date(
         return {"year": year or 0, "month": 0, "day": 0}
     else:
         return {"year": year or 0, "month": month or 0, "day": day or 0}
+
+
+def _tags_needing_groups(tag_paths: list[str]) -> list[str]:
+    """The tag paths of one contact that need a Google group of their own.
+
+    Inbound turns the group "Family/Extended" into the tags ``Family`` and
+    ``Extended`` and assigns both, so the contact pushes ``Family`` beside
+    ``Family/Extended``. That ``Family`` is implied by its child: the next pull
+    derives it again, so creating a ``Family`` group for it would only add a
+    group Google never had (#1821). A tag that is a strict ancestor of another
+    of the contact's tags is dropped (case-insensitively, as tags match). Its
+    membership is still sent when a group of that name already exists.
+    """
+    ancestors = {
+        ancestor.lower() for path in tag_paths for ancestor in _ancestor_paths(path)
+    }
+    return [path for path in tag_paths if path.lower() not in ancestors]
+
+
+def _ancestor_paths(path: str) -> list[str]:
+    """The strict ancestors of a tag path: ``A/B/C`` → ``A``, ``A/B``."""
+    segments = path.split("/")
+    return ["/".join(segments[:depth]) for depth in range(1, len(segments))]
 
 
 async def _ensure_google_groups_exist(
@@ -944,7 +1024,7 @@ async def _resolve_group_mapping_for_tags(
     """Resolve local tag names to Google contact-group resource names.
 
     Fetches the account's existing groups, reverses the mapping to be keyed by
-    name, and creates a group for any tag that does not have one yet.
+    tag path, and creates a group for any tag that does not have one yet.
 
     An empty result is meaningful and is not the same as "no mapping": callers
     pass it straight through to the transform, where a present mapping — even an
@@ -3233,10 +3313,12 @@ async def process_tag_event(
                         user_id=user_id,
                     )
 
-                    # Fetch groups to map name dynamically to resourceName
-                    forward_group_mapping = await _build_contact_group_mapping(client)
-                    reverse_group_mapping = _build_reverse_group_mapping(
-                        forward_group_mapping
+                    # Fetch groups to map name dynamically to resourceName. A
+                    # partial listing would miss the group and report success,
+                    # so a failed page fails this user instead.
+                    forward_group_mapping = await _fetch_contact_group_mapping(client)
+                    resolve_group = _group_resolver(
+                        _build_reverse_group_mapping(forward_group_mapping)
                     )
 
                     if event_type == "TagDeleted":
@@ -3244,14 +3326,14 @@ async def process_tag_event(
                         if not path_str:
                             continue
 
-                        resource_name = reverse_group_mapping.get(path_str)
+                        resource_name = resolve_group(path_str)
                         if resource_name:
                             await client.delete_contact_group(resource_name)
                     elif event_type == "TagUpdated":
                         changed_fields = event_data.get("changed_fields", {})
                         if "full_path" in changed_fields:
                             old_path, new_path = changed_fields["full_path"]
-                            resource_name = reverse_group_mapping.get(old_path)
+                            resource_name = resolve_group(old_path)
                             if resource_name:
                                 await client.update_contact_group(
                                     resource_name, new_path
@@ -3311,7 +3393,7 @@ async def _push_contact_to_google_for_event(
         google_account_email: Google account email
         external_id: Google resource name (for updates)
         version_hash: ETag for optimistic concurrency (for updates)
-        group_name_to_resource: Tag name to Google contact-group resource name.
+        group_name_to_resource: Tag path to Google contact-group resource name.
             Passing it (even empty) is what includes ``memberships`` in the
             payload, so tag changes reach Google and removed tags are cleared.
         user_id: The contact's owner, who owns the link the push writes.
@@ -3729,7 +3811,9 @@ async def process_contact_event(
                     # Groups are per Google account, so the mapping is resolved
                     # inside the loop even though the tag names are not.
                     group_name_to_resource = await _resolve_group_mapping_for_tags(
-                        client=client, tag_names=tag_names, require_all_tags=True
+                        client=client,
+                        tag_names=_tags_needing_groups(tag_names),
+                        require_all_tags=True,
                     )
 
                     result = await _push_contact_to_google_for_event(
@@ -3808,7 +3892,7 @@ async def _push_pending_local_contacts(
     tags_by_contact = await _load_tag_names_for_contacts_batch(session, contact_ids)
     all_tag_names: set[str] = set()
     for tag_list in tags_by_contact.values():
-        all_tag_names.update(tag_list)
+        all_tag_names.update(_tags_needing_groups(tag_list))
 
     reverse_group_mapping = await _resolve_group_mapping_for_tags(
         client=client, tag_names=sorted(all_tag_names)

@@ -1052,6 +1052,83 @@ class TestResolveGroupMappingForTags:
         # Nothing to create, so no group-creation round trip.
         mock_ensure.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_a_sanitised_tag_resolves_to_its_group(self) -> None:
+        """#1821: the event path must not raise for ``Family-Friends``.
+
+        Unresolved it would be redelivered forever; created, it would be a
+        second "Family-Friends" group beside the one the tag came from.
+        """
+        from worker import _resolve_group_mapping_for_tags
+
+        mock_client = AsyncMock()
+
+        with patch(
+            "worker._fetch_contact_group_mapping",
+            new_callable=AsyncMock,
+            return_value={"contactGroups/a": "Family Friends"},
+        ):
+            result = await _resolve_group_mapping_for_tags(
+                client=mock_client,
+                tag_names=["Family-Friends"],
+                require_all_tags=True,
+            )
+
+        assert result == {"Family-Friends": "contactGroups/a"}
+        mock_client.create_contact_group.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_implied_parent_tag_is_neither_created_nor_required(
+        self,
+    ) -> None:
+        """#1821: the group "Family/Extended" gives the contact ``Family`` too.
+
+        The event push must not create a ``Family`` group for it, nor raise
+        because it has none: the next pull derives ``Family`` from the child.
+        """
+        from worker import process_contact_event
+
+        mock_sync_row = MagicMock()
+        mock_sync_row.external_id = "people/c123"
+        mock_sync_row.version_hash = "etag-old"
+
+        mock_factory, _ = _mock_session_factory(
+            sync_row=mock_sync_row,
+            users=[MagicMock(user_id="1", google_account_email="test@gmail.com")],
+        )
+        client = _google_client()
+
+        with (
+            patch(
+                "worker._load_tag_names_for_contact",
+                new_callable=AsyncMock,
+                return_value=["Family", "Family/Extended"],
+            ),
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/x": "Family/Extended"},
+            ),
+            patch(
+                "worker._push_contact_to_google_for_event",
+                new_callable=AsyncMock,
+                return_value={"status": "updated"},
+            ) as mock_push,
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=client),
+        ):
+            result = await process_contact_event(
+                ctx=_make_ctx(mock_factory),
+                event_type="TagAssigned",
+                event_data={"user_id": OWNER, "contact_id": 42, "source": "ui"},
+            )
+
+        assert result["status"] == "success"
+        client.create_contact_group.assert_not_called()
+        assert mock_push.call_args[1]["group_name_to_resource"] == {
+            "Family/Extended": "contactGroups/x"
+        }
+
 
 class TestGroupLookupFailureIsNotDestructive:
     """Greptile P1 on #1549: a swallowed listing failure stripped tag groups.

@@ -67,7 +67,7 @@ async def _run(
         patch("worker.GoogleAuthService"),
         patch("worker.GoogleAPIClient", side_effect=make_client),
         patch(
-            "worker._build_contact_group_mapping",
+            "worker._fetch_contact_group_mapping",
             new_callable=AsyncMock,
             return_value={"contactGroups/work": "Work"},
         ),

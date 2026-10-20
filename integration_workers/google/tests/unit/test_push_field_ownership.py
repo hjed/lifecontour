@@ -16,9 +16,10 @@ import pytest
 from core_shared.models.contacts.entities import Contact
 
 from api_models import GooglePerson
+from group_translator import GoogleGroupNameTranslator
 from person_merge import FIELD_POLICIES, merge_with_current_person
 from transformer import GoogleContactTransformer
-from worker import _transform_contact_to_google_person
+from worker import _build_reverse_group_mapping, _transform_contact_to_google_person
 
 _CONTACT_SOURCE = {"source": {"type": "CONTACT", "id": "c1"}}
 
@@ -247,3 +248,69 @@ def test_a_pull_after_the_push_reads_back_what_was_pushed(
         pushed
     )
     assert after_second_push == after_push
+
+
+# Groups whose names inbound must sanitise or split before they are tags.
+_TAG_GROUPS = {
+    "contactGroups/friends": "Family Friends",
+    "contactGroups/extended": "Family/Extended",
+    "contactGroups/kids": "Kids & Co.",
+}
+
+
+def _group_membership(resource_name: str) -> dict[str, Any]:
+    return {
+        "contactGroupMembership": {
+            "contactGroupId": resource_name.removeprefix("contactGroups/"),
+            "contactGroupResourceName": resource_name,
+        }
+    }
+
+
+def _tag_paths(contact: Contact) -> list[str]:
+    """The tag names the push loads: a child tag by its path from the root."""
+    parents = {
+        str(tag.name): getattr(tag, "_parent_name", None) for tag in contact.tags
+    }
+
+    def path(name: str) -> str:
+        parent = parents.get(name)
+        return f"{path(parent)}/{name}" if parent else name
+
+    return sorted(path(name) for name in parents)
+
+
+def test_an_unchanged_round_trip_keeps_every_tag_group() -> None:
+    """#1821: a tag's group survives the push whatever its name looks like.
+
+    The push replaces memberships wholesale, so a tag that does not find its
+    group ("Family-Friends" for "Family Friends") removes the contact from it.
+    """
+    current = {
+        "resourceName": "people/c1",
+        "etag": "etag",
+        "names": _IMPORTED["names"],
+        "memberships": [
+            _group_membership("contactGroups/myContacts"),
+            *(_group_membership(resource) for resource in _TAG_GROUPS),
+        ],
+    }
+    translator = GoogleGroupNameTranslator(
+        reserved_group_ids=["myContacts"], group_mapping=_TAG_GROUPS
+    )
+    contact = GoogleContactTransformer(
+        user_id="1", translator=translator
+    ).transform_person(GooglePerson.model_validate(current))
+    pushed = {
+        "first_name": contact.first_name,
+        "tags": _tag_paths(contact),
+        "group_name_to_resource": _build_reverse_group_mapping(_TAG_GROUPS),
+    }
+
+    payload = _transform_contact_to_google_person(pushed)
+    merged = merge_with_current_person(payload, current)
+
+    assert sorted(
+        entry["contactGroupMembership"]["contactGroupResourceName"]
+        for entry in merged["memberships"]
+    ) == sorted(["contactGroups/myContacts", *_TAG_GROUPS])

@@ -624,6 +624,25 @@ class TestEnsureGoogleGroupsExist:
         assert result == existing_groups
         mock_client.create_contact_group.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_a_sanitised_tag_reuses_its_group(self) -> None:
+        """#1821: ``Family-Friends`` came from "Family Friends"; no second group."""
+        from worker import _build_reverse_group_mapping, _ensure_google_groups_exist
+
+        mock_client = AsyncMock()
+        existing_groups = _build_reverse_group_mapping(
+            {"contactGroups/a": "Family Friends"}
+        )
+
+        result = await _ensure_google_groups_exist(
+            client=mock_client,
+            tag_names=["Family-Friends"],
+            existing_groups=existing_groups,
+        )
+
+        assert result == {"Family-Friends": "contactGroups/a"}
+        mock_client.create_contact_group.assert_not_called()
+
 
 class TestBuildReverseGroupMapping:
     """Test building name→resource_name mapping for push direction."""
@@ -651,6 +670,113 @@ class TestBuildReverseGroupMapping:
         result = _build_reverse_group_mapping({})
 
         assert result == {}
+
+    def test_keys_are_the_tag_paths_inbound_builds(self) -> None:
+        """#1821: a group is keyed by its tag's name, not its display name.
+
+        Inbound sanitises "Family Friends" into the tag ``Family-Friends``, so
+        a display-name key never matched it: the push dropped the membership.
+        """
+        from worker import _build_reverse_group_mapping
+
+        result = _build_reverse_group_mapping(
+            {
+                "contactGroups/a": "Family Friends",
+                "contactGroups/b": "Kids & Co.",
+                "contactGroups/c": "Family Friends/Close Ones",
+            }
+        )
+
+        assert result == {
+            "Family-Friends": "contactGroups/a",
+            "Kids-&-Co": "contactGroups/b",
+            "Family-Friends/Close-Ones": "contactGroups/c",
+        }
+
+    @pytest.mark.parametrize("name", ["A--B", "-Leading", "Trailing-", "A--B/C"])
+    def test_a_group_named_by_a_valid_tag_keeps_that_key(self, name: str) -> None:
+        """Greptile on #1837: the push creates groups under the tag's own name.
+
+        ``TagName`` allows repeated and edge hyphens, which sanitising would
+        collapse; keyed only by the sanitised path, a group the push created for
+        ``A--B`` would be missed and created again on every push.
+        """
+        from worker import _build_reverse_group_mapping, group_tag_path
+
+        result = _build_reverse_group_mapping({"contactGroups/a": name})
+
+        assert result[name] == "contactGroups/a"
+        assert result[group_tag_path(name) or ""] == "contactGroups/a"
+
+    def test_a_group_named_by_the_tag_beats_one_sanitising_to_it(self) -> None:
+        """The tag ``A-B`` is the group "A-B", not "A--B" (which sanitises to it)."""
+        from worker import _build_reverse_group_mapping
+
+        for forward in (
+            {"contactGroups/a": "A-B", "contactGroups/b": "A--B"},
+            {"contactGroups/b": "A--B", "contactGroups/a": "A-B"},
+        ):
+            assert _build_reverse_group_mapping(forward) == {
+                "A-B": "contactGroups/a",
+                "A--B": "contactGroups/b",
+            }
+
+    @pytest.mark.asyncio
+    async def test_a_group_the_push_created_is_found_again(self) -> None:
+        """A tag ``A--B`` reuses the group created for it on an earlier push."""
+        from worker import _build_reverse_group_mapping, _ensure_google_groups_exist
+
+        mock_client = AsyncMock()
+
+        result = await _ensure_google_groups_exist(
+            client=mock_client,
+            tag_names=["A--B"],
+            existing_groups=_build_reverse_group_mapping({"contactGroups/a": "A--B"}),
+        )
+
+        assert result["A--B"] == "contactGroups/a"
+        mock_client.create_contact_group.assert_not_called()
+
+    def test_a_group_no_tag_can_name_is_left_out(self) -> None:
+        from worker import _build_reverse_group_mapping
+
+        result = _build_reverse_group_mapping({"contactGroups/a": "!!!"})
+
+        assert result == {}
+
+    @pytest.mark.parametrize(
+        "forward",
+        [
+            {"contactGroups/a": "Family Friends", "contactGroups/b": "Family-Friends"},
+            {"contactGroups/b": "Family-Friends", "contactGroups/a": "Family Friends"},
+        ],
+        ids=["exact-last", "exact-first"],
+    )
+    def test_the_group_named_exactly_like_the_tag_wins_a_collision(
+        self, forward: dict[str, str]
+    ) -> None:
+        """Both names become ``Family-Friends``; the exact one is the tag's group."""
+        from worker import _build_reverse_group_mapping
+
+        assert _build_reverse_group_mapping(forward) == {
+            "Family-Friends": "contactGroups/b"
+        }
+
+    def test_system_groups_are_never_a_tag_group(self) -> None:
+        """Inbound makes no tag of a reserved group or starred, so neither may
+        resolve one: a ``Starred`` tag would otherwise star every contact."""
+        import worker
+
+        with patch.object(worker.settings, "google_reserved_groups", ["myContacts"]):
+            result = worker._build_reverse_group_mapping(
+                {
+                    "contactGroups/myContacts": "My Contacts",
+                    "contactGroups/starred": "Starred",
+                    "contactGroups/a": "Friends",
+                }
+            )
+
+        assert result == {"Friends": "contactGroups/a"}
 
 
 class TestGoogleAPIClientGroupManagement:
@@ -805,3 +931,76 @@ class TestPushContactWithTagsEndToEnd:
                 "contactGroups/myContacts",
                 "contactGroups/abc123",
             ]
+
+
+class TestTagsNeedingGroups:
+    """#1821: a tag that is only the parent of another tag needs no group.
+
+    Inbound turns the group "Family/Extended" into the tags ``Family`` and
+    ``Extended``, so the contact pushes ``Family`` and ``Family/Extended``.
+    Creating a ``Family`` group for it would add a group Google never had.
+    """
+
+    @pytest.mark.parametrize(
+        ("tag_paths", "expected"),
+        [
+            (["Family", "Family/Extended"], ["Family/Extended"]),
+            (["A", "A/B", "A/B/C"], ["A/B/C"]),
+            (["family", "Family/Extended"], ["Family/Extended"]),
+            (["Family"], ["Family"]),
+            (["Fam", "Family/Extended"], ["Fam", "Family/Extended"]),
+            (["Family/Extended", "Family/Close"], ["Family/Extended", "Family/Close"]),
+            ([], []),
+        ],
+        ids=[
+            "parent",
+            "grandparents",
+            "case-insensitive",
+            "lone-parent",
+            "prefix-is-not-a-parent",
+            "siblings",
+            "none",
+        ],
+    )
+    def test_drops_tags_implied_by_a_child(
+        self, tag_paths: list[str], expected: list[str]
+    ) -> None:
+        from worker import _tags_needing_groups
+
+        assert _tags_needing_groups(tag_paths) == expected
+
+    @pytest.mark.asyncio
+    async def test_cron_push_creates_no_group_for_an_implied_parent(self) -> None:
+        """Only another contact's own ``Family`` tag would need that group."""
+        import worker
+
+        with (
+            patch(
+                "worker.find_contacts_to_push",
+                new_callable=AsyncMock,
+                return_value=[{"id": 1}, {"id": 2}],
+            ),
+            patch(
+                "worker._load_tag_names_for_contacts_batch",
+                new_callable=AsyncMock,
+                return_value={1: ["Family", "Family/Extended"], 2: ["Work"]},
+            ),
+            patch(
+                "worker._resolve_group_mapping_for_tags",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as mock_resolve,
+            patch(
+                "worker.push_contacts_to_google",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+        ):
+            await worker._push_pending_local_contacts(
+                session=AsyncMock(),
+                client=AsyncMock(),
+                google_account_email="test@gmail.com",
+                user_id="1",
+            )
+
+        assert mock_resolve.call_args[1]["tag_names"] == ["Family/Extended", "Work"]

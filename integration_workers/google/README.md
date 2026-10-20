@@ -155,6 +155,28 @@ altogether. For the same reason `contactGroups/starred` is written back from
 `is_favourite` (the field inbound sync reads it into): omitting it would unstar
 every favourite on any edit.
 
+A tag finds its group by the **tag path** the group's display name becomes, not
+by the display name itself. Inbound sanitises each `/`-separated segment
+(`group_naming.py`): "Family Friends" becomes the tag `Family-Friends`, and
+"Family/Extended" becomes `Family` with the child `Extended`. The push keys the
+groups the same way (`_build_reverse_group_mapping`), matching case-insensitively,
+so a renamed-by-sanitising tag keeps its membership and no duplicate group is
+created (#1821). Some details:
+
+- A group is also keyed by its display name when that is a valid tag path, so
+  a group the push created for the tag `A--B` (which sanitises to `A-B`) is
+  found again. A group named exactly like a tag beats one that only sanitises
+  to it ("Family-Friends" over "Family Friends").
+- Reserved groups and `starred` are never a tag's group.
+- A tag that is only the parent of another of the contact's tags (`Family` beside
+  `Family/Extended`) gets no group created for it (`_tags_needing_groups`):
+  the next pull derives it from the child again.
+- A group whose name sanitises to nothing (e.g. `家族`) has no tag, so a push
+  still drops its membership (#1835).
+
+Tag events (`TagUpdated`, `TagDeleted`) find the group to rename or delete the
+same way.
+
 The nickname is two-way. Inbound sync imports the primary Google nickname (or
 the first one), and the push always sends `nicknames`: a nickname cleared locally
 goes as an empty list, so Google drops it too and the next pull does not bring it
@@ -202,8 +224,8 @@ local notes are pushed joined into it.
 
 Because an incomplete group mapping would strip memberships, outbound code lists
 groups with the strict `_fetch_contact_group_mapping`, which raises on any failed
-page. On the event path that leaves the stream event unacknowledged for retry;
-the inbound sync keeps the tolerant `_build_contact_group_mapping`, where a
+page. On the contact event path that leaves the stream event unacknowledged for
+retry, and a tag event reports it as `partial_success`; the inbound sync keeps the tolerant `_build_contact_group_mapping`, where a
 missing group only costs a tag on import.
 
 Each handler builds a minimal ARQ-compatible context (`session_factory` +
