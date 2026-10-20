@@ -12,6 +12,8 @@ import {
   fetchUserSettings,
   journalTimezone,
   updateTimezone,
+  updateUserSettings,
+  useUpdateDefaultCountry,
   useUpdateTimezone,
   useUserSettings,
   useUserTimezone,
@@ -64,7 +66,7 @@ describe('settings API', () => {
   });
 
   describe('updateTimezone', () => {
-    it('PATCHes the timezone in the request body', async () => {
+    it('PATCHes only the timezone', async () => {
       const mockResponse = {
         data: {
           id: 'user-1',
@@ -86,6 +88,80 @@ describe('settings API', () => {
         body: JSON.stringify({ timezone: 'America/New_York' }),
       });
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('updateUserSettings', () => {
+    it('PATCHes an explicit null to clear the default country', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'user-1',
+            type: 'user_settings',
+            attributes: { timezone: null, default_country: null },
+          },
+        }),
+      } as Response);
+
+      await updateUserSettings({ default_country: null });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/user-settings', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_country: null }),
+      });
+    });
+
+    it('throws the API error detail on failure', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ detail: 'bad country' }] }),
+      } as Response);
+
+      await expect(
+        updateUserSettings({ default_country: 'XX' })
+      ).rejects.toThrow('bad country');
+    });
+  });
+
+  describe('useUpdateDefaultCountry', () => {
+    it('seeds the saved country into the settings query', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      const saved = {
+        data: {
+          id: 'user-1',
+          type: 'user_settings' as const,
+          attributes: { timezone: null, default_country: 'NZ' },
+        },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => saved,
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateDefaultCountry(), {
+        wrapper: wrapper(queryClient),
+      });
+
+      await result.current.mutateAsync('NZ');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/user-settings',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ default_country: 'NZ' }),
+        })
+      );
+      expect(queryClient.getQueryData(userSettingsKeys.detail())).toEqual(
+        saved
+      );
     });
   });
 
