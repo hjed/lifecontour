@@ -64,7 +64,7 @@ describe('settings API', () => {
   });
 
   describe('updateTimezone', () => {
-    it('PUTs the timezone in the request body', async () => {
+    it('PATCHes the timezone in the request body', async () => {
       const mockResponse = {
         data: {
           id: 'user-1',
@@ -80,7 +80,7 @@ describe('settings API', () => {
       const result = await updateTimezone('America/New_York');
 
       expect(mockFetch).toHaveBeenCalledWith('/api/user-settings', {
-        method: 'PUT',
+        method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ timezone: 'America/New_York' }),
@@ -257,7 +257,7 @@ describe('settings API', () => {
     });
 
     /**
-     * The invalidation is fire-and-forget, so between a successful PUT and the
+     * The invalidation is fire-and-forget, so between a successful PATCH and the
      * refetch landing the query still holds the *previous* zone — and a
      * non-null previous zone outranks everything else in `useUserTimezone`. A
      * journal written in that window would be anchored in the zone the user

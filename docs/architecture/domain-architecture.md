@@ -755,7 +755,10 @@ disclose and nothing is drawn.
 
 That precedence is also why `GET /api/user-settings` answers `timezone: null` rather than the `UTC`
 default when a user has never configured one: the frontend needs to tell "chose UTC" from "told us
-nothing", and only the second may fall back to the browser. `UserSettingsRepository.get_timezone(user_id)`
+nothing", and only the second may fall back to the browser. The column holds the same distinction:
+`user_settings.timezone` is nullable (NULL = not chosen) since `0138`, because a row can exist only to
+hold the user's `default_country` (#1820), and `PATCH /api/user-settings` writes only the fields it is
+sent. `UserSettingsRepository.get_timezone(user_id)`
 still applies the default everywhere the backend resolves a zone for itself, and it is the **only**
 timezone lookup: there is no "the" timezone. Background consumers with no request user resolve the owner
 of what they process and read that user's zone — the inbound consumer's title-similarity assessor from

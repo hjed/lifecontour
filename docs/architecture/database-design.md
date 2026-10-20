@@ -39,6 +39,10 @@ table's DDL:
 | Integrations | `sync_metadata`, `sync_jobs`, `pending_entity_mappings`, `strava_athlete_mappings`, `calendar_sync_tokens`, and the per-user credentials and settings: `user_google_auth`, `user_google_integration`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`, `user_immich_auth` |
 | Settings | `user_settings` |
 
+`user_settings` holds one row per user: `timezone` (IANA name) and `default_country` (ISO 3166-1
+alpha-2, filled in for imported addresses that have no country — #1820). Both are nullable, and NULL
+means "not chosen", the same as no row (#1401).
+
 **Known gap:** email uniqueness on `contact_methods` (`0027`, `LOWER(BTRIM(value))`) is
 system-wide, because the table has no owner. A second user cannot store an address another user's
 contact holds, and the 409 reveals that it exists somewhere. Fixing it needs the owner in the index.
