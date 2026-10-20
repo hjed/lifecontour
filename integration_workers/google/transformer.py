@@ -5,7 +5,6 @@ Handles the mapping between Google People API response structures and our
 internal Contact domain entities.
 """
 
-import re
 from typing import Any
 
 import structlog
@@ -35,6 +34,7 @@ from api_models import (
     GooglePersonEvent,
     GooglePhoneNumber,
 )
+from group_naming import group_tag_segments, sanitize_tag_segment
 from group_translator import GoogleGroupNameTranslator
 
 logger = structlog.get_logger()
@@ -288,22 +288,17 @@ class GoogleContactTransformer:
 
         name_str = str(translated_name)
 
-        # Split on '/' for hierarchy
-        segments = [s.strip() for s in name_str.split("/") if s.strip()]
-        if not segments:
-            return []
-
+        # Split on '/' for hierarchy. The push keys groups by the same path
+        # (group_naming.group_tag_path), so the two must stay one function.
         tags: list[Tag] = []
-        for segment in segments:
+        for segment in group_tag_segments(name_str):
             try:
-                sanitized = self._sanitize_tag_name(segment)
-                if sanitized:
-                    tag = Tag(name=TagName(sanitized))
-                    # For child tags in a hierarchy, set _parent_name so
-                    # serialization can carry the relationship info.
-                    if tags:
-                        tag._parent_name = tags[-1].name.value  # type: ignore[attr-defined]
-                    tags.append(tag)
+                tag = Tag(name=TagName(segment))
+                # For child tags in a hierarchy, set _parent_name so
+                # serialization can carry the relationship info.
+                if tags:
+                    tag._parent_name = tags[-1].name.value  # type: ignore[attr-defined]
+                tags.append(tag)
             except ValueError:
                 logger.debug(
                     "Skipping invalid segment in hierarchical group name",
@@ -356,23 +351,8 @@ class GoogleContactTransformer:
         )
 
     def _sanitize_tag_name(self, name: str) -> str | None:
-        """
-        Sanitize a string to make it valid for TagName.
-
-        TagName only allows alphanumeric, hyphens, underscores, and ampersands.
-        The '/' character should be split before this method is called.
-        """
-        if not name or not name.strip():
-            return None
-
-        sanitized = re.sub(r"[^a-zA-Z0-9_&-]", "-", name.strip())
-        sanitized = re.sub(r"-+", "-", sanitized)
-        sanitized = sanitized.strip("-")
-
-        if not sanitized or len(sanitized) > 100:
-            return None
-
-        return sanitized
+        """Sanitize one hierarchy segment to make it valid for TagName."""
+        return sanitize_tag_segment(name)
 
     def _extract_organization_info(
         self, organizations: list[Any]

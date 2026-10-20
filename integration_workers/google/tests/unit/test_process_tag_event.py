@@ -44,7 +44,7 @@ class TestProcessTagEvent:
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch("worker.GoogleAPIClient", return_value=mock_google_client),
             patch(
-                "worker._build_contact_group_mapping",
+                "worker._fetch_contact_group_mapping",
                 new_callable=AsyncMock,
                 return_value={"contactGroups/123": "Work/Project"},
             ),
@@ -75,7 +75,7 @@ class TestProcessTagEvent:
             patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
             patch("worker.GoogleAPIClient", return_value=mock_google_client),
             patch(
-                "worker._build_contact_group_mapping",
+                "worker._fetch_contact_group_mapping",
                 new_callable=AsyncMock,
                 return_value={"contactGroups/456": "To_Delete"},
             ),
@@ -96,3 +96,83 @@ class TestProcessTagEvent:
             mock_google_client.delete_contact_group.assert_called_once_with(
                 "contactGroups/456"
             )
+
+    @pytest.mark.asyncio
+    async def test_deleting_a_sanitised_tag_deletes_its_group(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        """#1821: the tag ``Family-Friends`` came from the group "Family Friends"."""
+        from worker import process_tag_event
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/456": "Family Friends"},
+            ),
+        ):
+            result = await process_tag_event(
+                ctx={"session_factory": mock_session_factory, "job_id": "job123"},
+                event_type="TagDeleted",
+                event_data={"tag_id": 1, "tag_name": "Family-Friends", "user_id": 1},
+            )
+
+        assert result["status"] == "success"
+        mock_google_client.delete_contact_group.assert_called_once_with(
+            "contactGroups/456"
+        )
+
+    @pytest.mark.asyncio
+    async def test_renaming_matches_the_group_case_insensitively(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        """Tag names are case-insensitive, so inbound's ``family`` is "Family"."""
+        from worker import process_tag_event
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={"contactGroups/123": "family"},
+            ),
+        ):
+            result = await process_tag_event(
+                ctx={"session_factory": mock_session_factory, "job_id": "job123"},
+                event_type="TagUpdated",
+                event_data={
+                    "changed_fields": {"full_path": ("Family", "Kin")},
+                    "user_id": 1,
+                },
+            )
+
+        assert result["status"] == "success"
+        mock_google_client.update_contact_group.assert_called_once_with(
+            "contactGroups/123", "Kin"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_failed_group_listing_is_reported_not_skipped(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        """A partial listing would miss the group and report success."""
+        from worker import process_tag_event
+
+        mock_google_client.list_contact_groups.side_effect = RuntimeError("503")
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+        ):
+            result = await process_tag_event(
+                ctx={"session_factory": mock_session_factory, "job_id": "job123"},
+                event_type="TagDeleted",
+                event_data={"tag_id": 1, "tag_name": "Friends", "user_id": 1},
+            )
+
+        assert result["status"] == "partial_success"
+        assert result["errors"] == ["503"]
+        mock_google_client.delete_contact_group.assert_not_called()
