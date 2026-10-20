@@ -693,6 +693,50 @@ class TestBuildReverseGroupMapping:
             "Family-Friends/Close-Ones": "contactGroups/c",
         }
 
+    @pytest.mark.parametrize("name", ["A--B", "-Leading", "Trailing-", "A--B/C"])
+    def test_a_group_named_by_a_valid_tag_keeps_that_key(self, name: str) -> None:
+        """Greptile on #1837: the push creates groups under the tag's own name.
+
+        ``TagName`` allows repeated and edge hyphens, which sanitising would
+        collapse; keyed only by the sanitised path, a group the push created for
+        ``A--B`` would be missed and created again on every push.
+        """
+        from worker import _build_reverse_group_mapping, group_tag_path
+
+        result = _build_reverse_group_mapping({"contactGroups/a": name})
+
+        assert result[name] == "contactGroups/a"
+        assert result[group_tag_path(name) or ""] == "contactGroups/a"
+
+    def test_a_group_named_by_the_tag_beats_one_sanitising_to_it(self) -> None:
+        """The tag ``A-B`` is the group "A-B", not "A--B" (which sanitises to it)."""
+        from worker import _build_reverse_group_mapping
+
+        for forward in (
+            {"contactGroups/a": "A-B", "contactGroups/b": "A--B"},
+            {"contactGroups/b": "A--B", "contactGroups/a": "A-B"},
+        ):
+            assert _build_reverse_group_mapping(forward) == {
+                "A-B": "contactGroups/a",
+                "A--B": "contactGroups/b",
+            }
+
+    @pytest.mark.asyncio
+    async def test_a_group_the_push_created_is_found_again(self) -> None:
+        """A tag ``A--B`` reuses the group created for it on an earlier push."""
+        from worker import _build_reverse_group_mapping, _ensure_google_groups_exist
+
+        mock_client = AsyncMock()
+
+        result = await _ensure_google_groups_exist(
+            client=mock_client,
+            tag_names=["A--B"],
+            existing_groups=_build_reverse_group_mapping({"contactGroups/a": "A--B"}),
+        )
+
+        assert result["A--B"] == "contactGroups/a"
+        mock_client.create_contact_group.assert_not_called()
+
     def test_a_group_no_tag_can_name_is_left_out(self) -> None:
         from worker import _build_reverse_group_mapping
 

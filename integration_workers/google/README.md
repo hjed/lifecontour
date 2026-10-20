@@ -163,8 +163,10 @@ groups the same way (`_build_reverse_group_mapping`), matching case-insensitivel
 so a renamed-by-sanitising tag keeps its membership and no duplicate group is
 created (#1821). Some details:
 
-- When two groups sanitise to the same path ("Family Friends" and
-  "Family-Friends"), the one whose display name *is* the path wins.
+- A group is also keyed by its display name when that is a valid tag path, so
+  a group the push created for the tag `A--B` (which sanitises to `A-B`) is
+  found again. A group named exactly like a tag beats one that only sanitises
+  to it ("Family-Friends" over "Family Friends").
 - Reserved groups and `starred` are never a tag's group.
 - A tag that is only the parent of another of the contact's tags (`Family` beside
   `Family/Extended`) gets no group created for it (`_tags_needing_groups`):

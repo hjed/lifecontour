@@ -37,6 +37,7 @@ from core_shared.logging import (
 )
 from core_shared.metrics import MetricsCollector
 from core_shared.models.contacts.serialization import serialize_contact
+from core_shared.models.contacts.value_objects import TagName
 from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncCapability,
@@ -802,18 +803,21 @@ def _build_reverse_group_mapping(
 
     The forward mapping (used for pull) maps Google group resource names to
     display names. The reverse mapping (used for push) maps each group back
-    from the local tag path inbound names it by (``group_tag_path``): inbound
-    sanitises "Family Friends" into the tag ``Family-Friends``, so a
-    display-name key would never match the tag (#1821).
+    from the tag paths that can name it:
 
-    Groups no tag can name are left out, as are the system groups inbound never
-    makes a tag of (the reserved groups and starred): the push sends those from
+    * the path inbound names it by (``group_tag_path``): inbound sanitises
+      "Family Friends" into the tag ``Family-Friends``, so a display-name key
+      alone would never match that tag (#1821);
+    * its display name itself, when that is a valid tag path: the push creates
+      groups under the tag's own name, and ``TagName`` allows hyphen runs that
+      sanitising collapses (``A--B``), so the group must be found by it again.
+
+    A group named exactly like a tag beats one that only sanitises to it, and
+    otherwise the last group seen wins (Google allows duplicate names); a
+    warning is logged when a group loses a key. Groups no tag can name are left
+    out, as are the system groups inbound never makes a tag of (the reserved
+    groups and starred): the push sends those from
     ``_with_reserved_group_memberships``, and a tag must not resolve to one.
-
-    Note: Google allows duplicate group display names, and distinct names can
-    sanitise alike ("Family Friends", "Family-Friends"). Inbound merges them
-    into one tag, so only one group can be the tag's: the one whose name *is*
-    the tag path, otherwise the last one seen. A warning is logged either way.
 
     Args:
         forward_mapping: resource_name → display_name mapping
@@ -824,26 +828,42 @@ def _build_reverse_group_mapping(
     system_groups = {
         f"contactGroups/{group_id}" for group_id in settings.google_reserved_groups
     } | {STARRED_GROUP_RESOURCE}
+    groups = [
+        (resource_name, name)
+        for resource_name, name in forward_mapping.items()
+        if resource_name not in system_groups
+    ]
     reverse: dict[str, str] = {}
-    exact_names: set[str] = set()
-    for resource_name, name in forward_mapping.items():
-        path = group_tag_path(name)
-        if path is None or resource_name in system_groups:
-            continue
-        if path in reverse:
+
+    def assign(key: str, resource_name: str) -> None:
+        previous = reverse.get(key)
+        if previous is not None and previous != resource_name:
             logger.warning(
                 "Google Contact Groups share a tag name, one resource wins",
-                group_name=name,
-                tag_name=path,
-                previous_resource=reverse[path],
+                tag_name=key,
+                previous_resource=previous,
                 new_resource=resource_name,
             )
-            if path in exact_names:
-                continue
-        if name == path:
-            exact_names.add(path)
-        reverse[path] = resource_name
+        reverse[key] = resource_name
+
+    for resource_name, name in groups:
+        path = group_tag_path(name)
+        if path is not None:
+            assign(path, resource_name)
+    # Second, so a group named exactly like a tag wins that key.
+    for resource_name, name in groups:
+        if _is_tag_path(name):
+            assign(name, resource_name)
     return reverse
+
+
+def _is_tag_path(name: str) -> bool:
+    """Whether a group's display name is itself a valid local tag path."""
+    try:
+        TagName(name)
+    except ValueError:
+        return False
+    return True
 
 
 def _transform_important_dates_to_google(
