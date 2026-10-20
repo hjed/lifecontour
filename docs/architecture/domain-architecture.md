@@ -630,6 +630,49 @@ All integration logic, patterns, and implementation details are defined in the d
 - Handle errors gracefully with meaningful messages
 - Keep services stateless and testable
 
+### Read-modify-write: change what you name, under the lock
+
+A write that builds on a read of the row it writes - every update of an
+aggregate - reads **under the aggregate's row lock**, inside the write's unit
+of work. Reading first and writing later, even within one request, leaves a
+window in which somebody else's committed change is overwritten with the value
+the first read saw: a lost update, with no error anywhere.
+
+The services make the safe shape the only one available:
+
+| Need | Use |
+|---|---|
+| Replace the whole resource with what the caller sent (REST `PUT`) | `update_contact` / `update_journal` |
+| Change some fields (MCP updates, REST `PATCH`) | `patch_contact(ContactPatch)` / `patch_journal(JournalPatch)` |
+| Derive the new state from the stored one (integration sync) | `modify_contact(mutate)` / `modify_journal(mutate)` |
+
+All three are one write path: `modify_*` locks the aggregate (through the
+guard, below), reads it, hands a copy to `mutate`, and saves what `mutate`
+returns. A patch is just a mutation that applies the fields it names
+(`app/shared/patch.py`): `UNSET` leaves a field alone and `None` clears it, so a
+field the caller did not name can never be written with a value from an older
+read. A contact mutation may return `None` to write nothing — the decision to
+skip is then made against the locked read too.
+
+**Never build a whole entity from a read of your own and hand it to an
+`update_*` method** to change part of it — name the change in a patch instead.
+Two bugs of exactly that shape motivated this: MCP `update_contact` reverted
+concurrent edits and cleared the photo and favourite flag it had no parameter
+for (#1557), and the inline field edit cleared a contact's company and job
+title.
+
+**Every aggregate write starts with the guard** —
+`guard_aggregate_write` (`app/shared/preconditions.py`), via
+`ContactService._guard_write` or `guard_journal_write` — which takes the row
+lock whether or not the caller sent a precondition, refuses a missing row, and
+then checks the precondition if there is one. Child-row writes take it too,
+before touching the child, so every writer takes the parent lock first and
+none can deadlock against another. The lock mode is the aggregate's: contacts
+`FOR UPDATE`, journals `FOR NO KEY UPDATE` so a journal edit never waits on a
+task link's `FOR KEY SHARE`. A transaction must never take the guard and then
+`FOR UPDATE` on the same row. See
+[API Design → Conditional Writes](api-design.md#conditional-writes-etag--if-match).
+
 ### Error Handling Guidelines
 
 - Create custom exception classes for domain errors

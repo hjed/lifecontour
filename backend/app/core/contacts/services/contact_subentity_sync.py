@@ -12,13 +12,12 @@ with a :class:`Reconciliation`; these functions only decide what matches what,
 and what moved.
 """
 
-from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Protocol
 
 from core_shared.models.contacts.entities import (
-    Contact,
     ContactAddress,
     ContactMethod,
     ContactNote,
@@ -503,49 +502,3 @@ def keep_archived[T: (ContactMethod, ContactAddress)](
         restored.add(id(match))
         result.append(replace(item, id=match.id, is_archived=False))
     return result + [row for row in archived if id(row) not in restored]
-
-
-@dataclass(frozen=True)
-class SubResourceMerge:
-    """Sub-resource changes named rather than listed.
-
-    A caller that wants to set the primary email, or add one note, would
-    otherwise have to hand ``update_contact`` the whole list, built from a
-    read it made itself - and a row added by someone else between that read
-    and the write would be missing from the list, and deleted. The service
-    applies a merge to the contact as it reads it under the row lock instead,
-    so there is no such window. The ``tag_names`` argument does the same for
-    tags.
-    """
-
-    primary_methods: Mapping[MethodType, str] = field(default_factory=dict)
-    new_notes: Sequence[str] = ()
-
-    def conflicts(self, contact: Contact) -> list[str]:
-        """The sub-resources ``contact`` also gives a whole list for.
-
-        Two answers to one question: refused rather than guessed between.
-        """
-        clashes = []
-        if self.primary_methods and contact.methods is not None:
-            clashes.append("methods")
-        if self.new_notes and contact.notes is not None:
-            clashes.append("notes")
-        return clashes
-
-    def apply_to(self, contact: Contact, stored: Contact) -> None:
-        """Give ``contact`` the whole lists this merge implies over ``stored``."""
-        contact_id = stored.id or 0
-        if self.primary_methods:
-            methods = list(stored.methods or [])
-            for method_type, value in self.primary_methods.items():
-                methods = with_primary_method(methods, method_type, value, contact_id)
-            contact.methods = methods
-        if self.new_notes:
-            contact.notes = [
-                *(stored.notes or []),
-                *(
-                    ContactNote(content=content, contact_id=contact_id)
-                    for content in self.new_notes
-                ),
-            ]

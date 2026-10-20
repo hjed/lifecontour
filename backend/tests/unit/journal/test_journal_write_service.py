@@ -32,6 +32,7 @@ from core_shared.models.journals.constants import MAX_ROLE_LENGTH
 from core_shared.models.journals.gear_usage_data import GearUsageData, GearUsageItem
 
 from app.core.journal.models.journal_tag import JournalTag
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_write_service import JournalWriteService
 from tests.integration.contact_seeding import TEST_USER_ID
 
@@ -581,17 +582,17 @@ class TestUpdateJournalComposite:
     ):
         """types/type_data/relationships/tags=None → only core fields update."""
         updated = _journal(journal_id=9)
-        mock_journal_service.update_journal.return_value = updated
+        mock_journal_service.patch_journal.return_value = updated
         write_service._get_current_types = AsyncMock(return_value=set())
 
         result = await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction
+            9, JournalPatch(), mock_transaction
         )
 
         assert result.journal is updated
         assert result.types_removed == []
         assert result.type_data_discarded == {}
-        mock_journal_service.update_journal.assert_awaited_once()
+        mock_journal_service.patch_journal.assert_awaited_once()
         mock_journal_service.add_type_to_journal.assert_not_awaited()
         mock_journal_service.remove_type_from_journal.assert_not_awaited()
         write_service.tag_repo.get_tags_for_journal.assert_not_awaited()
@@ -601,7 +602,7 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_transaction
     ):
         """Replacing types removes those no longer desired and adds the new ones."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(
             return_value={JournalType.MOOD_RATING}
         )
@@ -609,7 +610,7 @@ class TestUpdateJournalComposite:
         write_service.fitness_data_repo.find_by_journal_id.return_value = None
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, types=["fitness"]
+            9, JournalPatch(), mock_transaction, types=["fitness"]
         )
 
         # MOOD_RATING (current, not desired) is removed + its data deleted.
@@ -637,7 +638,7 @@ class TestUpdateJournalComposite:
         Without that, the shared ancestors were removed (wiping the fitness
         block and Strava link) and then re-added empty as CANYONING's deps.
         """
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(
             return_value={
                 JournalType.FITNESS,
@@ -653,7 +654,7 @@ class TestUpdateJournalComposite:
         write_service.abseiling_data_repo.find_by_journal_id.return_value = None
 
         result = await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, types=["canyoning"]
+            9, JournalPatch(), mock_transaction, types=["canyoning"]
         )
 
         mock_journal_service.remove_type_from_journal.assert_not_awaited()
@@ -673,7 +674,7 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_transaction
     ):
         """A genuinely dropped type is named, with the fields that held values."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(
             return_value={JournalType.FITNESS, JournalType.MOOD_RATING}
         )
@@ -696,7 +697,7 @@ class TestUpdateJournalComposite:
         write_service.fitness_data_repo.find_by_journal_id.return_value.elevation_gain = 0
 
         result = await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+            9, JournalPatch(), mock_transaction, types=["mood_rating"]
         )
 
         assert result.types_removed == ["fitness"]
@@ -714,7 +715,7 @@ class TestUpdateJournalComposite:
         mock_transaction: AsyncMock,
     ) -> None:
         """Dropping GEAR_USAGE names the items it held rather than nothing."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(
             return_value={JournalType.GEAR_USAGE, JournalType.MOOD_RATING}
         )
@@ -726,7 +727,7 @@ class TestUpdateJournalComposite:
         )
 
         result = await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+            9, JournalPatch(), mock_transaction, types=["mood_rating"]
         )
 
         assert result.types_removed == ["gear_usage"]
@@ -738,7 +739,7 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """tags=[...] drops the tags that left and assigns the ones that arrived."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         existing = JournalTag(
             user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
         )
@@ -749,7 +750,7 @@ class TestUpdateJournalComposite:
         write_service.tag_repo.find_by_name.return_value = new_tag
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, tags=["new"]
+            9, JournalPatch(), mock_transaction, tags=["new"]
         )
 
         assert mock_tag_service.remove_tag.await_args.args[:2] == (9, existing.id)
@@ -761,7 +762,7 @@ class TestUpdateJournalComposite:
     ):
         updated = _journal(journal_id=9)
         updated.user_id = "owner-of-9"
-        mock_journal_service.update_journal.return_value = updated
+        mock_journal_service.patch_journal.return_value = updated
         write_service.tag_repo.get_tags_for_journal.return_value = []
         write_service.tag_repo.find_by_name.return_value = None
         write_service.tag_repo.save.return_value = JournalTag(
@@ -769,7 +770,7 @@ class TestUpdateJournalComposite:
         )
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, tags=["new"]
+            9, JournalPatch(), mock_transaction, tags=["new"]
         )
 
         saved = write_service.tag_repo.save.await_args.args[0]
@@ -785,7 +786,7 @@ class TestUpdateJournalComposite:
         which would now write a bogus "Removed Tags"/"Added Tags" pair into the
         activity feed for an update that changed nothing.
         """
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         kept = JournalTag(
             user_id=TEST_USER_ID, id=uuid4(), name="keep", color="#111111"
         )
@@ -793,7 +794,7 @@ class TestUpdateJournalComposite:
         write_service.tag_repo.find_by_name.return_value = kept
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, tags=["keep"]
+            9, JournalPatch(), mock_transaction, tags=["keep"]
         )
 
         mock_tag_service.remove_tag.assert_not_awaited()
@@ -808,7 +809,7 @@ class TestUpdateJournalComposite:
         Otherwise re-sending "Keep" for a journal tagged "keep" would churn the
         assignment and fabricate history.
         """
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         kept = JournalTag(
             user_id=TEST_USER_ID, id=uuid4(), name="keep", color="#111111"
         )
@@ -816,7 +817,7 @@ class TestUpdateJournalComposite:
         write_service.tag_repo.find_by_name.return_value = kept
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, tags=["KEEP"]
+            9, JournalPatch(), mock_transaction, tags=["KEEP"]
         )
 
         mock_tag_service.remove_tag.assert_not_awaited()
@@ -827,14 +828,14 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """tags=[] clears all assignments and adds nothing (distinct from None)."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         existing = JournalTag(
             user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
         )
         write_service.tag_repo.get_tags_for_journal.return_value = [existing]
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, tags=[]
+            9, JournalPatch(), mock_transaction, tags=[]
         )
 
         assert mock_tag_service.remove_tag.await_args.args[:2] == (9, existing.id)
@@ -845,7 +846,7 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_tag_service, mock_transaction
     ):
         """Both halves of the diff carry the caller's provenance."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         existing = JournalTag(
             user_id=TEST_USER_ID, id=uuid4(), name="old", color="#111111"
         )
@@ -856,7 +857,8 @@ class TestUpdateJournalComposite:
         write_service.tag_repo.find_by_name.return_value = new_tag
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9),
+            9,
+            JournalPatch(),
             mock_transaction,
             tags=["new"],
             changed_by="mcp",
@@ -876,7 +878,7 @@ class TestUpdateJournalComposite:
         mock_transaction,
     ):
         """relationships=[...] removes existing then adds the provided set."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         existing_rel = MagicMock()
         existing_rel.contact_id = 7
         existing_rel.relationship_type = JournalContactRelationshipType.PARTICIPANT
@@ -885,7 +887,8 @@ class TestUpdateJournalComposite:
         mock_journal_contact_service.contact_relationship_repo = repo
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9),
+            9,
+            JournalPatch(),
             mock_transaction,
             relationships=[
                 {"attributes": {"contact_id": "5", "relationship_type": "PARTICIPANT"}}
@@ -906,13 +909,14 @@ class TestUpdateJournalComposite:
         Otherwise a stray key (e.g. EVENT) would recreate that type's row and
         defeat the replace-all semantics.
         """
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(return_value=set())
         mock_journal_service.add_type_to_journal.return_value = [JournalType.FITNESS]
         write_service.fitness_data_repo.find_by_journal_id.return_value = None
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9),
+            9,
+            JournalPatch(),
             mock_transaction,
             types=["fitness"],
             type_data={"EVENT": {"calendar_id": "irrelevant"}},
@@ -926,7 +930,7 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_transaction
     ):
         """Dropping EVENT deletes its journal_calendar_info marker row."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(return_value={JournalType.EVENT})
         mock_journal_service.add_type_to_journal.return_value = [
             JournalType.MOOD_RATING
@@ -934,7 +938,7 @@ class TestUpdateJournalComposite:
         write_service.mood_data_repo.find_by_journal_id.return_value = None
 
         await write_service.update_journal_composite(
-            _journal(journal_id=9), mock_transaction, types=["mood_rating"]
+            9, JournalPatch(), mock_transaction, types=["mood_rating"]
         )
 
         write_service.calendar_info_repo.delete.assert_awaited_once_with(9)
@@ -956,12 +960,12 @@ class TestUpdateJournalComposite:
         self, write_service, mock_journal_service, mock_transaction
     ):
         """An unparseable type aborts the replace rather than silently dropping it."""
-        mock_journal_service.update_journal.return_value = _journal(journal_id=9)
+        mock_journal_service.patch_journal.return_value = _journal(journal_id=9)
         write_service._get_current_types = AsyncMock(return_value=set())
 
         with pytest.raises(JournalValidationError):
             await write_service.update_journal_composite(
-                _journal(journal_id=9), mock_transaction, types=["not_a_real_type"]
+                9, JournalPatch(), mock_transaction, types=["not_a_real_type"]
             )
 
         # No type was removed/added because we bailed before mutating.

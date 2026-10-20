@@ -8,6 +8,7 @@ Controllers act as adapters between HTTP and domain services.
 from typing import Annotated
 
 import structlog
+from core_shared.models.contacts.entities import Contact
 from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.journals import Journal
@@ -366,25 +367,27 @@ async def update_contact(
     """
     base_url = get_request_base_url(request)
 
-    existing_contact = await contact_service.get_contact_by_id(
-        contact_id, user_id=user.id
-    )
-    if not existing_contact:
-        raise ContactNotFoundError(contact_id)
+    # The request is merged with the contact as the service reads it under the
+    # row lock - the fields it leaves out keep their stored values, so they
+    # must come from that read, not from one made here, which a concurrent
+    # write (a favourite toggle, a photo sync) could already have overtaken.
+    async def _apply_request(stored: Contact) -> Contact:
+        return ContactRequestConverter.from_update_request(contact_request.data, stored)
 
     # The precondition is handed to the service untouched: it is checked inside
     # the write's unit of work, under the row lock, so a comparison made here
     # would be one the write could not honour.
-    saved_contact = await contact_service.update_contact(
-        ContactRequestConverter.from_update_request(
-            contact_request.data, existing_contact
-        ),
+    saved_contact = await contact_service.modify_contact(
+        contact_id,
+        _apply_request,
         connection,
         changed_by="ui",
         source=Provenance.UI,
         expected_etags=get_if_match(request),
         user_id=user.id,
     )
+    # The mutation always returns a contact, so the service always writes.
+    assert saved_contact is not None
     set_etag(response, "contacts", contact_id, saved_contact.updated_at)
 
     contact_resource = ContactConverter.to_resource(saved_contact, base_url)

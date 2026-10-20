@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
@@ -56,6 +57,7 @@ from app.core.contacts.services.address_validation_service import (
     AddressValidationService,
 )
 from app.core.contacts.services.contact_history_service import ContactHistoryService
+from app.core.contacts.services.contact_patch import ContactMutation, ContactPatch
 from app.core.contacts.services.contact_subentity_sync import (
     ADDRESS_PREFIX,
     ADDRESSES,
@@ -68,7 +70,6 @@ from app.core.contacts.services.contact_subentity_sync import (
     ChangedFields,
     SubEntity,
     SubEntityKind,
-    SubResourceMerge,
     aggregate_change,
     diff_fields,
     prefixed,
@@ -446,18 +447,19 @@ class ContactService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
-        tag_names: list[str] | None = None,
+        tag_names: Sequence[str] | None = None,
         expected_etags: Sequence[str] | None = None,
-        subresource_merge: SubResourceMerge | None = None,
         *,
         user_id: str,
     ) -> Contact:
         """
-        Update an existing contact with transaction management.
+        Replace a contact with the whole desired state the caller sends.
 
-        This method updates a contact and all attached methods, addresses, and notes
-        in a single database transaction. Attach methods, addresses, and notes to the
-        Contact entity before calling this method for optimal transaction handling.
+        For a caller that holds the whole resource - a REST ``PUT``, an
+        integration sync - and means every field it sends. A caller changing
+        some fields of a contact it did not just read in full should name them
+        in a :class:`ContactPatch` and use :meth:`patch_contact`, or a field it
+        copied from an older read will overwrite a newer value.
 
         An attached list is the whole desired state for that sub-resource, and
         ``None`` leaves it alone. Reaching that state is a reconcile, not a
@@ -471,21 +473,18 @@ class ContactService:
         Args:
             contact: Contact entity with ID and optional attached methods, addresses, and notes
             transaction: Database transaction
+            tag_names: The whole set of tags by name; ``None`` leaves them alone.
             expected_etags: Optional entity-tags the caller expects the contact
                 to be at, from ``If-Match`` (REST) or ``expected_version``
                 (MCP). ``None`` writes unconditionally, as every caller did
                 before conditional writes existed.
-            subresource_merge: Optional changes to apply over the stored
-                methods and notes - set a primary email, add a note - instead
-                of a whole list. Applied to the contact as it is read under the
-                row lock, so a row added concurrently is not lost. Refused if
-                ``contact`` also carries a list for the same sub-resource.
 
         Returns:
             The updated Contact with all attached entities and assigned IDs
 
         Raises:
-            ContactValidationError: If contact ID is missing, contact not found, or validation fails
+            ContactValidationError: If contact ID is missing or validation fails
+            ContactNotFoundError: If ``user_id`` has no such contact
             PreconditionFailedError: If ``expected_etags`` names a version the
                 contact has already moved on from
             DuplicateEmailError: If any email method already exists (excluding this contact)
@@ -494,26 +493,117 @@ class ContactService:
         """
         if contact.id is None:
             raise ContactValidationError("id", "Contact ID is required for updates")
-        if subresource_merge is not None and (
-            clashes := subresource_merge.conflicts(contact)
-        ):
-            raise ValueError(
-                "A whole list and a merge were both given for: " + ", ".join(clashes)
-            )
 
-        async def _update_operation() -> Contact:
-            if contact.id is None:
-                raise ContactValidationError(
-                    "id", "Contact ID is required for update operation"
-                )
+        async def _replace(_stored: Contact) -> Contact:
+            return contact
 
+        return await self._modify_existing(
+            contact.id,
+            _replace,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            tag_names=tag_names,
+            expected_etags=expected_etags,
+            user_id=user_id,
+        )
+
+    async def patch_contact(
+        self,
+        contact_id: int,
+        patch: ContactPatch,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
+        *,
+        user_id: str,
+    ) -> Contact:
+        """Change the fields and child rows ``patch`` names, and nothing else.
+
+        The patch is applied to the contact as read under its row lock, so a
+        change somebody else committed to anything the patch does not name is
+        kept, whenever it landed. See :meth:`modify_contact`.
+
+        Raises:
+            ContactNotFoundError: If ``user_id`` has no such contact.
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from.
+        """
+
+        async def _apply(stored: Contact) -> Contact:
+            return patch.apply_to(stored)
+
+        return await self._modify_existing(
+            contact_id,
+            _apply,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            tag_names=patch.tag_names,
+            expected_etags=expected_etags,
+            user_id=user_id,
+        )
+
+    async def modify_contact(
+        self,
+        contact_id: int,
+        mutate: ContactMutation,
+        transaction: AsyncConnection,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+        tag_names: Sequence[str] | None = None,
+        expected_etags: Sequence[str] | None = None,
+        *,
+        user_id: str,
+    ) -> Contact | None:
+        """Read-modify-write a contact under its row lock, in one unit of work.
+
+        The one write path every whole-contact save goes through:
+
+        1. lock the contact (and refuse a stale ``expected_etags``);
+        2. read it, with every child row;
+        3. ``mutate`` builds the contact to save from that read;
+        4. save it, reconciling child rows and publishing what changed.
+
+        Because the read happens under the lock, nothing ``mutate`` builds on
+        can have moved by the time it is written. ``mutate`` is handed a copy,
+        and may return ``None`` to write nothing at all - the decision to skip
+        is then made against the locked read too.
+
+        Returns:
+            The saved contact, or ``None`` if ``mutate`` chose not to write.
+
+        Raises:
+            ContactNotFoundError: If ``user_id`` has no such contact.
+            PreconditionFailedError: If ``expected_etags`` names a version the
+                contact has already moved on from.
+            ValueError: If ``mutate`` returns a different contact.
+        """
+
+        async def _modify_operation() -> Contact | None:
             # Parent lock before anything the save builds on is read, as every
             # per-item writer takes it first: a method or note added
             # concurrently cannot land between the read below and the write,
             # where the reconcile would delete it for being missing from the
             # list. A stale write is refused here too, before tag resolution
             # below find-or-creates rows, so a refused update writes nothing.
-            await self._guard_write(contact.id, expected_etags, user_id=user_id)
+            await self._guard_write(contact_id, expected_etags, user_id=user_id)
+
+            current_contact = await self._get_existing_contact(
+                contact_id, user_id=user_id
+            )
+            contact = await mutate(deepcopy(current_contact))
+            if contact is None:
+                return None
+            if contact.id != contact_id:
+                raise ValueError(
+                    f"A mutation of contact {contact_id} returned contact {contact.id}"
+                )
+            # A contact's owner never changes. The repository never writes a
+            # new one; adopting the stored owner here keeps the aggregate this
+            # update saves, returns and publishes in agreement with the row.
+            contact.user_id = current_contact.user_id
 
             # Resolve any tag names to existing-or-new tags inside this unit of
             # work (replacement strategy: the resolved set replaces all existing
@@ -522,34 +612,16 @@ class ContactService:
             if tag_names is not None:
                 contact.tags = []
                 if tag_names:
-                    # The acting user's tags, not whatever owner the caller's
-                    # entity names: its ownership is only checked below.
                     await self._resolve_tag_names(
-                        contact, tag_names, transaction, owner=user_id
+                        contact, list(tag_names), transaction, owner=user_id
                     )
 
-            # Get current contact and calculate changes
-            current_contact = await self._get_existing_contact(
-                contact.id, user_id=user_id
-            )
-            # A contact's owner never changes. The repository never writes a
-            # new one; adopting the stored owner here keeps the aggregate this
-            # update saves, returns and publishes in agreement with the row.
-            contact.user_id = current_contact.user_id
-            if subresource_merge is not None:
-                subresource_merge.apply_to(contact, current_contact)
             changed_fields = self._calculate_changed_fields(current_contact, contact)
 
             # Validate and save basic contact fields
             saved_contact = await self._validate_and_save_contact_basic_fields(
-                contact, transaction, exclude_contact_id=contact.id
+                contact, transaction, exclude_contact_id=contact_id
             )
-            # contact_id is guaranteed to be not None after _ensure_contact_has_id
-            contact_id = saved_contact.id
-            if contact_id is None:
-                raise ContactValidationError(
-                    "id", "Contact ID is required after save operation"
-                )
 
             # Handle related entities update. A matched sub-entity edit is
             # reported on the aggregate event alongside the contact's own
@@ -577,8 +649,36 @@ class ContactService:
             return complete_contact
 
         return cast(
-            Contact, await self._execute_with_retry(_update_operation, transaction)
+            Contact | None,
+            await self._execute_with_retry(_modify_operation, transaction),
         )
+
+    async def _modify_existing(
+        self,
+        contact_id: int,
+        mutate: Callable[[Contact], Awaitable[Contact]],
+        transaction: AsyncConnection,
+        *,
+        changed_by: str,
+        source: Provenance,
+        tag_names: Sequence[str] | None,
+        expected_etags: Sequence[str] | None,
+        user_id: str,
+    ) -> Contact:
+        """:meth:`modify_contact` for a mutation that always writes."""
+        saved = await self.modify_contact(
+            contact_id,
+            mutate,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            tag_names=tag_names,
+            expected_etags=expected_etags,
+            user_id=user_id,
+        )
+        if saved is None:
+            raise ValueError(f"The update of contact {contact_id} wrote nothing")
+        return saved
 
     async def update_contact_field(
         self,

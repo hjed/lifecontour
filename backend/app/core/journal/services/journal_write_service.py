@@ -68,6 +68,7 @@ from app.core.journal.models.repositories import (
 )
 from app.core.journal.services import journal_type_data_helpers as helpers
 from app.core.journal.services.journal_contact_service import JournalContactService
+from app.core.journal.services.journal_patch import JournalPatch
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_guard import guard_journal_write
@@ -503,9 +504,35 @@ class JournalWriteService:
         )
 
     @transactional
+    async def patch_journal(
+        self,
+        journal_id: int,
+        patch: JournalPatch,
+        transaction: AsyncConnection,
+        *,
+        changed_by: str = "system",
+        source: Provenance = Provenance.SYSTEM,
+        expected_etags: Sequence[str] | None = None,
+    ) -> Journal:
+        """Change the journal fields ``patch`` names, as a committed unit of work.
+
+        Applied to the journal as read under its row lock; see
+        :meth:`JournalService.patch_journal`.
+        """
+        return await self.journal_service.patch_journal(
+            journal_id,
+            patch,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            expected_etags=expected_etags,
+        )
+
+    @transactional
     async def update_journal_composite(
         self,
-        journal: Journal,
+        journal_id: int,
+        patch: JournalPatch,
         transaction: AsyncConnection,
         *,
         types: list[str] | None = None,
@@ -516,7 +543,10 @@ class JournalWriteService:
         source: Provenance = Provenance.SYSTEM,
         expected_etags: Sequence[str] | None = None,
     ) -> CompositeUpdateResult:
-        """Update a journal's core fields and optionally replace its associations.
+        """Patch a journal's core fields and optionally replace its associations.
+
+        The core fields ``patch`` names are applied to the journal as read under
+        its row lock, so a field it does not name keeps its stored value.
 
         Tri-state per association: ``None`` leaves it untouched, while any list
         (including ``[]``) REPLACES the current set. This is the composite behind
@@ -527,17 +557,14 @@ class JournalWriteService:
         runs first, so a stale precondition refuses before any type, tag or
         relationship row is touched.
         """
-        updated = await self.journal_service.update_journal(
-            journal,
+        updated = await self.journal_service.patch_journal(
+            journal_id,
+            patch,
             transaction,
             changed_by=changed_by,
             source=source,
             expected_etags=expected_etags,
         )
-        if updated.id is None:
-            raise JournalValidationError("id", "Journal ID is required after update")
-        journal_id = updated.id
-
         report = TypeReplaceReport(types_removed=[], type_data_discarded={})
         if types is not None:
             report = await self._replace_journal_types(
@@ -572,7 +599,7 @@ class JournalWriteService:
 
         if relationships is not None:
             await self._replace_contact_relationships(
-                journal_id, relationships, transaction, user_id=journal.user_id
+                journal_id, relationships, transaction, user_id=updated.user_id
             )
 
         if tags is not None:

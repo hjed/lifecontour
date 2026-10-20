@@ -24,8 +24,8 @@ from core_shared.models.contacts.important_date_types import (
 from core_shared.models.history import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.services.contact_patch import ContactPatch
 from app.core.contacts.services.contact_service import ContactService
-from app.core.contacts.services.contact_subentity_sync import SubResourceMerge
 from tests.integration.contact_seeding import TEST_USER_ID
 from tests.integration.contacts.contact_service_harness import (
     RecordingEventPublisher,
@@ -738,10 +738,10 @@ class TestUniqueIndexesDuringASave:
         assert "contact_methods" not in changed
 
 
-class TestSubResourceMerge:
+class TestContactPatchChildMerges:
     """A change named rather than listed, applied to the contact as it stands.
 
-    MCP sets one primary email or adds one note. The merge is applied by the
+    MCP sets one primary email or adds one note. The patch is applied by the
     service after it has locked the contact and read its rows, so a row the
     caller never saw - one added while it was deciding - is kept.
     """
@@ -775,19 +775,13 @@ class TestSubResourceMerge:
         assert saved.methods is not None
         ids = {m.method_type: m.id for m in saved.methods}
 
-        # The contact handed in carries no methods at all: what is kept can
-        # only have come from the service's own read.
-        updated = await contact_service.update_contact(
-            Contact(
-                user_id=TEST_USER_ID,
-                id=saved.id,
-                first_name=saved.first_name,
-                last_name=saved.last_name,
-            ),
+        # The patch carries no methods at all: what is kept can only have come
+        # from the service's own read.
+        assert saved.id is not None
+        updated = await contact_service.patch_contact(
+            saved.id,
+            ContactPatch(primary_methods={MethodType.EMAIL: "merge.after@example.com"}),
             async_connection,
-            subresource_merge=SubResourceMerge(
-                primary_methods={MethodType.EMAIL: "merge.after@example.com"}
-            ),
             user_id=TEST_USER_ID,
         )
 
@@ -818,15 +812,11 @@ class TestSubResourceMerge:
         assert saved.notes is not None
         stored_id = saved.notes[0].id
 
-        updated = await contact_service.update_contact(
-            Contact(
-                user_id=TEST_USER_ID,
-                id=saved.id,
-                first_name=saved.first_name,
-                last_name=saved.last_name,
-            ),
+        assert saved.id is not None
+        updated = await contact_service.patch_contact(
+            saved.id,
+            ContactPatch(new_notes=["Follows the cricket"]),
             async_connection,
-            subresource_merge=SubResourceMerge(new_notes=["Follows the cricket"]),
             user_id=TEST_USER_ID,
         )
 
