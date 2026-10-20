@@ -73,4 +73,20 @@ describe('TimezoneSettings', () => {
 
     expect(mockSave).toHaveBeenCalledWith('America/New_York');
   });
+
+  it('keeps Save and Reset disabled when the settings could not be loaded', () => {
+    mockUseUserSettings.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    render(<TimezoneSettings />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not load your settings'
+    );
+    expect(screen.getByTestId('save-timezone-btn')).toBeDisabled();
+    expect(screen.getByTestId('reset-timezone-btn')).toBeDisabled();
+  });
 });

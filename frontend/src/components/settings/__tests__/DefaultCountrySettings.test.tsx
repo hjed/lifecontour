@@ -79,4 +79,19 @@ describe('DefaultCountrySettings', () => {
 
     expect(mockSave).toHaveBeenCalledWith(null);
   });
+
+  it('keeps Save disabled when the settings could not be loaded', () => {
+    mockUseUserSettings.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    render(<DefaultCountrySettings />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Could not load your settings'
+    );
+    expect(screen.getByTestId('save-default-country-btn')).toBeDisabled();
+  });
 });

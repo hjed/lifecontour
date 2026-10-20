@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { selectRadixOption } from './utils/radix-select';
 
 test.describe('Settings - Default Country', () => {
   // The e2e user is shared, so every test starts and ends with no country.
@@ -25,8 +26,7 @@ test.describe('Settings - Default Country', () => {
     const select = card.getByRole('combobox');
     await expect(select).toHaveText('None');
 
-    await select.click();
-    await page.getByRole('option', { name: 'New Zealand' }).click();
+    await selectRadixOption(page, select, 'New Zealand');
     await expect(select).toHaveText('New Zealand');
 
     const saved = page.waitForResponse(

@@ -28,6 +28,7 @@ import {
   useUpdateTimezone,
   useUserSettings,
 } from '@/lib/api/settings';
+import { SettingsLoadError } from './SettingsLoadError';
 
 /**
  * Re-exported from the API layer, where it has to live: `lib/` reaches for it
@@ -38,7 +39,7 @@ export { getDefaultTimezone };
 
 export function TimezoneSettings() {
   const browserTimezone = getBrowserTimezone();
-  const { data, isLoading } = useUserSettings();
+  const { data, isError } = useUserSettings();
   const { mutate: saveTimezone, isPending } = useUpdateTimezone();
 
   // The displayed value is the user's edit (draft) if any, otherwise the
@@ -47,6 +48,9 @@ export function TimezoneSettings() {
   const persisted = data?.data.attributes.timezone;
   const [draft, setDraft] = useState<string | null>(null);
   const timezone = draft ?? persisted ?? browserTimezone;
+  // Saving before the stored zone has loaded would replace it with the
+  // browser's, which the card shows in its place.
+  const loaded = data !== undefined;
 
   // Mirror the persisted value into the localStorage cache so the synchronous
   // getDefaultTimezone() helper stays current. Writes only — no state update.
@@ -86,7 +90,7 @@ export function TimezoneSettings() {
             value={timezone}
             onChange={e => setDraft(e.target.value)}
             placeholder={browserTimezone}
-            disabled={isLoading}
+            disabled={!loaded}
             data-testid='default-timezone-input'
           />
           {timezone !== browserTimezone && (
@@ -95,11 +99,12 @@ export function TimezoneSettings() {
             </p>
           )}
         </div>
+        {isError && <SettingsLoadError />}
         <div className='flex gap-2'>
           <Button
             onClick={handleSave}
             size='sm'
-            disabled={isPending || isLoading}
+            disabled={isPending || !loaded}
             data-testid='save-timezone-btn'
           >
             {isPending ? 'Saving…' : 'Save'}
@@ -108,7 +113,7 @@ export function TimezoneSettings() {
             onClick={handleReset}
             variant='outline'
             size='sm'
-            disabled={isPending || isLoading}
+            disabled={isPending || !loaded}
             data-testid='reset-timezone-btn'
           >
             Reset to browser

@@ -29,12 +29,13 @@ import {
 } from '@/components/ui/select';
 import { useUpdateDefaultCountry, useUserSettings } from '@/lib/api/settings';
 import { listCountries } from '@/lib/countries';
+import { SettingsLoadError } from './SettingsLoadError';
 
 /** Radix Select reserves `''`, so "no country" needs a value of its own. */
 const NO_COUNTRY = 'none';
 
 export function DefaultCountrySettings() {
-  const { data, isLoading } = useUserSettings();
+  const { data, isError } = useUserSettings();
   const { mutate: saveDefaultCountry, isPending } = useUpdateDefaultCountry();
   const countries = useMemo(() => listCountries(), []);
 
@@ -43,6 +44,9 @@ export function DefaultCountrySettings() {
   const persisted = data?.data.attributes.default_country ?? null;
   const [draft, setDraft] = useState<string | null>(null);
   const selected = draft ?? persisted ?? NO_COUNTRY;
+  // Saving before the stored value has loaded would overwrite it unseen —
+  // "None" here clears a country the card never showed.
+  const loaded = data !== undefined;
 
   const handleSave = () => {
     saveDefaultCountry(selected === NO_COUNTRY ? null : selected);
@@ -64,11 +68,7 @@ export function DefaultCountrySettings() {
       <CardContent className='space-y-4'>
         <div className='space-y-2'>
           <Label htmlFor='default-country'>Country</Label>
-          <Select
-            value={selected}
-            onValueChange={setDraft}
-            disabled={isLoading}
-          >
+          <Select value={selected} onValueChange={setDraft} disabled={!loaded}>
             <SelectTrigger
               id='default-country'
               data-testid='default-country-select'
@@ -85,10 +85,11 @@ export function DefaultCountrySettings() {
             </SelectContent>
           </Select>
         </div>
+        {isError && <SettingsLoadError />}
         <Button
           onClick={handleSave}
           size='sm'
-          disabled={isPending || isLoading}
+          disabled={isPending || !loaded}
           data-testid='save-default-country-btn'
         >
           {isPending ? 'Saving…' : 'Save'}
