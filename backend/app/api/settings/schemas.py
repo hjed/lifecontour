@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import pycountry
 from core_shared.models.contacts.value_objects import CountryCode
 from pydantic import BaseModel, Field, field_validator
 
@@ -52,8 +53,14 @@ class UserSettingsRequest(BaseModel):
     @field_validator("default_country")
     @classmethod
     def default_country_must_be_alpha_2(cls, value: str | None) -> str | None:
-        if value is not None:
-            CountryCode(value)
+        if value is None:
+            return value
+        CountryCode(value)
+        # The format check alone admits codes no country has (``ZZ``), which
+        # every imported address would then carry; addresses are checked the
+        # same way (``AddressValidationService.validate_country_code``).
+        if pycountry.countries.get(alpha_2=value) is None:
+            raise ValueError(f"Unknown ISO 3166-1 alpha-2 country: {value!r}")
         return value
 
     def to_changes(self) -> UserSettingsChanges:

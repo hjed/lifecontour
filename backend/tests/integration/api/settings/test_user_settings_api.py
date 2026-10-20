@@ -129,9 +129,10 @@ async def test_patch_null_default_country_clears_it(
         {"default_country": "AUS"},
         {"default_country": "au"},
         {"default_country": ""},
+        {"default_country": "ZZ"},
         {"timezone": None},
     ],
-    ids=["alpha-3", "lowercase", "empty", "null-timezone"],
+    ids=["alpha-3", "lowercase", "empty", "not-a-country", "null-timezone"],
 )
 async def test_patch_user_settings_rejects_invalid_values(
     authenticated_client: AsyncClient, body: dict[str, str | None]
