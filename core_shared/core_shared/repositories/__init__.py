@@ -23,6 +23,7 @@ from core_shared.repositories.sync_job_repository import SyncJobRepository
 from core_shared.repositories.unmatched_participant_repository import (
     UnmatchedParticipantRepository,
 )
+from core_shared.repositories.user_settings_reader import UserSettingsReader
 
 __all__ = [
     "ActiveCalendarChannel",
@@ -34,4 +35,5 @@ __all__ = [
     "MergedAliasRepository",
     "SyncJobRepository",
     "UnmatchedParticipantRepository",
+    "UserSettingsReader",
 ]
