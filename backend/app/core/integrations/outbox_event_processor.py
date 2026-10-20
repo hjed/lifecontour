@@ -36,6 +36,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import (
+    ContactNotFoundError,
     DuplicateEmailError,
     DuplicateTagNameError,
 )
@@ -151,6 +152,19 @@ def _has_unpushed_local_changes(contact: Contact, link: SyncMetadata) -> bool:
     The same test the Google worker selects contacts to push by.
     """
     return contact.updated_at is not None and contact.updated_at > link.last_synced_at
+
+
+def _skipped_update(
+    reason: str, integration_source: str, external_id: str
+) -> dict[str, Any]:
+    """The result of a ``contact.updated`` event that wrote nothing."""
+    return {
+        "status": "skipped",
+        "reason": reason,
+        "event_type": EVENT_TYPE_CONTACT_UPDATED,
+        "integration_source": integration_source,
+        "external_id": external_id,
+    }
 
 
 class OutboxEventProcessor:
@@ -711,6 +725,42 @@ class OutboxEventProcessor:
         else:
             updated_contact_data.tags = None
 
+    async def _reconcile_onto(
+        self,
+        contact_id: int,
+        contact: Contact,
+        payload: ContactSyncEventData,
+        *,
+        changed_by: str,
+        source: Provenance,
+    ) -> Contact:
+        """Save an inbound new contact over the local contact it matched by email.
+
+        What the event does not own comes from the stored contact as read
+        under its lock, so a local edit committed since the match is kept, and
+        a date added since is not deleted by the reconcile. A contact merged
+        away since the match surfaces as ``ContactNotFoundError``.
+        """
+
+        async def _merge_inbound(stored: Contact) -> Contact:
+            _keep_archived_values(contact, stored)
+            apply_sync_scope(contact, stored, payload.sync_scope)
+            return contact
+
+        reconciled = await self.contact_service.modify_contact(
+            contact_id,
+            _merge_inbound,
+            self.connection,
+            changed_by=changed_by,
+            source=source,
+            user_id=payload.user_id,
+        )
+        if reconciled is None:
+            raise OutboxEventProcessingError(
+                f"Reconciling onto contact {contact_id} wrote nothing"
+            )
+        return reconciled
+
     async def _process_contact_created(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a contact.created event."""
         event_data: dict[str, Any] = cast(dict[str, Any], event.event_data)
@@ -828,7 +878,10 @@ class OutboxEventProcessor:
                     source=provenance_source,
                 )
 
-                # Backfill photo_url for immich since the ID wasn't known during outbox event creation
+                # Backfill photo_url for immich since the ID wasn't known during
+                # outbox event creation. A whole-contact update with no read of
+                # the stored row is safe here: the contact was created by this
+                # unit of work, so no other transaction can have changed it.
                 if (
                     integration_source == "immich"
                     and created_contact.id
@@ -845,20 +898,15 @@ class OutboxEventProcessor:
                         user_id=payload.user_id,
                     )
             else:
+                if matched_contact.id is None:
+                    raise OutboxEventProcessingError("Matched contact has no ID")
                 contact.id = matched_contact.id
-                if matched_contact.id is not None:
-                    stored = await self.contact_service.get_contact_by_id(
-                        matched_contact.id, user_id=payload.user_id
-                    )
-                    if stored is not None:
-                        _keep_archived_values(contact, stored)
-                        apply_sync_scope(contact, stored, payload.sync_scope)
-                created_contact = await self.contact_service.update_contact(
+                created_contact = await self._reconcile_onto(
+                    matched_contact.id,
                     contact,
-                    self.connection,
+                    payload,
                     changed_by=sync_changed_by,
                     source=provenance_source,
-                    user_id=payload.user_id,
                 )
                 contact_action = "reconciled"
                 logger.info(
@@ -952,6 +1000,30 @@ class OutboxEventProcessor:
             "external_id": external_id,
         }
 
+    def _update_skip_reason(
+        self,
+        link: SyncMetadata,
+        stored: Contact,
+        new_version_hash: str,
+        force_apply: bool,
+    ) -> str | None:
+        """Why a ``contact.updated`` event should write nothing, if it should not.
+
+        Decided against the contact and link as read under their locks.
+        """
+        # Idempotency: the version is unchanged - unless the event is from a
+        # full sync, which re-applies every person.
+        if self.sync_metadata_repo.should_sync(link, new_version_hash):
+            return None
+        if not force_apply:
+            return "version_hash_unchanged"
+        # The version check is also what keeps a local edit whose push failed:
+        # Google's copy is unchanged, so it is skipped and the edit is pushed
+        # on the next cycle. A forced re-apply must not bypass it.
+        if _has_unpushed_local_changes(stored, link):
+            return "unpushed_local_changes"
+        return None
+
     async def _process_contact_updated(self, event: OutboxEvent) -> dict[str, Any]:
         """
         Process a contact update event with SELECT FOR UPDATE locking and idempotency.
@@ -983,61 +1055,20 @@ class OutboxEventProcessor:
             else calculate_contact_version_hash(contact_data)
         )
 
-        # Acquire lock on sync metadata (SELECT FOR UPDATE)
-        # This prevents concurrent updates to the same contact
-        # Note: sync_metadata may be None if this is the first sync or if
-        # sync_metadata creation failed during contact.created
-        sync_metadata = await self.sync_metadata_repo.find_and_lock(
+        # Which contact the link names - an unlocked peek, one statement on the
+        # link row alone, so it cannot straddle a merge the way a link read
+        # followed by a contact read could. The locks come contact first, then
+        # link, the order a contact merge takes them in (both contacts, then
+        # it repoints their links): taken the other way round, an inbound
+        # update overlapping a merge deadlocks. The link is read again under
+        # its lock below and must still name this contact.
+        peeked_link = await self.sync_metadata_repo.find_by_external_id(
             integration_source=integration_source,
             external_id=external_id,
             user_id=payload.user_id,
         )
 
-        if sync_metadata is None:
-            logger.info(
-                "No existing sync metadata found - will create on first update",
-                integration_source=integration_source,
-                external_id=external_id,
-            )
-
-        # Idempotency check: Skip if version hash matches, unless the event is
-        # from a full sync, which re-applies every person.
-        # should_sync() handles None gracefully (returns True to proceed with sync)
-        version_unchanged = not self.sync_metadata_repo.should_sync(
-            sync_metadata, new_version_hash
-        )
-        if version_unchanged and not payload.force_apply:
-            logger.info(
-                "Contact update skipped - version hash unchanged (idempotent)",
-                integration_source=integration_source,
-                external_id=external_id,
-                version_hash=new_version_hash,
-            )
-            return {
-                "status": "skipped",
-                "reason": "version_hash_unchanged",
-                "event_type": EVENT_TYPE_CONTACT_UPDATED,
-                "integration_source": integration_source,
-                "external_id": external_id,
-            }
-
-        # Find existing contact by external reference
-        try:
-            existing_contact = (
-                await self.contact_service.find_contact_by_external_reference(
-                    integration_source=integration_source,
-                    external_id=external_id,
-                    transaction=self.connection,
-                    user_id=payload.user_id,
-                )
-            )
-        except AttributeError as e:
-            # Method doesn't exist yet - this is expected during development
-            raise OutboxEventProcessingError(
-                "ContactService.find_contact_by_external_reference not implemented yet"
-            ) from e
-
-        if not existing_contact:
+        if peeked_link is None or peeked_link.internal_id is None:
             # Google's incremental sync emits contact.updated for contacts added
             # remotely after the initial full sync, so the backend may never have
             # seen them. Upsert via the create path instead of erroring; it owns
@@ -1048,51 +1079,76 @@ class OutboxEventProcessor:
                 external_id=external_id,
             )
             return await self._process_contact_created(event)
+        contact_id = peeked_link.internal_id
 
-        # The version check is also what keeps a local edit whose push failed:
-        # Google's copy is unchanged, so it is skipped and the edit is pushed on
-        # the next cycle. A forced re-apply must not bypass that.
-        if (
-            version_unchanged
-            and sync_metadata is not None
-            and _has_unpushed_local_changes(existing_contact, sync_metadata)
-        ):
-            logger.info(
-                "Forced contact update skipped - local changes not yet pushed",
+        skipped: dict[str, Any] | None = None
+        # The link's version as first locked, to tell whether a newer sync
+        # landed while a failed write's savepoint had released the lock.
+        locked_version: str | None = None
+        existing_link: dict[str, Any] | None = None
+        existing_reference_data: Any = None
+
+        async def _lock_link() -> SyncMetadata:
+            """Lock the link, and refuse it unless it still names this contact.
+
+            The peek found the contact *through* this link, so a link that is
+            gone or names another contact moved after the peek - a merge
+            repointed it, or the integration was unlinked. Retrying resolves
+            it afresh; carrying on would write the wrong contact, or re-create
+            a link the user removed.
+            """
+            link = await self.sync_metadata_repo.find_and_lock(
                 integration_source=integration_source,
                 external_id=external_id,
+                user_id=payload.user_id,
             )
-            return {
-                "status": "skipped",
-                "reason": "unpushed_local_changes",
-                "event_type": EVENT_TYPE_CONTACT_UPDATED,
-                "integration_source": integration_source,
-                "external_id": external_id,
-            }
+            if link is None or link.internal_id != contact_id:
+                raise OutboxEventProcessingError(
+                    f"The {integration_source} link for {external_id} no longer "
+                    f"names contact {contact_id}; retrying resolves it again"
+                )
+            return link
 
-        # Deserialize contact data from outbox event
-        try:
-            updated_contact_data = _deserialize_owned_contact(
-                contact_data, payload.user_id
+        async def _merge_inbound(stored: Contact) -> Contact | None:
+            """The contact to save: the event's fields over ``stored``, read locked.
+
+            Everything the event does not own - fields outside its scope,
+            archived values, tags it never synced - comes from ``stored``,
+            which is read under the contact's lock, so a local edit committed
+            before this event is kept rather than written back over.
+            """
+            nonlocal skipped, existing_link, existing_reference_data, locked_version
+
+            # Locks the link, second, under the contact's lock - which a merge
+            # also needs before it can repoint the link, so it cannot move again.
+            sync_metadata = await _lock_link()
+            locked_version = sync_metadata.version_hash
+
+            reason = self._update_skip_reason(
+                sync_metadata, stored, new_version_hash, payload.force_apply
             )
+            if reason is not None:
+                logger.info(
+                    "Contact update skipped",
+                    reason=reason,
+                    integration_source=integration_source,
+                    external_id=external_id,
+                    version_hash=new_version_hash,
+                )
+                skipped = _skipped_update(reason, integration_source, external_id)
+                return None
 
-            if existing_contact.id is None:
-                raise OutboxEventProcessingError("Existing contact has no ID")
-
+            try:
+                updated_contact_data = _deserialize_owned_contact(
+                    contact_data, payload.user_id
+                )
+            except ContactDeserializationError as e:
+                raise PermanentOutboxEventProcessingError(str(e)) from e
             # Preserve the existing contact ID. Its owner is the event's: the
             # lookup above is scoped to it, so another user's contact is never
             # found here.
-            updated_contact_data.id = existing_contact.id
-
-            # Refetch full contact to ensure we have current tags
-            full_existing_contact = await self.contact_service.get_contact_by_id(
-                existing_contact.id, user_id=payload.user_id
-            )
-            existing_tags = (
-                full_existing_contact.tags or [] if full_existing_contact else []
-            )
-            if full_existing_contact is not None:
-                _keep_archived_values(updated_contact_data, full_existing_contact)
+            updated_contact_data.id = contact_id
+            _keep_archived_values(updated_contact_data, stored)
 
             # Find the existing integration link (canonical sync_metadata store)
             # to carry forward its reference_data (synced_tags/etag).
@@ -1109,26 +1165,23 @@ class OutboxEventProcessor:
                 contact_data,
                 updated_contact_data,
                 existing_reference_data,
-                existing_tags,
+                stored.tags or [],
                 user_id=payload.user_id,
             )
-            if full_existing_contact is not None:
-                apply_sync_scope(
-                    updated_contact_data, full_existing_contact, payload.sync_scope
-                )
-        except ContactDeserializationError as e:
-            raise PermanentOutboxEventProcessingError(str(e)) from e
+            apply_sync_scope(updated_contact_data, stored, payload.sync_scope)
+            return updated_contact_data
 
         # Update the contact using the contact service
         sync_changed_by = f"{integration_source}_sync"
         provenance_source = _map_provenance(integration_source)
         try:
-            # Wrap in a nested transaction (savepoint) so that if update_contact
+            # Wrap in a nested transaction (savepoint) so that if the save
             # fails with an IntegrityError (e.g. converted to DuplicateEmailError),
             # the transaction state is cleanly rolled back and unpoisoned.
             async with self.connection.begin_nested():
-                updated_contact = await self.contact_service.update_contact(
-                    updated_contact_data,
+                updated_contact = await self.contact_service.modify_contact(
+                    contact_id,
+                    _merge_inbound,
                     self.connection,
                     changed_by=sync_changed_by,
                     source=provenance_source,
@@ -1142,11 +1195,23 @@ class OutboxEventProcessor:
                 error=str(e),
             )
             # Record conflict in sync_metadata so it's visible for resolution.
-            # The failed update_contact savepoint has been rolled back, so the
-            # transaction is healthy again and we can safely proceed.
+            # The failed savepoint has been rolled back, so the transaction is
+            # healthy again - but the rollback also released the locks taken
+            # inside it, so the link is locked and checked afresh: a merge that
+            # got in meanwhile may have repointed it, and this write must not
+            # point it back - nor, if another sync applied a newer version in
+            # the gap, write this older event's state over its success.
+            relocked = await _lock_link()
+            if relocked.version_hash != locked_version:
+                logger.info(
+                    "Duplicate-email conflict not recorded - a newer sync applied",
+                    integration_source=integration_source,
+                    external_id=external_id,
+                )
+                return _skipped_update("superseded", integration_source, external_id)
             await self.sync_metadata_repo.upsert(
                 user_id=payload.user_id,
-                internal_id=existing_contact.id,
+                internal_id=contact_id,
                 integration_source=integration_source,
                 external_id=external_id,
                 version_hash=new_version_hash,
@@ -1161,10 +1226,34 @@ class OutboxEventProcessor:
                 "external_id": external_id,
                 "error": str(e),
             }
+        except ContactNotFoundError as e:
+            # The contact the link named is not the owner's to write: gone, or
+            # never theirs. If a merge moved the link meanwhile, retrying
+            # resolves it again, onto the survivor. If the link still names
+            # the same contact, nothing will change on a retry: the create
+            # path decides, as for any link with no contact of the owner's.
+            current = await self.sync_metadata_repo.find_by_external_id(
+                integration_source=integration_source,
+                external_id=external_id,
+                user_id=payload.user_id,
+            )
+            if current is not None and current.internal_id not in (None, contact_id):
+                raise OutboxEventProcessingError(
+                    f"Contact {contact_id} is gone and its {integration_source} "
+                    "link moved; retrying resolves it again"
+                ) from e
+            return await self._process_contact_created(event)
+        except OutboxEventProcessingError:
+            raise
         except Exception as e:
             raise OutboxEventProcessingError(
                 f"Failed to update contact: {str(e)}"
             ) from e
+
+        if updated_contact is None:
+            # The event was skipped, decided against the locked contact.
+            assert skipped is not None
+            return skipped
 
         # Update reference data with new synced tags. Non-fatal: synced_tags
         # metadata self-heals on the next sync cycle. Wrapped in a savepoint so a
