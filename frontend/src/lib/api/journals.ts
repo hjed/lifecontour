@@ -11,6 +11,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { addDays, subDays, format, parseISO } from 'date-fns';
@@ -44,9 +45,22 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
-import { AGGREGATE_LABELS, toastUnlessConflict } from '@/lib/write-conflicts';
-import { guardedWrite, type AggregateRef } from './aggregate-write';
-import { sendConditional, type ConditionalResult } from './conditional-request';
+import {
+  AGGREGATE_LABELS,
+  isWriteConflict,
+  toastUnlessConflict,
+} from '@/lib/write-conflicts';
+import {
+  aggregateWrite,
+  guardedWrite,
+  sendGuarded,
+  type AggregateRef,
+} from './aggregate-write';
+import {
+  ApiError,
+  sendConditional,
+  type ConditionalResult,
+} from './conditional-request';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { homeDashboardKeys } from './home-dashboard';
 import { taskKeys } from './tasks';
@@ -452,249 +466,165 @@ function updateJournalField(
 }
 
 // Type Management Functions
-async function addJournalType(
-  journalId: string,
-  journalType: JournalType,
-  typeData?: Record<string, unknown>
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal-types' as const,
-    attributes: {
-      journal_type: journalType,
-      type_data: typeData || {},
-    },
-  };
+// Writes to a journal's rows. Each is guarded by the journal's tag: see
+// `journalAggregate`.
 
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/types`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
+const journalUrl = (journalId: string) =>
+  API_ENDPOINTS.JOURNALS.BY_ID(journalId);
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
-}
-
-async function removeJournalType(
-  journalId: string,
-  journalType: JournalType
-): Promise<JournalResponse> {
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/types/${journalType}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
-
-  return response.json();
-}
-
-async function updateTypeData(
-  journalId: string,
-  journalType: JournalType,
-  typeData: Record<string, unknown>
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal-type-data' as const,
-    attributes: typeData,
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/types/${journalType}/data`,
-    {
-      method: 'PUT',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
-}
-
-// Contact Relationship Management Functions
-async function addContactRelationship(
-  journalId: string,
-  contactId: string,
-  relationshipType: JournalContactRelationshipType,
-  status?: AttendeeStatus | null,
-  role?: ContactEventRole | null
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal-contact-relationships' as const,
-    attributes: {
-      contact_id: contactId,
-      relationship_type: relationshipType,
-      ...(status !== undefined && { status }),
-      ...(role !== undefined && { role }),
-    },
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/contacts`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
-}
-
-async function removeContactRelationship(
+const contactRelationshipUrl = (
   journalId: string,
   contactId: string,
   relationshipType: JournalContactRelationshipType
-): Promise<JournalResponse> {
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/contacts/${contactId}/${relationshipType}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    }
-  );
+) =>
+  `${journalUrl(journalId)}/relationships/contacts/${contactId}/${relationshipType}`;
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
-
-  return response.json();
+function addJournalType(
+  journalId: string,
+  journalType: JournalType,
+  typeData: Record<string, unknown> | undefined,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(`${journalUrl(journalId)}/types`, {
+    method: 'POST',
+    body: {
+      data: {
+        type: 'journal-types',
+        attributes: { journal_type: journalType, type_data: typeData || {} },
+      },
+    },
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
+  });
 }
 
-async function updateContactRelationship(
+function removeJournalType(
   journalId: string,
-  contactId: string,
-  relationshipType: JournalContactRelationshipType,
-  status?: AttendeeStatus | null,
-  role?: ContactEventRole | null
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal-contact-relationships' as const,
-    attributes: {
-      ...(status !== undefined && { status }),
-      ...(role !== undefined && { role }),
-    },
-  };
+  journalType: JournalType,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    `${journalUrl(journalId)}/types/${journalType}`,
+    { method: 'DELETE', ifMatch, fallbackMessage: ERROR_MESSAGES.DELETE_FAILED }
+  );
+}
 
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/contacts/${contactId}/${relationshipType}`,
+function updateTypeData(
+  journalId: string,
+  journalType: JournalType,
+  typeData: Record<string, unknown>,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    `${journalUrl(journalId)}/types/${journalType}/data`,
     {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
+      method: 'PUT',
+      body: { data: { type: 'journal-type-data', attributes: typeData } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
+}
 
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
+/** A contact's place in a journal, and optionally its status and role. */
+interface JournalContactLink {
+  contactId: string;
+  relationshipType: JournalContactRelationshipType;
+  status?: AttendeeStatus | null;
+  role?: ContactEventRole | null;
+}
 
-  return response.json();
+function linkAttributes({ status, role }: JournalContactLink) {
+  return {
+    ...(status !== undefined && { status }),
+    ...(role !== undefined && { role }),
+  };
+}
+
+function addContactRelationship(
+  journalId: string,
+  link: JournalContactLink,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    `${journalUrl(journalId)}/relationships/contacts`,
+    {
+      method: 'POST',
+      body: {
+        data: {
+          type: 'journal-contact-relationships',
+          attributes: {
+            contact_id: link.contactId,
+            relationship_type: link.relationshipType,
+            ...linkAttributes(link),
+          },
+        },
+      },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
+    }
+  );
+}
+
+function removeContactRelationship(
+  journalId: string,
+  { contactId, relationshipType }: JournalContactLink,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    contactRelationshipUrl(journalId, contactId, relationshipType),
+    { method: 'DELETE', ifMatch, fallbackMessage: ERROR_MESSAGES.DELETE_FAILED }
+  );
+}
+
+function updateContactRelationship(
+  journalId: string,
+  link: JournalContactLink,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    contactRelationshipUrl(journalId, link.contactId, link.relationshipType),
+    {
+      method: 'PATCH',
+      body: {
+        data: {
+          type: 'journal-contact-relationships',
+          attributes: linkAttributes(link),
+        },
+      },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
+    }
+  );
 }
 
 // Tag Management Functions
-async function addJournalTag(
+function addJournalTag(
   journalId: string,
-  tagId: string
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal-tag' as const, // Backend expects singular 'journal-tag'
-    attributes: {
-      tag_id: tagId,
-    },
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/tags`,
+  tagId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    `${journalUrl(journalId)}/relationships/tags`,
     {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
+      // Backend expects singular 'journal-tag'
+      body: { data: { type: 'journal-tag', attributes: { tag_id: tagId } } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
-async function removeJournalTag(
+function removeJournalTag(
   journalId: string,
-  tagId: string
-): Promise<JournalResponse> {
-  const response = await fetch(
-    `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/relationships/tags/${tagId}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    }
+  tagId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(
+    `${journalUrl(journalId)}/relationships/tags/${tagId}`,
+    { method: 'DELETE', ifMatch, fallbackMessage: ERROR_MESSAGES.DELETE_FAILED }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
 // Fetch available journal tags
@@ -1767,233 +1697,261 @@ export function useUpdateJournalField(journalId: string) {
   });
 }
 
-export function useAddJournalType() {
+/** Refreshes what a write to one of the journal's rows changed. */
+function invalidateJournalRows(
+  queryClient: QueryClient,
+  journalId: string
+): void {
+  void invalidateAfterMutation(
+    queryClient,
+    { queryKey: journalKeys.detail(journalId) },
+    { queryKey: journalKeys.lists() },
+    REFRESH_HOME_DASHBOARD
+  );
+}
+
+export function useAddJournalType(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      journalType,
-      typeData,
-    }: {
-      journalId: string;
-      journalType: JournalType;
-      typeData?: Record<string, unknown>;
-    }) => addJournalType(journalId, journalType, typeData),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      (
+        {
+          journalType,
+          typeData,
+        }: { journalType: JournalType; typeData?: Record<string, unknown> },
+        ifMatch
+      ) => addJournalType(journalId, journalType, typeData, ifMatch),
+      ({ journalType }) => `Add type ${journalType}`,
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Journal type added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useRemoveJournalType() {
+export function useRemoveJournalType(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      journalType,
-    }: {
-      journalId: string;
-      journalType: JournalType;
-    }) => removeJournalType(journalId, journalType),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      ({ journalType }: { journalType: JournalType }, ifMatch) =>
+        removeJournalType(journalId, journalType, ifMatch),
+      ({ journalType }) => `Remove type ${journalType}`,
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Journal type removed successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useUpdateTypeData() {
+export function useUpdateTypeData(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      journalType,
-      typeData,
-    }: {
-      journalId: string;
-      journalType: JournalType;
-      typeData: Record<string, unknown>;
-    }) => updateTypeData(journalId, journalType, typeData),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      (
+        {
+          journalType,
+          typeData,
+        }: { journalType: JournalType; typeData: Record<string, unknown> },
+        ifMatch
+      ) => updateTypeData(journalId, journalType, typeData, ifMatch),
+      ({ journalType }) => `Update ${journalType} details`,
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Type data updated successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useAddContactRelationship() {
+/** One type block's new data. */
+export interface TypeDataUpdate {
+  journalType: JournalType;
+  typeData: Record<string, unknown>;
+}
+
+/** A change to several type blocks, and what to say once it has landed. */
+export interface TypeDataBatch {
+  updates: TypeDataUpdate[];
+  successMessage: string;
+}
+
+/**
+ * Writes several type blocks as one change — applying a template, which sets
+ * the abseiling block and the matching activity block together.
+ *
+ * One mutation, so a conflict part-way through replays all of it on "Keep
+ * mine" rather than only the block that was refused. Each request is guarded
+ * by the tag the previous one returned. The success message travels with the
+ * change so it is shown when the write lands — a replay included — and never
+ * for one the server refused.
+ */
+export function useUpdateTypeDataBatch(journalId: string) {
+  const queryClient = useQueryClient();
+  const aggregate = journalAggregate(journalId);
+
+  return useMutation({
+    ...aggregateWrite<TypeDataBatch>(
+      aggregate,
+      ({ updates }) =>
+        `Update ${updates.map(update => update.journalType).join(' and ')} details`
+    ),
+    mutationFn: async ({ updates }: TypeDataBatch) => {
+      const saved: JournalType[] = [];
+      for (const { journalType, typeData } of updates) {
+        try {
+          await sendGuarded(
+            queryClient,
+            aggregate.detailKey,
+            ifMatch =>
+              updateTypeData(journalId, journalType, typeData, ifMatch),
+            { bodyIsResource: true }
+          );
+        } catch (error) {
+          // A conflict is the dialog's, and replays the whole batch. Any other
+          // failure part-way says what did land, since that part stays saved.
+          if (saved.length === 0 || isWriteConflict(error)) throw error;
+          const reason = error instanceof Error ? error.message : String(error);
+          const message = `${saved.join(' and ')} saved, but ${journalType} could not be: ${reason}`;
+          // Kept an ApiError where it was one, so a refusal is still not
+          // retried; a network failure stays retryable (the PUTs are
+          // idempotent).
+          throw error instanceof ApiError
+            ? new ApiError(message, error.status, error.code, error.meta)
+            : new Error(message);
+        }
+        saved.push(journalType);
+      }
+    },
+    onSuccess: (_, { successMessage }) => toast.success(successMessage),
+    onError: toastUnlessConflict,
+    // Re-read however it ended: a batch that failed part-way has still
+    // changed the blocks before the failure.
+    onSettled: () => invalidateJournalRows(queryClient, journalId),
+  });
+}
+
+export function useAddContactRelationship(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      contactId,
-      relationshipType,
-      status,
-      role,
-    }: {
-      journalId: string;
-      contactId: string;
-      relationshipType: JournalContactRelationshipType;
-      status?: AttendeeStatus | null;
-      role?: ContactEventRole | null;
-    }) =>
-      addContactRelationship(
-        journalId,
-        contactId,
-        relationshipType,
-        status,
-        role
-      ),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      (link: JournalContactLink, ifMatch) =>
+        addContactRelationship(journalId, link, ifMatch),
+      () => 'Add a person',
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Contact relationship added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useRemoveContactRelationship() {
+export function useRemoveContactRelationship(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      contactId,
-      relationshipType,
-    }: {
-      journalId: string;
-      contactId: string;
-      relationshipType: JournalContactRelationshipType;
-    }) => removeContactRelationship(journalId, contactId, relationshipType),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      (link: JournalContactLink, ifMatch) =>
+        removeContactRelationship(journalId, link, ifMatch),
+      () => 'Remove a person',
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Contact relationship removed successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useUpdateContactRelationship() {
+export function useUpdateContactRelationship(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      contactId,
-      relationshipType,
-      status,
-      role,
-    }: {
-      journalId: string;
-      contactId: string;
-      relationshipType: JournalContactRelationshipType;
-      status?: AttendeeStatus | null;
-      role?: ContactEventRole | null;
-    }) =>
-      updateContactRelationship(
-        journalId,
-        contactId,
-        relationshipType,
-        status,
-        role
-      ),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      (link: JournalContactLink, ifMatch) =>
+        updateContactRelationship(journalId, link, ifMatch),
+      () => 'Update a person’s attendance',
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Contact relationship updated successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useAddJournalTag() {
+export function useAddJournalTag(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ journalId, tagId }: { journalId: string; tagId: string }) =>
-      addJournalTag(journalId, tagId),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      ({ tagId }: { tagId: string }, ifMatch) =>
+        addJournalTag(journalId, tagId, ifMatch),
+      () => 'Add a tag',
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Tag added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useRemoveJournalTag() {
+export function useRemoveJournalTag(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ journalId, tagId }: { journalId: string; tagId: string }) =>
-      removeJournalTag(journalId, tagId),
-    onSuccess: (_, { journalId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: journalKeys.detail(journalId) },
-        { queryKey: journalKeys.lists() },
-        REFRESH_HOME_DASHBOARD
-      );
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      ({ tagId }: { tagId: string }, ifMatch) =>
+        removeJournalTag(journalId, tagId, ifMatch),
+      () => 'Remove a tag',
+      // Answers with the journal re-read after the commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateJournalRows(queryClient, journalId);
       toast.success('Tag removed successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 

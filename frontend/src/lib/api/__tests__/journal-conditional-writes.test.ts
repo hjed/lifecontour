@@ -6,14 +6,23 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createQueryTestHarness, mockApiResponse } from '@/test-utils';
 import {
   journalKeys,
+  useAddContactRelationship,
+  useAddJournalTag,
+  useAddJournalType,
   useAdoptChildJournal,
   useJournal,
+  useRemoveContactRelationship,
+  useRemoveJournalTag,
+  useRemoveJournalType,
+  useUpdateContactRelationship,
   useUpdateJournal,
   useUpdateJournalField,
+  useUpdateTypeData,
+  useUpdateTypeDataBatch,
 } from '../journals';
 import { readEtag, type Versioned } from '../versioned-cache';
 import { taskKeys } from '../tasks';
-import type { JournalResponse } from '@/types/journals';
+import { JournalType, type JournalResponse } from '@/types/journals';
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -193,5 +202,168 @@ describe('journal conditional writes', () => {
     expect(keys).toContainEqual(journalKeys.lists());
     expect(keys).toContainEqual(journalKeys.details());
     expect(keys).toContainEqual(taskKeys.all);
+  });
+
+  it('useUpdateTypeDataBatch writes several type blocks as one change, each guarded by the last', async () => {
+    // Applying a template writes two blocks; a conflict on either must replay
+    // both, so they are one mutation.
+    const { queryClient, wrapper } = seeded();
+    mockFetch
+      .mockResolvedValueOnce(mockApiResponse(JOURNAL, { etag: '"e2"' }))
+      .mockResolvedValueOnce(mockApiResponse(JOURNAL, { etag: '"e3"' }));
+
+    const { result } = renderHook(() => useUpdateTypeDataBatch('7'), {
+      wrapper,
+    });
+    await act(() =>
+      result.current.mutateAsync({
+        updates: [
+          {
+            journalType: JournalType.ABSEILING_TRIP,
+            typeData: { template_id: 't' },
+          },
+          { journalType: JournalType.CANYONING, typeData: { grade: 'v3a2' } },
+        ],
+        successMessage: 'Template linked to journal',
+      })
+    );
+
+    expect(mockFetch.mock.calls.map(call => call[0])).toEqual([
+      '/api/journals/7/types/abseiling_trip/data',
+      '/api/journals/7/types/canyoning/data',
+    ]);
+    expect(sentIfMatch(0)).toBe('"e1"');
+    expect(sentIfMatch(1)).toBe('"e2"');
+    expect(readEtag(queryClient, journalKeys.detail('7'))).toBe('"e3"');
+  });
+
+  it('useUpdateTypeDataBatch says which block saved when a later one fails, and re-reads the journal', async () => {
+    const { queryClient, wrapper } = seeded();
+    const invalidate = jest.spyOn(queryClient, 'invalidateQueries');
+    mockFetch
+      .mockResolvedValueOnce(mockApiResponse(JOURNAL, { etag: '"e2"' }))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: async () => ({ errors: [{ detail: 'Grade is invalid' }] }),
+      } as Response);
+
+    const { result } = renderHook(() => useUpdateTypeDataBatch('7'), {
+      wrapper,
+    });
+    const failure = await act(() =>
+      result.current
+        .mutateAsync({
+          updates: [
+            { journalType: JournalType.ABSEILING_TRIP, typeData: {} },
+            { journalType: JournalType.CANYONING, typeData: { grade: 'x' } },
+          ],
+          successMessage: 'Template linked to journal',
+        })
+        .catch((error: unknown) => error)
+    );
+
+    expect(String(failure)).toContain('abseiling_trip saved');
+    expect(String(failure)).toContain('Grade is invalid');
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: journalKeys.detail('7') })
+      )
+    );
+  });
+
+  describe('every journal row write sends the journal tag and stores the next', () => {
+    const cases: ReadonlyArray<
+      readonly [
+        string,
+        () => { mutateAsync: (variables: never) => Promise<unknown> },
+        unknown,
+        string,
+        string,
+      ]
+    > = [
+      [
+        'adds a type',
+        () => useAddJournalType('7'),
+        { journalType: JournalType.EVENT },
+        'POST',
+        '/api/journals/7/types',
+      ],
+      [
+        'removes a type',
+        () => useRemoveJournalType('7'),
+        { journalType: JournalType.EVENT },
+        'DELETE',
+        '/api/journals/7/types/event',
+      ],
+      [
+        'updates type data',
+        () => useUpdateTypeData('7'),
+        { journalType: JournalType.FITNESS, typeData: { distance: 5000 } },
+        'PUT',
+        '/api/journals/7/types/fitness/data',
+      ],
+      [
+        'adds a contact',
+        () => useAddContactRelationship('7'),
+        { contactId: '2', relationshipType: 'participant' },
+        'POST',
+        '/api/journals/7/relationships/contacts',
+      ],
+      [
+        'updates a contact',
+        () => useUpdateContactRelationship('7'),
+        { contactId: '2', relationshipType: 'participant', status: 'accepted' },
+        'PATCH',
+        '/api/journals/7/relationships/contacts/2/participant',
+      ],
+      [
+        'removes a contact',
+        () => useRemoveContactRelationship('7'),
+        { contactId: '2', relationshipType: 'participant' },
+        'DELETE',
+        '/api/journals/7/relationships/contacts/2/participant',
+      ],
+      [
+        'adds a tag',
+        () => useAddJournalTag('7'),
+        { tagId: '3' },
+        'POST',
+        '/api/journals/7/relationships/tags',
+      ],
+      [
+        'removes a tag',
+        () => useRemoveJournalTag('7'),
+        { tagId: '3' },
+        'DELETE',
+        '/api/journals/7/relationships/tags/3',
+      ],
+    ];
+
+    it.each(cases)('%s', async (_name, hook, variables, method, url) => {
+      const { queryClient, wrapper } = seeded();
+      // The journal as re-read after the write, which may carry another
+      // tab's change: it is kept with its tag, not just the tag.
+      const reread = {
+        data: {
+          ...JOURNAL.data,
+          attributes: { ...JOURNAL.data.attributes, content: 'Elsewhere' },
+        },
+      } as unknown as JournalResponse;
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(reread, { etag: '"e2"' })
+      );
+
+      const { result } = renderHook(hook, { wrapper });
+      await act(() => result.current.mutateAsync(variables as never));
+
+      expect(mockFetch.mock.calls[0]?.[0]).toBe(url);
+      expect(mockFetch.mock.calls[0]?.[1]?.method).toBe(method);
+      expect(sentIfMatch(0)).toBe('"e1"');
+      expect(queryClient.getQueryData(journalKeys.detail('7'))).toEqual({
+        resource: reread,
+        etag: '"e2"',
+      });
+    });
   });
 });

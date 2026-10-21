@@ -732,18 +732,14 @@ describe('Journals API', () => {
 
   describe('useAddJournalTag', () => {
     it('should POST the tag assignment to the journal relationships endpoint', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
-      const { result } = renderHook(() => useAddJournalTag(), {
+      const { result } = renderHook(() => useAddJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -760,20 +756,16 @@ describe('Journals API', () => {
     });
 
     it('should invalidate the journal detail and list queries on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
-      const { result } = renderHook(() => useAddJournalTag(), {
+      const { result } = renderHook(() => useAddJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -787,18 +779,14 @@ describe('Journals API', () => {
     });
 
     it('should show a success toast on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
-      const { result } = renderHook(() => useAddJournalTag(), {
+      const { result } = renderHook(() => useAddJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -809,17 +797,17 @@ describe('Journals API', () => {
     it('should surface the API error to the user as a toast', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 422,
         json: async () => ({ errors: [{ detail: 'Tag not found' }] }),
       } as Response);
 
-      const { result } = renderHook(() => useAddJournalTag(), {
+      const { result } = renderHook(() => useAddJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await expect(
           result.current.mutateAsync({
-            journalId: 'journal-1',
             tagId: 'missing',
           })
         ).rejects.toThrow('Tag not found');
@@ -833,18 +821,14 @@ describe('Journals API', () => {
 
   describe('useRemoveJournalTag', () => {
     it('should DELETE the tag assignment from the journal relationships endpoint', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
-      const { result } = renderHook(() => useRemoveJournalTag(), {
+      const { result } = renderHook(() => useRemoveJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -856,20 +840,16 @@ describe('Journals API', () => {
     });
 
     it('should invalidate the journal detail and list queries on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
-      const { result } = renderHook(() => useRemoveJournalTag(), {
+      const { result } = renderHook(() => useRemoveJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -883,18 +863,14 @@ describe('Journals API', () => {
     });
 
     it('should show a success toast on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: {} }),
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse({ data: {} }));
 
-      const { result } = renderHook(() => useRemoveJournalTag(), {
+      const { result } = renderHook(() => useRemoveJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await result.current.mutateAsync({
-          journalId: 'journal-1',
           tagId: 'tag-1',
         });
       });
@@ -905,17 +881,17 @@ describe('Journals API', () => {
     it('should surface the API error to the user as a toast', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 422,
         json: async () => ({ errors: [{ detail: 'Assignment not found' }] }),
       } as Response);
 
-      const { result } = renderHook(() => useRemoveJournalTag(), {
+      const { result } = renderHook(() => useRemoveJournalTag('journal-1'), {
         wrapper: createWrapper,
       });
 
       await act(async () => {
         await expect(
           result.current.mutateAsync({
-            journalId: 'journal-1',
             tagId: 'missing',
           })
         ).rejects.toThrow('Assignment not found');
@@ -2170,66 +2146,53 @@ describe('journal writes and the home dashboard', () => {
     ],
     [
       'useAddJournalType',
-      useAddJournalType,
+      () => useAddJournalType('1'),
       journalPayload(),
       {
-        journalId: '1',
         journalType: JournalType.EVENT,
       },
     ],
     [
       'useRemoveJournalType',
-      useRemoveJournalType,
+      () => useRemoveJournalType('1'),
       journalPayload(),
       {
-        journalId: '1',
         journalType: JournalType.EVENT,
       },
     ],
     [
       'useUpdateTypeData',
-      useUpdateTypeData,
+      () => useUpdateTypeData('1'),
       journalPayload(),
       {
-        journalId: '1',
         journalType: JournalType.FITNESS,
         typeData: { mood_value: 7 },
       },
     ],
     [
       'useAddContactRelationship',
-      useAddContactRelationship,
+      () => useAddContactRelationship('1'),
       journalPayload(),
       {
-        journalId: '1',
         contactId: '2',
         relationshipType: 'participant',
       },
     ],
     [
       'useRemoveContactRelationship',
-      useRemoveContactRelationship,
+      () => useRemoveContactRelationship('1'),
       {},
-      { journalId: '1', contactId: '2' },
+      { contactId: '2' },
     ],
     [
       'useAddJournalTag',
-      useAddJournalTag,
+      () => useAddJournalTag('1'),
       journalPayload(),
       {
-        journalId: '1',
         tagId: '3',
       },
     ],
-    [
-      'useRemoveJournalTag',
-      useRemoveJournalTag,
-      {},
-      {
-        journalId: '1',
-        tagId: '3',
-      },
-    ],
+    ['useRemoveJournalTag', () => useRemoveJournalTag('1'), {}, { tagId: '3' }],
   ];
 
   it.each(WRITERS)(

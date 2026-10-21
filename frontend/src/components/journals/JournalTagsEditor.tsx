@@ -50,8 +50,8 @@ export function JournalTagsEditor({
     isError: isAllTagsError,
   } = useJournalTags();
 
-  const addTag = useAddJournalTag();
-  const removeTag = useRemoveJournalTag();
+  const addTag = useAddJournalTag(journalId);
+  const removeTag = useRemoveJournalTag(journalId);
   const createTag = useCreateJournalTag();
 
   const assignedTagViews = useMemo(
@@ -66,7 +66,7 @@ export function JournalTagsEditor({
   const handleCreate = async (name: string, color: string) => {
     const response = await createTag.mutateAsync({ name, color });
     try {
-      await addTag.mutateAsync({ journalId, tagId: response.data.id });
+      await addTag.mutateAsync({ tagId: response.data.id });
     } catch {
       // The tag was created; only the assignment failed (its hook already
       // toasted). Swallow so the editor leaves the create form — retrying there
@@ -85,8 +85,8 @@ export function JournalTagsEditor({
         addTag.isPending || removeTag.isPending || createTag.isPending
       }
       colors={TAG_COLORS}
-      onAssign={tagId => addTag.mutate({ journalId, tagId })}
-      onRemove={tagId => removeTag.mutate({ journalId, tagId })}
+      onAssign={tagId => addTag.mutate({ tagId })}
+      onRemove={tagId => removeTag.mutate({ tagId })}
       onCreate={handleCreate}
       rootTestId='journal-tags-editor'
       className={className}

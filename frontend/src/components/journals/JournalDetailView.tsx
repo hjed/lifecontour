@@ -45,7 +45,6 @@ import {
   AttendeeStatus,
   ContactEventRole,
 } from '@/types/journals';
-import { toast } from 'sonner';
 import { JournalBreadcrumb } from './JournalBreadcrumb';
 import { JournalCalendarBadge } from './JournalCalendarBadge';
 import { JournalContactBadge } from './JournalContactBadge';
@@ -85,10 +84,13 @@ import {
   useCreateJournalSeries,
   useCalendars,
   useUpdateTypeData,
+  useUpdateTypeDataBatch,
+  type TypeDataUpdate,
   useAddJournalType,
   useRemoveJournalType,
   useUpdateContactRelationship,
 } from '@/lib/api/journals';
+import { closingOnConflict, isWriteConflict } from '@/lib/write-conflicts';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
@@ -138,15 +140,16 @@ export function JournalDetailView({
   // Mutations
   const updateJournal = useUpdateJournal(journal.id);
   const adoptChild = useAdoptChildJournal(journal.id);
-  const updateTypeData = useUpdateTypeData();
-  const addContact = useAddContactRelationship();
-  const removeContact = useRemoveContactRelationship();
-  const updateContact = useUpdateContactRelationship();
+  const updateTypeData = useUpdateTypeData(journal.id);
+  const applyTemplate = useUpdateTypeDataBatch(journal.id);
+  const addContact = useAddContactRelationship(journal.id);
+  const removeContact = useRemoveContactRelationship(journal.id);
+  const updateContact = useUpdateContactRelationship(journal.id);
   const addToSeries = useAddJournalToSeries();
   const removeFromSeries = useRemoveJournalFromSeries();
   const createSeries = useCreateJournalSeries();
-  const addType = useAddJournalType();
-  const removeType = useRemoveJournalType();
+  const addType = useAddJournalType(journal.id);
+  const removeType = useRemoveJournalType(journal.id);
 
   // Types the user has added locally but not yet persisted because they require
   // initial data (see TYPES_REQUIRING_INITIAL_DATA). Their inline editor renders
@@ -182,7 +185,6 @@ export function JournalDetailView({
   // Handlers
   const handleCalendarChange = async (calendarId: string) => {
     await updateTypeData.mutateAsync({
-      journalId: journal.id,
       journalType: JournalType.EVENT,
       typeData: {
         calendar_id: calendarId,
@@ -202,7 +204,6 @@ export function JournalDetailView({
     const results = await Promise.allSettled(
       contactIds.map(contactId =>
         addContact.mutateAsync({
-          journalId: journal.id,
           contactId: contactId,
           relationshipType,
           status,
@@ -211,8 +212,10 @@ export function JournalDetailView({
       )
     );
 
+    // A refused add is the conflict dialog's to report and re-apply.
     const failures = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected'
+      (r): r is PromiseRejectedResult =>
+        r.status === 'rejected' && !isWriteConflict(r.reason)
     );
     if (failures.length > 0) {
       const firstError =
@@ -232,7 +235,6 @@ export function JournalDetailView({
     if (!contact) return;
 
     await removeContact.mutateAsync({
-      journalId: journal.id,
       contactId: contactId,
       relationshipType: contact.relationship_type,
     });
@@ -245,7 +247,6 @@ export function JournalDetailView({
     role?: ContactEventRole | null
   ) => {
     await updateContact.mutateAsync({
-      journalId: journal.id,
       contactId: contactId,
       relationshipType,
       status,
@@ -284,7 +285,6 @@ export function JournalDetailView({
     }
 
     await addType.mutateAsync({
-      journalId: journal.id,
       journalType: type,
     });
   };
@@ -303,7 +303,6 @@ export function JournalDetailView({
     }
 
     await removeType.mutateAsync({
-      journalId: journal.id,
       journalType: type,
     });
   };
@@ -317,25 +316,33 @@ export function JournalDetailView({
   // entry around is harmless and it is dropped on type removal.
   const handlePendingTypeSave = useCallback(
     async (type: JournalType, data: JournalTypeSaveData) => {
-      await addType.mutateAsync({
-        journalId: journal.id,
-        journalType: type,
-        typeData: data as Record<string, unknown>,
-      });
+      try {
+        await addType.mutateAsync({
+          journalType: type,
+          typeData: data as Record<string, unknown>,
+        });
+      } catch (error) {
+        if (!isWriteConflict(error)) throw error;
+        // Refused: nothing was persisted, and the conflict dialog now holds
+        // the data and can re-apply it. A pending section left behind would
+        // show the refused data as though it had saved.
+        setPendingTypes(prev => prev.filter(t => t !== type));
+      }
     },
-    [journal.id, addType]
+    [addType]
   );
 
   // Handle type-specific data update
   const handleTypeDataSave = useCallback(
     async (type: JournalType, data: JournalTypeSaveData) => {
-      await updateTypeData.mutateAsync({
-        journalId: journal.id,
-        journalType: type,
-        typeData: data as Record<string, unknown>,
-      });
+      await closingOnConflict(
+        updateTypeData.mutateAsync({
+          journalType: type,
+          typeData: data as Record<string, unknown>,
+        })
+      );
     },
-    [journal.id, updateTypeData]
+    [updateTypeData]
   );
 
   // Handle title update
@@ -387,24 +394,25 @@ export function JournalDetailView({
       const pitches = template.attributes.pitches ?? [];
       const hasPitches = pitches.length > 0;
 
-      await updateTypeData.mutateAsync({
-        journalId: journal.id,
-        journalType: JournalType.ABSEILING_TRIP,
-        typeData: {
-          ...(currentAbseil as Record<string, unknown>),
-          template_id: template.id,
-          ...(hasPitches
-            ? {
-                pitches,
-                number_of_abseils: countAbseils(pitches),
-                total_length: pitches.reduce(
-                  (sum, p) => sum + (p.height || 0),
-                  0
-                ),
-              }
-            : {}),
+      const updates: TypeDataUpdate[] = [
+        {
+          journalType: JournalType.ABSEILING_TRIP,
+          typeData: {
+            ...(currentAbseil as Record<string, unknown>),
+            template_id: template.id,
+            ...(hasPitches
+              ? {
+                  pitches,
+                  number_of_abseils: countAbseils(pitches),
+                  total_length: pitches.reduce(
+                    (sum, p) => sum + (p.height || 0),
+                    0
+                  ),
+                }
+              : {}),
+          },
         },
-      });
+      ];
 
       // A canyoning/caving/climbing template also contributes its
       // type-specific fields to the matching type block when the journal
@@ -417,33 +425,25 @@ export function JournalDetailView({
         const currentTypeData = journal.type_data?.[
           typeFieldUpdates.journalType
         ] as Record<string, unknown> | undefined;
-        try {
-          await updateTypeData.mutateAsync({
-            journalId: journal.id,
-            journalType: typeFieldUpdates.journalType,
-            typeData: {
-              ...currentTypeData,
-              ...typeFieldUpdates.fields,
-            },
-          });
-        } catch (error) {
-          // The template reference was already persisted above — surface the
-          // partial result instead of implying the whole apply failed.
-          console.error('Template subtype field update failed:', error);
-          toast.error(
-            `Template linked, but its ${typeFieldUpdates.journalType} fields could not be applied. Edit the section manually or reselect the template.`
-          );
-          return;
-        }
+        updates.push({
+          journalType: typeFieldUpdates.journalType,
+          typeData: { ...currentTypeData, ...typeFieldUpdates.fields },
+        });
       }
 
-      toast.success(
-        hasPitches
-          ? 'Pitches imported from template'
-          : 'Template linked to journal'
-      );
+      // One write for the whole template, so a conflict replays all of it.
+      // The hook reports the outcome: success once the write lands, the
+      // conflict dialog for a refusal, a toast for anything else.
+      await closingOnConflict(
+        applyTemplate.mutateAsync({
+          updates,
+          successMessage: hasPitches
+            ? 'Pitches imported from template'
+            : 'Template linked to journal',
+        })
+      ).catch(() => undefined);
     },
-    [journal.id, journal.type_data, journal.types, updateTypeData]
+    [journal.type_data, journal.types, applyTemplate]
   );
 
   // Handle adding an existing journal as a child of this journal
