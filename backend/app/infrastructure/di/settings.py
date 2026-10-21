@@ -8,6 +8,9 @@ timezone-aware AI prompt generation.
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.integrations.adapters.sql.google_contacts_sync_token_repository import (
+    SqlGoogleContactsSyncTokenRepository,
+)
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
@@ -27,7 +30,13 @@ class SettingsProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def user_settings_service(
-        self, settings_repo: UserSettingsRepository
+        self, settings_repo: UserSettingsRepository, connection: AsyncConnection
     ) -> UserSettingsService:
-        """Provide a UserSettingsService instance."""
-        return UserSettingsService(settings_repo)
+        """Provide a UserSettingsService instance.
+
+        The Google contacts re-import is the only integration that reads the
+        default country, so it is the one a saved default forces.
+        """
+        return UserSettingsService(
+            settings_repo, SqlGoogleContactsSyncTokenRepository(connection)
+        )

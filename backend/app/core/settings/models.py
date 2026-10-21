@@ -46,6 +46,19 @@ class UserSettingsChanges:
     default_country: str | None | _Unset = UNSET
 
 
+class ContactsReimport(Protocol):
+    """Re-imports a user's integration contacts in full.
+
+    The default country fills in imported addresses with none (#1820); a
+    contact an integration has not changed is never re-pulled, so saving the
+    default has to force a full re-import for it to reach every contact.
+    """
+
+    async def force_full_contacts_sync(self, user_id: str) -> None:
+        """Make the user's next contacts sync a full one."""
+        ...
+
+
 class UserSettingsRepository(Protocol):
     """Persistence boundary for user settings."""
 

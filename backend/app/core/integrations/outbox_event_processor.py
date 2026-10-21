@@ -1280,30 +1280,19 @@ class OutboxEventProcessor:
             assert skipped is not None
             return skipped
 
-        # Update reference data with what this update imported. Non-fatal: the
-        # metadata self-heals on the next sync cycle (a stale address fallback
-        # leaves Google's countryless addresses kept, never deleted). Wrapped in a savepoint so a
-        # DB failure rolls back only this write and leaves the outer transaction
-        # healthy — the version-hash upsert and commit below must still succeed
-        # (catching the error alone would not un-poison the asyncpg transaction).
-        try:
-            async with self.connection.begin_nested():
-                await self._update_link_reference_data(
-                    integration_source,
-                    external_id,
-                    user_id=payload.user_id,
-                    link_exists=existing_link is not None,
-                    existing_reference_data=existing_reference_data,
-                    contact_data=contact_data,
-                    address_fallback_country=payload.address_fallback_country,
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Failed to update link reference data after contact update",
-                error=str(e),
-                external_id=external_id,
-                integration_source=integration_source,
-            )
+        # Record what this update imported on the link. Not swallowed: the push
+        # merge owns countryless addresses by the recorded fallback, so a stale
+        # record could delete ones this pull did not import (#1820). A failure
+        # fails the event, which rolls back and is retried.
+        await self._update_link_reference_data(
+            integration_source,
+            external_id,
+            user_id=payload.user_id,
+            link_exists=existing_link is not None,
+            existing_reference_data=existing_reference_data,
+            contact_data=contact_data,
+            address_fallback_country=payload.address_fallback_country,
+        )
 
         # Update sync metadata with new version hash
         # This is done atomically in the same transaction as the contact update

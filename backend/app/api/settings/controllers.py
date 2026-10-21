@@ -7,6 +7,7 @@ addresses imported without one (#1820).
 """
 
 import structlog
+from dishka import AsyncContainer
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -69,33 +70,28 @@ async def update_user_settings(
     request_data: UserSettingsRequest,
     user: FromDishka[SessionUser],
     service: FromDishka[UserSettingsService],
-    repository: FromDishka[UserSettingsRepository],
     oauth_service: FromDishka[OAuthService],
-    task_queue_service: FromDishka[TaskQueueService],
+    container: FromDishka[AsyncContainer],
     connection: FromDishka[AsyncConnection],
 ) -> UserSettingsResponse:
     """Update the fields the body names (upsert); omitted ones are kept.
 
-    A changed default country queues a full Google contacts sync, so every
-    imported contact's countryless addresses take it, not only the contacts
-    Google next changes (#1820).
+    Saving the default country forces a full Google contacts re-import, so
+    every contact's countryless addresses take it, not only the contacts
+    Google next changes (#1820). The service clears the sync token with the
+    save; the sync is then queued now, best-effort.
     """
     try:
         changes = request_data.to_changes()
-        previous = await repository.get_by_user_id(str(user.id))
         saved = await service.update_settings(
             user_id=str(user.id),
             changes=changes,
             transaction=connection,
         )
-        previous_country = previous.default_country if previous else None
-        if (
-            changes.default_country is not UNSET
-            and saved.default_country != previous_country
-        ):
+        if changes.default_country is not UNSET:
             await GoogleContactsResync(
-                oauth_service, task_queue_service
-            ).request_full_sync(str(user.id), connection)
+                oauth_service, lambda: _task_queue_service(container)
+            ).request_sync(str(user.id), connection)
 
         logger.info(
             "User settings saved",
@@ -129,3 +125,8 @@ def _response(user_id: str, settings: UserSettings | None) -> UserSettingsRespon
             ),
         )
     )
+
+
+async def _task_queue_service(container: AsyncContainer) -> TaskQueueService:
+    """The task queue, built only when a sync is queued (it connects to Redis)."""
+    return await container.get(TaskQueueService)
