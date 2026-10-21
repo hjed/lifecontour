@@ -68,6 +68,10 @@ jest.mock('@/lib/api/journals', () => ({
     mutateAsync: mockUpdateJournal,
     isPending: false,
   }),
+  useAdoptChildJournal: () => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  }),
   useDeleteJournal: () => ({
     mutate: mockDeleteJournal,
     mutateAsync: mockDeleteJournal,

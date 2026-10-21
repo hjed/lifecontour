@@ -96,23 +96,22 @@ async function expectTasksRefreshed(spy: jest.SpyInstance) {
 describe('journal mutations refresh the task caches', () => {
   it('useUpdateJournal names the task namespace', async () => {
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateJournal(), {
+    const { result } = renderHook(() => useUpdateJournal('1'), {
       wrapper: createWrapper,
     });
 
-    result.current.mutate({ id: '1', data: { title: 'Moved to next week' } });
+    result.current.mutate({ title: 'Moved to next week' });
 
     await expectTasksRefreshed(spy);
   });
 
   it('useUpdateJournalField names the task namespace', async () => {
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateJournalField(), {
+    const { result } = renderHook(() => useUpdateJournalField('1'), {
       wrapper: createWrapper,
     });
 
     result.current.mutate({
-      journalId: '1',
       fieldName: 'event_date_range',
       value: { start: '2020-01-01T00:00:00Z', end: '2020-01-02T00:00:00Z' },
     });
@@ -204,11 +203,11 @@ describe('the refresh reaches every namespace that embeds the entity', () => {
     // `journalList` does, so narrowing this to `journalLists()` would leave a
     // single task read and the dashboard showing the old title or lapse state.
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateJournal(), {
+    const { result } = renderHook(() => useUpdateJournal('1'), {
       wrapper: createWrapper,
     });
 
-    result.current.mutate({ id: '1', data: { title: 'Renamed' } });
+    result.current.mutate({ title: 'Renamed' });
 
     await expectTasksRefreshed(spy);
     const keys = invalidatedKeys(spy);
@@ -225,11 +224,11 @@ describe('a task history cache is not collateral damage', () => {
     // true because history lives under a root of its own; nested under
     // `taskKeys.all` it would be thrown away by every mutation above.
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateJournal(), {
+    const { result } = renderHook(() => useUpdateJournal('1'), {
       wrapper: createWrapper,
     });
 
-    result.current.mutate({ id: '1', data: { title: 'Renamed' } });
+    result.current.mutate({ title: 'Renamed' });
 
     await expectTasksRefreshed(spy);
     for (const key of invalidatedKeys(spy)) {

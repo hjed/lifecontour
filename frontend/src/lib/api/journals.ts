@@ -44,10 +44,14 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { AGGREGATE_LABELS, toastUnlessConflict } from '@/lib/write-conflicts';
+import { guardedWrite, type AggregateRef } from './aggregate-write';
+import { sendConditional, type ConditionalResult } from './conditional-request';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { homeDashboardKeys } from './home-dashboard';
 import { taskKeys } from './tasks';
 import { journalKeys } from './journal-keys';
+import { unwrapResource, type Versioned } from './versioned-cache';
 import { useUserTimezone } from './settings';
 import {
   addDaysToIsoDate,
@@ -155,7 +159,27 @@ async function fetchJournals(
   return response.json();
 }
 
-async function fetchJournal(id: string): Promise<JournalResponse> {
+/**
+ * The journal aggregate a write belongs to: every write to the journal or to
+ * one of its rows is guarded by, and serialised on, the journal's `ETag`.
+ */
+function journalAggregate(journalId: string): AggregateRef {
+  return {
+    kind: 'journal',
+    id: journalId,
+    detailKey: journalKeys.detail(journalId),
+  };
+}
+
+/** What a journal edit changes, in words, for the conflict dialog. */
+function describeJournalEdit(fields: Record<string, unknown>): string {
+  return Object.keys(fields)
+    .map(field => AGGREGATE_LABELS.journal[field] ?? field)
+    .join(', ');
+}
+
+/** Reads a journal together with its `ETag`, the version later writes send. */
+async function fetchJournal(id: string): Promise<Versioned<JournalResponse>> {
   const response = await fetch(API_ENDPOINTS.JOURNALS.BY_ID(id), {
     credentials: 'include',
   });
@@ -167,7 +191,10 @@ async function fetchJournal(id: string): Promise<JournalResponse> {
     );
   }
 
-  return response.json();
+  return {
+    resource: await response.json(),
+    etag: response.headers.get('ETag'),
+  };
 }
 
 async function searchJournals(
@@ -257,33 +284,17 @@ async function createJournal(data: JournalFormData): Promise<JournalResponse> {
   return response.json();
 }
 
-async function updateJournal(
+function updateJournal(
   id: string,
-  data: Partial<JournalFormData>
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journals' as const,
-    id,
-    attributes: data,
-  };
-
-  const response = await fetch(API_ENDPOINTS.JOURNALS.BY_ID(id), {
+  data: Partial<JournalFormData>,
+  ifMatch: string | null
+): Promise<ConditionalResult<JournalResponse>> {
+  return sendConditional<JournalResponse>(API_ENDPOINTS.JOURNALS.BY_ID(id), {
     method: 'PATCH',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data: requestData }),
+    body: { data: { type: 'journals', id, attributes: data } },
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
   });
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
 /** The error code a journal deletion refused by its anchored tasks carries. */
@@ -423,36 +434,21 @@ async function mergeJournal(
   return response.json();
 }
 
-async function updateJournalField(
+function updateJournalField(
   journalId: string,
   fieldName: string,
-  value: unknown
-): Promise<JournalResponse> {
-  const requestData = {
-    type: 'journal_fields' as const,
-    attributes: { value },
-  };
-
-  const response = await fetch(
+  value: unknown,
+  ifMatch: string | null
+): Promise<ConditionalResult<unknown>> {
+  return sendConditional<unknown>(
     `${API_ENDPOINTS.JOURNALS.BY_ID(journalId)}/fields/${fieldName}`,
     {
       method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
+      body: { data: { type: 'journal_fields', attributes: { value } } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
 // Type Management Functions
@@ -1341,6 +1337,7 @@ export function useJournal(id: string) {
   return useQuery({
     queryKey: journalKeys.detail(id),
     queryFn: () => fetchJournal(id),
+    select: unwrapResource,
     enabled: !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -1604,22 +1601,32 @@ export function useCreateJournal() {
   });
 }
 
-export function useUpdateJournal() {
+export function useUpdateJournal(id: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: Partial<JournalFormData>;
-    }) => updateJournal(id, data),
-    onSuccess: (_, { id }) => {
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(id),
+      (data: Partial<JournalFormData>, ifMatch) =>
+        updateJournal(id, data, ifMatch),
+      describeJournalEdit,
+      // The PATCH answers with the journal re-read after its commit.
+      { bodyIsResource: true }
+    ),
+    onSuccess: (_, data) => {
       setTimeout(() => {
         void invalidateAfterMutation(
           queryClient,
-          { queryKey: journalKeys.detail(id) },
+          // Re-parenting changes both the old and the new parent's children,
+          // so every journal detail; here rather than in the caller, so a
+          // "Keep mine" replay — which runs only this mutation — does it too.
+          {
+            queryKey:
+              data.parent_id === undefined
+                ? journalKeys.detail(id)
+                : journalKeys.details(),
+          },
           { queryKey: journalKeys.lists() },
           // A task's read shapes embed their journals — title, date, cancelled,
           // and the lapse derived from them — so a journal write changes what a
@@ -1631,6 +1638,35 @@ export function useUpdateJournal() {
         );
       }, 150);
       toast.success(SUCCESS_MESSAGES.JOURNAL_UPDATED);
+    },
+    onError: toastUnlessConflict,
+  });
+}
+
+/**
+ * Makes another journal a child of this one.
+ *
+ * The write is to the child, whose version this page has not read, so it is
+ * sent unconditionally and outside this journal's scope.
+ */
+export function useAdoptChildJournal(parentId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (childId: string) =>
+      (await updateJournal(childId, { parent_id: Number(parentId) }, null))
+        .body,
+    onSuccess: () => {
+      void invalidateAfterMutation(
+        queryClient,
+        // Re-parenting changes both the new parent's and the previous
+        // parent's children, so every journal detail.
+        { queryKey: journalKeys.details() },
+        { queryKey: journalKeys.lists() },
+        // See useUpdateJournal: a task embeds its journals.
+        { queryKey: taskKeys.all },
+        REFRESH_HOME_DASHBOARD
+      );
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -1702,21 +1738,18 @@ export function useMergeJournal() {
   });
 }
 
-export function useUpdateJournalField() {
+export function useUpdateJournalField(journalId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      journalId,
-      fieldName,
-      value,
-    }: {
-      journalId: string;
-      fieldName: string;
-      value: unknown;
-    }) => updateJournalField(journalId, fieldName, value),
-    onSuccess: (data, variables) => {
-      const journalId = variables.journalId;
+    ...guardedWrite(
+      queryClient,
+      journalAggregate(journalId),
+      ({ fieldName, value }: { fieldName: string; value: unknown }, ifMatch) =>
+        updateJournalField(journalId, fieldName, value, ifMatch),
+      ({ fieldName }) => describeJournalEdit({ [fieldName]: true })
+    ),
+    onSuccess: () => {
       void invalidateAfterMutation(
         queryClient,
         { queryKey: journalKeys.detail(journalId) },

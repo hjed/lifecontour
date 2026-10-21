@@ -75,6 +75,7 @@ import { StravaUnmatchedAthletesBadge } from '@/components/integrations/StravaUn
 import { ExternalLinksDisplay } from '@/components/shared/ExternalLinksDisplay';
 import { useJournalExternalLinks } from '@/lib/api/external-links';
 import {
+  useAdoptChildJournal,
   useUpdateJournal,
   useAddContactRelationship,
   useRemoveContactRelationship,
@@ -87,10 +88,7 @@ import {
   useAddJournalType,
   useRemoveJournalType,
   useUpdateContactRelationship,
-  journalKeys,
 } from '@/lib/api/journals';
-import { useQueryClient } from '@tanstack/react-query';
-import { invalidateAfterMutation } from '@/lib/api/invalidate-after-mutation';
 
 interface JournalDetailViewProps {
   readonly journal: Journal;
@@ -137,10 +135,9 @@ export function JournalDetailView({
   journal,
   className,
 }: JournalDetailViewProps) {
-  const queryClient = useQueryClient();
-
   // Mutations
-  const updateJournal = useUpdateJournal();
+  const updateJournal = useUpdateJournal(journal.id);
+  const adoptChild = useAdoptChildJournal(journal.id);
   const updateTypeData = useUpdateTypeData();
   const addContact = useAddContactRelationship();
   const removeContact = useRemoveContactRelationship();
@@ -345,39 +342,30 @@ export function JournalDetailView({
   const handleTitleSave = useCallback(
     async (value: string) => {
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          title: value,
-        },
+        title: value,
       });
     },
-    [journal.id, updateJournal]
+    [updateJournal]
   );
 
   // Handle content update
   const handleContentSave = useCallback(
     async (value: string) => {
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          content: value,
-        },
+        content: value,
       });
     },
-    [journal.id, updateJournal]
+    [updateJournal]
   );
 
   // Handle date range update
   const handleDateRangeSave = useCallback(
     async (value: EventDateRange) => {
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          event_date_range: value,
-        },
+        event_date_range: value,
       });
     },
-    [journal.id, updateJournal]
+    [updateJournal]
   );
 
   // Durable template reference lives on the consolidated abseiling block for
@@ -461,37 +449,21 @@ export function JournalDetailView({
   // Handle adding an existing journal as a child of this journal
   const handleAddExistingChild = useCallback(
     async (childJournalId: string) => {
-      await updateJournal.mutateAsync({
-        id: childJournalId,
-        data: {
-          parent_id: Number(journal.id),
-        },
-      });
-      // Re-parenting can affect both the new parent's and the previous parent's
-      // children lists, so invalidate all journal detail queries.
-      void invalidateAfterMutation(queryClient, {
-        queryKey: journalKeys.details(),
-      });
+      // The hook refreshes every journal the re-parenting touches.
+      await adoptChild.mutateAsync(childJournalId);
     },
-    [journal.id, updateJournal, queryClient]
+    [adoptChild]
   );
 
   // Handle changing the parent of this journal
   const handleParentChange = useCallback(
     async (parentId: string) => {
+      // The hook refreshes every journal detail a re-parenting touches.
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          parent_id: Number(parentId),
-        },
-      });
-      // Re-parenting can affect both the new parent's and the previous parent's
-      // children lists, so invalidate all journal detail queries.
-      void invalidateAfterMutation(queryClient, {
-        queryKey: journalKeys.details(),
+        parent_id: Number(parentId),
       });
     },
-    [journal.id, updateJournal, queryClient]
+    [updateJournal]
   );
 
   // Handle removing the parent of this journal
