@@ -15,8 +15,9 @@ other's record, turning an import into an update of someone else's journal
 For each owner with anything on the shared calendar this creates their calendar
 and moves onto it their journals' links and calendar info, their series,
 recurrence aliases and merged aliases, and the outbox events not yet relayed
-that would otherwise recreate the shared calendar. The shared calendar is then
-deleted. The ids are computed here, frozen, rather than imported from
+that would otherwise recreate the shared calendar. A pending update the old
+worker aimed at another owner's journal is sent as a create instead. The shared
+calendar is then deleted. The ids are computed here, frozen, rather than imported from
 ``core_shared``: a migration must keep meaning what it meant when it ran.
 
 Downgrading moves everything back onto the shared calendar, owned by one of the
@@ -155,9 +156,48 @@ def _delete_calendar(connection: sa.Connection, calendar_id: str) -> None:
     )
 
 
+def _recreate_misdirected_updates(connection: sa.Connection) -> None:
+    """Turn a pending update aimed at another owner's journal into a create.
+
+    On the shared calendar the worker found another user's link for this user's
+    record and queued an update of that user's journal. Moving the event to the
+    owner's calendar leaves that target in place, so the update would still try
+    to rewrite someone else's journal. It is sent as the create it should have
+    been. An update of the owner's own journal, or of one since deleted, keeps
+    its target and is handled as before.
+    """
+    connection.execute(
+        sa.text(
+            """
+            UPDATE outbox_events o
+            SET event_type = 'journal_event.created',
+                event_data = CAST(
+                    jsonb_set(
+                        jsonb_set(CAST(o.event_data AS jsonb),
+                                  '{existing_journal_id}', 'null'::jsonb),
+                        '{sync_action}', '"created"'::jsonb
+                    ) AS text)
+            WHERE o.relayed_at IS NULL
+              AND o.event_type = 'journal_event.updated'
+              AND CAST(o.event_data AS jsonb) ->> 'calendar_id' = :shared
+              AND EXISTS (
+                  SELECT 1 FROM journals j
+                  WHERE j.id = CAST(
+                          CAST(o.event_data AS jsonb) ->> 'existing_journal_id'
+                          AS integer)
+                    AND j.user_id IS DISTINCT FROM
+                        CAST(o.event_data AS jsonb) -> 'journal_data' ->> 'user_id'
+              )
+            """
+        ),
+        {"shared": SHARED_CALENDAR_ID},
+    )
+
+
 def upgrade() -> None:
     """Move every owner's maintenance rows onto their own calendar."""
     connection = op.get_bind()
+    _recreate_misdirected_updates(connection)
     owners = _owners_on(connection, SHARED_CALENDAR_ID)
     for owner in owners:
         target = owner_calendar_id(owner)

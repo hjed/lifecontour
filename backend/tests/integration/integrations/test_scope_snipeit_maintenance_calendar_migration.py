@@ -107,29 +107,56 @@ async def _merged_alias(
     )
 
 
-async def _event(url: str, owner: str, *, relayed: bool) -> None:
-    """A ``journal_event.created`` the worker enqueued on the shared calendar."""
+async def _event(
+    url: str,
+    owner: str,
+    *,
+    relayed: bool = False,
+    existing_journal_id: int | None = None,
+) -> None:
+    """A journal event the worker enqueued on the shared calendar: an update of
+    ``existing_journal_id`` when given, otherwise a create."""
+    sync_action = "created" if existing_journal_id is None else "updated"
     await execute(
         url,
         """
         INSERT INTO outbox_events
             (event_id, event_type, aggregate_id, event_data,
              occurred_at, created_at, retry_count, relayed_at)
-        VALUES (gen_random_uuid()::text, 'journal_event.created', 0, :data,
+        VALUES (gen_random_uuid()::text, :event_type, 0, :data,
                 now(), now(), 0, CASE WHEN :relayed THEN now() END)
         """,
         {
+            "event_type": f"journal_event.{sync_action}",
             "data": json.dumps(
                 {
                     "calendar_id": SHARED,
                     "calendar_info_data": {"calendar_id": SHARED},
                     "journal_data": {"user_id": owner},
                     "external_event_id": "snipeit_maint:30",
+                    "sync_action": sync_action,
+                    "existing_journal_id": existing_journal_id,
                 }
             ),
             "relayed": relayed,
         },
     )
+
+
+async def _event_targets(url: str) -> list[tuple[Any, ...]]:
+    """Each event's ``(owner, event_type, sync_action, existing_journal_id)``."""
+    rows = await _rows(
+        url, "SELECT event_type, event_data FROM outbox_events ORDER BY id"
+    )
+    return [
+        (
+            data["journal_data"]["user_id"],
+            event_type,
+            data["sync_action"],
+            data["existing_journal_id"],
+        )
+        for event_type, data in ((t, json.loads(raw)) for t, raw in rows)
+    ]
 
 
 async def _event_calendars(url: str) -> list[tuple[Any, ...]]:
@@ -200,6 +227,27 @@ class TestScopeSnipeItMaintenanceCalendarToOwner:
         assert await _event_calendars(url) == [
             (OTHER_OWNER, False, theirs_id, theirs_id),
             (OWNER, True, SHARED, SHARED),
+        ]
+
+    async def test_a_pending_update_of_another_owners_journal_becomes_a_create(
+        self, throwaway_database: URL, run_alembic: RunAlembic
+    ) -> None:
+        """The old worker found another user's link for this user's record and
+        queued an update of their journal; moving its calendar alone would
+        still aim it at that journal."""
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", _PREVIOUS_REVISION)
+        await _shared_calendar(url, OWNER)
+        theirs = await _import(url, OWNER, "snipeit_maint:30", SHARED)
+        mine = await _import(url, OTHER_OWNER, "snipeit_maint:31", SHARED)
+        await _event(url, OTHER_OWNER, existing_journal_id=theirs)
+        await _event(url, OTHER_OWNER, existing_journal_id=mine)
+
+        run_alembic(url, "upgrade", _REVISION)
+
+        assert await _event_targets(url) == [
+            (OTHER_OWNER, "journal_event.created", "created", None),
+            (OTHER_OWNER, "journal_event.updated", "updated", mine),
         ]
 
     async def test_downgrade_moves_everything_back(
