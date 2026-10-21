@@ -113,8 +113,9 @@ async def _event(
     *,
     relayed: bool = False,
     existing_journal_id: int | None = None,
+    calendar_id: str = SHARED,
 ) -> None:
-    """A journal event the worker enqueued on the shared calendar: an update of
+    """A journal event the worker enqueued on ``calendar_id``: an update of
     ``existing_journal_id`` when given, otherwise a create."""
     sync_action = "created" if existing_journal_id is None else "updated"
     await execute(
@@ -130,8 +131,9 @@ async def _event(
             "event_type": f"journal_event.{sync_action}",
             "data": json.dumps(
                 {
-                    "calendar_id": SHARED,
-                    "calendar_info_data": {"calendar_id": SHARED},
+                    "integration_source": "snipeit_maintenance",
+                    "calendar_id": calendar_id,
+                    "calendar_info_data": {"calendar_id": calendar_id},
                     "journal_data": {"user_id": owner},
                     "external_event_id": "snipeit_maint:30",
                     "sync_action": sync_action,
@@ -269,6 +271,19 @@ class TestScopeSnipeItMaintenanceCalendarToOwner:
             "SELECT CAST(calendar_id AS text), external_event_id "
             "FROM journal_external_event_links",
         ) == [(SHARED, "snipeit_maint:9")]
+
+    async def test_downgrade_returns_a_first_import_still_only_an_event(
+        self, throwaway_database: URL, run_alembic: RunAlembic
+    ) -> None:
+        """Its calendar is only created when the event is applied, so no
+        calendar row leads the downgrade to it."""
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", _REVISION)
+        await _event(url, OWNER, calendar_id=snipeit_maintenance_calendar_id(OWNER))
+
+        run_alembic(url, "downgrade", _PREVIOUS_REVISION)
+
+        assert await _event_calendars(url) == [(OWNER, False, SHARED, SHARED)]
 
     async def test_downgrade_refuses_a_record_id_two_owners_link(
         self, throwaway_database: URL, run_alembic: RunAlembic

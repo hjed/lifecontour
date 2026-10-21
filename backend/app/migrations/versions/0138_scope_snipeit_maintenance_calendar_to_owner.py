@@ -52,7 +52,21 @@ _SELF_OWNED = (
     "journal_series_recurrence_aliases",
     "journal_merged_aliases",
 )
-# A pending journal sync event names its calendar twice.
+# A pending journal sync event names its calendar twice; this points both at
+# ``:target``.
+_RECALENDAR_EVENT = """
+    UPDATE outbox_events
+    SET event_data = CAST(
+        jsonb_set(
+            jsonb_set(CAST(event_data AS jsonb), '{calendar_id}',
+                      to_jsonb(CAST(:target AS text))),
+            '{calendar_info_data,calendar_id}',
+            to_jsonb(CAST(:target AS text)),
+            false
+        ) AS text)
+    WHERE relayed_at IS NULL
+      AND event_type LIKE 'journal_event.%'
+"""
 _EVENT_ON_CALENDAR = (
     "relayed_at IS NULL AND event_type LIKE 'journal_event.%' "
     "AND CAST(event_data AS jsonb) ->> 'calendar_id' = :calendar_id"
@@ -110,21 +124,9 @@ def _move(
         )
     connection.execute(
         sa.text(
-            """
-            UPDATE outbox_events
-            SET event_data = CAST(
-                jsonb_set(
-                    jsonb_set(CAST(event_data AS jsonb), '{calendar_id}',
-                              to_jsonb(CAST(:target AS text))),
-                    '{calendar_info_data,calendar_id}',
-                    to_jsonb(CAST(:target AS text)),
-                    false
-                ) AS text)
-            WHERE relayed_at IS NULL
-              AND event_type LIKE 'journal_event.%'
-              AND CAST(event_data AS jsonb) ->> 'calendar_id' = :source
-              AND CAST(event_data AS jsonb) -> 'journal_data' ->> 'user_id' = :owner
-            """
+            _RECALENDAR_EVENT
+            + "AND CAST(event_data AS jsonb) ->> 'calendar_id' = :source "
+            "AND CAST(event_data AS jsonb) -> 'journal_data' ->> 'user_id' = :owner"
         ),
         params,
     )
@@ -207,6 +209,24 @@ def upgrade() -> None:
     _delete_calendar(connection, SHARED_CALENDAR_ID)
 
 
+def _return_pending_events(connection: sa.Connection) -> None:
+    """Point every pending Snipe-IT maintenance event at the shared calendar.
+
+    A user's first import can exist only as an event: its calendar is created
+    when the event is applied, so no calendar row names it yet. Applied after
+    the downgrade, it would link the journal on a calendar the old worker never
+    looks at, and the next sync would import the record again.
+    """
+    connection.execute(
+        sa.text(
+            _RECALENDAR_EVENT
+            + "AND CAST(event_data AS jsonb) ->> 'integration_source' = :source "
+            "AND CAST(event_data AS jsonb) ->> 'calendar_id' <> :target"
+        ),
+        {"source": _SOURCE, "target": SHARED_CALENDAR_ID},
+    )
+
+
 def downgrade() -> None:
     """Move everything back onto the shared calendar, refusing a shared record id."""
     connection = op.get_bind()
@@ -219,6 +239,7 @@ def downgrade() -> None:
         {"source": _SOURCE, "shared": SHARED_CALENDAR_ID},
     ).fetchall()
     if not calendars:
+        _return_pending_events(connection)
         return
 
     shared = connection.execute(
@@ -251,3 +272,4 @@ def downgrade() -> None:
             target_id=SHARED_CALENDAR_ID,
         )
         _delete_calendar(connection, row.id)
+    _return_pending_events(connection)
