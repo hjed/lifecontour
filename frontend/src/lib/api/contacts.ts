@@ -10,6 +10,8 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type InvalidateQueryFilters,
+  type QueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -39,9 +41,14 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
-import { AGGREGATE_LABELS, isWriteConflict } from '@/lib/write-conflicts';
+import {
+  AGGREGATE_LABELS,
+  isWriteConflict,
+  toastUnlessConflict,
+} from '@/lib/write-conflicts';
 import {
   aggregateWrite,
+  guardedWrite,
   sendGuarded,
   type AggregateRef,
 } from './aggregate-write';
@@ -791,280 +798,241 @@ export function useContactHistory(
   });
 }
 
-// Contact Methods Management API Functions
+// Contact Methods and Addresses API Functions
+//
+// Every write here is to one of the contact's rows, and is guarded by the
+// contact's tag: see `contactAggregate`.
 
-export async function updateContactMethodField(
+const contactRowUrl = (contactId: string, rows: 'methods' | 'addresses') =>
+  `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/${rows}`;
+
+function updateContactRowField(
   contactId: string,
-  methodId: string,
+  rows: 'methods' | 'addresses',
+  rowId: string,
   fieldName: string,
-  value: string | boolean
-): Promise<void> {
-  const requestData = {
-    type: 'contact_method_fields',
-    attributes: { value },
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods/${methodId}/fields/${fieldName}`,
+  value: string | boolean,
+  ifMatch: string | null
+): Promise<ConditionalResult<unknown>> {
+  const type =
+    rows === 'methods' ? 'contact_method_fields' : 'contact_address_fields';
+  return sendConditional<unknown>(
+    `${contactRowUrl(contactId, rows)}/${rowId}/fields/${fieldName}`,
     {
       method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
+      body: { data: { type, attributes: { value } } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
 }
 
-export async function updateContactAddressField(
+function addContactRow(
   contactId: string,
-  addressId: string,
-  fieldName: string,
-  value: string | boolean
-): Promise<void> {
-  const requestData = {
-    type: 'contact_address_fields',
-    attributes: { value },
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses/${addressId}/fields/${fieldName}`,
-    {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
+  rows: 'methods' | 'addresses',
+  attributes: ContactMethodAttributes | ContactAddressAttributes,
+  ifMatch: string | null
+): Promise<ConditionalResult<ContactResponse>> {
+  const type = rows === 'methods' ? 'contact_methods' : 'contact_addresses';
+  return sendConditional<ContactResponse>(contactRowUrl(contactId, rows), {
+    method: 'POST',
+    body: { data: { type, attributes } },
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
+  });
 }
 
-async function addContactMethod(
+function deleteContactRow(
   contactId: string,
-  method: ContactMethodAttributes
-): Promise<ContactResponse> {
-  const requestData = {
-    type: 'contact_methods',
-    attributes: method,
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
+  rows: 'methods' | 'addresses',
+  rowId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<undefined>> {
+  return sendConditional(`${contactRowUrl(contactId, rows)}/${rowId}`, {
+    method: 'DELETE',
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.DELETE_FAILED,
+  });
 }
 
-async function deleteContactMethod(
+/** Refreshes what a write to one of the contact's rows changed. */
+function invalidateContactRows(
+  queryClient: QueryClient,
   contactId: string,
-  methodId: string
-): Promise<void> {
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/methods/${methodId}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    }
+  ...extra: InvalidateQueryFilters[]
+): void {
+  void invalidateAfterMutation(
+    queryClient,
+    { queryKey: contactKeys.detail(contactId) },
+    { queryKey: contactKeys.lists() },
+    ...extra
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
-}
-
-// Contact Addresses Management API Functions
-
-async function addContactAddress(
-  contactId: string,
-  address: ContactAddressAttributes
-): Promise<ContactResponse> {
-  const requestData = {
-    type: 'contact_addresses',
-    attributes: address,
-  };
-
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data: requestData }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.CREATE_FAILED
-    );
-  }
-
-  return response.json();
-}
-
-async function deleteContactAddress(
-  contactId: string,
-  addressId: string
-): Promise<void> {
-  const response = await fetch(
-    `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/addresses/${addressId}`,
-    {
-      method: 'DELETE',
-      credentials: 'include',
-    }
-  );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
 }
 
 // React Query Hooks for Contact Methods
 
-export function useAddContactMethod() {
+export function useAddContactMethod(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      method,
-    }: {
-      contactId: string;
-      method: ContactMethodAttributes;
-    }) => addContactMethod(contactId, method),
-    onSuccess: (_, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ method }: { method: ContactMethodAttributes }, ifMatch) =>
+        addContactRow(contactId, 'methods', method, ifMatch),
+      ({ method }) => `Add contact method ${method.value}`,
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateContactRows(queryClient, contactId);
       toast.success('Contact method added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useDeleteContactMethod() {
+export function useUpdateContactMethodField(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      methodId,
-    }: {
-      contactId: string;
-      methodId: string;
-    }) => deleteContactMethod(contactId, methodId),
-    onSuccess: (_, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      (
+        {
+          methodId,
+          fieldName,
+          value,
+        }: { methodId: string; fieldName: string; value: string },
+        ifMatch
+      ) =>
+        updateContactRowField(
+          contactId,
+          'methods',
+          methodId,
+          fieldName,
+          value,
+          ifMatch
+        ),
+      ({ value }) => `Contact method → ${value}`
+    ),
+    onSuccess: () => invalidateContactRows(queryClient, contactId),
+    // No toast: the inline editor shows the error, and the dialog a conflict.
+  });
+}
+
+export function useDeleteContactMethod(contactId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ methodId }: { methodId: string }, ifMatch) =>
+        deleteContactRow(contactId, 'methods', methodId, ifMatch),
+      () => 'Delete a contact method'
+    ),
+    onSuccess: () => {
+      invalidateContactRows(queryClient, contactId);
       toast.success('Contact method deleted successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
 // React Query Hooks for Contact Addresses
 
-export function useAddContactAddress() {
+export function useAddContactAddress(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      address,
-    }: {
-      contactId: string;
-      address: ContactAddressAttributes;
-    }) => addContactAddress(contactId, address),
-    onSuccess: (_, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ address }: { address: ContactAddressAttributes }, ifMatch) =>
+        addContactRow(contactId, 'addresses', address, ifMatch),
+      () => 'Add an address',
+      { bodyIsResource: true }
+    ),
+    onSuccess: () => {
+      invalidateContactRows(queryClient, contactId);
       toast.success('Contact address added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useDeleteContactAddress() {
+/** One edit to an address, possibly of several of its fields. */
+interface ContactAddressEdit {
+  addressId: string;
+  fields: Record<string, string>;
+}
+
+/**
+ * Saves an edit to one address as a single mutation, however many of its
+ * fields it changes.
+ *
+ * The API takes one field per request, but the edit is one change to the
+ * user: a conflict part-way through must replay all of it on "Keep mine", not
+ * only the field that was refused. Each request is guarded by the tag the
+ * previous one returned.
+ */
+export function useUpdateContactAddressFields(contactId: string) {
+  const queryClient = useQueryClient();
+  const aggregate = contactAggregate(contactId);
+
+  return useMutation({
+    ...aggregateWrite<ContactAddressEdit>(
+      aggregate,
+      ({ fields }) =>
+        `Address → ${Object.values(fields).filter(Boolean).join(', ')}`
+    ),
+    mutationFn: async ({ addressId, fields }: ContactAddressEdit) => {
+      for (const [fieldName, value] of Object.entries(fields)) {
+        await sendGuarded(queryClient, aggregate.detailKey, ifMatch =>
+          updateContactRowField(
+            contactId,
+            'addresses',
+            addressId,
+            fieldName,
+            value,
+            ifMatch
+          )
+        );
+      }
+    },
+    onSuccess: () => invalidateContactRows(queryClient, contactId),
+    // No toast: the inline editor shows the error, and the dialog a conflict.
+  });
+}
+
+export function useDeleteContactAddress(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      addressId,
-    }: {
-      contactId: string;
-      addressId: string;
-    }) => deleteContactAddress(contactId, addressId),
-    onSuccess: (_, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ addressId }: { addressId: string }, ifMatch) =>
+        deleteContactRow(contactId, 'addresses', addressId, ifMatch),
+      () => 'Delete an address'
+    ),
+    onSuccess: () => {
+      invalidateContactRows(queryClient, contactId);
       toast.success('Contact address deleted successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
 /** Which of a contact's value lists an archive or restore applies to. */
 export type ContactValueKind = 'method' | 'address';
+
+interface ContactValueArchive {
+  kind: ContactValueKind;
+  id: string;
+  archived: boolean;
+}
 
 /**
  * Archive or restore one of a contact's emails, phones or addresses.
@@ -1072,36 +1040,31 @@ export type ContactValueKind = 'method' | 'address';
  * Archiving the primary value also makes it no longer primary; the server
  * does that, so the contact is refetched rather than patched in the cache.
  */
-export function useSetContactValueArchived() {
+export function useSetContactValueArchived(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      kind,
-      id,
-      archived,
-    }: {
-      contactId: string;
-      kind: ContactValueKind;
-      id: string;
-      archived: boolean;
-    }) =>
-      kind === 'method'
-        ? updateContactMethodField(contactId, id, 'is_archived', archived)
-        : updateContactAddressField(contactId, id, 'is_archived', archived),
-    onSuccess: (_, { contactId, archived }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() },
-        { queryKey: historyKeys.all }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ kind, id, archived }: ContactValueArchive, ifMatch) =>
+        updateContactRowField(
+          contactId,
+          kind === 'method' ? 'methods' : 'addresses',
+          id,
+          'is_archived',
+          archived,
+          ifMatch
+        ),
+      ({ archived }) => (archived ? 'Archive a value' : 'Restore a value')
+    ),
+    onSuccess: (_, { archived }) => {
+      invalidateContactRows(queryClient, contactId, {
+        queryKey: historyKeys.all,
+      });
       toast.success(archived ? 'Archived' : 'Restored');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 

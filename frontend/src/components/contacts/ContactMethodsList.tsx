@@ -41,10 +41,11 @@ import {
   useAddContactMethod,
   useDeleteContactMethod,
   useSetContactValueArchived,
-  updateContactMethodField,
+  useUpdateContactMethodField,
 } from '@/lib/api/contacts';
 import { partitionArchived } from '@/lib/archived-values';
 import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
+import { closingOnConflict } from '@/lib/write-conflicts';
 
 export interface ContactMethodsListProps {
   /** Contact ID */
@@ -79,15 +80,15 @@ export function ContactMethodsList({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [methodToDelete, setMethodToDelete] = useState<string | null>(null);
 
-  const addMethodMutation = useAddContactMethod();
-  const deleteMethodMutation = useDeleteContactMethod();
-  const archiveMutation = useSetContactValueArchived();
+  const addMethodMutation = useAddContactMethod(contactId);
+  const deleteMethodMutation = useDeleteContactMethod(contactId);
+  const archiveMutation = useSetContactValueArchived(contactId);
+  const updateFieldMutation = useUpdateContactMethodField(contactId);
   const [inUse, archived] = partitionArchived(methods);
 
   const setArchived = async (methodId: string, isArchived: boolean) => {
     try {
       await archiveMutation.mutateAsync({
-        contactId,
         kind: 'method',
         id: methodId,
         archived: isArchived,
@@ -112,15 +113,18 @@ export function ContactMethodsList({
     }
 
     try {
-      await addMethodMutation.mutateAsync({
-        contactId,
-        method: {
-          method_type: newMethodType,
-          value: newMethodValue.trim(),
-          label: newMethodLabel.trim() || undefined,
-          is_primary: newMethodIsPrimary,
-        },
-      });
+      // A conflict closes the form too: the conflict dialog holds the new
+      // method and can re-apply it.
+      await closingOnConflict(
+        addMethodMutation.mutateAsync({
+          method: {
+            method_type: newMethodType,
+            value: newMethodValue.trim(),
+            label: newMethodLabel.trim() || undefined,
+            is_primary: newMethodIsPrimary,
+          },
+        })
+      );
       resetAddForm();
     } catch (error) {
       // Error handling is done by the mutation hook
@@ -138,7 +142,6 @@ export function ContactMethodsList({
 
     try {
       await deleteMethodMutation.mutateAsync({
-        contactId,
         methodId: methodToDelete,
       });
     } catch (error) {
@@ -156,7 +159,7 @@ export function ContactMethodsList({
     value: string
   ) => {
     try {
-      await updateContactMethodField(contactId, methodId, fieldName, value);
+      await updateFieldMutation.mutateAsync({ methodId, fieldName, value });
     } catch (error) {
       console.error('Failed to update method field:', error);
       throw error; // Re-throw to trigger inline edit error handling

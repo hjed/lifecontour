@@ -11,6 +11,7 @@
 
 import type { Mutation, QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
+import { toast } from 'sonner';
 import {
   diffAggregate,
   type AggregateDocument,
@@ -108,6 +109,26 @@ export function resetWriteConflicts(): void {
 /** Whether a failed write is a conflict the dialog will report. */
 export function isWriteConflict(error: unknown): boolean {
   return error instanceof PreconditionFailedError;
+}
+
+/**
+ * Awaits a write, treating a conflict as handled: the conflict dialog now
+ * holds the change and can re-apply it, so the form that made it should close
+ * rather than offer to submit it a second time. Any other failure rejects.
+ */
+export async function closingOnConflict(
+  write: Promise<unknown>
+): Promise<void> {
+  try {
+    await write;
+  } catch (error) {
+    if (!isWriteConflict(error)) throw error;
+  }
+}
+
+/** A write hook's error toast: skipped for a conflict, which the dialog reports. */
+export function toastUnlessConflict(error: Error): void {
+  if (!isWriteConflict(error)) toast.error(error.message);
 }
 
 /**

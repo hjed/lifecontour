@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { isWriteConflict } from '@/lib/write-conflicts';
 
 export interface AddressData {
   street_line_1?: string;
@@ -182,6 +183,16 @@ export function InlineEditAddressField({
   // Format for display
   const displayValue = formatAddressForDisplay(value);
 
+  // Whether the address changed elsewhere while it was open, until the user
+  // has been told. A refetch that brings the change also brings the record's
+  // newer tag, so saving the draft as-is would quietly undo it.
+  const [shownValue, setShownValue] = useState(displayValue);
+  const [changedWhileEditing, setChangedWhileEditing] = useState(false);
+  if (displayValue !== shownValue) {
+    setShownValue(displayValue);
+    if (isEditing) setChangedWhileEditing(true);
+  }
+
   // Generate unique IDs for accessibility
   const baseId = useId();
   const streetId = `address-street-${baseId}`;
@@ -199,6 +210,7 @@ export function InlineEditAddressField({
 
   const startEdit = useCallback(() => {
     setIsEditing(true);
+    setChangedWhileEditing(false);
     setError(null);
     // Reset to current value
     const currentData =
@@ -208,6 +220,7 @@ export function InlineEditAddressField({
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
+    setChangedWhileEditing(false);
     setError(null);
     // Reset to original value
     const originalData =
@@ -225,6 +238,14 @@ export function InlineEditAddressField({
       }
     }
 
+    if (changedWhileEditing) {
+      setChangedWhileEditing(false);
+      setError(
+        'This address was changed elsewhere while you were editing. Save again to replace it.'
+      );
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setIsEditing(false);
@@ -232,6 +253,10 @@ export function InlineEditAddressField({
     try {
       await onSave(addressData);
     } catch (saveError) {
+      // A conflict is reported by the conflict dialog, which can re-apply the
+      // change; the field shows the re-read address instead.
+      if (isWriteConflict(saveError)) return;
+
       // Rollback
       setIsEditing(true);
       const errorMessage =
@@ -242,7 +267,7 @@ export function InlineEditAddressField({
     } finally {
       setIsLoading(false);
     }
-  }, [addressData, validation, onSave]);
+  }, [addressData, validation, onSave, changedWhileEditing]);
 
   const handleFieldChange = useCallback(
     (field: keyof AddressData, fieldValue: string) => {
