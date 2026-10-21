@@ -39,8 +39,21 @@ import {
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
+import { AGGREGATE_LABELS, isWriteConflict } from '@/lib/write-conflicts';
+import {
+  aggregateWrite,
+  sendGuarded,
+  type AggregateRef,
+} from './aggregate-write';
+import { sendConditional, type ConditionalResult } from './conditional-request';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { taskKeys } from './tasks';
+import {
+  storeVersioned,
+  unwrapResource,
+  updateResource,
+  type Versioned,
+} from './versioned-cache';
 
 // Query Keys
 export const contactKeys = {
@@ -59,6 +72,23 @@ export const contactKeys = {
   infiniteSearch: (query: string) =>
     [...contactKeys.infiniteSearches(), query] as const,
 };
+
+/**
+ * The contact aggregate a write belongs to: every write to the contact or to
+ * one of its rows is guarded by, and serialised on, the contact's `ETag`.
+ */
+function contactAggregate(contactId: string): AggregateRef {
+  return {
+    kind: 'contact',
+    id: contactId,
+    detailKey: contactKeys.detail(contactId),
+  };
+}
+
+/** A field edit in words, for the conflict dialog: "Nickname → Bob". */
+function describeFieldEdit(fieldName: string, value: string): string {
+  return `${AGGREGATE_LABELS.contact[fieldName] ?? fieldName} → ${value}`;
+}
 
 export const tagKeys = {
   all: ['tags'] as const,
@@ -172,7 +202,8 @@ export async function fetchContacts(
   return response.json();
 }
 
-async function fetchContact(id: string): Promise<ContactResponse> {
+/** Reads a contact together with its `ETag`, the version later writes send. */
+async function fetchContact(id: string): Promise<Versioned<ContactResponse>> {
   const response = await fetch(API_ENDPOINTS.CONTACTS.BY_ID(id), {
     credentials: 'include',
     headers: {
@@ -187,7 +218,10 @@ async function fetchContact(id: string): Promise<ContactResponse> {
     );
   }
 
-  return response.json();
+  return {
+    resource: await response.json(),
+    etag: response.headers.get('ETag'),
+  };
 }
 
 async function createContact(data: ContactFormData): Promise<ContactResponse> {
@@ -217,31 +251,21 @@ async function createContact(data: ContactFormData): Promise<ContactResponse> {
 
 async function updateContact(
   id: string,
-  data: ContactFormData
-): Promise<ContactResponse> {
+  data: ContactFormData,
+  ifMatch: string | null
+): Promise<ConditionalResult<ContactResponse>> {
   const requestData: ContactUpdateData = {
     type: 'contacts',
     id,
     attributes: data,
   };
 
-  const response = await fetch(API_ENDPOINTS.CONTACTS.BY_ID(id), {
+  return sendConditional<ContactResponse>(API_ENDPOINTS.CONTACTS.BY_ID(id), {
     method: 'PUT',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data: requestData }),
+    body: { data: requestData },
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
   });
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
 async function deleteContact(id: string): Promise<void> {
@@ -395,6 +419,7 @@ export function useContact(id: string) {
   return useQuery({
     queryKey: contactKeys.detail(id),
     queryFn: () => fetchContact(id),
+    select: unwrapResource,
     enabled: !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -480,14 +505,24 @@ export function useCreateContact() {
   });
 }
 
-export function useUpdateContact() {
+export function useUpdateContact(id: string) {
   const queryClient = useQueryClient();
+  const aggregate = contactAggregate(id);
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ContactFormData }) =>
-      updateContact(id, data),
-    onSuccess: (data, { id }) => {
-      queryClient.setQueryData(contactKeys.detail(id), data);
+    ...aggregateWrite<ContactFormData>(aggregate, () => 'Contact details'),
+    mutationFn: (data: ContactFormData) =>
+      sendGuarded(queryClient, aggregate.detailKey, ifMatch =>
+        updateContact(id, data, ifMatch)
+      ),
+    onSuccess: data => {
+      // The tag the write returned is already stored; the body is the same
+      // version re-read.
+      updateResource<ContactResponse>(
+        queryClient,
+        aggregate.detailKey,
+        () => data
+      );
       void invalidateAfterMutation(
         queryClient,
         { queryKey: contactKeys.lists() },
@@ -499,7 +534,8 @@ export function useUpdateContact() {
       toast.success(SUCCESS_MESSAGES.CONTACT_UPDATED);
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      // A conflict is reported by the conflict dialog instead.
+      if (!isWriteConflict(error)) toast.error(error.message);
     },
   });
 }
@@ -634,75 +670,56 @@ export function useMergeContact() {
 }
 
 // Field-level update functions
-export async function updateContactField(
+async function updateContactField(
   contactId: string,
   fieldName: string,
-  value: string
-): Promise<ContactFieldResponse> {
-  const response = await fetch(
+  value: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<ContactFieldResponse>> {
+  return sendConditional<ContactFieldResponse>(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/fields/${fieldName}`,
     {
       method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        data: {
-          type: 'contact_fields',
-          attributes: {
-            value,
-          },
-        },
-      }),
+      body: { data: { type: 'contact_fields', attributes: { value } } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    const errorMessage =
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED;
-    throw new Error(errorMessage);
-  }
-
-  return response.json();
 }
 
-export function useUpdateContactField() {
+interface ContactFieldEdit {
+  fieldName: string;
+  value: string;
+}
+
+export function useUpdateContactField(contactId: string) {
   const queryClient = useQueryClient();
+  const aggregate = contactAggregate(contactId);
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      fieldName,
-      value,
-    }: {
-      contactId: string;
-      fieldName: string;
-      value: string;
-    }) => updateContactField(contactId, fieldName, value),
-    onSuccess: (data: ContactFieldResponse, variables) => {
-      const contactId = variables.contactId;
-
-      // Safely merge the updated field into the cached ContactResponse
-      queryClient.setQueryData<ContactResponse | undefined>(
-        contactKeys.detail(contactId),
-        oldData => {
-          if (!oldData) return oldData;
-
-          const updatedAttributes = {
-            ...oldData.data.attributes,
-            [data.data.attributes.field_name]: data.data.attributes.new_value,
-          };
-
-          return {
-            ...oldData,
-            data: {
-              ...oldData.data,
-              attributes: updatedAttributes,
+    ...aggregateWrite<ContactFieldEdit>(aggregate, ({ fieldName, value }) =>
+      describeFieldEdit(fieldName, value)
+    ),
+    mutationFn: ({ fieldName, value }: ContactFieldEdit) =>
+      sendGuarded(queryClient, aggregate.detailKey, ifMatch =>
+        updateContactField(contactId, fieldName, value, ifMatch)
+      ),
+    onSuccess: (data: ContactFieldResponse) => {
+      // Merge the updated field into the cached contact; the write's tag is
+      // already stored.
+      updateResource<ContactResponse>(
+        queryClient,
+        aggregate.detailKey,
+        contact => ({
+          ...contact,
+          data: {
+            ...contact.data,
+            attributes: {
+              ...contact.data.attributes,
+              [data.data.attributes.field_name]: data.data.attributes.new_value,
             },
-          };
-        }
+          },
+        })
       );
 
       // We still need to invalidate lists so search tables and sidebars reflect the updated field
@@ -715,8 +732,9 @@ export function useUpdateContactField() {
       );
     },
     onError: (error: Error) => {
-      // Don't show toast here - let the component handle it
-      console.error('Field update failed:', error);
+      // Don't show toast here - let the component handle it. A conflict is
+      // reported by the conflict dialog.
+      if (!isWriteConflict(error)) console.error('Field update failed:', error);
     },
   });
 }
@@ -1104,53 +1122,36 @@ async function readErrorMessage(
   return errorData.errors?.[0]?.detail || fallback;
 }
 
-async function addContactImportantDate(
+// These answer with the whole contact and the tag of that same read, which is
+// kept with it: dropping it would leave later guarded edits unguarded.
+function addContactImportantDate(
   contactId: string,
   date: ImportantDateAttributes
-): Promise<ContactResponse> {
-  const response = await fetch(importantDatesUrl(contactId), {
+): Promise<ConditionalResult<ContactResponse>> {
+  return sendConditional<ContactResponse>(importantDatesUrl(contactId), {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      data: { type: 'contact_important_dates', attributes: date },
-    }),
+    body: { data: { type: 'contact_important_dates', attributes: date } },
+    ifMatch: null,
+    fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
   });
-
-  if (!response.ok) {
-    throw new Error(
-      await readErrorMessage(response, ERROR_MESSAGES.CREATE_FAILED)
-    );
-  }
-
-  return response.json();
 }
 
-async function updateContactImportantDate(
+function updateContactImportantDate(
   contactId: string,
   dateId: string,
   date: ImportantDateAttributes
-): Promise<ContactResponse> {
-  const response = await fetch(`${importantDatesUrl(contactId)}/${dateId}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      data: {
-        type: 'contact_important_dates',
-        id: dateId,
-        attributes: date,
+): Promise<ConditionalResult<ContactResponse>> {
+  return sendConditional<ContactResponse>(
+    `${importantDatesUrl(contactId)}/${dateId}`,
+    {
+      method: 'PUT',
+      body: {
+        data: { type: 'contact_important_dates', id: dateId, attributes: date },
       },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      await readErrorMessage(response, ERROR_MESSAGES.UPDATE_FAILED)
-    );
-  }
-
-  return response.json();
+      ifMatch: null,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
+    }
+  );
 }
 
 async function deleteContactImportantDate(
@@ -1180,13 +1181,13 @@ export function useAddContactImportantDate() {
       contactId: string;
       date: ImportantDateAttributes;
     }) => addContactImportantDate(contactId, date),
-    onSuccess: (data, { contactId }) => {
+    onSuccess: ({ body, etag }, { contactId }) => {
       // Seed rather than invalidate: these endpoints answer with the whole
       // contact, so the cache can be made current synchronously. An
       // invalidation alone resolves the mutation before the refetch lands, and
       // the inline editor seeds its inputs from the cache when it reopens - so
       // a second edit would submit the values the first one just replaced.
-      queryClient.setQueryData(contactKeys.detail(contactId), data);
+      storeVersioned(queryClient, contactKeys.detail(contactId), body, etag);
       void invalidateAfterMutation(
         queryClient,
         { queryKey: contactKeys.lists() },
@@ -1216,10 +1217,10 @@ export function useUpdateContactImportantDate() {
       dateId: string;
       date: ImportantDateAttributes;
     }) => updateContactImportantDate(contactId, dateId, date),
-    onSuccess: (data, { contactId }) => {
+    onSuccess: ({ body, etag }, { contactId }) => {
       // See useAddContactImportantDate: the editor reopens from this cache, so
       // it has to be current by the time the mutation settles.
-      queryClient.setQueryData(contactKeys.detail(contactId), data);
+      storeVersioned(queryClient, contactKeys.detail(contactId), body, etag);
       void invalidateAfterMutation(
         queryClient,
         { queryKey: contactKeys.lists() },

@@ -3,7 +3,7 @@
  */
 
 import { renderHook, waitFor } from '@testing-library/react';
-import { createQueryTestHarness } from '@/test-utils';
+import { createQueryTestHarness, mockApiResponse } from '@/test-utils';
 import {
   contactKeys,
   historyKeys,
@@ -11,6 +11,7 @@ import {
   useDeleteContactImportantDate,
   useUpdateContactImportantDate,
 } from '../contacts';
+import type { Versioned } from '../versioned-cache';
 import {
   ImportantDatePrecision,
   ImportantDateTypeEnum,
@@ -103,10 +104,9 @@ describe('important date mutations', () => {
 
   describe('useUpdateContactImportantDate', () => {
     it('PUTs the whole date to its own endpoint', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => editedContactResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(editedContactResponse, { etag: '"e2"' })
+      );
 
       const { result } = renderHook(() => useUpdateContactImportantDate(), {
         wrapper: harness.wrapper,
@@ -139,14 +139,13 @@ describe('important date mutations', () => {
       // whatever the cache holds when it reopens. If the cache were still stale
       // at that moment, a second edit would submit - and so restore - the old
       // values, undoing the save that just succeeded.
-      harness.queryClient.setQueryData(
-        contactKeys.detail('10'),
-        staleContactResponse
+      harness.queryClient.setQueryData(contactKeys.detail('10'), {
+        resource: staleContactResponse,
+        etag: '"e1"',
+      });
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(editedContactResponse, { etag: '"e2"' })
       );
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => editedContactResponse,
-      } as Response);
 
       const { result } = renderHook(() => useUpdateContactImportantDate(), {
         wrapper: harness.wrapper,
@@ -158,19 +157,21 @@ describe('important date mutations', () => {
         date: birthday,
       });
 
-      const cached = harness.queryClient.getQueryData(
-        contactKeys.detail('10')
-      ) as typeof editedContactResponse;
-      expect(cached.data.attributes.important_dates[0].attributes.year).toBe(
+      const versioned = harness.queryClient.getQueryData<
+        Versioned<typeof editedContactResponse>
+      >(contactKeys.detail('10'));
+      // The tag of the same read is kept, so later guarded edits stay guarded.
+      expect(versioned?.etag).toBe('"e2"');
+      const cached = versioned?.resource;
+      expect(cached?.data.attributes.important_dates[0].attributes.year).toBe(
         1991
       );
     });
 
     it('refreshes the activity feed, which the edit writes history rows to', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => editedContactResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(editedContactResponse, { etag: '"e2"' })
+      );
 
       const invalidateSpy = jest.spyOn(
         harness.queryClient,
@@ -200,6 +201,7 @@ describe('important date mutations', () => {
     it('rejects with the API error detail so the editor can stay open', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 409,
         json: async () => ({
           errors: [{ detail: 'Contact already has a birthday date defined' }],
         }),
@@ -221,14 +223,13 @@ describe('important date mutations', () => {
 
   describe('useAddContactImportantDate', () => {
     it('POSTs to the collection and makes the detail cache current', async () => {
-      harness.queryClient.setQueryData(
-        contactKeys.detail('10'),
-        staleContactResponse
+      harness.queryClient.setQueryData(contactKeys.detail('10'), {
+        resource: staleContactResponse,
+        etag: '"e1"',
+      });
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(editedContactResponse, { etag: '"e2"' })
       );
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => editedContactResponse,
-      } as Response);
 
       const { result } = renderHook(() => useAddContactImportantDate(), {
         wrapper: harness.wrapper,
@@ -240,10 +241,13 @@ describe('important date mutations', () => {
         '/api/contacts/10/important-dates',
         expect.objectContaining({ method: 'POST' })
       );
-      const cached = harness.queryClient.getQueryData(
-        contactKeys.detail('10')
-      ) as typeof editedContactResponse;
-      expect(cached.data.attributes.important_dates[0].attributes.year).toBe(
+      const versioned = harness.queryClient.getQueryData<
+        Versioned<typeof editedContactResponse>
+      >(contactKeys.detail('10'));
+      // The tag of the same read is kept, so later guarded edits stay guarded.
+      expect(versioned?.etag).toBe('"e2"');
+      const cached = versioned?.resource;
+      expect(cached?.data.attributes.important_dates[0].attributes.year).toBe(
         1991
       );
     });

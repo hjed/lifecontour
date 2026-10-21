@@ -18,6 +18,7 @@ import {
   useDeleteContact,
 } from '../contacts';
 import { ContactFormData } from '@/types/contacts';
+import { mockApiResponse } from '@/test-utils';
 
 // Mock fetch
 globalThis.fetch = jest.fn();
@@ -320,10 +321,7 @@ describe('Contacts API', () => {
         },
       };
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse(mockResponse));
 
       const { result } = renderHook(() => useContact('1'), {
         wrapper: createWrapper,
@@ -532,12 +530,9 @@ describe('Contacts API', () => {
         },
       };
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse(mockResponse));
 
-      const { result } = renderHook(() => useUpdateContact(), {
+      const { result } = renderHook(() => useUpdateContact('1'), {
         wrapper: createWrapper,
       });
 
@@ -551,7 +546,7 @@ describe('Contacts API', () => {
         notes: [],
       };
 
-      await result.current.mutateAsync({ id: '1', data: contactData });
+      await result.current.mutateAsync(contactData);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/contacts/1', {
         method: 'PUT',

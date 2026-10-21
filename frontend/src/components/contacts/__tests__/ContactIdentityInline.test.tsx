@@ -142,7 +142,6 @@ describe('ContactIdentityInline', () => {
 
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith({
-          contactId: '1',
           fieldName: 'first_name',
           value: 'Jane',
         });
@@ -167,7 +166,6 @@ describe('ContactIdentityInline', () => {
 
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith({
-          contactId: '1',
           fieldName: 'last_name',
           value: 'Smith',
         });
@@ -192,7 +190,6 @@ describe('ContactIdentityInline', () => {
 
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith({
-          contactId: '1',
           fieldName: 'nick_name',
           value: 'JD',
         });
