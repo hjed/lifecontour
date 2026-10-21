@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.integration_constants import snipeit_maintenance_calendar_id
 from core_shared.stream_client import StreamEvent
 
 if "DATABASE_URL" not in os.environ:
@@ -710,7 +711,7 @@ def _journal_deleted_event(*imported: str) -> StreamEvent:
             "snipeit_maintenance": [
                 {
                     "external_event_id": external_id,
-                    "calendar_id": "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a",
+                    "calendar_id": snipeit_maintenance_calendar_id("user1"),
                     "google_calendar_id": None,
                 }
                 for external_id in imported

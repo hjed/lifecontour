@@ -28,7 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from snipeit_api_client import SnipeItAPIError
 from snipeit_models import SnipeItMaintenance
-from snipeit_sync_service import IN_FLIGHT_LOCK_SECONDS, SnipeItSyncInProgress
+from snipeit_sync_service import (
+    IN_FLIGHT_LOCK_SECONDS,
+    SnipeItSyncInProgress,
+    snipeit_maintenance_calendar_id,
+)
 from snipeit_sync_window import ListedRecord
 
 # ``mock_transport``, ``integration_client`` and ``snipeit_sync_service`` are
@@ -554,8 +558,8 @@ class TestOutboundMaintenanceSyncIntegration:
         assert len(mock_transport.responses) == 0
 
 
-# Synthetic calendar every Snipe-IT maintenance journal is imported into.
-_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
+# The synthetic calendar the syncing user's maintenance journals are imported into.
+_MAINTENANCE_CALENDAR_ID = snipeit_maintenance_calendar_id("user-123")
 
 # Maintenance 17 as production Snipe-IT returns it: text HTML-escaped on output.
 _SNIPEIT_MAINTENANCE_17: dict[str, Any] = {
@@ -650,9 +654,9 @@ async def _seed_maintenance_journal(
     if imported_from is not None:
         await async_connection.execute(
             text("""
-                INSERT INTO calendars (id, user_id, name, color)
-                VALUES (:calendar_id, 'user-123', 'Snipeit_Maintenance Calendar',
-                        '#808080')
+                INSERT INTO calendars (id, user_id, name, color, integration_source)
+                VALUES (:calendar_id, 'user-123', 'Snipe-IT Maintenance',
+                        '#808080', 'snipeit_maintenance')
                 ON CONFLICT (id) DO NOTHING
             """),
             {"calendar_id": _MAINTENANCE_CALENDAR_ID},
@@ -2769,41 +2773,6 @@ class TestDeletedMaintenanceReconcile:
 
         assert deleted == 1
         assert await _maintenance_rows(async_connection) == ["snipeit_maint:9"]
-
-    @pytest.mark.asyncio
-    async def test_a_record_another_users_journal_holds_is_left_alone(
-        self,
-        snipeit_sync_service: Any,
-        mock_transport: Any,
-        async_connection: AsyncConnection,
-    ) -> None:
-        """Another user's Snipe-IT is not this sync's to judge."""
-        gear_item_id = await _seed_synced_asset(async_connection, 51)
-        their_import = await _seed_maintenance_journal(
-            async_connection,
-            gear_item_id=gear_item_id,
-            title="Their import",
-            imported_from=40,
-        )
-        await _seed_import_record(async_connection, maintenance_id=40, version_hash="h")
-        await _seed_push_record(
-            async_connection, journal_id=their_import, maintenance_id=41
-        )
-        await async_connection.execute(
-            text("UPDATE journals SET user_id = 'user-456' WHERE id = :journal_id"),
-            {"journal_id": their_import},
-        )
-
-        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
-            set(), _joined_session_factory(async_connection)
-        )
-
-        assert deleted == 0
-        assert await _maintenance_rows(async_connection) == [
-            "snipeit_maint:40",
-            "snipeit_maint:41",
-        ]
-        assert mock_transport.requests == []
 
 
 @pytest.mark.asyncio

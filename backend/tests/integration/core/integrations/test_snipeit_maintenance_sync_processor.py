@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from core_shared.integration_constants import snipeit_maintenance_calendar_id
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,11 +26,12 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     build_processor,
 )
 
-# Must equal ``_SNIPEIT_MAINTENANCE_CALENDAR_ID`` in the Snipe-IT worker.
-SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
+# The calendar the Snipe-IT worker imports ``USER_ID``'s maintenances into.
+SNIPEIT_MAINTENANCE_CALENDAR_ID = snipeit_maintenance_calendar_id(USER_ID)
+OTHER_USER_ID = "other-user-456"
 
 
-async def _create_gear_item(connection: AsyncConnection) -> str:
+async def _create_gear_item(connection: AsyncConnection, user_id: str = USER_ID) -> str:
     result = await connection.execute(
         text(
             """
@@ -38,7 +40,7 @@ async def _create_gear_item(connection: AsyncConnection) -> str:
             RETURNING id
             """
         ),
-        {"user_id": USER_ID},
+        {"user_id": user_id},
     )
     return str(result.scalar_one())
 
@@ -51,6 +53,7 @@ def _maintenance_event(
     existing_journal_id: int | None = None,
     title: str = "Split Canyoneroo 50 -> 34 + 15",
     version_hash: str | None = None,
+    user_id: str = USER_ID,
 ) -> OutboxEvent:
     """A ``journal_event.created``/``.updated`` shaped like the Snipe-IT worker's payload.
 
@@ -61,9 +64,9 @@ def _maintenance_event(
     event_data: dict[str, Any] = {
         "integration_source": "snipeit_maintenance",
         "external_event_id": f"snipeit_maint:{maintenance_id}",
-        "calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID,
+        "calendar_id": snipeit_maintenance_calendar_id(user_id),
         "journal_data": {
-            "user_id": USER_ID,
+            "user_id": user_id,
             "title": title,
             "content": "",
             "event_date_range_start": "2026-09-11T00:00:00+00:00",
@@ -75,7 +78,7 @@ def _maintenance_event(
             "journal_types": ["GEAR_MAINTENANCE"],
             "version_hash": version_hash or f"maintenance-hash-{sync_action}",
         },
-        "calendar_info_data": {"calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID},
+        "calendar_info_data": {"calendar_id": snipeit_maintenance_calendar_id(user_id)},
         "sync_timestamp": datetime.now(UTC).isoformat(),
         "sync_action": sync_action,
         "existing_journal_id": existing_journal_id,
@@ -112,7 +115,7 @@ async def _record_sent(connection: AsyncConnection, event: OutboxEvent) -> None:
             """
         ),
         {
-            "user_id": USER_ID,
+            "user_id": event_data["journal_data"]["user_id"],
             "external_id": event_data["external_event_id"],
             "version_hash": event_data["journal_data"]["version_hash"],
         },
@@ -234,11 +237,67 @@ class TestSnipeItMaintenanceImportLink:
             _maintenance_event(gear_item_id, maintenance_id=17),
         )
 
-        source = await async_connection.execute(
-            text("SELECT integration_source FROM calendars WHERE id = :calendar_id"),
+        calendar = await async_connection.execute(
+            text(
+                "SELECT user_id, name, integration_source FROM calendars"
+                " WHERE id = :calendar_id"
+            ),
             {"calendar_id": SNIPEIT_MAINTENANCE_CALENDAR_ID},
         )
-        assert source.scalar_one() == "snipeit_maintenance"
+        assert tuple(calendar.one()) == (
+            USER_ID,
+            "Snipe-IT Maintenance",
+            "snipeit_maintenance",
+        )
+
+    async def test_two_users_import_the_same_maintenance_id_independently(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """Snipe-IT ids are per instance: another user's record 17 is not this
+        user's, so each import creates its owner's own journal on its owner's
+        maintenance calendar rather than updating the other's."""
+        processor = build_processor(async_connection)
+        theirs = await _send(
+            processor,
+            async_connection,
+            _maintenance_event(
+                await _create_gear_item(async_connection, OTHER_USER_ID),
+                maintenance_id=17,
+                title="Their maintenance",
+                user_id=OTHER_USER_ID,
+            ),
+        )
+
+        mine = await _send(
+            processor,
+            async_connection,
+            _maintenance_event(
+                await _create_gear_item(async_connection),
+                maintenance_id=17,
+                title="My maintenance",
+            ),
+        )
+
+        assert mine["journal_id"] != theirs["journal_id"]
+        links = await async_connection.execute(
+            text(
+                """
+                SELECT j.user_id, j.title, l.calendar_id::text
+                FROM journal_external_event_links l
+                JOIN journals j ON j.id = l.journal_id
+                WHERE l.external_event_id = 'snipeit_maint:17'
+                ORDER BY j.user_id
+                """
+            )
+        )
+        assert [tuple(row) for row in links] == [
+            (
+                OTHER_USER_ID,
+                "Their maintenance",
+                snipeit_maintenance_calendar_id(OTHER_USER_ID),
+            ),
+            (USER_ID, "My maintenance", SNIPEIT_MAINTENANCE_CALENDAR_ID),
+        ]
 
 
 @pytest.mark.integration

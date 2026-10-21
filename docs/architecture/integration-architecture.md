@@ -306,6 +306,15 @@ rows a not-yet-deployed writer left unowned, made the column `NOT NULL`, and dro
 the global `(integration_source, external_id)` index; its downgrade refuses while
 two owners hold one external id.
 
+Links are keyed by calendar, not owner: `journal_external_event_links` is unique on
+`(calendar_id, external_event_id)`. A synthetic calendar shared by every user is
+therefore a cross-user key, safe only for ids that are globally unique (Strava's).
+Snipe-IT ids are per instance, so each user imports their maintenances into their own
+calendar, `snipeit_maintenance_calendar_id(user_id)` in
+`core_shared.integration_constants` (`uuid5(NAMESPACE_URL,
+"snipeit:maintenance:{user_id}")`). Migration `0138` moved each owner's rows off the
+old shared calendar (#1510).
+
 #### Merged Aliases: a Sync Never Undoes a Merge
 
 A journal merge deletes the source journal, and every external link the target
