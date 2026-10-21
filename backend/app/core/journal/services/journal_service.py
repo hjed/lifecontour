@@ -1,6 +1,6 @@
 """Main journal service with transaction management and type dependency resolution."""
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from typing import Any
 from uuid import UUID
@@ -181,7 +181,7 @@ class JournalService:
         async def _replace(_stored: Journal) -> Journal:
             return journal
 
-        return await self.modify_journal(
+        return await self._modify_existing(
             journal.id,
             _replace,
             transaction,
@@ -210,7 +210,7 @@ class JournalService:
         async def _apply(stored: Journal) -> Journal:
             return patch.applied_to(stored)
 
-        return await self.modify_journal(
+        return await self._modify_existing(
             journal_id,
             _apply,
             transaction,
@@ -218,6 +218,29 @@ class JournalService:
             source=source,
             expected_etags=expected_etags,
         )
+
+    async def _modify_existing(
+        self,
+        journal_id: int,
+        mutate: Callable[[Journal], Awaitable[Journal]],
+        transaction: AsyncConnection,
+        *,
+        changed_by: str,
+        source: Provenance,
+        expected_etags: Sequence[str] | None,
+    ) -> Journal:
+        """:meth:`modify_journal` for a mutation that always writes."""
+        saved = await self.modify_journal(
+            journal_id,
+            mutate,
+            transaction,
+            changed_by=changed_by,
+            source=source,
+            expected_etags=expected_etags,
+        )
+        if saved is None:
+            raise ValueError(f"The update of journal {journal_id} wrote nothing")
+        return saved
 
     @transactional
     async def modify_journal(
@@ -228,7 +251,7 @@ class JournalService:
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
         expected_etags: Sequence[str] | None = None,
-    ) -> Journal:
+    ) -> Journal | None:
         """
         Read-modify-write a journal's own fields under its row lock.
 
@@ -236,7 +259,9 @@ class JournalService:
         lock it (refusing a stale ``expected_etags``), read it, have ``mutate``
         build the journal to save from that read, and save. Because the read
         happens under the lock, nothing ``mutate`` builds on can have moved by
-        the time it is written. ``mutate`` is handed a copy.
+        the time it is written. ``mutate`` is handed a copy, and may return
+        ``None`` to write nothing at all - the decision to skip is then made
+        against the locked read too.
 
         Computes field-level ``changed_fields`` as ``{field: (old, new)}`` pairs by
         diffing the persisted journal against ``journal`` (mirroring the contact
@@ -257,7 +282,7 @@ class JournalService:
                 before conditional writes existed.
 
         Returns:
-            The updated journal
+            The updated journal, or ``None`` if ``mutate`` chose not to write
 
         Raises:
             JournalValidationError: If validation fails or journal has no ID
@@ -279,6 +304,8 @@ class JournalService:
             raise JournalNotFoundError(journal_id)
 
         journal = await mutate(deepcopy(existing_journal))
+        if journal is None:
+            return None
         if journal.id != journal_id:
             raise JournalValidationError(
                 "id",

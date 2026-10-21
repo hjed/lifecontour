@@ -12,8 +12,8 @@ from core_shared.models.journals import EventDateRange, Journal
 from app.shared.patch import UNSET, FieldPatch, Unset
 
 #: Builds the journal to save from the journal as stored, read under its row
-#: lock.
-type JournalMutation = Callable[[Journal], Awaitable[Journal]]
+#: lock - or returns ``None`` to write nothing.
+type JournalMutation = Callable[[Journal], Awaitable[Journal | None]]
 
 
 @dataclass(frozen=True, kw_only=True)

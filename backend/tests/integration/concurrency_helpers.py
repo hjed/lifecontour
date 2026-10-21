@@ -14,10 +14,13 @@ update needs.
 """
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+
+from app.infrastructure.unit_of_work import unit_of_work
 
 # Long enough that a slow container is not mistaken for a hang, short enough
 # that a genuine one is reported rather than waited on.
@@ -86,3 +89,26 @@ async def settle(*tasks: asyncio.Task[object] | asyncio.Task[None] | None) -> No
         if not task.done():
             task.cancel()
     await asyncio.gather(*running, return_exceptions=True)
+
+
+async def overlap(
+    async_engine: AsyncEngine,
+    first: Callable[[AsyncConnection], Coroutine[Any, Any, object]],
+    second: Callable[[AsyncConnection], Coroutine[Any, Any, object]],
+) -> None:
+    """Run ``first`` holding its transaction until ``second`` blocks on a lock.
+
+    Each runs on a connection of its own; ``first`` commits once ``second`` is
+    waiting, and ``second`` is then awaited to the end.
+    """
+    async with async_engine.connect() as one, async_engine.connect() as two:
+        overlapping: asyncio.Task[object] | None = None
+        try:
+            two_pid = await backend_pid(two)
+            async with unit_of_work(one):
+                await first(one)
+                overlapping = asyncio.create_task(second(two))
+                await wait_until_blocked_on_a_lock(async_engine, two_pid)
+            await bounded(overlapping)
+        finally:
+            await settle(overlapping)
