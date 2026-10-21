@@ -818,3 +818,26 @@ class TestContactSyncSkippedAddresses:
 
         payload = ContactSyncEventData.model_validate(event.event_data)
         assert payload.skipped_addresses == [skipped]
+
+
+class TestContactSyncAddressFallback:
+    """The country an import gave addresses with none (#1820)."""
+
+    def test_an_event_queued_before_the_field_has_no_fallback(
+        self, contact_sync_data: dict[str, Any]
+    ) -> None:
+        payload = ContactSyncEventData.model_validate(contact_sync_data)
+
+        assert payload.address_fallback_country is None
+
+    def test_the_builder_carries_the_fallback(self) -> None:
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Kiri"},
+            integration_source="google",
+            external_id="people/c1",
+            user_id="user-1",
+            address_fallback_country="NZ",
+        )
+
+        payload = ContactSyncEventData.model_validate(event.event_data)
+        assert payload.address_fallback_country == "NZ"

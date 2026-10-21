@@ -82,6 +82,13 @@ class ContactSyncEventData(BaseModel):
         "Every applied event replaces the contact's pending ones, so fixing an "
         "address at the source clears it.",
     )
+    address_fallback_country: str | None = Field(
+        default=None,
+        description="The country the import gave addresses with none (#1820), "
+        "or None when it had none to give. Recorded on the link when the event "
+        "is applied: a push owns a countryless address only if the last applied "
+        "pull imported it.",
+    )
 
 
 # ── Sync Completed ───────────────────────────────────────────────────

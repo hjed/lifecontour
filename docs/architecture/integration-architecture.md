@@ -225,8 +225,13 @@ dual-write has been removed: every writer now persists the canonical link (plus
 `external_references` anymore:
 
 - The inbound contact create/update paths write the link and its `reference_data`
-  (`resource_name`/`etag`/`synced_tags`) onto `sync_metadata` (the `synced_tags`/`etag`
-  read/write moved here too, via `SyncMetadataRepository.update_reference_data`).
+  (`resource_name`/`etag`/`synced_tags`/`address_fallback_country`) onto
+  `sync_metadata` (the `synced_tags`/`etag` read/write moved here too, via
+  `SyncMetadataRepository.update_reference_data`). `address_fallback_country`
+  is the country the last *applied* pull gave addresses with none (#1820); a
+  skipped event leaves it alone, and the Google push merge owns a countryless
+  address only when that record says it was imported
+  (`core_shared.models.sync_metadata.recorded_address_fallback`).
 - `SyncMetadataRepository.upsert_contact_link` (manual Immich linking) and
   `repoint_contact_links` (contact merge) operate on `sync_metadata` only.
 - `SyncMetadataRepository.repoint_journal_links` does the same for journal merge.

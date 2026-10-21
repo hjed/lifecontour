@@ -836,7 +836,12 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            {"old_key": "old_value", "synced_tags": ["Work"]},
+            # The fallback is recorded already, so tags are all that could change.
+            {
+                "old_key": "old_value",
+                "synced_tags": ["Work"],
+                "address_fallback_country": None,
+            },
         )
 
         await processor.process_event(contact_updated_event)
@@ -860,7 +865,12 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            {"old_key": "old_value", "synced_tags": ["Work"]},
+            # The fallback is recorded already, so tags are all that could change.
+            {
+                "old_key": "old_value",
+                "synced_tags": ["Work"],
+                "address_fallback_country": None,
+            },
         )
 
         # Mock tag_repo as it's accessed directly by the processor

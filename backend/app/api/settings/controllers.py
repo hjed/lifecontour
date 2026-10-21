@@ -17,9 +17,14 @@ from app.api.settings.schemas import (
     UserSettingsRequest,
     UserSettingsResponse,
 )
-from app.core.settings.models import UserSettings, UserSettingsRepository
+from app.core.integrations.services.google_contacts_resync import (
+    GoogleContactsResync,
+)
+from app.core.integrations.task_queue_service import TaskQueueService
+from app.core.settings.models import UNSET, UserSettings, UserSettingsRepository
 from app.core.settings.services.user_settings_service import UserSettingsService
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
 
 router = APIRouter(prefix="/user-settings", tags=["settings"])
 logger = structlog.get_logger()
@@ -64,15 +69,33 @@ async def update_user_settings(
     request_data: UserSettingsRequest,
     user: FromDishka[SessionUser],
     service: FromDishka[UserSettingsService],
+    repository: FromDishka[UserSettingsRepository],
+    oauth_service: FromDishka[OAuthService],
+    task_queue_service: FromDishka[TaskQueueService],
     connection: FromDishka[AsyncConnection],
 ) -> UserSettingsResponse:
-    """Update the fields the body names (upsert); omitted ones are kept."""
+    """Update the fields the body names (upsert); omitted ones are kept.
+
+    A changed default country queues a full Google contacts sync, so every
+    imported contact's countryless addresses take it, not only the contacts
+    Google next changes (#1820).
+    """
     try:
+        changes = request_data.to_changes()
+        previous = await repository.get_by_user_id(str(user.id))
         saved = await service.update_settings(
             user_id=str(user.id),
-            changes=request_data.to_changes(),
+            changes=changes,
             transaction=connection,
         )
+        previous_country = previous.default_country if previous else None
+        if (
+            changes.default_country is not UNSET
+            and saved.default_country != previous_country
+        ):
+            await GoogleContactsResync(
+                oauth_service, task_queue_service
+            ).request_full_sync(str(user.id), connection)
 
         logger.info(
             "User settings saved",
