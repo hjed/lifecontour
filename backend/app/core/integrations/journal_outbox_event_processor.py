@@ -652,6 +652,11 @@ class JournalOutboxEventProcessor:
         Looks up the existing journal, checks for ETag-based idempotency,
         applies InboundFieldMerger to protect local edits, updates the
         journal fields, and updates the external event link.
+
+        The merge and the journal it builds are made inside
+        ``JournalService.modify_journal``, from the journal as read under its
+        row lock, so a local edit committed meanwhile is protected rather than
+        overwritten.
         """
         event_data: dict[str, Any] = event.event_data  # type: ignore
         payload = JournalSyncEventData.model_validate(event_data)
@@ -823,71 +828,57 @@ class JournalOutboxEventProcessor:
                 external_event_id=external_event_id,
             )
 
-        # Apply InboundFieldMerger for protected local edits
-        inbound_data: dict[str, Any] = {
-            "title": journal_data.get("title", ""),
-            "event_date_range_start": journal_data.get("event_date_range_start"),
-            "event_date_range_end": journal_data.get("event_date_range_end"),
-        }
-        if "content" in journal_data:
-            inbound_data["content"] = journal_data["content"]
-
         # When private_description is enabled, block inbound content changes
         # to prevent external calendar descriptions overwriting local journal notes.
-        # We replace the inbound value with the existing journal content (rather than
-        # removing the key) so that merged_data always contains "content".
         existing_calendar_info = await self._find_calendar_info(existing_journal_id)
-        if existing_calendar_info and existing_calendar_info.private_description:
-            inbound_data["content"] = existing_journal.content or ""
+        private_description = bool(
+            existing_calendar_info and existing_calendar_info.private_description
+        )
+        if private_description:
             logger.debug(
                 "Blocking inbound content update due to private_description",
                 journal_id=existing_journal_id,
             )
+        link_updated_at = existing_link.updated_at if existing_link else None
+        adopting = split_adoption is not None
 
-        merged_data = self._merge_fields_with_protection(
-            existing_journal=existing_journal,
-            inbound_data=inbound_data,
-            link_updated_at=existing_link.updated_at if existing_link else None,
-        )
+        def _merged(stored: Journal) -> Journal | None:
+            return self._merged_journal(
+                stored,
+                adopted_journal_data(journal_data, stored)
+                if adopting
+                else journal_data,
+                private_description=private_description,
+                link_updated_at=link_updated_at,
+            )
 
-        # Build updated journal from merged data
-        merged_journal_data = dict(journal_data)
-        merged_journal_data["title"] = merged_data.get("title", existing_journal.title)
-        merged_journal_data["content"] = merged_data.get(
-            "content", existing_journal.content or ""
-        )
-        merged_journal_data["event_date_range_start"] = merged_data[
-            "event_date_range_start"
-        ]
-        merged_journal_data["event_date_range_end"] = merged_data[
-            "event_date_range_end"
-        ]
+        # Skip a no-op inbound sync entirely so it produces no event/history.
+        # Judged first on the unlocked read: writing nothing cannot revert a
+        # concurrent edit, and it keeps a no-op sync off the journal's lock,
+        # which would otherwise be taken ahead of the series locks below - the
+        # opposite order to a split adoption.
+        saved_journal = existing_journal
+        fields_changed = False
+        if _merged(existing_journal) is not None:
+            locked_journal = existing_journal
 
-        updated_journal = self._build_journal_from_data(
-            merged_journal_data,
-            journal_id=existing_journal_id,
-            parent_id=existing_journal.parent_id,
-            order=existing_journal.order,
-        )
+            async def _merge_inbound(stored: Journal) -> Journal | None:
+                # Merged again from the journal read under its row lock, so a
+                # local edit committed since the read above is what the
+                # protection check compares - and what the save keeps (#1813).
+                nonlocal locked_journal
+                locked_journal = stored
+                return _merged(stored)
 
-        # Skip a no-op inbound sync entirely so it produces no event/history;
-        # when something changed, JournalService computes the field-level
-        # changed_fields by diffing the persisted journal against updated_journal.
-        fields_changed = (
-            updated_journal.title != existing_journal.title
-            or updated_journal.content != existing_journal.content
-            or updated_journal.event_date_range != existing_journal.event_date_range
-        )
-        if fields_changed:
-            provenance = _provenance_for_source(payload.integration_source)
-            saved_journal = await self.journal_service.update_journal(
-                updated_journal,
+            written = await self.journal_service.modify_journal(
+                existing_journal_id,
+                _merge_inbound,
                 self.connection,
                 changed_by=payload.integration_source or "system",
-                source=provenance,
+                source=_provenance_for_source(payload.integration_source),
             )
-        else:
-            saved_journal = existing_journal
+            fields_changed = written is not None
+            saved_journal = written if written is not None else locked_journal
 
         # Update calendar info
         if saved_journal.id is not None:
@@ -1618,6 +1609,66 @@ class JournalOutboxEventProcessor:
             parent_id=parent_id,
             order=order,
         )
+
+    @classmethod
+    def _merged_journal(
+        cls,
+        stored: Journal,
+        journal_data: dict[str, Any],
+        *,
+        private_description: bool,
+        link_updated_at: datetime | None,
+    ) -> Journal | None:
+        """The journal an inbound update would save over ``stored``, if any.
+
+        Merges the inbound fields with protection against ``stored`` and
+        builds the whole journal to save from it, keeping ``stored``'s place
+        in the hierarchy. ``None`` when that journal changes none of the
+        fields an inbound sync writes.
+
+        Under ``private_description`` the inbound content is replaced with the
+        stored content (rather than dropped), so the merge always has one.
+        """
+        inbound_data: dict[str, Any] = {
+            "title": journal_data.get("title", ""),
+            "event_date_range_start": journal_data.get("event_date_range_start"),
+            "event_date_range_end": journal_data.get("event_date_range_end"),
+        }
+        if "content" in journal_data:
+            inbound_data["content"] = journal_data["content"]
+        if private_description:
+            inbound_data["content"] = stored.content or ""
+
+        merged_data = cls._merge_fields_with_protection(
+            existing_journal=stored,
+            inbound_data=inbound_data,
+            link_updated_at=link_updated_at,
+        )
+
+        merged_journal_data = dict(journal_data)
+        merged_journal_data["title"] = merged_data.get("title", stored.title)
+        merged_journal_data["content"] = merged_data.get(
+            "content", stored.content or ""
+        )
+        merged_journal_data["event_date_range_start"] = merged_data[
+            "event_date_range_start"
+        ]
+        merged_journal_data["event_date_range_end"] = merged_data[
+            "event_date_range_end"
+        ]
+
+        updated_journal = cls._build_journal_from_data(
+            merged_journal_data,
+            journal_id=stored.id,
+            parent_id=stored.parent_id,
+            order=stored.order,
+        )
+        fields_changed = (
+            updated_journal.title != stored.title
+            or updated_journal.content != stored.content
+            or updated_journal.event_date_range != stored.event_date_range
+        )
+        return updated_journal if fields_changed else None
 
     @staticmethod
     def _merge_fields_with_protection(

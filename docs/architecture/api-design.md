@@ -366,6 +366,17 @@ under its lock and must still name it; a contact merged away in between fails
 the event as transient, and its redelivery resolves the link onto the
 survivor.
 
+**Inbound journal syncs merge under the journal's lock too.** An inbound
+`journal_event.updated` merges the calendar's fields with protection, and builds
+the journal to save, inside `modify_journal`, from the journal as read under
+its lock: the protection check compares *that* read's `updated_at` against the
+link's anchor, so a local edit committed while the event was in flight is seen
+and kept (#1813). A sync that changes nothing on its earlier, unlocked read
+skips without locking. Writing nothing cannot revert anything, and it keeps a
+no-op sync off the journal's lock, which would otherwise come ahead of the
+series locks. A split adoption takes those locks first. A journal merged away
+between the two reads fails the event, and its redelivery is skipped as merged.
+
 **Lock modes are the aggregate's choice.** Contacts lock `FOR UPDATE`. Journals
 lock `FOR NO KEY UPDATE` — the mode a plain `UPDATE` of the row takes anyway —
 because a task link holds `FOR KEY SHARE` on the journal it anchors to, and an

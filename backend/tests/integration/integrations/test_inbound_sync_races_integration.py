@@ -13,7 +13,7 @@ the services run on real connections, so what they publish is committed too.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -53,6 +53,7 @@ from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.concurrency_helpers import (
     backend_pid,
     bounded,
+    overlap,
     settle,
     wait_until_blocked_on_a_lock,
 )
@@ -179,25 +180,6 @@ async def _linked_contact(async_engine: AsyncEngine, user_id: str) -> int:
         )
 
 
-async def _overlap(
-    async_engine: AsyncEngine,
-    first: Callable[[AsyncConnection], Coroutine[Any, Any, object]],
-    second: Callable[[AsyncConnection], Coroutine[Any, Any, object]],
-) -> None:
-    """Run ``first`` holding its transaction until ``second`` blocks on a lock."""
-    async with async_engine.connect() as one, async_engine.connect() as two:
-        overlapping: asyncio.Task[object] | None = None
-        try:
-            two_pid = await backend_pid(two)
-            async with unit_of_work(one):
-                await first(one)
-                overlapping = asyncio.create_task(second(two))
-                await wait_until_blocked_on_a_lock(async_engine, two_pid)
-            await bounded(overlapping)
-        finally:
-            await settle(overlapping)
-
-
 @pytest.mark.integration
 class TestInboundSyncOverlappingALocalEdit:
     async def test_a_local_edit_committed_first_is_not_reverted(
@@ -217,7 +199,7 @@ class TestInboundSyncOverlappingALocalEdit:
             async def inbound(connection: AsyncConnection) -> None:
                 await _process(connection, _google_update(synced.user_id))
 
-            await _overlap(async_engine, local_edit, inbound)
+            await overlap(async_engine, local_edit, inbound)
 
             row = await _row(async_engine, synced.contact_id)
             assert (row.first_name, row.nick_name) == ("Rob", "Bobby")
@@ -239,7 +221,7 @@ class TestInboundSyncOverlappingALocalEdit:
                     user_id=synced.user_id,
                 )
 
-            await _overlap(async_engine, inbound, local_edit)
+            await overlap(async_engine, inbound, local_edit)
 
             row = await _row(async_engine, synced.contact_id)
             assert (row.first_name, row.nick_name) == ("Rob", "Bobby")
@@ -292,7 +274,7 @@ class TestInboundSyncOverlappingALocalEdit:
                 result = await _process(connection, created)
                 assert result["contact_id"] == synced.other_contact_id
 
-            await _overlap(async_engine, local_edit, inbound)
+            await overlap(async_engine, local_edit, inbound)
 
             row = await _row(async_engine, synced.other_contact_id)
             assert (row.first_name, row.nick_name) == ("Bobbie", "Bertie")
@@ -389,7 +371,7 @@ class TestInboundSyncOverlappingAMerge:
                     await _process(connection, update)
                 assert type(failed.value) is OutboxEventProcessingError
 
-            await _overlap(async_engine, merge, inbound)
+            await overlap(async_engine, merge, inbound)
 
             async with async_engine.connect() as redelivery:
                 result = await _process(redelivery, _google_update(synced.user_id))

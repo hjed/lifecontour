@@ -256,6 +256,28 @@ class TestJournalServiceCRUD:
             await journal_service.update_journal(journal, mock_transaction)
 
     @pytest.mark.asyncio
+    async def test_modify_journal_that_writes_nothing_saves_and_publishes_nothing(
+        self, journal_service, mock_journal_repo, mock_event_publisher, mock_transaction
+    ):
+        """A mutation returning ``None`` decides, against the locked read, to skip."""
+        stored = create_test_journal(journal_id=1, title="Stored Title")
+        mock_journal_repo.find_by_id.return_value = stored
+        handed: list[Journal] = []
+
+        async def _nothing_to_write(journal: Journal) -> Journal | None:
+            handed.append(journal)
+            return None
+
+        result = await journal_service.modify_journal(
+            1, _nothing_to_write, mock_transaction
+        )
+
+        assert result is None
+        assert handed == [stored]
+        mock_journal_repo.save.assert_not_called()
+        mock_event_publisher.publish.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_update_journal_parent_validates_hierarchy(
         self, journal_service, mock_journal_repo, mock_event_publisher, mock_transaction
     ):

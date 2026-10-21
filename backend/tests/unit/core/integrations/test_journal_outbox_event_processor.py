@@ -8,7 +8,8 @@ InboundFieldMerger protected-edit logic.
 
 import inspect
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,6 +37,7 @@ from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessor,
 )
 from app.core.journal.adapters.sql.calendar_info_repository import _FIND_CANCELLED
+from app.core.journal.services.journal_patch import JournalMutation
 
 CALENDAR_ID = "12345678-1234-5678-1234-567812345678"
 SERIES_ID = uuid4()
@@ -207,6 +209,106 @@ def _make_journal_row(
     row.created_at = datetime(2026, 3, 1, tzinfo=UTC)
     row.updated_at = updated_at or datetime(2026, 3, 15, tzinfo=UTC)
     return row
+
+
+def _journal_from_row(row: MagicMock) -> Journal:
+    """The journal a ``_make_journal_row`` row reads back as."""
+    return Journal(
+        id=row.id,
+        user_id=row.user_id,
+        title=row.title,
+        content=row.content,
+        event_date_range=EventDateRange(
+            start=row.event_date_range_start, end=row.event_date_range_end
+        ),
+        parent_id=row.parent_id,
+        order=row.order,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _modify_journal_reads(service: AsyncMock, stored: Journal) -> list[Journal | None]:
+    """Have ``service.modify_journal`` hand its mutation ``stored``.
+
+    ``stored`` stands for the journal as read under its row lock, which is not
+    necessarily the processor's own earlier read. Like the real service, the
+    fake returns what the mutation built: the journal it saves, or ``None``.
+
+    Returns:
+        Each mutation's result, in call order.
+    """
+    built: list[Journal | None] = []
+
+    async def _modify(
+        journal_id: int, mutate: JournalMutation, transaction: Any, **_: Any
+    ) -> Journal | None:
+        assert journal_id == stored.id
+        journal = await mutate(deepcopy(stored))
+        built.append(journal)
+        return journal
+
+    service.modify_journal.side_effect = _modify
+    return built
+
+
+def _arrange_update(
+    connection: AsyncMock,
+    service: AsyncMock,
+    *,
+    journal_row: MagicMock | None = None,
+    link_row: MagicMock | None = None,
+    calendar_info: MagicMock | None = None,
+    locked: Journal | None = None,
+    then: Sequence[MagicMock] = (),
+) -> list[Journal | None]:
+    """Arrange the reads of a ``journal_event.updated`` that changes the journal.
+
+    The connection answers, in order: the calendar upsert, the journal and
+    link lookups, the calendar info (``private_description``), the calendar
+    info save and the link's etag update, then whatever ``then`` adds.
+    ``modify_journal`` hands its mutation ``locked``, the journal as read under
+    its lock - by default the same journal the processor read first.
+
+    Returns:
+        What each mutation built; see :func:`_modify_journal_reads`.
+    """
+    journal_row = _make_journal_row() if journal_row is None else journal_row
+    connection.execute.side_effect = [
+        MagicMock(),  # _ensure_calendar_exists
+        _mock_fetchone(journal_row),  # _find_journal_by_id
+        _mock_fetchone(_make_link_row() if link_row is None else link_row),
+        _mock_empty_result() if calendar_info is None else calendar_info,
+        _mock_empty_result(),  # _save_calendar_info
+        _mock_empty_result(),  # _update_external_event_link_etag
+        *then,
+    ]
+    return _modify_journal_reads(
+        service, _journal_from_row(journal_row) if locked is None else locked
+    )
+
+
+def _arrange_recurring_update(
+    connection: AsyncMock,
+    service: AsyncMock,
+    *,
+    recurring_event_id: str,
+    series_recurring_event_id: str | None = None,
+) -> OutboxEvent:
+    """A changed recurring instance's update, its reads arranged as it makes them.
+
+    Past the reads :func:`_arrange_update` arranges, a recurring instance asks
+    whether its calendar is a display calendar before joining its series.
+    """
+    _arrange_update(connection, service, then=[_mock_is_display_calendar()])
+    return _make_outbox_event(
+        event_type="journal_event.updated",
+        sync_action="updated",
+        existing_journal_id=42,
+        etag='"etag-new"',
+        recurring_event_id=recurring_event_id,
+        series_recurring_event_id=series_recurring_event_id,
+    )
 
 
 def _make_link_row(
@@ -509,19 +611,11 @@ class TestJournalOutboxEventProcessor:
             ],
         )
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
-            _mock_fetchone(_make_link_row()),  # _find_external_event_link
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-            _mock_resolve_contact(200),  # contact resolver
-            _mock_empty_rels(),  # existing relationships
-            _mock_empty_result(),  # create relationship
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal()
+        _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            then=[_mock_resolve_contact(200), _mock_empty_rels(), _mock_empty_result()],
+        )
 
         result = await processor.process_event(event)
 
@@ -554,30 +648,89 @@ class TestJournalOutboxEventProcessor:
             updated_at=datetime(2026, 3, 16, tzinfo=UTC),  # earlier than journal
         )
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(journal_row),  # _find_journal_by_id
-            _mock_fetchone(link_row),  # _find_external_event_link
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal(
-            title="My Local Title",
-            content="My local content",
+        built = _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            journal_row=journal_row,
+            link_row=link_row,
         )
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        journal_arg = mock_journal_service.update_journal.call_args[0][0]
+        journal_arg = built[-1]
+        assert journal_arg is not None
         assert journal_arg.title == "My Local Title"
         assert journal_arg.content == "My local content"
         # But date range should be from inbound (always-update field)
         assert journal_arg.event_date_range.start == datetime(
             2026, 3, 20, 10, 0, tzinfo=UTC
         )
+
+    async def test_the_merge_protects_a_local_edit_only_the_locked_read_has(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """A local edit committed after the processor's own read is kept (#1813).
+
+        The first read predates the edit, so on its own it would let the
+        inbound title through; the journal read under the lock carries the
+        edit and its newer ``updated_at``, and the merge is made against that.
+        """
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+        )
+        link_row = _make_link_row(updated_at=datetime(2026, 3, 16, tzinfo=UTC))
+        locked = _journal_from_row(
+            _make_journal_row(
+                title="Edited locally", updated_at=datetime(2026, 3, 17, tzinfo=UTC)
+            )
+        )
+        built = _arrange_update(
+            mock_connection, mock_journal_service, link_row=link_row, locked=locked
+        )
+
+        result = await processor.process_event(event)
+
+        assert result["status"] == "success"
+        [saved] = built
+        assert saved is not None
+        assert saved.title == "Edited locally"
+        assert saved.event_date_range == DEFAULT_DATE_RANGE
+
+    async def test_nothing_is_written_when_the_locked_read_already_has_the_change(
+        self,
+        processor: JournalOutboxEventProcessor,
+        mock_journal_service: AsyncMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """The no-op decision is made again under the lock, and can go either way."""
+        event = _make_outbox_event(
+            event_type="journal_event.updated",
+            sync_action="updated",
+            existing_journal_id=42,
+        )
+        built = _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            locked=_journal_from_row(
+                _make_journal_row(
+                    title="Team Meeting",
+                    content="Weekly sync",
+                    start=DEFAULT_DATE_RANGE.start,
+                    end=DEFAULT_DATE_RANGE.end,
+                )
+            ),
+        )
+
+        result = await processor.process_event(event)
+
+        assert built == [None]
+        assert (result["status"], result["journal_id"]) == ("success", 42)
 
     # ── journal_event.updated - missing journal ────────────────────────
 
@@ -663,7 +816,7 @@ class TestJournalOutboxEventProcessor:
 
         assert result["status"] == "skipped"
         assert result["reason"] == "etag_unchanged"
-        mock_journal_service.update_journal.assert_not_called()
+        mock_journal_service.modify_journal.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_same_etag_still_backfills_a_missing_identity(
@@ -704,7 +857,7 @@ class TestJournalOutboxEventProcessor:
             mock_connection, "journal_external_event_links"
         ).args
         assert params["external_identity"] == "widget-7f3a::instance-0"
-        mock_journal_service.update_journal.assert_not_called()
+        mock_journal_service.modify_journal.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_the_backfill_does_not_touch_sync_status(
@@ -797,21 +950,16 @@ class TestJournalOutboxEventProcessor:
             etag=None,
         )
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),
-            _mock_fetchone(_make_link_row(external_version=None)),
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal()
+        _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            link_row=_make_link_row(external_version=None),
+        )
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        mock_journal_service.update_journal.assert_called_once()
+        mock_journal_service.modify_journal.assert_awaited_once()
 
     # ── Date-range change drives the journal update ───────────────────
 
@@ -822,7 +970,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service: AsyncMock,
         mock_connection: AsyncMock,
     ) -> None:
-        """An inbound date-range change calls update_journal with the merged journal."""
+        """An inbound date-range change has modify_journal save the merged journal."""
         from core_shared.models.journals import Journal
 
         event = _make_outbox_event(
@@ -831,24 +979,16 @@ class TestJournalOutboxEventProcessor:
             existing_journal_id=42,
         )
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),
-            _mock_fetchone(_make_link_row()),
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal()
+        built = _arrange_update(mock_connection, mock_journal_service)
 
         await processor.process_event(event)
 
-        mock_journal_service.update_journal.assert_called_once()
-        passed_journal = mock_journal_service.update_journal.call_args[0][0]
+        mock_journal_service.modify_journal.assert_awaited_once()
+        passed_journal = built[-1]
+        assert passed_journal is not None
         assert isinstance(passed_journal, Journal)
         assert passed_journal.event_date_range is not None
-        assert mock_journal_service.update_journal.call_args[0][1] is mock_connection
+        assert mock_journal_service.modify_journal.call_args[0][2] is mock_connection
 
     # ── Calendar info upsert updated_at ───────────────────────────────
 
@@ -1055,7 +1195,9 @@ class TestJournalOutboxEventProcessor:
             ],
         )
 
-        mock_journal_service.update_journal.return_value = _make_journal()
+        _modify_journal_reads(
+            mock_journal_service, _journal_from_row(_make_journal_row())
+        )
 
         def _mock_rels() -> MagicMock:
             result = MagicMock()
@@ -1137,29 +1279,21 @@ class TestJournalOutboxEventProcessor:
         )
 
         # No local edits: journal.updated_at <= link.updated_at
-        journal_row = _make_journal_row(
-            updated_at=datetime(2026, 3, 15, tzinfo=UTC),
+        built = _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            journal_row=_make_journal_row(updated_at=datetime(2026, 3, 15, tzinfo=UTC)),
+            link_row=_make_link_row(
+                updated_at=datetime(2026, 3, 16, tzinfo=UTC)  # link is newer
+            ),
         )
-        link_row = _make_link_row(
-            updated_at=datetime(2026, 3, 16, tzinfo=UTC),  # link is newer
-        )
-
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(journal_row),
-            _mock_fetchone(link_row),
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal()
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
         # When no local edits, inbound values should take effect
-        journal_arg = mock_journal_service.update_journal.call_args[0][0]
+        journal_arg = built[-1]
+        assert journal_arg is not None
         assert journal_arg.title == "Team Meeting"
         assert journal_arg.content == "Weekly sync"
 
@@ -1191,24 +1325,19 @@ class TestJournalOutboxEventProcessor:
         calendar_info_result = MagicMock()
         calendar_info_result.fetchone.return_value = calendar_info_row
 
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(journal_row),  # _find_journal_by_id
-            _mock_fetchone(link_row),  # _find_external_event_link
-            calendar_info_result,  # _find_calendar_info (private_description=True)
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-
-        mock_journal_service.update_journal.return_value = _make_journal(
-            title="Team Meeting",
-            content="My private notes",
+        built = _arrange_update(
+            mock_connection,
+            mock_journal_service,
+            journal_row=journal_row,
+            link_row=link_row,
+            calendar_info=calendar_info_result,
         )
 
         result = await processor.process_event(event)
 
         assert result["status"] == "success"
-        journal_arg = mock_journal_service.update_journal.call_args[0][0]
+        journal_arg = built[-1]
+        assert journal_arg is not None
         # Content should be preserved from existing journal, not overwritten by inbound
         assert journal_arg.content == "My private notes"
         # Title should still take inbound value (not protected by private_description)
@@ -2754,24 +2883,12 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         mock_connection: AsyncMock,
     ) -> None:
         """Updates key the series the same way creates do."""
-        event = _make_outbox_event(
-            event_type="journal_event.updated",
-            sync_action="updated",
-            existing_journal_id=42,
-            etag='"etag-new"',
+        event = _arrange_recurring_update(
+            mock_connection,
+            mock_journal_service,
             recurring_event_id="master-1_R20260801T090000",
             series_recurring_event_id="master-1",
         )
-        mock_journal_service.update_journal.return_value = _make_journal()
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
-            _mock_fetchone(_make_link_row()),  # _find_external_event_link
-            _mock_empty_result(),  # _find_calendar_info (private_description)
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-            _mock_is_display_calendar(),  # _is_display_calendar
-        ]
 
         await processor.process_event(event)
 
@@ -2812,23 +2929,9 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         mock_connection: AsyncMock,
     ) -> None:
         """An update carrying a recurring id backfills the link and series."""
-        event = _make_outbox_event(
-            event_type="journal_event.updated",
-            sync_action="updated",
-            existing_journal_id=42,
-            etag='"etag-new"',
-            recurring_event_id="master-1",
+        event = _arrange_recurring_update(
+            mock_connection, mock_journal_service, recurring_event_id="master-1"
         )
-        mock_journal_service.update_journal.return_value = _make_journal()
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
-            _mock_fetchone(_make_link_row()),  # _find_external_event_link
-            _mock_empty_result(),  # _find_calendar_info (private_description)
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-            _mock_is_display_calendar(),  # _is_display_calendar
-        ]
 
         result = await processor.process_event(event)
 
@@ -2844,23 +2947,9 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         mock_connection: AsyncMock,
     ) -> None:
         """The link update SQL persists the recurring id (COALESCE keeps old)."""
-        event = _make_outbox_event(
-            event_type="journal_event.updated",
-            sync_action="updated",
-            existing_journal_id=42,
-            etag='"etag-new"',
-            recurring_event_id="master-1",
+        event = _arrange_recurring_update(
+            mock_connection, mock_journal_service, recurring_event_id="master-1"
         )
-        mock_journal_service.update_journal.return_value = _make_journal()
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
-            _mock_fetchone(_make_link_row()),  # _find_external_event_link
-            _mock_empty_result(),  # _find_calendar_info (private_description)
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-            _mock_is_display_calendar(),  # _is_display_calendar
-        ]
 
         await processor.process_event(event)
 
@@ -3148,9 +3237,9 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
     publish one*, and the answer is not uniform:
 
     - a change to the **journal's own fields** (title, content, dates) calls
-      ``JournalService.update_journal``, which publishes — nothing to add;
+      ``JournalService.modify_journal``, which publishes — nothing to add;
     - a change to **calendar info alone** — a time, a location, an all-day flag
-      moved upstream — leaves ``fields_changed`` false, so ``update_journal`` is
+      moved upstream — leaves ``fields_changed`` false, so ``modify_journal`` is
       never called and no event exists;
     - a change to the **attendees alone** is written by ``_sync_contact_relationships``
       in raw SQL and likewise announces nothing;
@@ -3213,22 +3302,14 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
             existing_journal_id=42,
             etag='"etag-new"',
         )
-        mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
-            _mock_fetchone(_make_journal_row()),
-            _mock_fetchone(_make_link_row()),
-            _mock_empty_result(),  # _find_calendar_info
-            _mock_empty_result(),  # _save_calendar_info
-            _mock_empty_result(),  # _update_external_event_link_etag
-        ]
-        mock_journal_service.update_journal.return_value = _make_journal()
+        _arrange_update(mock_connection, mock_journal_service)
 
         with patch.object(
             processor, "_invalidate_summary_for_journal", new_callable=AsyncMock
         ) as invalidate:
             await processor.process_event(event)
 
-        mock_journal_service.update_journal.assert_called_once()
+        mock_journal_service.modify_journal.assert_awaited_once()
         invalidate.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -3259,7 +3340,7 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
         ) as invalidate:
             await processor.process_event(event)
 
-        mock_journal_service.update_journal.assert_not_called()
+        mock_journal_service.modify_journal.assert_not_called()
         invalidate.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
@@ -3298,5 +3379,5 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
         ) as invalidate:
             await processor.process_event(event)
 
-        mock_journal_service.update_journal.assert_not_called()
+        mock_journal_service.modify_journal.assert_not_called()
         invalidate.assert_awaited_once_with(42)
