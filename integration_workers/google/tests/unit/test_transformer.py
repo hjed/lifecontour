@@ -1078,3 +1078,196 @@ class TestAddressRegions:
         )
 
         assert transformer.skipped_addresses(person) == []
+
+    def test_a_region_is_judged_in_the_inferred_country(self) -> None:
+        """A countryless "London" given AU is reported for review, not imported."""
+        person = GooglePerson(
+            resourceName="people/c1",
+            addresses=[GoogleAddress(streetAddress="10 Downing St", region="London")],
+        )
+        transformer = GoogleContactTransformer(
+            user_id=TEST_USER_ID, default_country="AU"
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert contact.addresses is None
+        assert transformer.skipped_addresses(person) == [
+            SkippedAddress(
+                street_line_1="10 Downing St",
+                region="London",
+                country_code="AU",
+                reason="unrecognised_region",
+            )
+        ]
+
+
+class TestAddressCountryFallback:
+    """An address with no country takes one from the phones, then the default.
+
+    See ``address_country.resolve_address_country`` for the order (#1820).
+    """
+
+    @staticmethod
+    def _person(
+        *addresses: GoogleAddress, phones: tuple[str, ...] = ()
+    ) -> GooglePerson:
+        return GooglePerson(
+            resourceName="people/c1",
+            addresses=list(addresses),
+            phoneNumbers=[GooglePhoneNumber(value=phone) for phone in phones],
+        )
+
+    def test_takes_the_country_of_the_contacts_phone(self) -> None:
+        person = self._person(
+            GoogleAddress(streetAddress="1 Queen St", city="Auckland"),
+            phones=("+6421234567",),
+        )
+
+        contact = GoogleContactTransformer(
+            user_id=TEST_USER_ID, default_country="AU"
+        ).transform_person(person)
+
+        assert [a.country_code for a in contact.addresses or []] == ["NZ"]
+
+    def test_takes_the_users_default_country_without_a_phone(self) -> None:
+        person = self._person(GoogleAddress(streetAddress="1 Queen St"))
+
+        contact = GoogleContactTransformer(
+            user_id=TEST_USER_ID, default_country="AU"
+        ).transform_person(person)
+
+        assert [a.country_code for a in contact.addresses or []] == ["AU"]
+
+    def test_skips_the_address_with_neither(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = self._person(GoogleAddress(streetAddress="1 Queen St"))
+
+        contact = transformer.transform_person(person)
+
+        assert contact.addresses is None
+
+    def test_an_explicit_country_code_wins(self) -> None:
+        person = self._person(
+            GoogleAddress(streetAddress="1 Queen St", countryCode="GB"),
+            phones=("+6421234567",),
+        )
+
+        contact = GoogleContactTransformer(
+            user_id=TEST_USER_ID, default_country="AU"
+        ).transform_person(person)
+
+        assert [a.country_code for a in contact.addresses or []] == ["GB"]
+
+    def test_drops_an_inferred_twin_of_an_address_with_a_country(self) -> None:
+        """A push before #1820 left the local copy beside Google's countryless one."""
+        person = self._person(
+            GoogleAddress(streetAddress="1 Queen St", city="Auckland"),
+            GoogleAddress(
+                streetAddress="1 Queen St", city="Auckland", countryCode="NZ"
+            ),
+            GoogleAddress(streetAddress="9 Other Rd"),
+            phones=("+6421234567",),
+        )
+
+        contact = GoogleContactTransformer(user_id=TEST_USER_ID).transform_person(
+            person
+        )
+
+        assert [(a.street_line_1, a.country_code) for a in contact.addresses or []] == [
+            ("1 Queen St", "NZ"),
+            ("9 Other Rd", "NZ"),
+        ]
+
+    @pytest.mark.parametrize(
+        "explicit",
+        [
+            GoogleAddress(
+                streetAddress="1 Queen St",
+                extendedAddress="Flat 2",
+                city="Auckland",
+                countryCode="NZ",
+            ),
+            GoogleAddress(
+                streetAddress="1 Queen St",
+                city="Auckland",
+                region="X",
+                countryCode="NZ",
+            ),
+            GoogleAddress(
+                streetAddress="1 Queen St", city="Auckland", countryCode="GB"
+            ),
+        ],
+        ids=["other-flat", "other-region", "other-country"],
+    )
+    def test_keeps_an_inferred_address_that_differs_from_one_with_a_country(
+        self, explicit: GoogleAddress
+    ) -> None:
+        person = self._person(
+            GoogleAddress(streetAddress="1 Queen St", city="Auckland"),
+            explicit,
+            phones=("+6421234567",),
+        )
+
+        contact = GoogleContactTransformer(user_id=TEST_USER_ID).transform_person(
+            person
+        )
+
+        assert len(contact.addresses or []) == 2
+
+    def test_the_surviving_twin_keeps_a_primary_choice(self) -> None:
+        """The countryless copy was the primary one: its twin takes the flag."""
+        person = self._person(
+            GoogleAddress.model_validate(
+                {"streetAddress": "1 Queen St", "metadata": {"primary": True}}
+            ),
+            GoogleAddress(streetAddress="1 Queen St", countryCode="NZ"),
+            phones=("+6421234567",),
+        )
+
+        contact = GoogleContactTransformer(user_id=TEST_USER_ID).transform_person(
+            person
+        )
+
+        assert [(a.country_code, a.is_primary) for a in contact.addresses or []] == [
+            ("NZ", True)
+        ]
+
+
+class TestAddressFallbackCountry:
+    """The fallback a pull records: only one it gave an address (#1820)."""
+
+    def test_is_the_country_a_countryless_address_was_given(self) -> None:
+        person = TestAddressCountryFallback._person(
+            GoogleAddress(streetAddress="1 Queen St"), phones=("+6421234567",)
+        )
+
+        assert (
+            GoogleContactTransformer(user_id=TEST_USER_ID).address_fallback_country(
+                person
+            )
+            == "NZ"
+        )
+
+    @pytest.mark.parametrize(
+        "addresses",
+        [
+            (),
+            (GoogleAddress(streetAddress="1 Queen St", countryCode="NZ"),),
+            (GoogleAddress(city="Auckland"),),
+        ],
+        ids=["no-addresses", "every-address-has-a-country", "no-street"],
+    )
+    def test_is_none_when_no_address_took_it(
+        self, addresses: tuple[GoogleAddress, ...]
+    ) -> None:
+        """So an address added in Google later is not owned before it is pulled."""
+        person = TestAddressCountryFallback._person(*addresses, phones=("+6421234567",))
+
+        assert (
+            GoogleContactTransformer(
+                user_id=TEST_USER_ID, default_country="AU"
+            ).address_fallback_country(person)
+            is None
+        )

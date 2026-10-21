@@ -29,6 +29,7 @@ from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSync
 from core_shared.models.contacts.value_objects import TagName
 from core_shared.models.outbox_events import SkippedAddress
 
+from address_country import resolve_address_country
 from api_models import (
     GoogleAddress,
     GoogleBirthday,
@@ -81,6 +82,7 @@ class GoogleContactTransformer:
         self,
         *,
         user_id: str,
+        default_country: str | None = None,
         translator: GoogleGroupNameTranslator | None = None,
     ) -> None:
         """
@@ -88,9 +90,12 @@ class GoogleContactTransformer:
 
         Args:
             user_id: The syncing user, stamped as the owner of every contact built.
+            default_country: The syncing user's default country, the last
+                resort for an address with no country (see ``address_country``).
             translator: Translator for Google Contact Groups. If None, an empty one is used.
         """
         self.user_id = user_id
+        self.default_country = default_country
         self.translator = translator or GoogleGroupNameTranslator(
             reserved_group_ids=[], group_mapping={}
         )
@@ -150,7 +155,10 @@ class GoogleContactTransformer:
 
         # Addresses, notes, tags: use None when Google provides no data
         # so that locally-managed data is preserved on sync updates.
-        transformed_addresses = self._transform_addresses(google_person.addresses)
+        transformed_addresses = self._transform_addresses(
+            google_person.addresses,
+            fallback_country=self.address_fallback_country(google_person),
+        )
         contact.addresses = transformed_addresses or None
 
         transformed_notes = self._transform_biographies(google_person.biographies)
@@ -220,18 +228,68 @@ class GoogleContactTransformer:
         return [m for m in map(import_phone, phone_numbers) if m is not None]
 
     def skipped_addresses(self, google_person: GooglePerson) -> list[SkippedAddress]:
-        """The person's addresses the import leaves out for review (#1820)."""
+        """The person's addresses the import leaves out for review (#1820).
+
+        Judged in the country each is imported with, so a countryless "London"
+        given AU by the fallback is reported, not imported.
+        """
+        fallback_country = self.address_fallback_country(google_person)
         return [
             skipped
-            for skipped in map(skipped_address, google_person.addresses)
-            if skipped is not None
+            for address in google_person.addresses
+            if (skipped := skipped_address(address, fallback_country)) is not None
         ]
 
+    def address_fallback_country(self, google_person: GooglePerson) -> str | None:
+        """The country this person's countryless addresses are imported with.
+
+        ``None`` unless an address actually takes it (a street, no country of
+        its own): the pull records this on the link, and the push merge owns a
+        countryless address only when the recorded pull gave it a country, so
+        one added in Google since is kept until it is pulled (#1820).
+        """
+        if not any(
+            _street_line_1(address) and not getattr(address, "country_code", None)
+            for address in google_person.addresses
+        ):
+            return None
+        return resolve_address_country(
+            google_person.phone_numbers, self.default_country
+        )
+
     def _transform_addresses(
-        self, addresses: list[GoogleAddress]
+        self, addresses: list[GoogleAddress], fallback_country: str | None = None
     ) -> list[ContactAddress]:
-        """Transform Google addresses to ContactAddress entities."""
-        return [a for a in map(import_address, addresses) if a is not None]
+        """Transform Google addresses to ContactAddress entities.
+
+        An address imported with ``fallback_country`` is dropped when Google
+        also holds it, every part and the country the same, with a country of
+        its own: a push before #1820 sent the local copy back beside Google's
+        countryless original.
+        """
+        imported = [
+            (bool(getattr(address, "country_code", None)), contact_address)
+            for address in addresses
+            if (contact_address := import_address(address, fallback_country))
+        ]
+        held_with_country = {
+            _address_key(contact_address): contact_address
+            for has_country, contact_address in imported
+            if has_country
+        }
+        transformed: list[ContactAddress] = []
+        for has_country, contact_address in imported:
+            twin = (
+                None
+                if has_country
+                else held_with_country.get(_address_key(contact_address))
+            )
+            if twin is None:
+                transformed.append(contact_address)
+            elif contact_address.is_primary:
+                # The dropped copy was the chosen one; its twin carries that on.
+                twin.is_primary = True
+        return transformed
 
     def _transform_biographies(self, biographies: list[Any]) -> list[ContactNote]:
         """Transform Google biographies to ContactNote entities."""
@@ -533,16 +591,20 @@ def import_phone(phone: GooglePhoneNumber) -> ContactMethod | None:
     )
 
 
-def import_address(address: GoogleAddress) -> ContactAddress | None:
+def import_address(
+    address: GoogleAddress, fallback_country: str | None = None
+) -> ContactAddress | None:
     """The address, or None when inbound cannot import it (see #1820).
 
-    That is: no street, no country code, or an AU/US/CA region naming no state,
-    province or territory - left out for the user to review
-    (:func:`skipped_address`), and so never owned by a push. A recognised region
-    is imported as its code ("New South Wales" -> "NSW").
+    ``fallback_country`` stands in for a missing ``countryCode``; resolve it
+    with ``address_country.resolve_address_country``. None is returned without
+    a street or a country, or for an AU/US/CA region naming no state, province
+    or territory - left out for the user to review (:func:`skipped_address`),
+    and so never owned by a push. A recognised region is imported as its code
+    ("New South Wales" -> "NSW").
     """
     street_line_1 = _street_line_1(address)
-    country_code = getattr(address, "country_code", None)
+    country_code = getattr(address, "country_code", None) or fallback_country
     if not street_line_1 or not country_code:
         return None
     region = getattr(address, "region", None)
@@ -569,10 +631,16 @@ def import_address(address: GoogleAddress) -> ContactAddress | None:
         return None
 
 
-def skipped_address(address: GoogleAddress) -> SkippedAddress | None:
-    """The address as reported for review, when its region is unrecognised."""
+def skipped_address(
+    address: GoogleAddress, fallback_country: str | None = None
+) -> SkippedAddress | None:
+    """The address as reported for review, when its region is unrecognised.
+
+    Judged in the country :func:`import_address` would give it, which the
+    report carries.
+    """
     street_line_1 = _street_line_1(address)
-    country_code = getattr(address, "country_code", None)
+    country_code = getattr(address, "country_code", None) or fallback_country
     region = getattr(address, "region", None)
     if not street_line_1 or not country_code:
         return None
@@ -632,6 +700,19 @@ def _import_contact_method(
             error=str(exc),
         )
         return None
+
+
+def _address_key(address: ContactAddress) -> tuple[str, ...]:
+    """Every part of an imported address, case and spacing aside."""
+    parts = (
+        address.street_line_1,
+        address.street_line_2,
+        address.locality,
+        address.region,
+        address.postal_code,
+        address.country_code,
+    )
+    return tuple(" ".join((part or "").split()).casefold() for part in parts)
 
 
 def _is_primary_field(field_value: Any) -> bool:

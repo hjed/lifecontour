@@ -608,12 +608,36 @@ class TestGoogleWorker:
             new_callable=AsyncMock,
             return_value={},
         ):
-            transformer = await _create_transformer(AsyncMock(), user_id=1)
+            transformer = await _create_transformer(
+                _session_with_default_country(None), AsyncMock(), user_id=1
+            )
 
         contact = transformer.transform_person(
             GooglePerson(resourceName="people/1", etag="etag-1")
         )
         assert contact.user_id == "1"
+
+    @pytest.mark.asyncio
+    async def test_create_transformer_reads_the_users_default_country(self):
+        """A countryless address takes the syncing user's default (#1820)."""
+        from api_models import GooglePerson
+        from worker import _create_transformer
+
+        with patch(
+            "worker._build_contact_group_mapping",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            transformer = await _create_transformer(
+                _session_with_default_country("NZ"), AsyncMock(), user_id=1
+            )
+
+        contact = transformer.transform_person(
+            GooglePerson.model_validate(
+                {"resourceName": "people/1", "addresses": [{"streetAddress": "1 Rd"}]}
+            )
+        )
+        assert [a.country_code for a in contact.addresses or []] == ["NZ"]
 
     @pytest.mark.asyncio
     async def test_perform_full_sync_events_name_the_job_user(self):
@@ -2153,3 +2177,10 @@ class TestArchivedValuesAreNotPushed:
         )
 
         assert person["addresses"] == []
+
+
+def _session_with_default_country(country: str | None) -> AsyncMock:
+    """A session whose ``user_settings`` read answers ``country``."""
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(scalar=MagicMock(return_value=country))
+    return session

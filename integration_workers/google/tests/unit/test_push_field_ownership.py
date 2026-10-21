@@ -34,7 +34,9 @@ _UNIMPORTED: dict[str, list[dict[str, Any]]] = {
     "nicknames": [_entry(value="AL", type="INITIALS")],
     "emailAddresses": [_entry(value="not an email", type="work")],
     "phoneNumbers": [_entry(value="ask reception")],
-    "addresses": [_entry(streetAddress="2 Nowhere Rd", city="Sydney", type="home")],
+    # No street: a countryless one with a street would now take the +61
+    # phone's country and be imported (#1820).
+    "addresses": [_entry(city="Sydney", postalCode="2000", type="home")],
     "birthdays": [_entry(text="sometime in spring")],
     "events": [_entry(type="Graduation", date={"year": 2010, "month": 3, "day": 4})],
     "organizations": [_entry(name="Old Co", current=False)],

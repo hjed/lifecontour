@@ -57,6 +57,7 @@ from core_shared.repositories import (
     MergedAliasRepository,
     SyncJobRepository,
     UnmatchedParticipantRepository,
+    UserSettingsReader,
 )
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from google.auth.exceptions import RefreshError
@@ -1624,12 +1625,13 @@ def _process_contacts_batch(
 
 
 async def _create_transformer(
+    session: AsyncSession,
     client: GoogleAPIClient,
     user_id: str | int,
 ) -> GoogleContactTransformer:
     """
     Create a GoogleContactTransformer for the syncing user, with a populated
-    name translator.
+    name translator and the user's default country for addresses with none.
 
     Fetches contact groups to build the translation mapping.
     """
@@ -1639,7 +1641,13 @@ async def _create_transformer(
         reserved_group_ids=settings.google_reserved_groups, group_mapping=group_mapping
     )
 
-    return GoogleContactTransformer(user_id=str(user_id), translator=translator)
+    return GoogleContactTransformer(
+        user_id=str(user_id),
+        default_country=await UserSettingsReader(session).get_default_country(
+            str(user_id)
+        ),
+        translator=translator,
+    )
 
 
 async def _find_existing_external_ids(
@@ -1748,6 +1756,9 @@ async def _emit_contact_sync_events(
                 sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
                 force_apply=force_apply,
                 skipped_addresses=transformer.skipped_addresses(google_person),
+                address_fallback_country=transformer.address_fallback_country(
+                    google_person
+                ),
             )
 
             # Add to session (will be committed with transaction)
@@ -1800,7 +1811,7 @@ async def _perform_full_sync(
     page_token = None
     created_count = 0
     updated_count = 0
-    transformer = await _create_transformer(client, user_id)
+    transformer = await _create_transformer(session, client, user_id)
 
     while True:
         # Check if job has been cancelled
@@ -1910,7 +1921,7 @@ async def _perform_incremental_sync(
 
     created_count = 0
     updated_count = 0
-    transformer = await _create_transformer(client, user_id)
+    transformer = await _create_transformer(session, client, user_id)
     page_token = None
 
     while True:
