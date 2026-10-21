@@ -197,16 +197,28 @@ def _chosen_nickname(current: list[Entry]) -> int | None:
     return next((index for index, n in parsed if n is chosen), None)
 
 
-def merge_with_current_person(payload: Entry, current: Entry) -> Entry:
+def merge_with_current_person(
+    payload: Entry, current: Entry, *, address_fallback_country: str | None = None
+) -> Entry:
     """Return ``payload`` with the values it does not own kept from ``current``.
 
     Only fields the payload carries are merged, and a field leaves it only when
     its policy leaves Google's value untouched. ``payload`` itself is left
     untouched.
+
+    ``address_fallback_country`` is the country the last applied pull gave
+    addresses with none, as the link records it: an address with no country
+    is owned only when that pull imported it (#1820). What the import would
+    infer *now* is not used — an address no pull has imported is not held
+    locally, and owning it would delete it from Google.
     """
+    policies = {
+        **FIELD_POLICIES,
+        "addresses": _address_policy(address_fallback_country),
+    }
     merged: Entry = {}
     for field, pushed in payload.items():
-        policy = FIELD_POLICIES.get(field)
+        policy = policies.get(field)
         if policy is None:
             logger.warning("Pushed Google field has no merge policy", field=field)
             merged[field] = pushed
@@ -215,6 +227,16 @@ def merge_with_current_person(payload: Entry, current: Entry) -> Entry:
         if result is not Omit.FIELD:
             merged[field] = result
     return merged
+
+
+def _address_policy(fallback_country: str | None) -> FieldPolicy:
+    """Addresses: local owns those inbound imports given ``fallback_country``."""
+    return KeepUnimported(
+        _imported_by(
+            GoogleAddress,
+            lambda address: import_address(address, fallback_country),
+        )
+    )
 
 
 def _is_contact_entry(entry: dict[str, Any]) -> bool:
@@ -293,7 +315,9 @@ FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
     "nicknames": KeepUnchosen(_chosen_nickname),
     "emailAddresses": KeepUnimported(_imported_by(GoogleEmailAddress, import_email)),
     "phoneNumbers": KeepUnimported(_imported_by(GooglePhoneNumber, import_phone)),
-    "addresses": KeepUnimported(_imported_by(GoogleAddress, import_address)),
+    # Rebuilt per push with the person's fallback country, see
+    # ``merge_with_current_person``; this entry is the no-fallback policy.
+    "addresses": _address_policy(None),
     "biographies": WhollyOwned("inbound imports every biography as a note"),
     "organizations": MergedBy(_merge_organizations),
     "memberships": WhollyOwned(

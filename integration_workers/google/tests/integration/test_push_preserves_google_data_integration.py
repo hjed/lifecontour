@@ -6,9 +6,11 @@ title) against the real database, with only the Google client mocked, the
 update must carry the local contact's values merged into the person Google
 holds: its honorifics, custom events and other organizations survive (#1732),
 and so do the entries inbound sync never imported - an address with no country
-code, and a text-only birthday, which leaves the update mask (#1788).
+code and none to infer (#1820), and a text-only birthday, which leaves the
+update mask (#1788).
 """
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -84,10 +86,8 @@ def _ctx(db_session: AsyncSession) -> dict[str, Any]:
     return {"session_factory": factory, "job_id": "evt-merge-it"}
 
 
-@pytest.mark.asyncio
-async def test_update_push_merges_into_the_person_google_holds(
-    db_session: AsyncSession,
-) -> None:
+async def _seed_linked_contact(db_session: AsyncSession) -> int:
+    """The local contact linked to ``_REMOTE``, with a GB address of its own."""
     contact_id = await seed_contact(
         db_session,
         user_id=CONTACT_OWNER,
@@ -131,7 +131,11 @@ async def test_update_push_merges_into_the_person_google_holds(
         {"owner": CONTACT_OWNER, "cid": contact_id, "ext": _REMOTE},
     )
     await db_session.flush()
+    return contact_id
 
+
+async def _push_update(db_session: AsyncSession, contact_id: int) -> AsyncMock:
+    """Run the event push for ``contact_id``; the Google client it used."""
     client = AsyncMock()
     client.get_person.return_value = _CURRENT_PERSON
     client.update_contact.return_value = {"resourceName": _REMOTE, "etag": "new"}
@@ -168,6 +172,15 @@ async def test_update_push_merges_into_the_person_google_holds(
         )
 
     assert result["results"] == [{"status": "updated", "resource_name": _REMOTE}]
+    return client
+
+
+@pytest.mark.asyncio
+async def test_update_push_merges_into_the_person_google_holds(
+    db_session: AsyncSession,
+) -> None:
+    client = await _push_update(db_session, await _seed_linked_contact(db_session))
+
     client.get_person.assert_awaited_once_with(_REMOTE)
     update = client.update_contact.await_args.kwargs
     assert update["etag"] == "etag_current"
@@ -203,3 +216,58 @@ async def test_update_push_merges_into_the_person_google_holds(
     assert update["rebase"](refetched)["names"] == [
         {"givenName": "Ada", "familyName": "Lovelace", "honorificPrefix": "Prof"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_countryless_address_the_last_pull_imported_is_not_kept(
+    db_session: AsyncSession,
+) -> None:
+    """The link records the pull gave it a country, so the push owns it (#1820).
+
+    The pull imported it with that country and the push sends the local list,
+    so keeping Google's countryless copy would hold the address twice.
+    """
+    contact_id = await _seed_linked_contact(db_session)
+    await db_session.execute(
+        text(
+            """
+            UPDATE sync_metadata SET reference_data = :ref
+            WHERE user_id = :owner AND external_id = :ext
+            """
+        ),
+        {
+            "owner": CONTACT_OWNER,
+            "ext": _REMOTE,
+            "ref": json.dumps({"address_fallback_country": "GB"}),
+        },
+    )
+
+    client = await _push_update(db_session, contact_id)
+
+    person = client.update_contact.await_args.kwargs["contact_data"]
+    assert person["addresses"] == [
+        {
+            "streetAddress": "12 St James Sq",
+            "countryCode": "GB",
+            "metadata": {"primary": True},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_default_country_no_pull_has_applied_keeps_the_address(
+    db_session: AsyncSession,
+) -> None:
+    """A default set since the last pull imports nothing yet: keep the address."""
+    contact_id = await _seed_linked_contact(db_session)
+    await db_session.execute(
+        text(
+            "INSERT INTO user_settings (user_id, default_country) VALUES (:owner, 'GB')"
+        ),
+        {"owner": CONTACT_OWNER},
+    )
+
+    client = await _push_update(db_session, contact_id)
+
+    person = client.update_contact.await_args.kwargs["contact_data"]
+    assert {"streetAddress": "2 Nowhere Rd", "city": "Leeds"} in person["addresses"]

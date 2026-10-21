@@ -316,3 +316,66 @@ def test_an_unchanged_round_trip_keeps_every_tag_group() -> None:
         entry["contactGroupMembership"]["contactGroupResourceName"]
         for entry in merged["memberships"]
     ) == sorted(["contactGroups/myContacts", *_TAG_GROUPS])
+
+
+def _countryless_person(
+    phones: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "resourceName": "people/c1",
+        "names": _IMPORTED["names"],
+        "phoneNumbers": phones,
+        "addresses": [_entry(streetAddress="2 Nowhere Rd", city="Sydney")],
+    }
+
+
+@pytest.mark.parametrize(
+    ("phones", "default_country"),
+    [
+        pytest.param([_entry(value="+61400000000")], None, id="phone-country"),
+        pytest.param([], "AU", id="default-country"),
+    ],
+)
+@pytest.mark.parametrize(
+    "edit", [_unchanged, _clear_addresses], ids=["unchanged", "deleted-locally"]
+)
+def test_a_countryless_address_the_pull_imported_is_owned(
+    phones: list[dict[str, Any]],
+    default_country: str | None,
+    edit: Callable[[Contact], None],
+) -> None:
+    """Pushed back once, with its country, or deleted: never kept beside (#1820).
+
+    The push merges with the fallback the pull recorded. Pushing it writes a
+    country Google never held.
+    """
+    current = _countryless_person(phones)
+    transformer = GoogleContactTransformer(user_id="1", default_country=default_country)
+    person = GooglePerson.model_validate(current)
+    contact = transformer.transform_person(person)
+    edit(contact)
+    payload = _transform_contact_to_google_person(
+        _push_contact(contact, with_organization=False)
+    )
+
+    merged = merge_with_current_person(
+        payload,
+        current,
+        address_fallback_country=transformer.address_fallback_country(person),
+    )
+
+    assert [
+        (a["streetAddress"], a.get("countryCode")) for a in merged["addresses"]
+    ] == [("2 Nowhere Rd", "AU") for _ in contact.addresses or []]
+
+
+def test_a_countryless_address_no_pull_imported_is_kept() -> None:
+    """Before a pull records a fallback, the push keeps it whatever it infers."""
+    current = _countryless_person([_entry(value="+61400000000")])
+    payload = _transform_contact_to_google_person(
+        {"first_name": "Ada", "addresses": [], "group_name_to_resource": {}}
+    )
+
+    merged = merge_with_current_person(payload, current)
+
+    assert merged["addresses"] == [{"streetAddress": "2 Nowhere Rd", "city": "Sydney"}]

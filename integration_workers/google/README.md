@@ -202,7 +202,7 @@ fails when a pushed field has none:
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
 | `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
 | `emailAddresses`, `phoneNumbers` | the entries inbound imports | entries it rejects (invalid values) |
-| `addresses` | the entries inbound imports (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country code, or an AU/US/CA region naming no state, province or territory — reported on the event as `skipped_addresses` for the user to review (#1820) |
+| `addresses` | the entries inbound imports, including a countryless one the last applied pull gave a country (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country and none recorded, or an AU/US/CA region naming no state, province or territory in the country it is imported with — reported on the event as `skipped_addresses` for the user to review (#1820) |
 | `birthdays` | a birthday with a usable date | a text-only birthday: with no local birthday the field leaves the update mask, so Google keeps it |
 | `events` | `anniversary` events | every other event (custom, untyped) |
 | `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
@@ -210,6 +210,32 @@ fails when a pushed field has none:
 
 Parts of an owned entry the local model cannot hold (an address's type, a
 phone's formatting) are still replaced (#1823).
+
+**Address country (#1820).** The local model requires a country, but Google
+often holds addresses without a `countryCode`. Inbound gives such an address
+the country of the contact's **primary** phone, else the one all its other
+phones agree on, else the syncing user's **default country**
+(`user_settings.default_country`, set in Settings). Only international (`+`)
+numbers count, and only ISO 3166-1 countries (`address_country.py`). With
+none of them the address is not imported, and Google keeps it.
+
+The contact event carries that fallback (`address_fallback_country`), and the
+backend records it on the link's `reference_data` when it **applies** the
+event. A push merges with the **recorded** fallback, not what it would infer
+now, so it owns exactly the countryless addresses the last applied pull
+imported:
+
+- an imported one is sent back **with** its `countryCode`, writing a country
+  Google never had, and the countryless original is not kept beside it; a
+  local delete or edit of it reaches Google;
+- one no applied pull imported — the phone or a default changed since, or the
+  person has not been re-pulled since this shipped — is kept, never deleted.
+
+An inferred address that duplicates one Google also holds with a country
+(left by pushes before #1820) is dropped on import, and the push then removes
+the countryless twin from Google. Migration `0139` forces one full sync so
+existing contacts are re-pulled, and saving a new default country queues a
+full sync for that user.
 
 The owned entry is chosen exactly as the import chooses it, and values from a
 linked profile (rather than the contact) are never copied into the contact. The
