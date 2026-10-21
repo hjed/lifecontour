@@ -56,7 +56,6 @@ import { sendConditional, type ConditionalResult } from './conditional-request';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { taskKeys } from './tasks';
 import {
-  storeVersioned,
   unwrapResource,
   updateResource,
   type Versioned,
@@ -365,28 +364,18 @@ async function fetchTags(): Promise<TagListResponse> {
   return response.json();
 }
 
-export async function toggleContactFavourite(
-  contactId: string
-): Promise<ContactResponse> {
-  const response = await fetch(
+function toggleContactFavourite(
+  contactId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<ContactResponse>> {
+  return sendConditional<ContactResponse>(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/favourite`,
     {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
-
-  return response.json();
 }
 
 // React Query Hooks
@@ -568,18 +557,51 @@ export function useDeleteContact() {
   });
 }
 
-export function useToggleContactFavourite() {
+/** What the user asked the favourite toggle for. */
+interface FavouriteIntent {
+  favourite: boolean;
+}
+
+export function useToggleContactFavourite(contactId: string) {
   const queryClient = useQueryClient();
+  const aggregate = contactAggregate(contactId);
 
   return useMutation({
-    mutationFn: toggleContactFavourite,
-    onSuccess: data => {
-      const contactId = data.data.id;
-      void invalidateAfterMutation(
+    ...aggregateWrite<FavouriteIntent>(aggregate, ({ favourite }) =>
+      favourite ? 'Add to favourites' : 'Remove from favourites'
+    ),
+    // The API only toggles, so the mutation carries the state the user asked
+    // for: if the other tab already made the same change, toggling again —
+    // as a re-applied toggle otherwise would — would undo both.
+    // Guarded only where the contact's detail has been read; from a list card
+    // no tag is cached, and the toggle goes out unconditionally.
+    mutationFn: async ({ favourite }: FavouriteIntent) => {
+      const isWanted = (contact: ContactResponse) =>
+        Boolean(contact.data.attributes.is_favourite) === favourite;
+      const cached = queryClient.getQueryData<Versioned<ContactResponse>>(
+        aggregate.detailKey
+      )?.resource;
+      if (cached && isWanted(cached)) {
+        // The cached copy disagrees with the control the user clicked, so
+        // one of them is stale: ask the server before deciding.
+        const current = await queryClient.query({
+          queryKey: contactKeys.detail(contactId),
+          queryFn: () => fetchContact(contactId),
+          staleTime: 0,
+        });
+        if (isWanted(current.resource)) return current.resource;
+      }
+      // The toggle answers with the contact it left, kept with its tag so
+      // the next click compares against what this one did.
+      return sendGuarded(
         queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() }
+        aggregate.detailKey,
+        ifMatch => toggleContactFavourite(contactId, ifMatch),
+        { bodyIsResource: true }
       );
+    },
+    onSuccess: data => {
+      invalidateContactRows(queryClient, contactId);
       const isFavourite = data.data.attributes.is_favourite;
       toast.success(
         isFavourite
@@ -587,9 +609,7 @@ export function useToggleContactFavourite() {
           : 'Contact removed from favourites'
       );
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
@@ -1077,24 +1097,17 @@ export function useSetContactValueArchived(contactId: string) {
 const importantDatesUrl = (contactId: string) =>
   `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/important-dates`;
 
-async function readErrorMessage(
-  response: Response,
-  fallback: string
-): Promise<string> {
-  const errorData: JsonApiErrorResponse = await response.json();
-  return errorData.errors?.[0]?.detail || fallback;
-}
-
 // These answer with the whole contact and the tag of that same read, which is
-// kept with it: dropping it would leave later guarded edits unguarded.
+// kept with it.
 function addContactImportantDate(
   contactId: string,
-  date: ImportantDateAttributes
+  date: ImportantDateAttributes,
+  ifMatch: string | null
 ): Promise<ConditionalResult<ContactResponse>> {
   return sendConditional<ContactResponse>(importantDatesUrl(contactId), {
     method: 'POST',
     body: { data: { type: 'contact_important_dates', attributes: date } },
-    ifMatch: null,
+    ifMatch,
     fallbackMessage: ERROR_MESSAGES.CREATE_FAILED,
   });
 }
@@ -1102,7 +1115,8 @@ function addContactImportantDate(
 function updateContactImportantDate(
   contactId: string,
   dateId: string,
-  date: ImportantDateAttributes
+  date: ImportantDateAttributes,
+  ifMatch: string | null
 ): Promise<ConditionalResult<ContactResponse>> {
   return sendConditional<ContactResponse>(
     `${importantDatesUrl(contactId)}/${dateId}`,
@@ -1111,46 +1125,62 @@ function updateContactImportantDate(
       body: {
         data: { type: 'contact_important_dates', id: dateId, attributes: date },
       },
-      ifMatch: null,
+      ifMatch,
       fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
 }
 
-async function deleteContactImportantDate(
+function deleteContactImportantDate(
   contactId: string,
-  dateId: string
-): Promise<void> {
-  const response = await fetch(`${importantDatesUrl(contactId)}/${dateId}`, {
+  dateId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<undefined>> {
+  return sendConditional(`${importantDatesUrl(contactId)}/${dateId}`, {
     method: 'DELETE',
-    credentials: 'include',
+    ifMatch,
+    fallbackMessage: ERROR_MESSAGES.DELETE_FAILED,
   });
-
-  if (!response.ok) {
-    throw new Error(
-      await readErrorMessage(response, ERROR_MESSAGES.DELETE_FAILED)
-    );
-  }
 }
 
-export function useAddContactImportantDate() {
+/**
+ * Seeds the detail cache from a date write's response.
+ *
+ * Seed rather than invalidate: these endpoints answer with the whole contact,
+ * so the cache can be made current synchronously. An invalidation alone
+ * resolves the mutation before the refetch lands, and the inline editor seeds
+ * its inputs from the cache when it reopens - so a second edit would submit
+ * the values the first one just replaced. The tag the write returned is
+ * already stored by `sendGuarded`.
+ */
+function seedContactFromDateWrite(
+  queryClient: QueryClient,
+  contactId: string,
+  contact: ContactResponse
+): void {
+  updateResource<ContactResponse>(
+    queryClient,
+    contactKeys.detail(contactId),
+    () => contact
+  );
+}
+
+const describeDate = ({ date }: { date: ImportantDateAttributes }) =>
+  `Important date → ${[date.day, date.month, date.year].filter(Boolean).join('/')}`;
+
+export function useAddContactImportantDate(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      date,
-    }: {
-      contactId: string;
-      date: ImportantDateAttributes;
-    }) => addContactImportantDate(contactId, date),
-    onSuccess: ({ body, etag }, { contactId }) => {
-      // Seed rather than invalidate: these endpoints answer with the whole
-      // contact, so the cache can be made current synchronously. An
-      // invalidation alone resolves the mutation before the refetch lands, and
-      // the inline editor seeds its inputs from the cache when it reopens - so
-      // a second edit would submit the values the first one just replaced.
-      storeVersioned(queryClient, contactKeys.detail(contactId), body, etag);
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ date }: { date: ImportantDateAttributes }, ifMatch) =>
+        addContactImportantDate(contactId, date, ifMatch),
+      describeDate
+    ),
+    onSuccess: contact => {
+      seedContactFromDateWrite(queryClient, contactId, contact);
       void invalidateAfterMutation(
         queryClient,
         { queryKey: contactKeys.lists() },
@@ -1161,29 +1191,25 @@ export function useAddContactImportantDate() {
       );
       toast.success('Important date added successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useUpdateContactImportantDate() {
+export function useUpdateContactImportantDate(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      dateId,
-      date,
-    }: {
-      contactId: string;
-      dateId: string;
-      date: ImportantDateAttributes;
-    }) => updateContactImportantDate(contactId, dateId, date),
-    onSuccess: ({ body, etag }, { contactId }) => {
-      // See useAddContactImportantDate: the editor reopens from this cache, so
-      // it has to be current by the time the mutation settles.
-      storeVersioned(queryClient, contactKeys.detail(contactId), body, etag);
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      (
+        { dateId, date }: { dateId: string; date: ImportantDateAttributes },
+        ifMatch
+      ) => updateContactImportantDate(contactId, dateId, date, ifMatch),
+      describeDate
+    ),
+    onSuccess: contact => {
+      seedContactFromDateWrite(queryClient, contactId, contact);
       void invalidateAfterMutation(
         queryClient,
         { queryKey: contactKeys.lists() },
@@ -1192,90 +1218,65 @@ export function useUpdateContactImportantDate() {
       );
       toast.success('Important date updated successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useDeleteContactImportantDate() {
+export function useDeleteContactImportantDate(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      contactId,
-      dateId,
-    }: {
-      contactId: string;
-      dateId: string;
-    }) => deleteContactImportantDate(contactId, dateId),
-    onSuccess: (_, { contactId }) => {
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ dateId }: { dateId: string }, ifMatch) =>
+        deleteContactImportantDate(contactId, dateId, ifMatch),
+      () => 'Delete an important date'
+    ),
+    onSuccess: () => {
       // A delete answers 204, so there is no payload to seed the cache with and
       // the detail query is invalidated instead. No editor reopens from it.
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.lists() },
+      invalidateContactRows(queryClient, contactId, {
         // The delete writes a "deleted" marker to field_history.
-        { queryKey: historyKeys.all }
-      );
+        queryKey: historyKeys.all,
+      });
       toast.success('Important date deleted successfully');
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
 // Contact Tag Management API Functions
 
-async function assignTagToContact(
+function assignTagToContact(
   contactId: string,
-  tagId: string
-): Promise<void> {
-  const response = await fetch(
+  tagId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<unknown>> {
+  return sendConditional<unknown>(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/tags`,
     {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        data: {
-          type: 'tags',
-          id: tagId,
-        },
-      }),
+      body: { data: { type: 'tags', id: tagId } },
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.UPDATE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.UPDATE_FAILED
-    );
-  }
 }
 
-async function removeTagFromContact(
+function removeTagFromContact(
   contactId: string,
-  tagId: string
-): Promise<void> {
-  const response = await fetch(
+  tagId: string,
+  ifMatch: string | null
+): Promise<ConditionalResult<undefined>> {
+  return sendConditional(
     `${API_ENDPOINTS.CONTACTS.BASE}/${contactId}/tags/${tagId}`,
     {
       method: 'DELETE',
-      credentials: 'include',
+      ifMatch,
+      fallbackMessage: ERROR_MESSAGES.DELETE_FAILED,
     }
   );
-
-  if (!response.ok) {
-    const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(
-      errorData.errors?.[0]?.detail || ERROR_MESSAGES.DELETE_FAILED
-    );
-  }
 }
 
 async function createTag(
@@ -1307,38 +1308,44 @@ async function createTag(
 
 // React Query Hooks for Contact Tag Management
 
-export function useAssignContactTag() {
+export function useAssignContactTag(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
-      assignTagToContact(contactId, tagId),
-    onSuccess: (_, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.tags(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ tagId }: { tagId: string }, ifMatch) =>
+        assignTagToContact(contactId, tagId, ifMatch),
+      () => 'Add a tag'
+    ),
+    onSuccess: () => {
+      invalidateContactRows(queryClient, contactId, {
+        queryKey: contactKeys.tags(contactId),
+      });
       toast.success(SUCCESS_MESSAGES.TAG_ASSIGNED);
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: toastUnlessConflict,
   });
 }
 
-export function useRemoveContactTag() {
+export function useRemoveContactTag(contactId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ contactId, tagId }: { contactId: string; tagId: string }) =>
-      removeTagFromContact(contactId, tagId),
+    ...guardedWrite(
+      queryClient,
+      contactAggregate(contactId),
+      ({ tagId }: { tagId: string }, ifMatch) =>
+        removeTagFromContact(contactId, tagId, ifMatch),
+      () => 'Remove a tag'
+    ),
     // Optimistically remove the badge so the UI doesn't depend on the refetch
     // landing (the backend commits the delete at request teardown, so an
     // immediate refetch can still observe the tag — see the read-after-write
-    // note in the transaction-ordering issue).
-    onMutate: async ({ contactId, tagId }) => {
+    // note in the transaction-ordering issue). The tags list is its own
+    // query, so the contact's tag is untouched.
+    onMutate: async ({ tagId }) => {
       await queryClient.cancelQueries({
         queryKey: contactKeys.tags(contactId),
       });
@@ -1353,25 +1360,24 @@ export function useRemoveContactTag() {
       }
       return { previousTags };
     },
-    onError: (error: Error, { contactId }, context) => {
-      if (context?.previousTags) {
+    onError: (error: Error, _variables, context) => {
+      // Not on a conflict: its re-read has already replaced the tags, and the
+      // snapshot would bring back a tag another tab removed.
+      if (context?.previousTags && !isWriteConflict(error)) {
         queryClient.setQueryData(
           contactKeys.tags(contactId),
           context.previousTags
         );
       }
-      toast.error(error.message);
+      toastUnlessConflict(error);
     },
     onSuccess: () => {
       toast.success(SUCCESS_MESSAGES.TAG_REMOVED);
     },
-    onSettled: (_data, _error, { contactId }) => {
-      void invalidateAfterMutation(
-        queryClient,
-        { queryKey: contactKeys.detail(contactId) },
-        { queryKey: contactKeys.tags(contactId) },
-        { queryKey: contactKeys.lists() }
-      );
+    onSettled: () => {
+      invalidateContactRows(queryClient, contactId, {
+        queryKey: contactKeys.tags(contactId),
+      });
     },
   });
 }

@@ -24,6 +24,7 @@ import {
   ImportantDateTypeEnum,
 } from '@/types/contacts';
 import { ImportantDateInlineEditor } from './ImportantDateInlineEditor';
+import { closingOnConflict } from '@/lib/write-conflicts';
 
 export interface ImportantDatesListProps {
   readonly contactId: string;
@@ -41,9 +42,9 @@ export function ImportantDatesList({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [dateToDelete, setDateToDelete] = useState<string | null>(null);
 
-  const addDateMutation = useAddContactImportantDate();
-  const updateDateMutation = useUpdateContactImportantDate();
-  const deleteDateMutation = useDeleteContactImportantDate();
+  const addDateMutation = useAddContactImportantDate(contactId);
+  const updateDateMutation = useUpdateContactImportantDate(contactId);
+  const deleteDateMutation = useDeleteContactImportantDate(contactId);
 
   const isWriting =
     addDateMutation.isPending ||
@@ -51,7 +52,7 @@ export function ImportantDatesList({
     deleteDateMutation.isPending;
 
   const handleAddDate = async (date: ImportantDateAttributes) => {
-    await addDateMutation.mutateAsync({ contactId, date });
+    await closingOnConflict(addDateMutation.mutateAsync({ date }));
     setIsAddingDate(false);
   };
 
@@ -59,10 +60,10 @@ export function ImportantDatesList({
     dateId: string,
     date: ImportantDateAttributes
   ) => {
-    // Deliberately not wrapped in try/catch: a rejected write must leave the
-    // editor open with the user's input intact, and the hook has already
-    // surfaced the error as a toast.
-    await updateDateMutation.mutateAsync({ contactId, dateId, date });
+    // A rejected write must leave the editor open with the user's input
+    // intact, and the hook has already surfaced the error as a toast. Only a
+    // conflict closes it: the conflict dialog holds the input instead.
+    await closingOnConflict(updateDateMutation.mutateAsync({ dateId, date }));
     setEditingDateId(null);
   };
 
@@ -73,7 +74,10 @@ export function ImportantDatesList({
 
   const handleConfirmDelete = async () => {
     if (!dateToDelete) return;
-    await deleteDateMutation.mutateAsync({ contactId, dateId: dateToDelete });
+    // A conflict closes the confirmation too; the dialog can re-apply it.
+    await closingOnConflict(
+      deleteDateMutation.mutateAsync({ dateId: dateToDelete })
+    );
     setDeleteDialogOpen(false);
     setDateToDelete(null);
   };

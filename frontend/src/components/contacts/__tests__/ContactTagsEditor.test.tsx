@@ -143,7 +143,6 @@ describe('ContactTagsEditor', () => {
     await user.click(screen.getByTestId('remove-tag-1'));
 
     expect(mockRemoveMutate).toHaveBeenCalledWith({
-      contactId: '42',
       tagId: '1',
     });
   });
@@ -175,7 +174,6 @@ describe('ContactTagsEditor', () => {
     await user.click(screen.getByTestId('tag-option-3'));
 
     expect(mockAssignMutate).toHaveBeenCalledWith({
-      contactId: '42',
       tagId: '3',
     });
   });

@@ -53,8 +53,8 @@ export function ContactTagsEditor({
     isError: isAllTagsError,
   } = useTags();
 
-  const assignTag = useAssignContactTag();
-  const removeTag = useRemoveContactTag();
+  const assignTag = useAssignContactTag(contactId);
+  const removeTag = useRemoveContactTag(contactId);
   const createTag = useCreateTag();
 
   const assignedTags = useMemo(
@@ -69,7 +69,7 @@ export function ContactTagsEditor({
   const handleCreate = async (name: string, color: string) => {
     const response = await createTag.mutateAsync({ name, color });
     try {
-      await assignTag.mutateAsync({ contactId, tagId: response.data.id });
+      await assignTag.mutateAsync({ tagId: response.data.id });
     } catch {
       // The tag was created; only the assignment failed (its hook already
       // toasted). Swallow so the editor leaves the create form — retrying there
@@ -88,8 +88,8 @@ export function ContactTagsEditor({
         assignTag.isPending || removeTag.isPending || createTag.isPending
       }
       colors={TAG_COLORS}
-      onAssign={tagId => assignTag.mutate({ contactId, tagId })}
-      onRemove={tagId => removeTag.mutate({ contactId, tagId })}
+      onAssign={tagId => assignTag.mutate({ tagId })}
+      onRemove={tagId => removeTag.mutate({ tagId })}
       onCreate={handleCreate}
       rootTestId='contact-tags-editor'
       className={className}
