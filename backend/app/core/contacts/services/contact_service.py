@@ -968,6 +968,10 @@ class ContactService:
 
             # Convert field_value to appropriate type
             new_value = _convert_address_field_value(field_name, field_value)
+            if field_name == "region":
+                new_value = self.address_validation.normalise_region(
+                    address_to_update.country_code, new_value
+                )
 
             # Skip update if value hasn't changed (normalize for comparison)
             if _normalize_field_value(old_value) == _normalize_field_value(new_value):
@@ -1708,8 +1712,13 @@ class ContactService:
                         user_id=contact.user_id,
                     )
 
-        # Validate addresses
+        # Normalise, then validate, the addresses - normalised in place, so the
+        # save that follows stores the normalised region.
         if contact.addresses:
+            contact.addresses = [
+                self.address_validation.normalise_address(address)
+                for address in contact.addresses
+            ]
             for address in contact.addresses:
                 await self.address_validation.validate_with_transaction(
                     address, transaction
@@ -2230,9 +2239,10 @@ class ContactService:
                 contact_id, transaction, user_id=user_id
             )
 
-            # Validate address format
+            # Normalise and validate the address
+            normalised = self.address_validation.normalise_address(address)
             await self.address_validation.validate_with_transaction(
-                address, transaction
+                normalised, transaction
             )
 
             # Validate primary address constraints
@@ -2242,7 +2252,7 @@ class ContactService:
                 )
 
             # Add address
-            saved_address = await self.contact_repo.add_address(contact_id, address)
+            saved_address = await self.contact_repo.add_address(contact_id, normalised)
 
             # Ensure address has ID after save
             if saved_address.id is None:

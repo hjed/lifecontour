@@ -33,55 +33,6 @@ class TestAddressValidationService:
         assert exc_info.value.field == "country_code"
         assert "Invalid country code" in exc_info.value.message
 
-    def test_validate_postal_code_empty_allowed(self, service):
-        """Test empty postal code is allowed."""
-        service.validate_postal_code("", "AU")  # Should not raise
-
-    def test_validate_postal_code_none_allowed(self, service):
-        """Test None postal code is allowed."""
-        service.validate_postal_code(None, "AU")  # Should not raise
-
-    def test_validate_postal_code_dutch_valid(self, service):
-        """Test valid Dutch postal code."""
-        service.validate_postal_code("1234AB", "NL")  # Should not raise
-
-    def test_validate_postal_code_dutch_invalid_raises_error(self, service):
-        """Test invalid Dutch postal code raises error."""
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_postal_code("invalid", "NL")
-
-        assert exc_info.value.field == "postal_code"
-        assert "Invalid Dutch postal code" in exc_info.value.message
-
-    def test_validate_postal_code_swedish_valid(self, service):
-        """Test valid Swedish postal code."""
-        service.validate_postal_code("12345", "SE")  # Should not raise
-
-    def test_validate_postal_code_spanish_valid(self, service):
-        """Test valid Spanish postal code."""
-        service.validate_postal_code("12345", "ES")  # Should not raise
-
-    def test_validate_postal_code_spanish_invalid_raises_error(self, service):
-        """Test invalid Spanish postal code raises error."""
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_postal_code("1234", "ES")  # Too short
-
-        assert exc_info.value.field == "postal_code"
-        assert "Invalid Spanish postal code" in exc_info.value.message
-
-    def test_validate_postal_code_unknown_country_basic_validation(self, service):
-        """Test postal code validation for unknown country uses basic validation."""
-        service.validate_postal_code("12345", "ZZ")  # Should not raise
-        service.validate_postal_code("ABC-123", "ZZ")  # Should not raise
-
-    def test_validate_postal_code_unknown_country_invalid_raises_error(self, service):
-        """Test invalid postal code for unknown country raises error."""
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_postal_code("invalid@#$", "ZZ")
-
-        assert exc_info.value.field == "postal_code"
-        assert "Invalid postal code format" in exc_info.value.message
-
     def test_validate_address_format_valid_address(self, service):
         """Test valid address format."""
         address = ContactAddress(
@@ -117,92 +68,123 @@ class TestAddressValidationService:
 
         assert exc_info.value.field == "country_code"
 
-    def test_validate_address_format_with_postal_code(self, service):
-        """Test address validation with postal code."""
+    @pytest.mark.parametrize(
+        ("country_code", "postal_code"),
+        [("NL", "invalid"), ("ES", "8001"), ("SE", "1"), ("AU", "#2000.")],
+        ids=["dutch", "spanish-missing-zero", "swedish", "punctuation"],
+    )
+    def test_any_postal_code_is_accepted(
+        self, service: AddressValidationService, country_code: str, postal_code: str
+    ) -> None:
+        """Postcodes are not validated: a badly typed one must not fail a contact."""
         address = ContactAddress(
             street_line_1="123 Main St",
-            country_code="NL",
-            postal_code="1234AB",
-            contact_id=1,
-        )
-        service.validate_address_format(address)  # Should not raise
-
-    def test_validate_address_format_invalid_postal_code_raises_error(self, service):
-        """Test invalid postal code raises error."""
-        address = ContactAddress(
-            street_line_1="123 Main St",
-            country_code="NL",
-            postal_code="invalid",
+            country_code=country_code,
+            postal_code=postal_code,
             contact_id=1,
         )
 
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_address_format(address)
-
-        assert exc_info.value.field == "postal_code"
-
-    def test_validate_country_specific_rules_au_valid_state(self, service):
-        """Test Australian state validation."""
-        address = ContactAddress(
-            street_line_1="123 Main St", country_code="AU", region="NSW", contact_id=1
-        )
         service.validate_address_format(address)  # Should not raise
 
-    def test_validate_country_specific_rules_au_invalid_state_raises_error(
-        self, service
-    ):
-        """Test invalid Australian state raises error."""
+    @pytest.mark.parametrize(
+        ("country_code", "region", "normalised"),
+        [
+            ("AU", "NSW", "NSW"),
+            ("AU", "nsw", "NSW"),
+            ("AU", "New South Wales", "NSW"),
+            ("AU", "  new south wales ", "NSW"),
+            ("AU", "Australian Capital Territory", "ACT"),
+            ("AU", "tasmania", "TAS"),
+            ("US", "ca", "CA"),
+            ("US", "California", "CA"),
+            ("US", "district of columbia", "DC"),
+            ("CA", "on", "ON"),
+            ("CA", "Québec", "QC"),
+            ("CA", "quebec", "QC"),
+            ("CA", "Newfoundland and Labrador", "NL"),
+        ],
+    )
+    def test_a_known_region_is_normalised_to_its_code(
+        self,
+        service: AddressValidationService,
+        country_code: str,
+        region: str,
+        normalised: str,
+    ) -> None:
+        assert service.normalise_region(country_code, region) == normalised
+
+    @pytest.mark.parametrize("region", [None, "", "   "])
+    def test_an_empty_region_is_none(
+        self, service: AddressValidationService, region: str | None
+    ) -> None:
+        assert service.normalise_region("AU", region) is None
+
+    @pytest.mark.parametrize(
+        ("country_code", "region"),
+        [("AU", "London"), ("US", "XX"), ("CA", "Somewhere")],
+    )
+    def test_an_unrecognised_region_is_kept_as_written(
+        self, service: AddressValidationService, country_code: str, region: str
+    ) -> None:
+        """A wrong inferred country must not fail a contact (#1820)."""
+        assert service.normalise_region(country_code, f" {region} ") == region
+
+    def test_a_region_elsewhere_is_only_trimmed(
+        self, service: AddressValidationService
+    ) -> None:
+        """Only AU, US and CA regions were ever validated, so only they map."""
+        assert service.normalise_region("GB", " Greater London ") == "Greater London"
+
+    def test_normalise_address_rewrites_the_region(
+        self, service: AddressValidationService
+    ) -> None:
         address = ContactAddress(
-            street_line_1="123 Main St", country_code="AU", region="XX", contact_id=1
+            street_line_1="1 George St",
+            country_code="AU",
+            region="new south wales",
+            contact_id=1,
+        )
+
+        normalised = service.normalise_address(address)
+
+        assert normalised.region == "NSW"
+        assert normalised.street_line_1 == "1 George St"
+
+    @pytest.mark.parametrize(
+        ("country_code", "region"),
+        [("AU", "Sydney"), ("US", "XX"), ("CA", "Somewhere")],
+    )
+    def test_an_unrecognised_region_fails_validation(
+        self, service: AddressValidationService, country_code: str, region: str
+    ) -> None:
+        """Someone typing fixes it; the Google import skips it instead (#1820)."""
+        address = ContactAddress(
+            street_line_1="123 Main St",
+            country_code=country_code,
+            region=region,
+            contact_id=1,
         )
 
         with pytest.raises(ContactValidationError) as exc_info:
             service.validate_address_format(address)
 
         assert exc_info.value.field == "region"
-        assert "Invalid Australian state/territory" in exc_info.value.message
 
-    def test_validate_country_specific_rules_us_valid_state(self, service):
-        """Test US state validation."""
+    @pytest.mark.parametrize(
+        ("country_code", "region"),
+        [("AU", "new south wales"), ("US", "ca"), ("GB", "Anything at all")],
+    )
+    def test_a_recognised_or_unchecked_region_passes_validation(
+        self, service: AddressValidationService, country_code: str, region: str
+    ) -> None:
         address = ContactAddress(
-            street_line_1="123 Main St", country_code="US", region="CA", contact_id=1
+            street_line_1="123 Main St",
+            country_code=country_code,
+            region=region,
+            contact_id=1,
         )
+
         service.validate_address_format(address)  # Should not raise
-
-    def test_validate_country_specific_rules_us_invalid_state_raises_error(
-        self, service
-    ):
-        """Test invalid US state raises error."""
-        address = ContactAddress(
-            street_line_1="123 Main St", country_code="US", region="XX", contact_id=1
-        )
-
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_address_format(address)
-
-        assert exc_info.value.field == "region"
-        assert "Invalid US state code" in exc_info.value.message
-
-    def test_validate_country_specific_rules_ca_valid_province(self, service):
-        """Test Canadian province validation."""
-        address = ContactAddress(
-            street_line_1="123 Main St", country_code="CA", region="ON", contact_id=1
-        )
-        service.validate_address_format(address)  # Should not raise
-
-    def test_validate_country_specific_rules_ca_invalid_province_raises_error(
-        self, service
-    ):
-        """Test invalid Canadian province raises error."""
-        address = ContactAddress(
-            street_line_1="123 Main St", country_code="CA", region="XX", contact_id=1
-        )
-
-        with pytest.raises(ContactValidationError) as exc_info:
-            service.validate_address_format(address)
-
-        assert exc_info.value.field == "region"
-        assert "Invalid Canadian province/territory" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_validate_with_transaction(self, service):

@@ -25,6 +25,8 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.62b1",
     "opentelemetry-instrumentation-redis>=0.62b1",
     "opentelemetry-exporter-otlp>=1.41.1",
+    # ISO 3166-2 subdivisions for address regions (#1820)
+    "pycountry>=26.2.16",
 ]
 
 [project.optional-dependencies]

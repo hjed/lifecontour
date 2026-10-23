@@ -101,6 +101,12 @@ domain/
     synced to an integration
   - Address validation (street_line_1 and country_code required)
   - Country code validation (ISO 3166-1 alpha-2 format)
+  - Region normalisation: an AU, US or CA region given as its ISO 3166-2
+    code or name, in any case or accents ("new south wales", "Québec"), is
+    stored as the code, and a blank region is stored empty. One no subdivision
+    matches is rejected on a write; the Google import skips that address and
+    flags it for review instead (#1820). Postcodes are not validated. The
+    rules live in `core_shared.models.contacts.regions`, shared with the import
   - Contact history tracking for all changes
 - **Domain Events**: ContactCreated, ContactUpdated, ContactDeleted, TagAssigned, TagRemoved, ContactMethodAdded, ContactNoteAdded, ContactAddressAdded
 
