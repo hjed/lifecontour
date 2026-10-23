@@ -152,9 +152,29 @@ class TestAddressValidationService:
 
     @pytest.mark.parametrize(
         ("country_code", "region"),
-        [("AU", "Sydney"), ("US", "XX"), ("CA", "XX")],
+        [("AU", "Sydney"), ("US", "XX"), ("CA", "Somewhere")],
     )
-    def test_any_region_passes_validation(
+    def test_an_unrecognised_region_fails_validation(
+        self, service: AddressValidationService, country_code: str, region: str
+    ) -> None:
+        """Someone typing fixes it; the Google import skips it instead (#1820)."""
+        address = ContactAddress(
+            street_line_1="123 Main St",
+            country_code=country_code,
+            region=region,
+            contact_id=1,
+        )
+
+        with pytest.raises(ContactValidationError) as exc_info:
+            service.validate_address_format(address)
+
+        assert exc_info.value.field == "region"
+
+    @pytest.mark.parametrize(
+        ("country_code", "region"),
+        [("AU", "new south wales"), ("US", "ca"), ("GB", "Anything at all")],
+    )
+    def test_a_recognised_or_unchecked_region_passes_validation(
         self, service: AddressValidationService, country_code: str, region: str
     ) -> None:
         address = ContactAddress(

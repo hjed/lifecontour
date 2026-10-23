@@ -1,15 +1,16 @@
 """Every address write stores a known region as its code (#1820).
 
 A region typed as a name ("New South Wales"), in lower case, or left blank is
-accepted, and a recognised one is stored as its ISO 3166-2 code. One that is
-not recognised is kept as written, and no postcode fails: a badly typed field
-must never fail - and on import, dead-letter - a whole contact.
+accepted, and a recognised one is stored as its ISO 3166-2 code. No postcode
+fails. An AU/US/CA region no subdivision matches is rejected on a write; the
+Google import skips such an address rather than send it.
 """
 
 from __future__ import annotations
 
 import pytest
 from core_shared.models.contacts.entities import Contact, ContactAddress
+from core_shared.models.contacts.exceptions import ContactValidationError
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -122,10 +123,10 @@ async def test_a_region_field_edit_stores_the_code(
 
 
 @pytest.mark.asyncio
-async def test_an_import_with_a_typed_or_unknown_region_is_applied(
+async def test_an_import_with_a_typed_region_is_applied(
     async_connection: AsyncConnection,
 ) -> None:
-    """Before #1820 these failed the whole contact event."""
+    """Before #1820 a typed state name failed the whole contact event."""
     event = OutboxEvent.create_contact_sync_event(
         contact_data={
             "user_id": TEST_USER_ID,
@@ -136,13 +137,7 @@ async def test_an_import_with_a_typed_or_unknown_region_is_applied(
                     "country_code": "AU",
                     "region": "New South Wales",
                     "postal_code": "2000",
-                },
-                {
-                    "street_line_1": "10 Downing St",
-                    "country_code": "AU",
-                    "region": "London",
-                    "postal_code": "SW1A 2AA",
-                },
+                }
             ],
         },
         integration_source="google",
@@ -157,7 +152,19 @@ async def test_an_import_with_a_typed_or_unknown_region_is_applied(
     ).process_event(event)
 
     assert result["status"] == "success"
-    assert await _stored(async_connection, result["contact_id"]) == [
-        ("NSW", "2000"),
-        ("London", "SW1A 2AA"),
-    ]
+    assert await _stored(async_connection, result["contact_id"]) == [("NSW", "2000")]
+
+
+@pytest.mark.asyncio
+async def test_an_unrecognised_region_is_rejected(
+    async_connection: AsyncConnection,
+) -> None:
+    service = build_contact_service(async_connection)
+    contact_id = await _create(service, async_connection)
+
+    with pytest.raises(ContactValidationError) as exc_info:
+        await service.add_contact_address(
+            contact_id, _address("London"), async_connection, user_id=TEST_USER_ID
+        )
+
+    assert exc_info.value.field == "region"
