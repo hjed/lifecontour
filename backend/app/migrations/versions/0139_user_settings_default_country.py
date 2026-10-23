@@ -1,7 +1,7 @@
 """add user_settings.default_country; make timezone nullable
 
-Revision ID: 0138
-Revises: 0137
+Revision ID: 0139
+Revises: 0138
 Create Date: 2026-10-20 00:00:00.000000
 
 ``default_country`` (ISO 3166-1 alpha-2) fills in addresses imported without a
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0138"
-down_revision: str | None = "0137"
+revision: str = "0139"
+down_revision: str | None = "0138"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
