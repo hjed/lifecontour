@@ -16,6 +16,7 @@ import { LoadingSpinner } from '@/components/ui/loading';
 import { IntegrationPanel } from '@/components/integrations/IntegrationPanel';
 import { DeadLetterQueue } from '@/components/integrations/DeadLetterQueue';
 import { ContactSuggestionsCard } from '@/components/integrations/ContactSuggestionsCard';
+import { SkippedAddressesCard } from '@/components/integrations/SkippedAddressesCard';
 
 export default function IntegrationsPage() {
   return (
@@ -88,6 +89,7 @@ function IntegrationsPageContent() {
           )}
 
           <ContactSuggestionsCard />
+          <SkippedAddressesCard />
 
           <DeadLetterQueue />
         </div>

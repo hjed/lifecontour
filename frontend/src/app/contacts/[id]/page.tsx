@@ -33,6 +33,7 @@ import { ContactTagsEditor } from '@/components/contacts/ContactTagsEditor';
 import { ContactSummary } from '@/components/contacts/ContactSummary';
 import { ExternalLinksDisplay } from '@/components/shared/ExternalLinksDisplay';
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { ContactImportIssuesAlert } from '@/components/contacts/ContactImportIssuesAlert';
 import { DATE_FORMATS } from '@/lib/constants';
 import { useContactExternalLinks } from '@/lib/api/external-links';
 
@@ -187,6 +188,9 @@ function ContactDetailPageContent() {
               <ContactTagsEditor contactId={contact.id} />
             </div>
           </div>
+
+          {/* Addresses a Google import skipped, for review (#1820) */}
+          <ContactImportIssuesAlert contactId={contact.id} />
 
           <div className='grid grid-cols-1 gap-6 xl:grid-cols-2'>
             {/* Contact Methods */}
