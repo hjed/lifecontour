@@ -1,13 +1,17 @@
 """Pydantic schemas for the user settings API.
 
-Defines request/response shapes for ``GET`` and ``PUT /api/user-settings``.
+Defines request/response shapes for ``GET`` and ``PATCH /api/user-settings``.
 """
 
 from __future__ import annotations
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import pycountry
+from core_shared.models.contacts.value_objects import CountryCode
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.settings.models import UNSET, UserSettingsChanges
 
 
 def _validate_timezone(value: str) -> str:
@@ -20,17 +24,55 @@ def _validate_timezone(value: str) -> str:
 
 
 class UserSettingsRequest(BaseModel):
-    """Request body for updating user settings."""
+    """Request body for a partial update of user settings.
 
-    timezone: str = Field(
-        ...,
+    A field the body omits is left as it is. ``default_country: null`` clears
+    the country; the timezone can be changed but not cleared.
+    """
+
+    timezone: str | None = Field(
+        default=None,
         description="IANA timezone name, e.g. 'Australia/Sydney' or 'UTC'",
+    )
+    default_country: str | None = Field(
+        default=None,
+        description=(
+            "ISO 3166-1 alpha-2 country, e.g. 'AU', used for imported addresses "
+            "with no country; null clears it"
+        ),
     )
 
     @field_validator("timezone")
     @classmethod
-    def timezone_must_be_valid(cls, value: str) -> str:
+    def timezone_must_be_valid(cls, value: str | None) -> str:
+        # Runs only on a value the body sent, so None here is an explicit null.
+        if value is None:
+            raise ValueError("The timezone can be changed but not cleared")
         return _validate_timezone(value)
+
+    @field_validator("default_country")
+    @classmethod
+    def default_country_must_be_alpha_2(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        CountryCode(value)
+        # The format check alone admits codes no country has (``ZZ``), which
+        # every imported address would then carry; addresses are checked the
+        # same way (``AddressValidationService.validate_country_code``).
+        if pycountry.countries.get(alpha_2=value) is None:
+            raise ValueError(f"Unknown ISO 3166-1 alpha-2 country: {value!r}")
+        return value
+
+    def to_changes(self) -> UserSettingsChanges:
+        """The settings changes this body asks for, omitted fields unset."""
+        return UserSettingsChanges(
+            timezone=self.timezone if self.timezone is not None else UNSET,
+            default_country=(
+                self.default_country
+                if "default_country" in self.model_fields_set
+                else UNSET
+            ),
+        )
 
 
 class UserSettingsAttributes(BaseModel):
@@ -47,6 +89,10 @@ class UserSettingsAttributes(BaseModel):
     timezone: str | None = Field(
         ...,
         description="IANA timezone name, or null when the user has not set one",
+    )
+    default_country: str | None = Field(
+        default=None,
+        description="ISO 3166-1 alpha-2 country, or null when the user has not set one",
     )
 
 

@@ -94,7 +94,7 @@ export async function updateTimezone(
   timezone: string
 ): Promise<UserSettingsResponse> {
   const response = await fetch(USER_SETTINGS_ENDPOINT, {
-    method: 'PUT',
+    method: 'PATCH',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',

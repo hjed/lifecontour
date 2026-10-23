@@ -7,7 +7,11 @@ the service layer rather than the controller.
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.settings.models import UserSettings, UserSettingsRepository
+from app.core.settings.models import (
+    UserSettings,
+    UserSettingsChanges,
+    UserSettingsRepository,
+)
 from app.infrastructure.unit_of_work import transactional
 
 
@@ -18,13 +22,11 @@ class UserSettingsService:
         self.settings_repo = settings_repo
 
     @transactional
-    async def save_settings(
+    async def update_settings(
         self,
         user_id: str,
-        timezone: str,
+        changes: UserSettingsChanges,
         transaction: AsyncConnection,
     ) -> UserSettings:
-        """Create or update the user's settings (upsert) as a committed unit."""
-        return await self.settings_repo.save(
-            UserSettings(user_id=user_id, timezone=timezone)
-        )
+        """Write the fields ``changes`` names (upsert) as a committed unit."""
+        return await self.settings_repo.update(user_id, changes)

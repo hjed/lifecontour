@@ -1,9 +1,9 @@
 """User settings API controller.
 
-Provides REST endpoints for managing per-user preferences. Currently exposes
-the default timezone, which is synced from the frontend and used by the
-backend (including AI prompt generation) to render dates/times in the user's
-local time.
+Provides REST endpoints for managing per-user preferences: the default
+timezone, used by the backend (including AI prompt generation) to render
+dates/times in the user's local time, and the default country, used to fill in
+addresses imported without one (#1820).
 """
 
 import structlog
@@ -17,7 +17,7 @@ from app.api.settings.schemas import (
     UserSettingsRequest,
     UserSettingsResponse,
 )
-from app.core.settings.models import UserSettingsRepository
+from app.core.settings.models import UserSettings, UserSettingsRepository
 from app.core.settings.services.user_settings_service import UserSettingsService
 from app.infrastructure.auth.models import SessionUser
 
@@ -33,7 +33,8 @@ async def get_user_settings(
 ) -> UserSettingsResponse:
     """Get the authenticated user's settings.
 
-    Returns the stored timezone, or ``None`` when the user has not set one.
+    Returns the stored timezone and default country, each ``None`` when the
+    user has not set it.
     The ``UTC`` default is deliberately *not* substituted here: the frontend
     anchors the day boundaries it writes on this value and falls back to the
     browser's zone when it is absent, so reporting a default it cannot tell
@@ -43,14 +44,7 @@ async def get_user_settings(
     """
     try:
         settings = await repository.get_by_user_id(str(user.id))
-        timezone = settings.timezone if settings else None
-
-        return UserSettingsResponse(
-            data=UserSettingsData(
-                id=str(user.id),
-                attributes=UserSettingsAttributes(timezone=timezone),
-            )
-        )
+        return _response(str(user.id), settings)
     except Exception as e:
         logger.error(
             "Failed to get user settings",
@@ -64,19 +58,19 @@ async def get_user_settings(
         ) from e
 
 
-@router.put("")
+@router.patch("")
 @inject
-async def save_user_settings(
+async def update_user_settings(
     request_data: UserSettingsRequest,
     user: FromDishka[SessionUser],
     service: FromDishka[UserSettingsService],
     connection: FromDishka[AsyncConnection],
 ) -> UserSettingsResponse:
-    """Create or update the authenticated user's settings (upsert)."""
+    """Update the fields the body names (upsert); omitted ones are kept."""
     try:
-        saved = await service.save_settings(
+        saved = await service.update_settings(
             user_id=str(user.id),
-            timezone=request_data.timezone,
+            changes=request_data.to_changes(),
             transaction=connection,
         )
 
@@ -84,14 +78,10 @@ async def save_user_settings(
             "User settings saved",
             user_id=user.id,
             timezone=saved.timezone,
+            default_country=saved.default_country,
         )
 
-        return UserSettingsResponse(
-            data=UserSettingsData(
-                id=str(user.id),
-                attributes=UserSettingsAttributes(timezone=saved.timezone),
-            )
-        )
+        return _response(str(user.id), saved)
     except Exception as e:
         logger.error(
             "Failed to save user settings",
@@ -103,3 +93,16 @@ async def save_user_settings(
             status_code=500,
             detail="An unexpected error occurred while saving user settings",
         ) from e
+
+
+def _response(user_id: str, settings: UserSettings | None) -> UserSettingsResponse:
+    """The settings as JSON API, ``None`` fields meaning "not chosen"."""
+    return UserSettingsResponse(
+        data=UserSettingsData(
+            id=user_id,
+            attributes=UserSettingsAttributes(
+                timezone=settings.timezone if settings else None,
+                default_country=settings.default_country if settings else None,
+            ),
+        )
+    )

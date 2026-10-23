@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.settings.models import UserSettings
+from app.core.settings.models import UserSettings, UserSettingsChanges
 from app.core.settings.services.user_settings_service import UserSettingsService
 
 
@@ -26,25 +26,23 @@ def settings_service(mock_settings_repo):
     return UserSettingsService(mock_settings_repo)
 
 
-class TestSaveSettings:
-    """Test the save_settings unit of work."""
+class TestUpdateSettings:
+    """Test the update_settings unit of work."""
 
     @pytest.mark.asyncio
-    async def test_save_settings_persists_and_returns(
+    async def test_update_settings_passes_the_changes_and_returns(
         self, settings_service, mock_settings_repo, mock_transaction
-    ):
-        """save_settings upserts via the repo and returns the saved entity."""
-        saved = UserSettings(user_id="user-1", timezone="Australia/Sydney")
-        mock_settings_repo.save.return_value = saved
+    ) -> None:
+        """update_settings writes only the given changes and returns the row."""
+        saved = UserSettings(user_id="user-1", default_country="NZ")
+        mock_settings_repo.update.return_value = saved
+        changes = UserSettingsChanges(default_country="NZ")
 
-        result = await settings_service.save_settings(
+        result = await settings_service.update_settings(
             user_id="user-1",
-            timezone="Australia/Sydney",
+            changes=changes,
             transaction=mock_transaction,
         )
 
         assert result is saved
-        mock_settings_repo.save.assert_awaited_once()
-        persisted = mock_settings_repo.save.call_args.args[0]
-        assert persisted.user_id == "user-1"
-        assert persisted.timezone == "Australia/Sydney"
+        mock_settings_repo.update.assert_awaited_once_with("user-1", changes)
