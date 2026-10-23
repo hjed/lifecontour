@@ -111,7 +111,8 @@ start() {
     # Start backend
     log_info "Starting backend server..."
     cd backend
-    uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+    # --timeout-keep-alive: see UVICORN_TIMEOUT_KEEP_ALIVE_SECONDS in backend/app/main.py (#1862)
+    uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --timeout-keep-alive 65 &
     BACKEND_PID=$!
     cd ..
 

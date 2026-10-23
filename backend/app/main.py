@@ -8,7 +8,7 @@ middleware setup, and route registration.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Final
 
 import structlog
 from core_shared.product import PRODUCT_NAME, PRODUCT_TAGLINE
@@ -549,6 +549,16 @@ def _configure_openapi_security(app: FastAPI, settings: Settings) -> None:
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
+# The Next.js /api rewrite proxy pools its backend connections with no idle
+# timeout of its own, so uvicorn is always the side that closes an idle one. A
+# request the proxy sends on a socket at the moment uvicorn closes it is reset
+# (ECONNRESET) and answered 500 (#1862). At uvicorn's 5 s default the gaps
+# between bursts of traffic hit that window often; 65 s makes it rare. It is a
+# mitigation, not a guarantee: Node ignores a Keep-Alive hint for an agent with
+# no timeout of its own. Every uvicorn launch script passes the same value.
+UVICORN_TIMEOUT_KEEP_ALIVE_SECONDS: Final = 65
+
+
 def run_app(settings: Settings | None = None) -> None:
     """Run the application with the configured host and port."""
     import uvicorn
@@ -560,6 +570,7 @@ def run_app(settings: Settings | None = None) -> None:
         port=resolved_settings.port,
         reload=resolved_settings.debug,
         log_level=resolved_settings.log_level.lower(),
+        timeout_keep_alive=UVICORN_TIMEOUT_KEEP_ALIVE_SECONDS,
     )
 
 

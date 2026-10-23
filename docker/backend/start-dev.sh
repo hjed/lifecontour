@@ -55,9 +55,13 @@ echo "📍 Backend will be available at: http://localhost:8000"
 echo "📖 API Documentation: http://localhost:8000/api/docs"
 echo "🔍 Health Check: http://localhost:8000/api/health"
 
+# --timeout-keep-alive: at uvicorn's 5 s default the Next.js proxy often reuses
+# a socket uvicorn is closing (#1862); keep it equal to
+# UVICORN_TIMEOUT_KEEP_ALIVE_SECONDS in backend/app/main.py.
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
+    --timeout-keep-alive 65 \
     --reload \
     --reload-dir /app/app \
     --log-level debug \
