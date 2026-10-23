@@ -14,6 +14,7 @@ sys.path.insert(0, "/core_shared")
 
 from core_shared.models.contacts.entities import Contact, MethodType
 from core_shared.models.contacts.sync_scope import ContactSyncField
+from core_shared.models.outbox_events import SkippedAddress
 
 from api_models import (
     GoogleAddress,
@@ -1018,3 +1019,62 @@ class TestNicknameTransformation:
     def test_google_sync_owns_the_nickname(self) -> None:
         """Owned, so a nickname removed in Google is cleared locally too."""
         assert ContactSyncField.NICK_NAME in GOOGLE_CONTACT_SYNC_SCOPE.fields
+
+
+class TestAddressRegions:
+    """Regions follow the backend's rules; an unplaceable one is skipped (#1820)."""
+
+    @staticmethod
+    def _person(*addresses: GoogleAddress) -> GooglePerson:
+        return GooglePerson(resourceName="people/c1", addresses=list(addresses))
+
+    def test_a_typed_region_is_imported_as_its_code(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = self._person(
+            GoogleAddress(
+                streetAddress="1 George St", region="new south wales", countryCode="AU"
+            )
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert [a.region for a in contact.addresses or []] == ["NSW"]
+
+    def test_an_address_whose_region_is_unrecognised_is_skipped_and_reported(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        london = GoogleAddress(
+            streetAddress="10 Downing St",
+            city="London",
+            region="London",
+            postalCode="SW1A 2AA",
+            countryCode="AU",
+        )
+        person = self._person(
+            london, GoogleAddress(streetAddress="1 George St", countryCode="AU")
+        )
+
+        contact = transformer.transform_person(person)
+
+        assert [a.street_line_1 for a in contact.addresses or []] == ["1 George St"]
+        assert transformer.skipped_addresses(person) == [
+            SkippedAddress(
+                street_line_1="10 Downing St",
+                locality="London",
+                region="London",
+                postal_code="SW1A 2AA",
+                country_code="AU",
+                reason="unrecognised_region",
+            )
+        ]
+
+    def test_nothing_is_reported_when_every_region_is_placed(
+        self, transformer: GoogleContactTransformer
+    ) -> None:
+        person = self._person(
+            GoogleAddress(streetAddress="1 George St", region="NSW", countryCode="AU"),
+            GoogleAddress(streetAddress="1 High St", region="Kent", countryCode="GB"),
+        )
+
+        assert transformer.skipped_addresses(person) == []

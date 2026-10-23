@@ -21,8 +21,13 @@ from core_shared.models.contacts.important_date_types import (
     DatePrecision,
     ImportantDateType,
 )
+from core_shared.models.contacts.regions import (
+    is_unrecognised_region,
+    normalise_region,
+)
 from core_shared.models.contacts.sync_scope import ContactSyncField, ContactSyncScope
 from core_shared.models.contacts.value_objects import TagName
+from core_shared.models.outbox_events import SkippedAddress
 
 from api_models import (
     GoogleAddress,
@@ -213,6 +218,14 @@ class GoogleContactTransformer:
     ) -> list[ContactMethod]:
         """Transform Google phone numbers to ContactMethod entities."""
         return [m for m in map(import_phone, phone_numbers) if m is not None]
+
+    def skipped_addresses(self, google_person: GooglePerson) -> list[SkippedAddress]:
+        """The person's addresses the import leaves out for review (#1820)."""
+        return [
+            skipped
+            for skipped in map(skipped_address, google_person.addresses)
+            if skipped is not None
+        ]
 
     def _transform_addresses(
         self, addresses: list[GoogleAddress]
@@ -521,12 +534,19 @@ def import_phone(phone: GooglePhoneNumber) -> ContactMethod | None:
 
 
 def import_address(address: GoogleAddress) -> ContactAddress | None:
-    """The address, or None without a street and a country code (see #1820)."""
-    street_line_1 = getattr(address, "street_address", None)
-    if not street_line_1 and hasattr(address, "formatted_value"):
-        street_line_1 = address.formatted_value
+    """The address, or None when inbound cannot import it (see #1820).
+
+    That is: no street, no country code, or an AU/US/CA region naming no state,
+    province or territory - left out for the user to review
+    (:func:`skipped_address`), and so never owned by a push. A recognised region
+    is imported as its code ("New South Wales" -> "NSW").
+    """
+    street_line_1 = _street_line_1(address)
     country_code = getattr(address, "country_code", None)
     if not street_line_1 or not country_code:
+        return None
+    region = getattr(address, "region", None)
+    if is_unrecognised_region(country_code, region):
         return None
     try:
         return ContactAddress(
@@ -534,7 +554,7 @@ def import_address(address: GoogleAddress) -> ContactAddress | None:
             country_code=country_code,
             street_line_2=getattr(address, "extended_address", None),
             locality=getattr(address, "city", None),
-            region=getattr(address, "region", None),
+            region=normalise_region(country_code, region),
             postal_code=getattr(address, "postal_code", None),
             is_primary=_is_primary_field(address),
             contact_id=0,
@@ -547,6 +567,34 @@ def import_address(address: GoogleAddress) -> ContactAddress | None:
             error=str(exc),
         )
         return None
+
+
+def skipped_address(address: GoogleAddress) -> SkippedAddress | None:
+    """The address as reported for review, when its region is unrecognised."""
+    street_line_1 = _street_line_1(address)
+    country_code = getattr(address, "country_code", None)
+    region = getattr(address, "region", None)
+    if not street_line_1 or not country_code:
+        return None
+    if not is_unrecognised_region(country_code, region):
+        return None
+    return SkippedAddress(
+        street_line_1=street_line_1,
+        street_line_2=getattr(address, "extended_address", None),
+        locality=getattr(address, "city", None),
+        region=region,
+        postal_code=getattr(address, "postal_code", None),
+        country_code=country_code,
+        reason="unrecognised_region",
+    )
+
+
+def _street_line_1(address: GoogleAddress) -> str | None:
+    """The street, or the formatted address when Google gives no street."""
+    street = getattr(address, "street_address", None)
+    if not street and hasattr(address, "formatted_value"):
+        street = address.formatted_value
+    return street
 
 
 def import_birthday(birthday: GoogleBirthday) -> ImportantDate | None:

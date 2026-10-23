@@ -179,3 +179,100 @@ class TestFullSyncIntegration:
                 )
             )
             assert [row[0] for row in result_force] == [True, True]
+
+    async def test_full_sync_reports_an_address_whose_region_is_unrecognised(
+        self, db_session
+    ) -> None:
+        """Skipped from the contact, carried on the event for review (#1820)."""
+        now = datetime.now(UTC)
+        test_email = "skipped_region_sync@example.com"
+        test_user = "1820-skip"
+        fernet_key = Fernet.generate_key()
+        fernet = Fernet(fernet_key)
+        await db_session.execute(
+            text(
+                """
+                INSERT INTO user_google_auth (user_id, google_account_email,
+                                              encrypted_access_token, encrypted_refresh_token,
+                                              expires_at, created_at, updated_at)
+                VALUES (:user_id, :email, :token, :refresh, :expiry, :now, :now)
+                """
+            ),
+            {
+                "user_id": test_user,
+                "email": test_email,
+                "token": fernet.encrypt(b"access_token"),
+                "refresh": fernet.encrypt(b"refresh_token"),
+                "expiry": now + timedelta(hours=1),
+                "now": now,
+            },
+        )
+        await db_session.commit()
+
+        @asynccontextmanager
+        async def mock_session_factory():
+            yield db_session
+
+        mock_list = MagicMock()
+        mock_list.execute.return_value = {
+            "connections": [
+                {
+                    "resourceName": "people/skipped_region_1",
+                    "etag": "etag_1",
+                    "names": [{"givenName": "Kiri", "metadata": {"primary": True}}],
+                    "addresses": [
+                        {
+                            "streetAddress": "10 Downing St",
+                            "region": "London",
+                            "countryCode": "AU",
+                        },
+                        {
+                            "streetAddress": "1 George St",
+                            "region": "new south wales",
+                            "countryCode": "AU",
+                        },
+                    ],
+                }
+            ],
+            "nextSyncToken": "token_after_skipped_region_sync",
+        }
+        mock_service = MagicMock()
+        mock_service.people.return_value.connections.return_value.list.return_value = (
+            mock_list
+        )
+
+        with (
+            patch(
+                "worker.settings.encryption_key.get_secret_value",
+                return_value=fernet_key.decode(),
+            ),
+            patch("google_client.build", return_value=mock_service),
+        ):
+            await sync_google_contacts(
+                ctx={
+                    "session_factory": mock_session_factory,
+                    "redis": None,
+                    "job_id": "test_job_skipped_region",
+                },
+                google_account_email=test_email,
+                user_id=test_user,
+                sync_type="full",
+            )
+
+        rows = await db_session.execute(
+            text(
+                """
+                SELECT (event_data::jsonb)->'contact_data'->'addresses',
+                       (event_data::jsonb)->'skipped_addresses'
+                FROM outbox_events
+                WHERE (event_data::jsonb)->>'external_id' = 'people/skipped_region_1'
+                """
+            )
+        )
+        [(addresses, skipped)] = rows.all()
+        assert [(a["street_line_1"], a["region"]) for a in addresses] == [
+            ("1 George St", "NSW")
+        ]
+        assert [(s["street_line_1"], s["region"], s["reason"]) for s in skipped] == [
+            ("10 Downing St", "London", "unrecognised_region")
+        ]

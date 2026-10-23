@@ -343,6 +343,25 @@ class TestAddresses:
             {"streetAddress": "1 Somewhere St", "city": "Sydney", "type": "home"},
         ]
 
+    def test_keeps_an_address_whose_region_inbound_cannot_place(self) -> None:
+        """Inbound skipped it for review, so the push must not delete it (#1820)."""
+        london = {
+            "metadata": CONTACT_SOURCE,
+            "streetAddress": "10 Downing St",
+            "region": "London",
+            "countryCode": "AU",
+        }
+        pushed = {"streetAddress": "1 George St", "countryCode": "AU"}
+
+        merged = merge_with_current_person(
+            {"addresses": [pushed]}, {"addresses": [london]}
+        )
+
+        assert merged["addresses"] == [
+            pushed,
+            {"streetAddress": "10 Downing St", "region": "London", "countryCode": "AU"},
+        ]
+
     def test_imported_address_deleted_locally_is_not_restored(self) -> None:
         current = {
             "addresses": [

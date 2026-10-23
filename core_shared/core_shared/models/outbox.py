@@ -23,6 +23,7 @@ from .outbox_events import (
     JournalSeriesCancelledEventData,
     JournalSyncEventData,
     MatchDetectionEventData,
+    SkippedAddress,
     SyncCompletedEventData,
 )
 
@@ -113,6 +114,7 @@ class OutboxEvent(Base):
         user_id: str,
         sync_scope: ContactSyncScope | None = None,
         force_apply: bool = False,
+        skipped_addresses: list[SkippedAddress] | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -126,6 +128,7 @@ class OutboxEvent(Base):
             user_id: Owner of the synced contact (the integration's user)
             sync_scope: The fields the source owns; see ``ContactSyncScope``
             force_apply: Apply even when ``etag`` is unchanged (a full sync)
+            skipped_addresses: Addresses the import left out, for review
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -143,6 +146,7 @@ class OutboxEvent(Base):
             user_id=user_id,
             sync_scope=sync_scope,
             force_apply=force_apply,
+            skipped_addresses=skipped_addresses or [],
         )
         return cls(
             event_type=f"contact.{sync_type}",
