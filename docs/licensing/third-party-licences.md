@@ -100,7 +100,6 @@ Notes on the counts:
 |---|---|---|---|---|
 | `psycopg2-binary` | 2.9.13 | LGPL-3.0 (with exceptions) | all Python projects | **Compatible.** A dynamically loaded library. LGPLv3 is compatible with GPLv3 and so with AGPLv3. |
 | `pycountry` | 26.2.16 | LGPL-2.1-only | backend | **Compatible.** Imported, not modified. LGPL-2.1 section 3 permits applying GPLv2-or-later instead, which is AGPLv3-combinable via GPLv3 section 13. |
-| `python-stdnum` | 2.2 | LGPL-2.1-or-later | backend | **Compatible**, for the same reasons. |
 | `certifi` | 2025.4.26 – 2026.5.20 | MPL-2.0 | all Python projects | **Compatible.** File-level copyleft, and MPL-2.0 section 3.3 permits combination with GPL-family code. The CA bundle is used unmodified. |
 | `docutils` | 0.22.3 | Public domain / BSD-2-Clause (metadata also lists GPL) | backend, via `fastmcp` → `cyclopts` → `rich-rst` | **Compatible.** The GPL-3.0-or-later file (the Emacs mode) is not in the wheel, and it would be compatible anyway. |
 | `@img/sharp-libvips-*` (10 platforms) | 1.3.3 | LGPL-3.0-or-later | frontend (server-side Next.js image optimisation) | **Compatible.** A dynamically loaded native library that is never sent to the browser. |

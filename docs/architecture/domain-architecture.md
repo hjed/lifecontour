@@ -101,6 +101,11 @@ domain/
     synced to an integration
   - Address validation (street_line_1 and country_code required)
   - Country code validation (ISO 3166-1 alpha-2 format)
+  - Region normalisation: an AU, US or CA region given as its ISO 3166-2
+    code or name, in any case or accents ("new south wales", "Québec"), is
+    stored as the code; a blank region is stored empty and an unrecognised one
+    as written. Regions and postcodes never fail validation: on import one bad
+    field would dead-letter the whole contact (#1820)
   - Contact history tracking for all changes
 - **Domain Events**: ContactCreated, ContactUpdated, ContactDeleted, TagAssigned, TagRemoved, ContactMethodAdded, ContactNoteAdded, ContactAddressAdded
 
