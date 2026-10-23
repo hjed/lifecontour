@@ -155,6 +155,13 @@ class Settings(BaseSettings):
         "Disabled by default — set ENABLE_TEST_REVIEW_ITEMS=true "
         "only in test/CI environments for E2E review queue testing.",
     )
+    enable_test_import_issues: bool = Field(
+        default=False,
+        description="Enable the POST /api/integrations/import-issues test "
+        "endpoint, which records a skipped import address. Disabled by default "
+        "- set ENABLE_TEST_IMPORT_ISSUES=true only in test/CI environments for "
+        "E2E review testing.",
+    )
     enable_test_daily_summary_stub: bool = Field(
         default=False,
         description="Answer daily summary generation with a fixed stub response "
@@ -378,6 +385,7 @@ class Settings(BaseSettings):
         switches = (
             ("ENABLE_TEST_REVIEW_ITEMS", self.enable_test_review_items),
             ("ENABLE_TEST_DAILY_SUMMARY_STUB", self.enable_test_daily_summary_stub),
+            ("ENABLE_TEST_IMPORT_ISSUES", self.enable_test_import_issues),
         )
         return [name for name, enabled in switches if enabled]
 

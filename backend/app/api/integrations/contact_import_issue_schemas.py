@@ -42,6 +42,31 @@ class ContactImportIssueListResponse(BaseModel):
     data: list[ContactImportIssueResource]
 
 
+class SkippedAddressCreateAttributes(BaseModel):
+    contact_id: int
+    address: SkippedAddressSchema
+
+
+class SkippedAddressCreateData(BaseModel):
+    type: Literal["contact-import-issues"] = "contact-import-issues"
+    attributes: SkippedAddressCreateAttributes
+
+
+class SkippedAddressCreateRequest(BaseModel):
+    """Body of the test-only create (``ENABLE_TEST_IMPORT_ISSUES``)."""
+
+    data: SkippedAddressCreateData
+
+
+class CreatedContactImportIssueData(BaseModel):
+    type: Literal["contact-import-issues"] = "contact-import-issues"
+    id: str
+
+
+class CreatedContactImportIssueResponse(BaseModel):
+    data: CreatedContactImportIssueData
+
+
 def to_resource(issue: ContactImportIssue) -> ContactImportIssueResource:
     return ContactImportIssueResource(
         id=str(issue.id),
