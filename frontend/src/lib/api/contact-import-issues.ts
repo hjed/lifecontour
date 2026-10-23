@@ -49,10 +49,19 @@ export function dismissContactImportIssue(issueId: string): Promise<void> {
   );
 }
 
+/**
+ * The pending issues, kept current while a page is open.
+ *
+ * Issues change when a sync applies, and nothing in the app fires when a sync
+ * job finishes, so the list re-checks on the Google status cadence instead of
+ * waiting out the app-wide five-minute staleTime.
+ */
 export function useContactImportIssues(contactId?: string) {
   return useQuery({
     queryKey: contactImportIssueKeys.list(contactId),
     queryFn: () => fetchContactImportIssues(contactId),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
 
