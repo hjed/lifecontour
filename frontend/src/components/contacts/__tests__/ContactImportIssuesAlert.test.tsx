@@ -92,4 +92,32 @@ describe('ContactImportIssuesAlert', () => {
 
     expect(dismissMutate).toHaveBeenCalledWith('3');
   });
+
+  it('says so when the skipped addresses fail to load', () => {
+    (useContactImportIssues as jest.Mock).mockReturnValue({
+      data: undefined,
+      error: new Error('Server unavailable'),
+    });
+
+    render(<ContactImportIssuesAlert contactId='7' />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Couldn’t check for skipped Google addresses'
+    );
+    expect(alert).toHaveTextContent('Server unavailable');
+  });
+
+  it('keeps showing what it has when a later refresh fails', () => {
+    (useContactImportIssues as jest.Mock).mockReturnValue({
+      data: { data: [issue('3')] },
+      error: new Error('Server unavailable'),
+    });
+
+    render(<ContactImportIssuesAlert contactId='7' />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'A Google address wasn’t imported'
+    );
+  });
 });

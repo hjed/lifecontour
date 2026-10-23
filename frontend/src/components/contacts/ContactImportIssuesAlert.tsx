@@ -1,6 +1,6 @@
 'use client';
 
-import { MapPinOff } from 'lucide-react';
+import { AlertCircle, MapPinOff } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,9 +22,20 @@ export interface ContactImportIssuesAlertProps {
 export function ContactImportIssuesAlert({
   contactId,
 }: ContactImportIssuesAlertProps) {
-  const { data } = useContactImportIssues(contactId);
+  const { data, error } = useContactImportIssues(contactId);
   const dismiss = useDismissContactImportIssue();
   const issues = data?.data ?? [];
+
+  // Only when there is nothing to show: a failed refresh keeps the last list.
+  if (error && !data) {
+    return (
+      <Alert variant='destructive'>
+        <AlertCircle className='h-4 w-4' />
+        <AlertTitle>Couldn’t check for skipped Google addresses</AlertTitle>
+        <AlertDescription>{error.message}</AlertDescription>
+      </Alert>
+    );
+  }
 
   if (issues.length === 0) {
     return null;

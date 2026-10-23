@@ -97,4 +97,17 @@ describe('SkippedAddressesCard', () => {
 
     expect(dismissMutate).toHaveBeenCalledWith('3');
   });
+
+  it('says so when the skipped addresses fail to load', () => {
+    (useContactImportIssues as jest.Mock).mockReturnValue({
+      data: undefined,
+      error: new Error('Server unavailable'),
+    });
+
+    render(<SkippedAddressesCard />);
+
+    const card = screen.getByTestId('skipped-addresses');
+    expect(card).toHaveTextContent('Error loading skipped addresses');
+    expect(card).toHaveTextContent('Server unavailable');
+  });
 });

@@ -23,9 +23,29 @@ import { describeAddress, skippedReason } from '@/lib/import-issues';
  * in Google Contacts imports it on the next sync and clears it from here.
  */
 export function SkippedAddressesCard() {
-  const { data } = useContactImportIssues();
+  const { data, error } = useContactImportIssues();
   const dismiss = useDismissContactImportIssue();
   const issues = data?.data ?? [];
+
+  // Only when there is nothing to show: a failed refresh keeps the last list.
+  if (error && !data) {
+    return (
+      <Card data-testid='skipped-addresses'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <MapPinOff className='h-5 w-5' />
+            Skipped addresses
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className='text-destructive text-sm font-medium'>
+            Error loading skipped addresses
+          </p>
+          <p className='text-muted-foreground text-sm'>{error.message}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (issues.length === 0) {
     return null;
