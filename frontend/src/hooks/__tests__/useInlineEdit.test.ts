@@ -7,6 +7,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useInlineEdit } from '@/hooks/useInlineEdit';
+import { PreconditionFailedError } from '@/lib/api/conditional-request';
 
 // Mock toast notifications
 jest.mock('sonner', () => ({
@@ -361,6 +362,110 @@ describe('useInlineEdit', () => {
 
       expect(mockEvent.preventDefault).not.toHaveBeenCalled();
       expect(result.current.isEditing).toBe(true);
+    });
+  });
+  describe('write conflicts', () => {
+    const conflict = () =>
+      new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {});
+
+    async function saveRefused(initial: string) {
+      const onSave = jest.fn().mockRejectedValue(conflict());
+      const hook = renderHook(
+        ({ value }) => useInlineEdit(value, onSave, undefined, {}),
+        { initialProps: { value: initial } }
+      );
+      act(() => hook.result.current.startEdit());
+      act(() => hook.result.current.setValue('mine'));
+      return { hook, save: () => hook.result.current.saveEdit() };
+    }
+
+    it('leaves edit mode without an error or toast, since the conflict dialog reports it', async () => {
+      const { hook, save } = await saveRefused('original');
+
+      await act(save);
+
+      expect(hook.result.current.isEditing).toBe(false);
+      expect(hook.result.current.error).toBeNull();
+      expect(hook.result.current.displayValue).toBe('original');
+      const { toast } = jest.requireMock('sonner');
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it('shows the value re-read with the conflict, not the one it replaced', async () => {
+      const { hook, save } = await saveRefused('original');
+
+      // The conflict handler re-reads the record before the save rejects.
+      await act(async () => {
+        const saving = save();
+        hook.rerender({ value: 'theirs' });
+        await saving;
+      });
+
+      expect(hook.result.current.displayValue).toBe('theirs');
+    });
+  });
+
+  describe('the field changing while it is being edited', () => {
+    function editing(
+      initial: string,
+      onSave = jest.fn().mockResolvedValue(undefined)
+    ) {
+      const hook = renderHook(
+        ({ value }) => useInlineEdit(value, onSave, undefined, {}),
+        { initialProps: { value: initial } }
+      );
+      act(() => hook.result.current.startEdit());
+      act(() => hook.result.current.setValue('mine'));
+      return { hook, onSave };
+    }
+
+    it('asks before replacing a value that changed elsewhere since editing began', async () => {
+      // A refetch brought the other tab's value, and with it the newer tag:
+      // sending the draft now would overwrite that value unrefused.
+      const { hook, onSave } = editing('original');
+      hook.rerender({ value: 'theirs' });
+
+      await act(() => hook.result.current.saveEdit());
+
+      expect(onSave).not.toHaveBeenCalled();
+      expect(hook.result.current.isEditing).toBe(true);
+      expect(hook.result.current.value).toBe('mine');
+      expect(hook.result.current.error).toBe(
+        'This was changed elsewhere to “theirs” while you were editing. Save again to replace it.'
+      );
+
+      await act(() => hook.result.current.saveEdit());
+
+      expect(onSave).toHaveBeenCalledWith('mine');
+    });
+
+    it('cancels back to the value that changed elsewhere', () => {
+      const { hook } = editing('original');
+      hook.rerender({ value: 'theirs' });
+
+      act(() => hook.result.current.cancelEdit());
+
+      expect(hook.result.current.displayValue).toBe('theirs');
+    });
+
+    it('cannot be reopened while a save is in flight', async () => {
+      let finish!: () => void;
+      const onSave = jest.fn(
+        () => new Promise<void>(resolve => (finish = resolve))
+      );
+      const { hook } = editing('original', onSave);
+      let saving!: Promise<void>;
+      act(() => {
+        saving = hook.result.current.saveEdit();
+      });
+
+      act(() => hook.result.current.startEdit());
+
+      expect(hook.result.current.isEditing).toBe(false);
+      await act(async () => {
+        finish();
+        await saving;
+      });
     });
   });
 });

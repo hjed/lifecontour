@@ -91,9 +91,9 @@ export function aggregateWrite<TVariables>(
  * Sends one guarded write and records the version it committed.
  *
  * Call from inside `mutationFn`, so the tag is read when the scope reaches
- * this mutation. A refetch of the detail still in flight is cancelled first:
- * it may have read the version before the previous write, and landing after
- * this write's tag is stored it would put the older tag back.
+ * this mutation. Refetches of the detail are cancelled before the write and
+ * again after it: any of them may have read the version before this write,
+ * and landing after its tag is stored would put the older tag back.
  */
 export async function sendGuarded<T>(
   queryClient: QueryClient,
@@ -102,6 +102,10 @@ export async function sendGuarded<T>(
 ): Promise<T> {
   await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
   const { body, etag } = await send(readEtag(queryClient, detailKey));
+  // And again once it has landed: a read started while the write was in
+  // flight (a window refocus, say) may have read the version before it, and
+  // arriving after the new tag is stored it would put the old one back.
+  await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
   storeEtag(queryClient, detailKey, etag);
   return body;
 }

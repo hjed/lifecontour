@@ -27,7 +27,7 @@ export function ContactIdentityInline({
   contact,
   className,
 }: ContactIdentityInlineProps) {
-  const updateFieldMutation = useUpdateContactField();
+  const updateFieldMutation = useUpdateContactField(contact.id);
 
   const displayName = generateDisplayName(
     contact.attributes.first_name,
@@ -43,7 +43,6 @@ export function ContactIdentityInline({
   // Handle field updates
   const handleFirstNameSave = async (value: string) => {
     await updateFieldMutation.mutateAsync({
-      contactId: contact.id,
       fieldName: 'first_name',
       value,
     });
@@ -51,7 +50,6 @@ export function ContactIdentityInline({
 
   const handleLastNameSave = async (value: string) => {
     await updateFieldMutation.mutateAsync({
-      contactId: contact.id,
       fieldName: 'last_name',
       value,
     });
@@ -59,7 +57,6 @@ export function ContactIdentityInline({
 
   const handleNicknameSave = async (value: string) => {
     await updateFieldMutation.mutateAsync({
-      contactId: contact.id,
       fieldName: 'nick_name',
       value,
     });

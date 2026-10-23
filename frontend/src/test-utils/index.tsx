@@ -119,6 +119,26 @@ export function renderWithProviders(
 }
 
 /**
+ * A fetch `Response` stand-in that, unlike a bare `{ ok, json }` object, also
+ * carries headers — what a contact or journal read or write needs, since the
+ * aggregate's `ETag` comes back as one.
+ */
+export function mockApiResponse(
+  body: unknown,
+  { status = 200, etag }: { status?: number; etag?: string } = {}
+): Response {
+  const headers = new Map<string, string>(etag ? [['etag', etag]] : []);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name: string) => headers.get(name.toLowerCase()) ?? null,
+    },
+    json: async () => body,
+  } as Response;
+}
+
+/**
  * Build a retry-disabled QueryClient and a matching wrapper for testing React
  * Query hooks with `renderHook`. Returns the client so tests can spy on
  * `invalidateQueries` / seed cache state.

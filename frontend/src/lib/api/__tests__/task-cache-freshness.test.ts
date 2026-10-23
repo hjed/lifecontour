@@ -28,6 +28,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import { taskHistoryKeys, taskKeys, useUpdateTask } from '../tasks';
 import { TaskStatus } from '@/types/tasks';
+import { mockApiResponse } from '@/test-utils';
 import {
   useDeleteJournal,
   useMergeJournal,
@@ -67,11 +68,9 @@ beforeEach(() => {
     },
   });
   jest.clearAllMocks();
-  mockFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => ({ data: { type: 'x', id: '1', attributes: {} } }),
-  } as Response);
+  mockFetch.mockResolvedValue(
+    mockApiResponse({ data: { type: 'x', id: '1', attributes: {} } })
+  );
 });
 
 /** Every query key an `invalidateQueries` spy was asked to invalidate. */
@@ -151,23 +150,22 @@ describe('journal mutations refresh the task caches', () => {
 describe('contact mutations refresh the task caches', () => {
   it('useUpdateContact names the task namespace', async () => {
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateContact(), {
+    const { result } = renderHook(() => useUpdateContact('1'), {
       wrapper: createWrapper,
     });
 
-    result.current.mutate({ id: '1', data: { first_name: 'Renamed' } });
+    result.current.mutate({ first_name: 'Renamed' });
 
     await expectTasksRefreshed(spy);
   });
 
   it('useUpdateContactField names the task namespace', async () => {
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateContactField(), {
+    const { result } = renderHook(() => useUpdateContactField('1'), {
       wrapper: createWrapper,
     });
 
     result.current.mutate({
-      contactId: '1',
       fieldName: 'first_name',
       value: 'Renamed',
     });
@@ -241,11 +239,11 @@ describe('a task history cache is not collateral damage', () => {
 
   it('a contact mutation does not discard it either', async () => {
     const spy = jest.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useUpdateContact(), {
+    const { result } = renderHook(() => useUpdateContact('1'), {
       wrapper: createWrapper,
     });
 
-    result.current.mutate({ id: '1', data: { first_name: 'Renamed' } });
+    result.current.mutate({ first_name: 'Renamed' });
 
     await expectTasksRefreshed(spy);
     for (const key of invalidatedKeys(spy)) {

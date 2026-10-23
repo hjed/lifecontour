@@ -11,6 +11,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
+import { isWriteConflict } from '@/lib/write-conflicts';
 
 export interface UseInlineEditOptions {
   /** Validation function that returns error message or null */
@@ -73,10 +74,32 @@ export function useInlineEdit(
   // Keep track of original value for rollback
   const [originalValue, setOriginalValue] = useState(normalizedInitialValue);
   const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
+  // Set when a save was refused as a write conflict: the record has been
+  // re-read, so the field shows whatever the cache now holds.
+  const [resyncPending, setResyncPending] = useState(false);
+  // The value the field took on elsewhere while it was being edited, until
+  // the user has seen it. A refetch that brings it also brings the record's
+  // newer tag, so saving the draft as-is would overwrite it unrefused.
+  const [changedWhileEditing, setChangedWhileEditing] = useState<string | null>(
+    null
+  );
+  // Whether the error showing is that notice rather than a validation error,
+  // so the second save it asks for is not blocked by it.
+  const [staleWarned, setStaleWarned] = useState(false);
+
+  if (resyncPending) {
+    setResyncPending(false);
+    setDisplayValue(normalizedInitialValue);
+    setValue(normalizedInitialValue);
+    setOriginalValue(normalizedInitialValue);
+  }
 
   // Sync external changes (e.g. from react-query refetches) when not actively editing
   if (initialValue !== prevInitialValue) {
     setPrevInitialValue(initialValue);
+    if (isEditing && initialValue !== undefined) {
+      setChangedWhileEditing(initialValue ?? '');
+    }
     if (!isEditing && initialValue !== undefined) {
       const normalized = initialValue ?? '';
 
@@ -88,21 +111,29 @@ export function useInlineEdit(
   }
 
   const startEdit = useCallback(() => {
+    // Not while a save is in flight: its outcome — a conflict re-read, say —
+    // resyncs the field, which an open editor would hold back.
+    if (isLoading) return;
     setIsEditing(true);
     setError(null);
     setOriginalValue(displayValue);
-  }, [displayValue]);
+  }, [displayValue, isLoading]);
 
   const cancelEdit = useCallback(() => {
-    setValue(originalValue);
-    setDisplayValue(originalValue);
+    const restored = changedWhileEditing ?? originalValue;
+    setChangedWhileEditing(null);
+    setValue(restored);
+    setDisplayValue(restored);
+    setOriginalValue(restored);
     setIsEditing(false);
     setError(null);
-  }, [originalValue]);
+  }, [changedWhileEditing, originalValue]);
 
   const handleSetValue = useCallback(
     (newValue: string) => {
       setValue(newValue);
+      // Editing on replaces the notice; validation below decides the error.
+      setStaleWarned(false);
 
       // Run validation if provided
       if (validation) {
@@ -117,8 +148,23 @@ export function useInlineEdit(
 
   const saveEdit = useCallback(async () => {
     // Don't save if there's a validation error
-    if (error) {
+    if (error && !staleWarned) {
       return;
+    }
+    setStaleWarned(false);
+
+    // The field changed elsewhere since editing began: say so once, and let
+    // a second save replace it knowingly.
+    if (changedWhileEditing !== null) {
+      setChangedWhileEditing(null);
+      setOriginalValue(changedWhileEditing);
+      if (value !== changedWhileEditing) {
+        setError(
+          `This was changed elsewhere to “${changedWhileEditing}” while you were editing. Save again to replace it.`
+        );
+        setStaleWarned(true);
+        return;
+      }
     }
 
     // Don't save if value hasn't changed
@@ -153,6 +199,13 @@ export function useInlineEdit(
         toast.success('Field updated successfully');
       }
     } catch (saveError) {
+      if (isWriteConflict(saveError)) {
+        // The conflict dialog reports it and offers to re-apply the value, so
+        // the field closes rather than holding a second copy of the edit.
+        setResyncPending(true);
+        return;
+      }
+
       // Rollback optimistic update
       setDisplayValue(originalValue);
       setValue(originalValue);
@@ -175,6 +228,8 @@ export function useInlineEdit(
     value,
     originalValue,
     error,
+    staleWarned,
+    changedWhileEditing,
     validation,
     onSave,
     showSuccessToast,

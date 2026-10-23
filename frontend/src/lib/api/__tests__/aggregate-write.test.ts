@@ -99,6 +99,25 @@ describe('sendGuarded', () => {
   });
 });
 
+describe('sendGuarded and reads that overlap the write', () => {
+  it('cancels a read started while the write was in flight before storing its tag', async () => {
+    // A read that began before the write committed would land afterwards
+    // with the old body and tag, and the next edit would conflict with this
+    // page's own write.
+    const queryClient = seeded();
+    const cancel = jest.spyOn(queryClient, 'cancelQueries');
+    const send = jest.fn().mockResolvedValue({ body: undefined, etag: '"e2"' });
+
+    await sendGuarded(queryClient, KEY, send);
+
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(cancel.mock.invocationCallOrder[1]).toBeGreaterThan(
+      send.mock.invocationCallOrder[0] ?? Infinity
+    );
+    expect(readEtag(queryClient, KEY)).toBe('"e2"');
+  });
+});
+
 describe('aggregateWrite', () => {
   const options = aggregateWrite(REF, (value: string) => `Name → ${value}`);
 
