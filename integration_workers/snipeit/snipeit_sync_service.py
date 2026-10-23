@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import structlog
+from core_shared.integration_constants import snipeit_maintenance_calendar_id
 from core_shared.models.journals.calendar_info import event_date_in_timezone
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy import text
@@ -361,10 +362,6 @@ def _is_transient_error(exc: Exception) -> bool:
 _MAX_ASSET_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2.0
 
-# Synthetic calendar UUID for Snipe-IT maintenance events.
-# Generated deterministically: uuid5(NAMESPACE_URL, "snipeit:maintenance")
-_SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
-
 # The integration source of inbound maintenance syncs. The backend records it as
 # ``changed_by`` on every journal update it applies from one, which is how the
 # consumer tells a Snipe-IT-applied update from a user's edit.
@@ -575,8 +572,10 @@ async def _journal_exists(session: Any, journal_id: int, *, lock: bool = False) 
     return result.fetchone() is not None
 
 
-async def _journal_holding_maintenance(session: Any, external_id: str) -> int | None:
-    """The live journal linked to this Snipe-IT maintenance, if there is one.
+async def _journal_holding_maintenance(
+    session: Any, external_id: str, *, user_id: str
+) -> int | None:
+    """The live journal ``user_id`` has linked to this Snipe-IT maintenance, if any.
 
     A link is written only for an imported record, and only by the backend once
     it has created the journal — so this answers "does the app still show this
@@ -594,7 +593,7 @@ async def _journal_holding_maintenance(session: Any, external_id: str) -> int | 
         """),
         {
             "external_event_id": external_id,
-            "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+            "calendar_id": snipeit_maintenance_calendar_id(user_id),
         },
     )
     journal_id: int | None = result.scalar_one_or_none()
@@ -1374,7 +1373,7 @@ class SnipeItSyncService:
                     "user_id": self._user_id,
                     "maintenance_ids": [record.id for record in on_an_asset],
                     "asset_ids": [record.asset_id for record in on_an_asset],
-                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
                 },
             )
             return {int(row.maintenance_id) for row in result}
@@ -1399,8 +1398,8 @@ class SnipeItSyncService:
 
         Each user's sync asks their own Snipe-IT, so only this user's rows are
         candidates: another user's row for the same id names a record in their
-        instance. A row another user's live journal holds, by its push or its
-        import link, is left alone as well.
+        instance, and their journals are linked on their own maintenance
+        calendar, so they hold nothing of this user's.
 
         Only reads are sent to Snipe-IT, so running this again is harmless.
 
@@ -1423,29 +1422,8 @@ class SnipeItSyncService:
                     FROM sync_metadata m
                     WHERE m.user_id = :user_id
                       AND m.integration_source = 'snipeit_maintenance'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM journals j
-                          WHERE j.user_id <> :user_id
-                            AND (
-                                j.id = CASE
-                                    WHEN m.internal_uuid ~ '^[0-9]+$'
-                                    THEN CAST(m.internal_uuid AS bigint)
-                                END
-                                OR EXISTS (
-                                    SELECT 1
-                                    FROM journal_external_event_links l
-                                    WHERE l.journal_id = j.id
-                                      AND l.calendar_id = :calendar_id
-                                      AND l.external_event_id = m.external_id
-                                )
-                            )
-                      )
                 """),
-                {
-                    "user_id": self._user_id,
-                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
-                },
+                {"user_id": self._user_id},
             )
             candidates = [
                 (row.external_id, maintenance_id)
@@ -1521,7 +1499,7 @@ class SnipeItSyncService:
                     {
                         "user_id": self._user_id,
                         "external_id": external_id,
-                        "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                        "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
                     },
                 )
                 forgotten = result.fetchone() is not None
@@ -1636,7 +1614,9 @@ class SnipeItSyncService:
                         """),
                         {
                             "external_event_id": external_id,
-                            "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                            "calendar_id": snipeit_maintenance_calendar_id(
+                                self._user_id
+                            ),
                         },
                     )
                     link_row = link_result.fetchone()
@@ -1767,7 +1747,7 @@ class SnipeItSyncService:
 
                 # Build calendar_info_data
                 calendar_info_data: dict[str, Any] = {
-                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
                 }
 
                 # Create outbox event
@@ -1778,7 +1758,7 @@ class SnipeItSyncService:
                     calendar_info_data=calendar_info_data,
                     integration_source=INBOUND_SYNC_CHANGED_BY,
                     external_event_id=external_id,
-                    calendar_id=_SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    calendar_id=snipeit_maintenance_calendar_id(self._user_id),
                     sync_action=sync_action,
                     existing_journal_id=existing_journal_id,
                 )
@@ -1888,7 +1868,7 @@ class SnipeItSyncService:
                 """),
                 {
                     "journal_id": journal_id,
-                    "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
                 },
             )
             link_row = link_result.fetchone()
@@ -2649,7 +2629,9 @@ class SnipeItSyncService:
             return False
 
         async with session_factory() as session:
-            holder = await _journal_holding_maintenance(session, external_id)
+            holder = await _journal_holding_maintenance(
+                session, external_id, user_id=self._user_id
+            )
         if holder is not None:
             # Someone holds this record now, so the deletion being processed is
             # not about it: a redelivered event, or one that crossed a sync that

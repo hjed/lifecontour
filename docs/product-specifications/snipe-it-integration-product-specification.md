@@ -117,7 +117,7 @@ Snipe-IT allows logging maintenance on assets. These map to the `GEAR_MAINTENANC
     - A journal deleted in the moment between its record being posted and being recorded has that record deleted, but nothing retries that delete if it fails. The record then imports as a new journal, as a record left by any other lost attempt does.
     - A full sync that imports a record in the moments before its journal's deletion is handled can win the race: the new journal's link arrives first, so the deletion leaves the record in Snipe-IT with that journal holding it, and the deleted journal comes back as a new one. That is visible rather than a silent loss. The opposite order is safe — once the deletion has removed the record's row, the create that sync sent is skipped, so it cannot bring back a journal for a record that is gone.
 - **Loop Prevention**: A record must never travel back to the system it came from.
-  - A journal imported from Snipe-IT (linked to the synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
+  - A journal imported from Snipe-IT (linked to the user's own synthetic Snipe-IT maintenance calendar) is never created in Snipe-IT again.
   - A journal update the inbound sync applied (`changed_by` is `snipeit_maintenance`) is not pushed; only a user's edit is.
   - A push of the record's own state changes nothing when it is next imported, so no journal update follows it.
   - A Snipe-IT record created from a journal is skipped by the inbound sync rather than imported as a second journal.

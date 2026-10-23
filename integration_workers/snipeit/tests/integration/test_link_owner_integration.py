@@ -10,6 +10,7 @@ changes it.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -17,13 +18,28 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from snipeit_sync_service import (
+    IMPORT_LINK_GRACE_SECONDS,
     GearUsagePair,
     _delete_maintenance_claim,
     _fetch_maintenance_claim,
+    snipeit_maintenance_calendar_id,
 )
 from snipeit_sync_window import ListedRecord
 
 from .test_checkin_sync_integration import _session_factory
+from .test_maintenance_sync_integration import (
+    _an_import_whose_journal_is_gone,
+    _joined_session_factory,
+    _listed,
+    _push_rows,
+    _queue_gone,
+    _seed_claim,
+    _seed_import_record,
+    _seed_maintenance_journal,
+    _seed_synced_asset,
+    _snipeit_writes,
+    _write_response,
+)
 
 # ``snipeit_sync_service`` (conftest) syncs for this user.
 OWNER = "user-123"
@@ -262,3 +278,256 @@ class TestGearUsagePairsAreTheOwners:
         )
 
         assert recorded[PAIR.asset_id].checkin_status is None
+
+
+async def _seed_other_users_import(
+    async_connection: AsyncConnection, *, maintenance_id: int
+) -> int:
+    """Another user's journal imported from their own Snipe-IT's record
+    ``maintenance_id``, as the backend writes it: on their maintenance calendar,
+    with their import row."""
+    gear = await async_connection.execute(
+        text("""
+            INSERT INTO gear_items (name, user_id)
+            VALUES ('Their rope', :user_id)
+            RETURNING id
+        """),
+        {"user_id": OTHER_USER},
+    )
+    gear_item_id = str(gear.scalar_one())
+    journal = await async_connection.execute(
+        text("""
+            INSERT INTO journals (title, content, user_id,
+                event_date_range_start, event_date_range_end)
+            VALUES ('Their maintenance', '', :user_id, '2026-09-11', '2026-09-11')
+            RETURNING id
+        """),
+        {"user_id": OTHER_USER},
+    )
+    journal_id = int(journal.scalar_one())
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_gear_maintenance_data
+                (journal_id, gear_item_id, maintenance_type)
+            VALUES (:journal_id, :gear_item_id, 'routine maintenance')
+        """),
+        {"journal_id": journal_id, "gear_item_id": gear_item_id},
+    )
+    calendar_id = snipeit_maintenance_calendar_id(OTHER_USER)
+    await async_connection.execute(
+        text("""
+            INSERT INTO calendars (id, user_id, name, color, integration_source)
+            VALUES (:calendar_id, :user_id, 'Snipe-IT Maintenance', '#808080',
+                    'snipeit_maintenance')
+            ON CONFLICT (id) DO NOTHING
+        """),
+        {"calendar_id": calendar_id, "user_id": OTHER_USER},
+    )
+    await async_connection.execute(
+        text("""
+            INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id,
+                 sync_capability, sync_status)
+            VALUES (:journal_id, :calendar_id, :external_event_id,
+                    'bidirectional', 'synced')
+        """),
+        {
+            "journal_id": journal_id,
+            "calendar_id": calendar_id,
+            "external_event_id": f"snipeit_maint:{maintenance_id}",
+        },
+    )
+    await _seed_row(
+        async_connection,
+        source="snipeit_maintenance",
+        external_id=f"snipeit_maint:{maintenance_id}",
+    )
+    return journal_id
+
+
+async def _journal_event_payloads(
+    async_connection: AsyncConnection,
+) -> list[tuple[str, dict[str, Any]]]:
+    result = await async_connection.execute(
+        text("""
+            SELECT event_type, event_data FROM outbox_events
+            WHERE event_type LIKE 'journal_event.%'
+            ORDER BY id
+        """)
+    )
+    return [(row.event_type, json.loads(row.event_data)) for row in result.fetchall()]
+
+
+@pytest.mark.asyncio
+class TestMaintenanceImportLinksAreTheOwners:
+    """Each user's imports are linked on their own maintenance calendar, so
+    another user's journal holding the same record id never stands in for
+    this user's record."""
+
+    def test_each_user_has_their_own_maintenance_calendar(self) -> None:
+        assert snipeit_maintenance_calendar_id(OWNER) != (
+            snipeit_maintenance_calendar_id(OTHER_USER)
+        )
+        assert snipeit_maintenance_calendar_id(OWNER) == (
+            snipeit_maintenance_calendar_id(OWNER)
+        )
+
+    async def test_a_record_another_user_imported_is_imported_for_this_user(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """This user's earlier import of record 9 lost its journal; another
+        user's journal for their record 9 is not it."""
+        await _seed_synced_asset(async_connection, 51)
+        await _seed_import_record(
+            async_connection,
+            maintenance_id=9,
+            version_hash="old",
+            age_seconds=IMPORT_LINK_GRACE_SECONDS + 60,
+        )
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+        mock_transport.add_response("/maintenances/9", json_data=_listed(9))
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[9],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        [(event_type, event_data)] = await _journal_event_payloads(async_connection)
+        assert event_type == "journal_event.created"
+        assert event_data.get("existing_journal_id") is None
+        assert event_data["calendar_id"] == snipeit_maintenance_calendar_id(OWNER)
+        assert event_data["journal_data"]["user_id"] == OWNER
+
+    async def test_a_posted_record_another_user_holds_gets_this_journals_row(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+        mock_transport.add_response(
+            "/maintenances", json_data=_write_response(9), method="POST"
+        )
+
+        await snipeit_sync_service.push_maintenance_create(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
+        assert (OTHER_USER, "snipeit_maintenance", "snipeit_maint:9") in [
+            row[:3] for row in await _rows(async_connection)
+        ]
+
+    async def test_a_claim_links_a_record_another_user_holds(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+        await _seed_claim(async_connection, journal_id=journal_id, status="failed")
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+        mock_transport.add_response("/maintenances/9", json_data=_listed(9))
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[9],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 0, "skipped": 1, "failed": 0}
+        assert await _journal_event_payloads(async_connection) == []
+        assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:9"]
+
+    async def test_another_users_journal_does_not_hold_this_users_record(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Deleting this user's imported journal deletes this user's record 9."""
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=9, age_seconds=0
+        )
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+        mock_transport.add_response(
+            "/maintenances/9", json_data={"status": "success"}, method="DELETE"
+        )
+
+        deleted = await snipeit_sync_service.delete_maintenance_record(
+            external_id="snipeit_maint:9",
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert deleted is True
+        assert _snipeit_writes(mock_transport) == ["DELETE /api/v1/maintenances/9"]
+        assert [row[:3] for row in await _rows(async_connection)] == [
+            ("user-123", "snipeit", "51"),
+            (OTHER_USER, "snipeit_maintenance", "snipeit_maint:9"),
+        ]
+
+    async def test_another_users_journal_does_not_unsettle_this_users_import(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        """Their journal is on their own gear, which is not this record's."""
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="x", imported_from=9
+        )
+        await _seed_import_record(async_connection, maintenance_id=9, version_hash="h")
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+
+        unsettled = await snipeit_sync_service.unsettled_maintenance_ids(
+            [ListedRecord(9, None, 51)], _joined_session_factory(async_connection)
+        )
+
+        assert unsettled == set()
+
+    async def test_another_users_journal_does_not_settle_this_users_import(
+        self, snipeit_sync_service: Any, async_connection: AsyncConnection
+    ) -> None:
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=9, age_seconds=0
+        )
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+
+        unsettled = await snipeit_sync_service.unsettled_maintenance_ids(
+            [ListedRecord(9, None, 51)], _joined_session_factory(async_connection)
+        )
+
+        assert unsettled == {9}
+
+    async def test_another_users_journal_does_not_keep_a_deleted_record(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Record 9 is gone from this user's Snipe-IT, so this user's row for it
+        is forgotten; the other user's row and journal are left alone."""
+        await _an_import_whose_journal_is_gone(
+            async_connection, maintenance_id=9, age_seconds=0
+        )
+        await _seed_other_users_import(async_connection, maintenance_id=9)
+        _queue_gone(mock_transport, 9)
+
+        deleted = await snipeit_sync_service.reconcile_deleted_maintenances(
+            set(), _joined_session_factory(async_connection)
+        )
+
+        assert deleted == 1
+        assert [row[:3] for row in await _rows(async_connection)] == [
+            ("user-123", "snipeit", "51"),
+            (OTHER_USER, "snipeit_maintenance", "snipeit_maint:9"),
+        ]

@@ -2080,6 +2080,7 @@ class JournalOutboxEventProcessor:
     _INTEGRATION_CALENDAR_DEFAULTS: dict[str, tuple[str, str]] = {
         "strava": ("Strava Activities", "#FC4C02"),
         "google": ("Google Calendar", "#4285F4"),
+        "snipeit_maintenance": ("Snipe-IT Maintenance", "#808080"),
     }
 
     async def _ensure_calendar_exists(

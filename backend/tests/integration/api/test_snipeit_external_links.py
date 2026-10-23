@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from core_shared.integration_constants import snipeit_maintenance_calendar_id
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -8,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.infrastructure.auth.models import SessionUser
 
-_SNIPEIT_MAINTENANCE_CALENDAR_ID = "d7e0f8a1-4b2c-5e3d-9a6f-1c8b7d5e4f3a"
 _MAINTENANCE_SOURCE = "snipeit_maintenance"
 # The record journal 215032 was imported from, and the echo its old push created
 _ORIGINAL = "snipeit_maint:17"
@@ -35,16 +35,17 @@ async def _link_import(
     connection: AsyncConnection, user_id: str, journal_id: int, external_id: str
 ) -> None:
     """Link a journal to the record it was imported from, as the backend does."""
+    calendar_id = snipeit_maintenance_calendar_id(user_id)
     await connection.execute(
         text(
             """
             INSERT INTO calendars (id, user_id, name, color, integration_source)
-            VALUES (:id, :user_id, 'Snipeit_Maintenance Calendar', '#808080',
+            VALUES (:id, :user_id, 'Snipe-IT Maintenance', '#808080',
                     'snipeit_maintenance')
             ON CONFLICT (id) DO NOTHING
             """
         ),
-        {"id": _SNIPEIT_MAINTENANCE_CALENDAR_ID, "user_id": user_id},
+        {"id": calendar_id, "user_id": user_id},
     )
     await connection.execute(
         text(
@@ -56,7 +57,7 @@ async def _link_import(
         ),
         {
             "journal_id": journal_id,
-            "calendar_id": _SNIPEIT_MAINTENANCE_CALENDAR_ID,
+            "calendar_id": calendar_id,
             "external_id": external_id,
         },
     )
@@ -458,3 +459,27 @@ async def test_journal_a_user_wrote_is_found_by_the_record_it_pushed(
     )
 
     assert found == journal_id
+
+
+@pytest.mark.asyncio
+async def test_each_user_finds_their_own_import_of_the_same_record(
+    async_connection: AsyncConnection,
+    test_user: SessionUser,
+) -> None:
+    """Snipe-IT ids are per instance: another user's import of their record 17
+    is not this user's import of theirs."""
+    other_user = "other-user-456"
+    theirs = await _journal(async_connection, other_user)
+    await _link_import(async_connection, other_user, theirs, _ORIGINAL)
+    mine = await _journal(async_connection, test_user.id)
+    await _link_import(async_connection, test_user.id, mine, _ORIGINAL)
+    repo = SqlJournalRepository(async_connection)
+
+    assert (
+        await repo.find_id_by_external_id(test_user.id, _MAINTENANCE_SOURCE, _ORIGINAL)
+        == mine
+    )
+    assert (
+        await repo.find_id_by_external_id(other_user, _MAINTENANCE_SOURCE, _ORIGINAL)
+        == theirs
+    )
