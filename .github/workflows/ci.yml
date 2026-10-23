@@ -1193,6 +1193,14 @@ jobs:
           CLEANUP_AFTER_TESTS: true
         run: pnpm exec playwright test --project="${{ matrix.browser }}"
 
+      # A 500 seen by a test can come from the Next.js /api proxy rather than the
+      # backend (#1862). Timestamped backend logs let a failure be lined up with
+      # what the backend actually received. Must run before the cleanup step
+      # tears the stack down. failOnFlakyTests makes a flaky pass a failure too.
+      - name: Dump backend logs on failure
+        if: failure()
+        run: docker compose --profile test logs --no-color --timestamps --tail=500 backend
+
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v7
         if: always()

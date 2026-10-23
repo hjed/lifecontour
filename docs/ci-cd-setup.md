@@ -254,6 +254,10 @@ For detailed Docker Compose setup, see [Docker Compose Unified Setup](./DOCKER_C
 ### Common Issues
 
 1. **Test failures in CI but not locally**
+   - When an E2E job fails, including on a flaky pass, it prints the last 500
+     timestamped lines of the backend container log (the "Dump backend logs on failure"
+     step). Use that log to tell a real backend error from one the Next.js `/api` proxy
+     produced (for example `Failed to proxy … ECONNRESET`)
    - Check environment variables
    - Verify database service configuration
    - Check for timing issues in async tests

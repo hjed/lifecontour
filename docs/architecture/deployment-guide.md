@@ -138,7 +138,7 @@ services:
     depends_on:
       - postgres
       - meilisearch
-    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 65 --reload
 
   frontend:
     build:
@@ -386,6 +386,34 @@ http {
     }
 }
 ```
+
+### HTTP Keep-Alive Between Proxy and Backend
+
+The Next.js `/api` rewrite proxy keeps its connections to the backend in a keep-alive
+pool, and that pool has no idle timeout of its own. uvicorn is therefore always the side
+that closes an idle connection. If the proxy sends a request on a pooled socket just as
+uvicorn closes it, the connection is reset (`ECONNRESET`). The proxy then answers 500,
+because it cannot retry a write
+([#1862](https://github.com/hjed/lifecontour/issues/1862)).
+
+At uvicorn's default 5 s keep-alive, the gaps between bursts of requests fall into that
+window often. Every uvicorn launch therefore passes `--timeout-keep-alive 65`. That
+value is `UVICORN_TIMEOUT_KEEP_ALIVE_SECONDS` in `backend/app/main.py`, and a unit test
+keeps the launch scripts in step with it. A reset now needs a pooled socket that has
+sat idle for about 65 s and is reused at the instant it closes. The pool reuses its
+most recent socket first, so that is rare.
+
+This is a mitigation, not a guarantee:
+
+- A `Keep-Alive: timeout=N` response header would not help. Node's HTTP agent only
+  uses that hint to *shorten* an idle timeout the agent already has, and Next's
+  proxy agent has none. Next offers no setting to configure that agent.
+- A deterministic fix needs a client that closes idle sockets first. One option is a
+  route handler that proxies `/api` with `fetch`/undici, whose client keep-alive
+  timeout (4 s) is shorter than uvicorn's.
+
+Production nginx is not affected. Its `/api/` location sends `Connection: upgrade`, so
+it never reuses upstream connections.
 
 ## Observability and Monitoring
 
