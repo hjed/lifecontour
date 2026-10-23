@@ -234,8 +234,11 @@ imported:
 An inferred address that duplicates one Google also holds with a country
 (left by pushes before #1820) is dropped on import, and the push then removes
 the countryless twin from Google. Migration `0139` forces one full sync so
-existing contacts are re-pulled, and saving a new default country queues a
-full sync for that user.
+existing contacts are re-pulled, and saving the default country clears that
+user's contacts sync token with the save (then queues a sync, best-effort), so
+their next sync is a full one. The backend normalises an AU/US/CA region to its
+code ("New South Wales" -> "NSW") and validates no postcode, so a typed region
+or a wrongly inferred country never fails the contact.
 
 The owned entry is chosen exactly as the import chooses it, and values from a
 linked profile (rather than the contact) are never copied into the contact. The
