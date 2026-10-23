@@ -668,3 +668,103 @@ class TestContactMergeAggregateIntegration:
         ]
         assert len(refresh_events) == 1
         assert refresh_events[0].aggregate_id == survivor_id
+
+
+async def _seed_import_issue(
+    connection: AsyncConnection, contact_id: int, street: str, *, status: str
+) -> None:
+    await connection.execute(
+        text(
+            """
+            INSERT INTO contact_import_issues (
+                user_id, contact_id, integration_source, external_id, kind,
+                reason, payload, payload_hash, status
+            )
+            VALUES (
+                :user_id, :contact_id, 'google', 'people/c1', 'skipped_address',
+                'unrecognised_region', CAST(:payload AS JSONB),
+                md5(CAST(:payload AS JSONB)::text), :status
+            )
+            """
+        ),
+        {
+            "user_id": TEST_USER_ID,
+            "contact_id": contact_id,
+            "payload": f'{{"street_line_1": "{street}"}}',
+            "status": status,
+        },
+    )
+
+
+async def _import_issues(
+    connection: AsyncConnection,
+) -> list[tuple[int, str, str]]:
+    rows = await connection.execute(
+        text(
+            """
+            SELECT contact_id, payload->>'street_line_1' AS street, status
+            FROM contact_import_issues WHERE user_id = :user_id
+            ORDER BY street
+            """
+        ),
+        {"user_id": TEST_USER_ID},
+    )
+    return [(row.contact_id, row.street, row.status) for row in rows]
+
+
+class TestMergeCarriesImportIssues:
+    """The absorbed contact's skipped-import flags move with its Google link (#1820).
+
+    ``contact_import_issues`` cascades on contact delete, and an unchanged-etag
+    pull would not record them again, so a merge that dropped them would lose
+    the flags - and the user's dismissals - for good.
+    """
+
+    @pytest.mark.asyncio
+    async def test_issues_move_onto_the_survivor_keeping_their_status(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _seed_import_issue(
+            async_connection, source_id, "10 Downing St", status="dismissed"
+        )
+        await _seed_import_issue(
+            async_connection, source_id, "1 Rue de Rivoli", status="pending"
+        )
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
+        )
+
+        assert await _import_issues(async_connection) == [
+            (survivor_id, "1 Rue de Rivoli", "pending"),
+            (survivor_id, "10 Downing St", "dismissed"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_survivors_own_copy_of_an_issue_wins(
+        self,
+        async_connection: AsyncConnection,
+        contact_repo: SqlContactRepository,
+        merge_service: ContactMergeService,
+    ) -> None:
+        survivor_id = await _make_contact(contact_repo, "Survivor")
+        source_id = await _make_contact(contact_repo, "Source")
+        await _seed_import_issue(
+            async_connection, survivor_id, "10 Downing St", status="dismissed"
+        )
+        await _seed_import_issue(
+            async_connection, source_id, "10 Downing St", status="pending"
+        )
+
+        await merge_service.merge_contacts(
+            survivor_id, source_id, transaction=async_connection, user_id=TEST_USER_ID
+        )
+
+        assert await _import_issues(async_connection) == [
+            (survivor_id, "10 Downing St", "dismissed"),
+        ]
