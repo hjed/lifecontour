@@ -18,6 +18,9 @@ from app.core.contacts.adapters.sql import (
     SqlTagRepository,
     SqlUpcomingImportantDateRepository,
 )
+from app.core.contacts.adapters.sql.contact_import_issue_repository import (
+    SqlContactImportIssueRepository,
+)
 from app.core.contacts.models.repositories import (
     ContactEventPublisher,
     ContactFieldHistoryRepository,
@@ -41,6 +44,9 @@ from app.core.contacts.services import (
     TagHierarchyService,
     TagService,
     UpcomingImportantDatesService,
+)
+from app.core.contacts.services.contact_import_issue_service import (
+    ContactImportIssueService,
 )
 from app.core.history.models import FieldHistoryRepository
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
@@ -153,6 +159,18 @@ class ContactProvider(Provider):
         self, connection: AsyncConnection
     ) -> SqlContactSummaryRepository:
         return SqlContactSummaryRepository(connection)
+
+    @provide
+    def get_contact_import_issue_repository(
+        self, connection: AsyncConnection
+    ) -> SqlContactImportIssueRepository:
+        return SqlContactImportIssueRepository(connection)
+
+    @provide
+    def get_contact_import_issue_service(
+        self, repository: SqlContactImportIssueRepository
+    ) -> ContactImportIssueService:
+        return ContactImportIssueService(repository)
 
     # Domain services
     @provide

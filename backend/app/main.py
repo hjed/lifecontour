@@ -361,6 +361,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.error_handlers import register_error_handlers
     from app.api.health import router as health_router
     from app.api.home_dashboard.controllers import router as home_dashboard_router
+    from app.api.integrations.contact_import_issue_controllers import (
+        router as contact_import_issues_router,
+    )
     from app.api.integrations.contact_suggestion_controllers import (
         router as contact_suggestions_router,
     )
@@ -466,6 +469,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(strava_router, prefix="/api", tags=["integrations-strava"])
     app.include_router(
         contact_suggestions_router, prefix="/api", tags=["integrations-contacts"]
+    )
+    app.include_router(
+        contact_import_issues_router, prefix="/api", tags=["integrations-contacts"]
     )
     app.include_router(snipeit_router, prefix="/api", tags=["integrations-snipeit"])
     app.include_router(

@@ -377,6 +377,11 @@ NO_RESULT_CALLS: tuple[CrossUserCall, ...] = (
 
 # Tools taking a contact id that are deliberately not in the tables above.
 COVERED_ELSEWHERE: dict[str, str] = {
+    "list_contact_import_issues": (
+        "the contact is a filter within the caller's own import issues, which "
+        "are owner-filtered; a foreign contact lists exactly what a missing one "
+        "does (test_contact_import_issue_mcp.py)"
+    ),
     "unlink_task_from_contact": (
         "keyed on the task, which is owner-checked first; the REST counterpart "
         "is exempt from test_contact_ownership.py for the same reason"

@@ -16,6 +16,9 @@ from app.core.contacts.services import (
     ContactService,
     TagService,
 )
+from app.core.contacts.services.contact_import_issue_service import (
+    ContactImportIssueService,
+)
 from app.core.contacts.services.contact_merge_service import ContactMergeService
 from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
@@ -272,6 +275,14 @@ async def get_calendar_service() -> CalendarService:
 async def get_review_item_service() -> ReviewItemService:
     """Resolve the review item service for the current MCP request."""
     return cast(ReviewItemService, await _resolve_dependency(ReviewItemService))
+
+
+async def get_contact_import_issue_service() -> ContactImportIssueService:
+    """Resolve the contact import-issue service for the current MCP request."""
+    return cast(
+        ContactImportIssueService,
+        await _resolve_dependency(ContactImportIssueService),
+    )
 
 
 async def get_contact_suggestion_service() -> ContactSuggestionService:

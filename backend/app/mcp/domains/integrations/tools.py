@@ -23,6 +23,9 @@ from app.core.integrations.strava.athlete_mapping_service import (
     StravaAthleteMappingService,
 )
 from app.core.integrations.task_queue_service import TaskQueueService
+from app.mcp.domains.integrations.contact_import_issue_tools import (
+    register_contact_import_issue_tools,
+)
 from app.mcp.domains.integrations.contact_suggestion_tools import (
     register_contact_suggestion_tools,
 )
@@ -69,6 +72,7 @@ def register_integration_tools(mcp: FastMCP[None]) -> None:
         mcp: The FastMCP server instance to register tools with
     """
     register_contact_suggestion_tools(mcp)
+    register_contact_import_issue_tools(mcp)
 
     @mcp.tool(annotations=READ_ONLY_EXTERNAL)
     @mcp_unified_error_handler("list_integrations", "integration")
