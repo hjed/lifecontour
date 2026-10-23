@@ -35,11 +35,15 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_import_issue_repository import (
+    SqlContactImportIssueRepository,
+)
 from app.core.contacts.models.exceptions import (
     ContactNotFoundError,
     DuplicateEmailError,
     DuplicateTagNameError,
 )
+from app.core.contacts.models.import_issues import SKIPPED_ADDRESS
 from app.core.contacts.services.contact_service import ContactService
 from app.core.contacts.services.contact_subentity_sync import keep_archived
 from app.core.integrations.adapters.sql.sync_metadata_repository import (
@@ -194,6 +198,7 @@ class OutboxEventProcessor:
         from app.core.contacts.adapters.sql.tag_repository import SqlTagRepository
 
         self.tag_repo = SqlTagRepository(connection)
+        self.import_issue_repo = SqlContactImportIssueRepository(connection)
 
     async def process_event(self, event: OutboxEvent) -> dict[str, Any]:
         """
@@ -983,6 +988,8 @@ class OutboxEventProcessor:
                 f"{created_contact.id}: {e}"
             ) from e
 
+        await self._record_skipped_addresses(payload, created_contact.id)
+
         logger.info(
             "Successfully processed contact creation from outbox event",
             contact_id=created_contact.id,
@@ -1310,6 +1317,8 @@ class OutboxEventProcessor:
             # Don't fail the entire operation if sync metadata update fails
             # The contact was updated successfully
 
+        await self._record_skipped_addresses(payload, updated_contact.id)
+
         logger.info(
             "Successfully updated contact from outbox event",
             contact_id=updated_contact.id,
@@ -1325,6 +1334,29 @@ class OutboxEventProcessor:
             "integration_source": integration_source,
             "external_id": external_id,
         }
+
+    async def _record_skipped_addresses(
+        self, payload: ContactSyncEventData, contact_id: int
+    ) -> None:
+        """Record what this applied import left out of the contact (#1820).
+
+        Replaces the contact's skipped addresses from this source, so one fixed
+        at the source clears and a dismissed one that is still skipped stays
+        dismissed. Part of the event's unit of work: a failure retries it.
+        """
+        await self.import_issue_repo.replace(
+            user_id=payload.user_id,
+            contact_id=contact_id,
+            integration_source=_normalize_integration_source(
+                payload.integration_source
+            ),
+            external_id=payload.external_id,
+            kind=SKIPPED_ADDRESS,
+            issues=[
+                (skipped.reason, skipped.model_dump(exclude={"reason"}))
+                for skipped in payload.skipped_addresses
+            ],
+        )
 
     def _process_sync_completed(self, event: OutboxEvent) -> dict[str, Any]:
         """Process a sync.completed event."""
