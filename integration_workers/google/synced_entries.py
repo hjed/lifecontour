@@ -15,7 +15,7 @@ key: it was never held locally.
 from collections.abc import Callable, Mapping
 from typing import Any, Final, Literal
 
-from core_shared.sync_base import entry_key
+from core_shared.sync_base import SyncedEntries, entry_key
 from pydantic import BaseModel, ValidationError
 
 from api_models import (
@@ -144,4 +144,18 @@ def synced_entries_of(
     return {
         field: frozenset(key for key in keys if key is not None)
         for field, keys in keyed.items()
+    }
+
+
+def raw_synced_entries(
+    person: Mapping[str, Any], fallback_country: str | None
+) -> SyncedEntries:
+    """:func:`synced_entries_of` for a raw People API person, as the push holds it."""
+    return {
+        field: frozenset(
+            key
+            for entry in person.get(field) or []
+            if (key := raw_entry_key(field, entry, fallback_country)) is not None
+        )
+        for field in BASE_FIELDS
     }
