@@ -344,3 +344,62 @@ async def test_a_second_push_before_the_pull_still_holds_back_a_google_deletion(
 
     pushed = client.update_contact.await_args.kwargs["contact_data"]
     assert [email["value"] for email in pushed["emailAddresses"]] == ["ada@example.com"]
+
+
+@pytest.mark.asyncio
+async def test_a_local_edit_landing_during_the_push_is_still_owed_a_push(
+    db_session: AsyncSession,
+) -> None:
+    """The link records the version pushed, not when the push finished.
+
+    Otherwise the edit reads as pushed: never sent, and a pull marked
+    pending_import would apply Google's copy over it.
+    """
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    after = _google(_HELD, _ADDED_IN_GOOGLE)
+    client = _client(
+        {"etag": "etag_google_edit", "emailAddresses": after},
+        {"etag": "etag_pushed", "emailAddresses": after},
+    )
+
+    async def update_while_the_user_edits(**kwargs: Any) -> dict[str, Any]:
+        await db_session.execute(
+            text("UPDATE contacts SET updated_at = clock_timestamp()")
+        )
+        return client.update_contact.return_value
+
+    client.update_contact.side_effect = update_while_the_user_edits
+
+    await _push(db_session, client)
+
+    assert len(await find_contacts_to_push(db_session, user_id=CONTACT_OWNER)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_retry_on_a_link_with_no_base_keeps_the_first_reads_base(
+    db_session: AsyncSession,
+) -> None:
+    """The first read was the synced version; the retry's etag is Google's edit."""
+    await _seed(db_session)
+    deleted_locally = {"value": "old@example.com"}
+    synced = {"etag": "etag_synced", "emailAddresses": _google(_HELD, deleted_locally)}
+    raced = {
+        "resourceName": _REMOTE,
+        "etag": "etag_raced",
+        "emailAddresses": _google(_HELD, deleted_locally),
+        "names": [{"metadata": _CONTACT_SOURCE, "honorificPrefix": "Dr"}],
+    }
+    client = _client(synced, {"etag": "etag_pushed", "emailAddresses": _google(_HELD)})
+    retried: list[dict[str, Any]] = []
+
+    async def update_after_a_race(**kwargs: Any) -> dict[str, Any]:
+        retried.append(kwargs["rebase"](raced))
+        return client.update_contact.return_value
+
+    client.update_contact.side_effect = update_after_a_race
+
+    await _push(db_session, client)
+
+    assert [email["value"] for email in retried[0]["emailAddresses"]] == [
+        "ada@example.com"
+    ]
