@@ -11,6 +11,14 @@ class ContactNotFoundError(ContactDomainError):
         self.contact_id = contact_id
 
 
+class ContactImportIssueNotFoundError(ContactDomainError):
+    """An import issue the user does not hold (missing, or another user's)."""
+
+    def __init__(self, issue_id: int):
+        super().__init__(f"Import issue with ID {issue_id} not found", 404)
+        self.issue_id = issue_id
+
+
 class ContactMergeConflictError(ContactDomainError):
     """Raised when two contacts cannot be merged (e.g. merging a contact into itself)."""
 
