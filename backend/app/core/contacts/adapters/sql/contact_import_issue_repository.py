@@ -91,6 +91,48 @@ class SqlContactImportIssueRepository:
                 },
             )
 
+    async def add(
+        self,
+        *,
+        user_id: str,
+        contact_id: int,
+        integration_source: str,
+        external_id: str,
+        kind: str,
+        reason: str,
+        payload: dict[str, Any],
+    ) -> int | None:
+        """Record one issue on the user's contact; ``None`` if they hold no such contact."""
+        result = await self.connection.execute(
+            text(
+                """
+                INSERT INTO contact_import_issues (
+                    user_id, contact_id, integration_source, external_id, kind,
+                    reason, payload, payload_hash
+                )
+                SELECT c.user_id, c.id, :integration_source, :external_id, :kind,
+                       :reason, CAST(:payload AS JSONB),
+                       md5(CAST(:payload AS JSONB)::text)
+                FROM contacts c
+                WHERE c.id = :contact_id AND c.user_id = :user_id
+                ON CONFLICT ON CONSTRAINT uq_contact_import_issues_payload
+                DO UPDATE SET status = 'pending', updated_at = now()
+                RETURNING id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "contact_id": contact_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+                "kind": kind,
+                "reason": reason,
+                "payload": json.dumps(payload, sort_keys=True),
+            },
+        )
+        row = result.fetchone()
+        return int(row.id) if row else None
+
     async def list_pending(
         self, user_id: str, *, contact_id: int | None = None
     ) -> list[ContactImportIssue]:

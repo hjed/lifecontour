@@ -132,11 +132,13 @@ class TestTestOnlySwitches:
             _env_file=None,
             enable_test_review_items=True,
             enable_test_daily_summary_stub=True,
+            enable_test_import_issues=True,
         )
 
         assert settings.enabled_test_only_switches == [
             "ENABLE_TEST_REVIEW_ITEMS",
             "ENABLE_TEST_DAILY_SUMMARY_STUB",
+            "ENABLE_TEST_IMPORT_ISSUES",
         ]
 
     def test_names_none_by_default(self):
