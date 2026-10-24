@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from worker import LinkSyncState
+
 sys.path.insert(0, "/core_shared")
 
 
@@ -1534,9 +1536,9 @@ class TestPushSyncLogic:
             patch("worker._lock_contact_for_push", new_callable=AsyncMock),
             patch("worker._read_sync_link", new_callable=AsyncMock, return_value=None),
             patch(
-                "worker._recorded_address_fallback",
+                "worker._read_link_sync_state",
                 new_callable=AsyncMock,
-                return_value=None,
+                return_value=LinkSyncState(),
             ),
         ):
             yield
@@ -1894,6 +1896,8 @@ class TestPushSyncLogic:
                     etag="etag_metadata",
                     integration_source="google",
                     user_id="1",
+                    # The patched loader reports no version, so it stamps now.
+                    synced_at=None,
                 )
 
 
