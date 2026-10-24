@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -26,8 +27,8 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
     SqlTaskAnchorRepository,
 )
 
-# Must match _STRAVA_SYNTHETIC_CALENDAR_ID in strava_sync_service.py
-STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
+# The Strava worker links each user's activities on their own calendar.
+STRAVA_CALENDAR_ID = synthetic_calendar_id(SyntheticCalendar.STRAVA, "test-user-123")
 
 GPX_XML_SAMPLE = (
     '<?xml version="1.0" encoding="UTF-8"?>'

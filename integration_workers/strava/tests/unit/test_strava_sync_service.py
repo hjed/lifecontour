@@ -12,6 +12,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.models.outbox import OutboxEvent
 
 from strava_data_transformer import TransformedActivity
 from strava_models import StravaActivity, StravaStreamSet
@@ -97,6 +99,17 @@ def mock_api_client() -> AsyncMock:
     return client
 
 
+def _assert_on_users_own_calendar(event: OutboxEvent, user_id: str) -> None:
+    """The event names the syncing user's own Strava calendar, both times.
+
+    One calendar shared by every user was owned by whoever synced first and
+    hidden from everyone else (#1856).
+    """
+    calendar_id = synthetic_calendar_id(SyntheticCalendar.STRAVA, user_id)
+    assert event.event_data["calendar_id"] == calendar_id
+    assert event.event_data["calendar_info_data"]["calendar_id"] == calendar_id
+
+
 @pytest.fixture()
 def mock_session() -> MagicMock:
     """Mocked async database session with begin() async context manager."""
@@ -175,6 +188,7 @@ class TestSyncSingleActivity:
         assert len(events) == 1
         event = events[0]
         assert event.event_type == "journal_event.created"
+        _assert_on_users_own_calendar(event, "user-123")
 
     @pytest.mark.asyncio()
     async def test_fetches_streams_when_gps_available(
@@ -251,6 +265,7 @@ class TestSyncSingleActivity:
         event = events[0]
         assert event.event_type == "journal_event.updated"
         assert event.event_data["existing_journal_id"] == 42
+        _assert_on_users_own_calendar(event, "user-123")
 
 
 class TestListActivityBatches:
@@ -798,6 +813,7 @@ class TestDeleteHandling:
 
         assert event is not None
         assert event.event_type == "journal_event.cancelled"
+        _assert_on_users_own_calendar(event, "user-123")
 
     @pytest.mark.asyncio()
     async def test_returns_none_when_activity_not_found(

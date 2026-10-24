@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 import structlog
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.journals import JournalType
 from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
@@ -31,11 +32,6 @@ from strava_models import StravaStreamSet
 from strava_rate_limiter import StravaRateLimitError
 
 logger = structlog.get_logger(__name__)
-
-# Synthetic calendar_id for Strava (Strava doesn't use calendars, but the
-# outbox event schema requires one for compatibility with the inbound
-# processor).  This UUID is deterministic so lookups work.
-_STRAVA_SYNTHETIC_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
 
 # Maximum activities per Strava API page
 _PAGE_SIZE = 100
@@ -406,12 +402,13 @@ class StravaSyncService:
             )
             return None
 
+        calendar_id = self._calendar_id()
         event = OutboxEvent.create_journal_sync_event(
             journal_data={"user_id": self._user_id},
-            calendar_info_data={"calendar_id": _STRAVA_SYNTHETIC_CALENDAR_ID},
+            calendar_info_data={"calendar_id": calendar_id},
             integration_source="strava",
             external_event_id=f"strava:{strava_id}",
-            calendar_id=_STRAVA_SYNTHETIC_CALENDAR_ID,
+            calendar_id=calendar_id,
             sync_action="cancelled",
             existing_journal_id=journal_id,
         )
@@ -425,6 +422,15 @@ class StravaSyncService:
         return event
 
     # ── Internal helpers ────────────────────────────────────────────────
+
+    def _calendar_id(self) -> str:
+        """The calendar this user's activities are linked on.
+
+        Strava has no calendars, but a journal sync event names one, so each
+        user has a synthetic calendar of their own: one shared by every user
+        was owned by whoever synced first and hidden from everyone else (#1856).
+        """
+        return synthetic_calendar_id(SyntheticCalendar.STRAVA, self._user_id)
 
     async def _is_merged_away(
         self, strava_activity_id: str, session: AsyncSession
@@ -591,10 +597,8 @@ class StravaSyncService:
         if JournalType.CLIMBING in transformed.journal_types:
             journal_data["climbing_data"] = {"indoor": transformed.climbing_indoor}
 
-        # Strava doesn't use calendars, but the outbox event schema requires
-        # calendar_info_data for compatibility with the inbound processor.
         calendar_info_data: dict[str, Any] = {
-            "calendar_id": _STRAVA_SYNTHETIC_CALENDAR_ID,
+            "calendar_id": self._calendar_id(),
             "is_all_day": False,
             "location": None,
             "start_time": None,
@@ -607,7 +611,7 @@ class StravaSyncService:
             calendar_info_data=calendar_info_data,
             integration_source="strava",
             external_event_id=f"strava:{transformed.fitness_data_strava_activity_id}",
-            calendar_id=_STRAVA_SYNTHETIC_CALENDAR_ID,
+            calendar_id=self._calendar_id(),
             sync_action=sync_action,
             existing_journal_id=existing_journal_id,
         )

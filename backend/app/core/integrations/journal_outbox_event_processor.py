@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncStatus,
@@ -118,6 +119,39 @@ _SERIES_DELETION_BUFFER = timedelta(days=1)
 # Integration source of Snipe-IT maintenance imports. Must equal
 # ``INBOUND_SYNC_CHANGED_BY`` in the Snipe-IT worker.
 _SNIPEIT_MAINTENANCE_SOURCE = "snipeit_maintenance"
+
+# The one calendar every user's Strava activities shared until #1856.
+# TODO(#1902): remove once no event naming it can still be in flight.
+LEGACY_SHARED_STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def rehome_legacy_strava_calendar(event_data: dict[str, Any]) -> dict[str, Any]:
+    """``event_data``, re-homed onto its user's own calendar if it names the old one.
+
+    Migration ``0142`` moved every user's Strava links onto their own calendar,
+    but an event the old worker sent beforehand can still be in the stream, or
+    come from an old worker still running. Applied as sent, the first would
+    recreate the shared calendar as its user's, and the guard in
+    ``_ensure_calendar_exists`` would refuse everyone else's; a cancellation
+    would look for a link that is no longer there. The event names its user, so
+    it is read as naming that user's calendar. Anything else is returned as is.
+    """
+    user_id = (event_data.get("journal_data") or {}).get("user_id")
+    if (
+        event_data.get("integration_source") != "strava"
+        or event_data.get("calendar_id") != LEGACY_SHARED_STRAVA_CALENDAR_ID
+        or not user_id
+    ):
+        return event_data
+    own = synthetic_calendar_id(SyntheticCalendar.STRAVA, user_id)
+    rehomed = {**event_data, "calendar_id": own}
+    if "calendar_info_data" in event_data:
+        rehomed["calendar_info_data"] = {
+            **event_data["calendar_info_data"],
+            "calendar_id": own,
+        }
+    return rehomed
+
 
 # Maps an inbound sync event's integration_source to the history Provenance
 # recorded for the journal changes it produces.
@@ -332,6 +366,8 @@ class JournalOutboxEventProcessor:
             event_id=event.id,
             event_type=event.event_type,
         )
+        event_data: dict[str, Any] = event.event_data  # type: ignore
+        event.event_data = rehome_legacy_strava_calendar(event_data)  # type: ignore[assignment]
 
         if event.event_type in (
             EVENT_TYPE_JOURNAL_EVENT_CREATED,

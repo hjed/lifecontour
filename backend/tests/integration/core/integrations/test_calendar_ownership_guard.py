@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.integrations.journal_outbox_event_processor import (
     EVENT_TYPE_JOURNAL_EVENT_CREATED,
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
     JournalOutboxEventProcessingError,
 )
 from app.infrastructure.unit_of_work import unit_of_work
@@ -172,3 +173,43 @@ async def test_a_second_user_racing_a_calendars_first_sync_is_refused(
                     text(statement), {"ids": journal_ids, "calendar_id": calendar_id}
                 )
             await cleanup.commit()
+
+
+async def test_an_in_flight_event_on_the_old_shared_strava_calendar_lands_on_the_users_own(
+    async_connection: AsyncConnection, clean_database: None
+) -> None:
+    """Events sent before the worker moved to per-user calendars still arrive.
+
+    They name the one calendar every user used to share; applied there, the
+    first user's event would recreate it as theirs and every other user's would
+    be refused.
+    """
+    for user_id, activity in ((OWNER, "1"), (INTRUDER, "2")):
+        event = sync_event(
+            EVENT_TYPE_JOURNAL_EVENT_CREATED,
+            calendar_id=LEGACY_SHARED_STRAVA_CALENDAR_ID,
+            external_event_id=f"strava:{activity}",
+            user_id=user_id,
+            integration_source="strava",
+        )
+        await build_processor(async_connection).process_event(event)
+
+    result = await async_connection.execute(
+        text(
+            "SELECT j.user_id, CAST(l.calendar_id AS text) "
+            "FROM journal_external_event_links l "
+            "JOIN journals j ON j.id = l.journal_id ORDER BY j.user_id"
+        )
+    )
+    assert [tuple(row) for row in result] == sorted(
+        (user_id, synthetic_calendar_id(SyntheticCalendar.STRAVA, user_id))
+        for user_id in (OWNER, INTRUDER)
+    )
+    assert (
+        await _count(
+            async_connection,
+            "SELECT count(*) FROM calendars "
+            f"WHERE id = CAST('{LEGACY_SHARED_STRAVA_CALENDAR_ID}' AS uuid)",
+        )
+        == 0
+    )
