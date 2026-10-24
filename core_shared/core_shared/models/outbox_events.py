@@ -89,6 +89,13 @@ class ContactSyncEventData(BaseModel):
         "is applied: a push owns a countryless address only if the last applied "
         "pull imported it.",
     )
+    synced_entries: dict[str, list[str]] | None = Field(
+        default=None,
+        description="Per field, the keys of the entries the import read "
+        "(see core_shared.sync_base), or None from a worker that records none. "
+        "Recorded on the link when the event is applied: the base the next "
+        "push merges against, so an entry the source gains later is kept (#1861).",
+    )
 
 
 # ── Sync Completed ───────────────────────────────────────────────────
