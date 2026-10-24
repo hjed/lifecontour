@@ -79,6 +79,16 @@ class TestRawEntryKeys:
             {"value": "+44 20 2555 0123", "canonicalForm": "+442025550123"},
         )
 
+    def test_a_national_number_never_matches_another_country_s_international_one(
+        self,
+    ) -> None:
+        """US "(656) 500-1234" and Singapore "+65 6500 1234" share their digits."""
+        assert not _same_entry(
+            "phoneNumbers",
+            {"value": "(656) 500-1234", "canonicalForm": "+16565001234"},
+            {"value": "+65 6500 1234", "canonicalForm": "+6565001234"},
+        )
+
     def test_different_values_key_differently(self) -> None:
         assert not _same_entry(
             "emailAddresses",

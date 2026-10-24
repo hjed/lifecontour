@@ -291,6 +291,10 @@ class TestProfileBirthday:
 
         assert merged.payload["birthdays"] == []
         assert merged.pending_import is True
+        # Not the contact's yet: the next base must not count it as synced.
+        assert merged.kept["birthdays"] == _keys(
+            "birthdays", {"date": {"year": 1815, "month": 12, "day": 10}}
+        )
 
 
 class TestBirthdays:
