@@ -785,7 +785,12 @@ integration the missing piece, the **base**: per field, opaque keys
   in one statement (`IntegrationLinkRepository.patch_reference_data`), so it
   never races the backend's own keys.
 - The push merges three ways: `three_way_keys` for a list field (kept, dropped,
-  suppressed), `three_way_value` for a scalar (local, remote, same, conflict).
+  suppressed), `three_way_entries` when an entry can be written several ways
+  and carries a key per spelling (a phone in E.164 or as typed), and
+  `three_way_value` for a scalar (local, remote, same, conflict).
+- The link records the contact version the push *sent* as `last_synced_at`,
+  not the time it finished, so an edit landing mid-push is still owed a push
+  and a pull never applies over it.
 - A push that leaves the remote holding what local does not sets
   `pending_import`. The backend then applies the next pull even though its
   version is the push's own — but never over a local edit still to push, so a
