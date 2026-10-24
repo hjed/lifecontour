@@ -13,7 +13,7 @@
 
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { ApiError, type ConditionalResult } from './conditional-request';
-import { readEtag, storeEtag } from './versioned-cache';
+import { readEtag, storeEtag, updateResource } from './versioned-cache';
 
 export type AggregateKind = 'contact' | 'journal';
 
@@ -95,10 +95,21 @@ export function aggregateWrite<TVariables>(
  * again after it: any of them may have read the version before this write,
  * and landing after its tag is stored would put the older tag back.
  */
+export interface GuardedWriteOptions {
+  /**
+   * The write answers with the whole aggregate, re-read after its commit.
+   * Its body is stored with its tag: the re-read may include another tab's
+   * change, and keeping only the tag would pair that version with the older
+   * body — so the next edit would overwrite the change unrefused.
+   */
+  bodyIsResource?: boolean;
+}
+
 export async function sendGuarded<T>(
   queryClient: QueryClient,
   detailKey: QueryKey,
-  send: (ifMatch: string | null) => Promise<ConditionalResult<T>>
+  send: (ifMatch: string | null) => Promise<ConditionalResult<T>>,
+  { bodyIsResource = false }: GuardedWriteOptions = {}
 ): Promise<T> {
   await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
   const { body, etag } = await send(readEtag(queryClient, detailKey));
@@ -106,6 +117,36 @@ export async function sendGuarded<T>(
   // flight (a window refocus, say) may have read the version before it, and
   // arriving after the new tag is stored it would put the old one back.
   await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
+  if (bodyIsResource) {
+    updateResource<T>(queryClient, detailKey, () => body);
+  }
   storeEtag(queryClient, detailKey, etag);
   return body;
+}
+
+/**
+ * `aggregateWrite`'s options plus the `mutationFn` that sends the write
+ * guarded: everything a hook writing to one aggregate needs but its
+ * callbacks.
+ */
+export function guardedWrite<TVariables, TBody>(
+  queryClient: QueryClient,
+  ref: AggregateRef,
+  send: (
+    variables: TVariables,
+    ifMatch: string | null
+  ) => Promise<ConditionalResult<TBody>>,
+  describe?: (variables: TVariables) => string | undefined,
+  options?: GuardedWriteOptions
+) {
+  return {
+    ...aggregateWrite<TVariables>(ref, describe),
+    mutationFn: (variables: TVariables) =>
+      sendGuarded(
+        queryClient,
+        ref.detailKey,
+        ifMatch => send(variables, ifMatch),
+        options
+      ),
+  };
 }

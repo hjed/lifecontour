@@ -43,7 +43,7 @@ import {
   useAddContactAddress,
   useDeleteContactAddress,
   useSetContactValueArchived,
-  updateContactAddressField,
+  useUpdateContactAddressFields,
 } from '@/lib/api/contacts';
 import { partitionArchived } from '@/lib/archived-values';
 import {
@@ -51,6 +51,7 @@ import {
   ContactAddressAttributes,
 } from '@/types/contacts';
 import { AddressData } from './InlineEditAddressField';
+import { closingOnConflict } from '@/lib/write-conflicts';
 
 // Common country codes for the select dropdown
 const COMMON_COUNTRIES = [
@@ -108,15 +109,15 @@ export function ContactAddressesList({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
 
-  const addAddressMutation = useAddContactAddress();
-  const deleteAddressMutation = useDeleteContactAddress();
-  const archiveMutation = useSetContactValueArchived();
+  const addAddressMutation = useAddContactAddress(contactId);
+  const deleteAddressMutation = useDeleteContactAddress(contactId);
+  const archiveMutation = useSetContactValueArchived(contactId);
+  const updateFieldsMutation = useUpdateContactAddressFields(contactId);
   const [inUse, archived] = partitionArchived(addresses);
 
   const setArchived = async (addressId: string, isArchived: boolean) => {
     try {
       await archiveMutation.mutateAsync({
-        contactId,
         kind: 'address',
         id: addressId,
         archived: isArchived,
@@ -138,19 +139,22 @@ export function ContactAddressesList({
     }
 
     try {
-      await addAddressMutation.mutateAsync({
-        contactId,
-        address: {
-          street_line_1: newAddress.street_line_1.trim(),
-          street_line_2: newAddress.street_line_2?.trim() || undefined,
-          locality: newAddress.locality?.trim() || undefined,
-          region: newAddress.region?.trim() || undefined,
-          postal_code: newAddress.postal_code?.trim() || undefined,
-          country_code: newAddress.country_code,
-          label: newAddress.label?.trim() || undefined,
-          is_primary: newAddress.is_primary,
-        },
-      });
+      // A conflict closes the form too: the conflict dialog holds the new
+      // address and can re-apply it.
+      await closingOnConflict(
+        addAddressMutation.mutateAsync({
+          address: {
+            street_line_1: newAddress.street_line_1.trim(),
+            street_line_2: newAddress.street_line_2?.trim() || undefined,
+            locality: newAddress.locality?.trim() || undefined,
+            region: newAddress.region?.trim() || undefined,
+            postal_code: newAddress.postal_code?.trim() || undefined,
+            country_code: newAddress.country_code,
+            label: newAddress.label?.trim() || undefined,
+            is_primary: newAddress.is_primary,
+          },
+        })
+      );
       resetAddForm();
     } catch (error) {
       // Error handling is done by the mutation hook
@@ -168,7 +172,6 @@ export function ContactAddressesList({
 
     try {
       await deleteAddressMutation.mutateAsync({
-        contactId,
         addressId: addressToDelete,
       });
     } catch (error) {
@@ -186,7 +189,10 @@ export function ContactAddressesList({
     value: string
   ) => {
     try {
-      await updateContactAddressField(contactId, addressId, fieldName, value);
+      await updateFieldsMutation.mutateAsync({
+        addressId,
+        fields: { [fieldName]: value },
+      });
     } catch (error) {
       console.error('Failed to update address field:', error);
       throw error; // Re-throw to trigger inline edit error handling
@@ -197,18 +203,35 @@ export function ContactAddressesList({
     addressId: string,
     addressData: AddressData
   ) => {
-    // Update each field that has changed
-    const fieldUpdates = [
-      { field: 'street_line_1', value: addressData.street_line_1 || '' },
-      { field: 'street_line_2', value: addressData.street_line_2 || '' },
-      { field: 'locality', value: addressData.locality || '' },
-      { field: 'region', value: addressData.region || '' },
-      { field: 'postal_code', value: addressData.postal_code || '' },
-      { field: 'country_code', value: addressData.country_code || '' },
-    ];
+    // Only the fields the edit changed: re-sending the rest would restore
+    // whatever this page last read over a newer value.
+    const current = addresses.find(
+      a => a.id?.toString() === addressId
+    )?.attributes;
+    const edited: Record<string, string> = {
+      street_line_1: addressData.street_line_1 || '',
+      street_line_2: addressData.street_line_2 || '',
+      locality: addressData.locality || '',
+      region: addressData.region || '',
+      postal_code: addressData.postal_code || '',
+      country_code: addressData.country_code || '',
+    };
+    const fields = Object.fromEntries(
+      Object.entries(edited).filter(
+        ([field, value]) =>
+          value !==
+          ((current?.[field as keyof typeof current] as string | undefined) ||
+            '')
+      )
+    );
+    if (Object.keys(fields).length === 0) return;
 
-    for (const { field, value } of fieldUpdates) {
-      await handleFieldUpdate(addressId, field, value);
+    // One write for the whole edit, so a conflict replays all of it.
+    try {
+      await updateFieldsMutation.mutateAsync({ addressId, fields });
+    } catch (error) {
+      console.error('Failed to update address:', error);
+      throw error; // Re-throw to trigger inline edit error handling
     }
   };
 

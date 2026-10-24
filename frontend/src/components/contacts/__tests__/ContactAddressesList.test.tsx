@@ -13,13 +13,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactAddressesList } from '../ContactAddressesList';
 import { ContactAddressResource } from '@/types/contacts';
 import * as contactsApi from '@/lib/api/contacts';
+import { PreconditionFailedError } from '@/lib/api/conditional-request';
 
 // Mock the API functions
 jest.mock('@/lib/api/contacts', () => ({
   useAddContactAddress: jest.fn(),
   useDeleteContactAddress: jest.fn(),
   useSetContactValueArchived: jest.fn(),
-  updateContactAddressField: jest.fn(),
+  useUpdateContactAddressFields: jest.fn(),
 }));
 
 // Mock toast
@@ -98,9 +99,10 @@ describe('ContactAddressesList', () => {
       isPending: false,
     });
 
-    (contactsApi.updateContactAddressField as jest.Mock).mockImplementation(
-      mockUpdateField
-    );
+    (contactsApi.useUpdateContactAddressFields as jest.Mock).mockReturnValue({
+      mutateAsync: mockUpdateField,
+      isPending: false,
+    });
   });
 
   it('renders addresses list with addresses', () => {
@@ -160,7 +162,6 @@ describe('ContactAddressesList', () => {
 
     await waitFor(() => {
       expect(mockDeleteAddress).toHaveBeenCalledWith({
-        contactId: '123',
         addressId: '1',
       });
     });
@@ -283,10 +284,56 @@ describe('ContactAddressesList', () => {
 
       await waitFor(() => {
         expect(mockSetArchived.mock.calls).toEqual([
-          [{ contactId: '123', kind: 'address', id: '2', archived: true }],
-          [{ contactId: '123', kind: 'address', id: '3', archived: false }],
+          [{ kind: 'address', id: '2', archived: true }],
+          [{ kind: 'address', id: '3', archived: false }],
         ]);
       });
     });
+  });
+
+  it('closes the add form when the add is refused as a conflict', async () => {
+    // The conflict dialog holds the new value and can re-apply it; a form
+    // left filled in would invite adding it twice.
+    mockAddAddress.mockRejectedValueOnce(
+      new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {})
+    );
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
+
+    fireEvent.click(screen.getByLabelText('Add address'));
+    fireEvent.change(screen.getByPlaceholderText('123 Main Street'), {
+      target: { value: '1 New Street' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Address' }));
+
+    await waitFor(() => expect(mockAddAddress).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Add Address' })
+      ).not.toBeInTheDocument()
+    );
+  });
+
+  it('saves only the address fields the edit changed', async () => {
+    // Re-sending the untouched fields would put back whatever this page last
+    // read over a newer value saved elsewhere.
+    mockUpdateField.mockResolvedValue(undefined);
+    render(<ContactAddressesList contactId='123' addresses={mockAddresses} />, {
+      wrapper: createWrapper(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Address (Home)' }));
+    fireEvent.change(screen.getByLabelText('City'), {
+      target: { value: 'Newcastle' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save address' }));
+
+    await waitFor(() =>
+      expect(mockUpdateField).toHaveBeenCalledWith({
+        addressId: '1',
+        fields: { locality: 'Newcastle' },
+      })
+    );
   });
 });

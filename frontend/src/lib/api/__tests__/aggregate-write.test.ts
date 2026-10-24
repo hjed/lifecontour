@@ -3,6 +3,7 @@ import { ApiError, PreconditionFailedError } from '../conditional-request';
 import {
   aggregateScopeId,
   aggregateWrite,
+  guardedWrite,
   sendGuarded,
 } from '../aggregate-write';
 import {
@@ -118,6 +119,35 @@ describe('sendGuarded and reads that overlap the write', () => {
   });
 });
 
+describe('sendGuarded with a write that answers with the whole aggregate', () => {
+  it('stores the body and its tag together, so the tag never outruns the data', async () => {
+    // The body is the re-read aggregate, and may carry another tab's change:
+    // keeping only its tag would pair that version with the older body.
+    const queryClient = seeded();
+    const send = jest
+      .fn()
+      .mockResolvedValue({ body: { name: 'Augusta' }, etag: '"e2"' });
+
+    await sendGuarded(queryClient, KEY, send, { bodyIsResource: true });
+
+    expect(queryClient.getQueryData(KEY)).toEqual({
+      resource: { name: 'Augusta' },
+      etag: '"e2"',
+    });
+  });
+
+  it('leaves an aggregate nobody has read uncached', async () => {
+    const queryClient = new QueryClient();
+    const send = jest
+      .fn()
+      .mockResolvedValue({ body: { name: 'Augusta' }, etag: '"e2"' });
+
+    await sendGuarded(queryClient, KEY, send, { bodyIsResource: true });
+
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+});
+
 describe('aggregateWrite', () => {
   const options = aggregateWrite(REF, (value: string) => `Name → ${value}`);
 
@@ -143,5 +173,25 @@ describe('aggregateWrite', () => {
     expect(retry(0, new ApiError('down', 503))).toBe(true);
     expect(retry(0, new TypeError('network'))).toBe(true);
     expect(retry(1, new TypeError('network'))).toBe(false);
+  });
+});
+
+describe('guardedWrite', () => {
+  it('builds a scoped mutation whose mutationFn sends the cached tag', async () => {
+    const queryClient = seeded();
+    const send = jest.fn().mockResolvedValue({ body: 'ok', etag: '"e2"' });
+
+    const options = guardedWrite(
+      queryClient,
+      REF,
+      send,
+      (value: string) => `Name → ${value}`
+    );
+    const body = await options.mutationFn('Bob');
+
+    expect(options.scope).toEqual({ id: aggregateScopeId('contact', '1') });
+    expect(send).toHaveBeenCalledWith('Bob', '"e1"');
+    expect(body).toBe('ok');
+    expect(readEtag(queryClient, KEY)).toBe('"e2"');
   });
 });

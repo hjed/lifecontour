@@ -131,4 +131,77 @@ test.describe('Contact write conflicts', () => {
     );
     await expect(page.getByTestId('nickname-field')).toContainText('QuickNick');
   });
+
+  test('an edit to one of the contact rows conflicts with a change elsewhere in the contact', async ({
+    contactsWithData,
+  }) => {
+    const { page, contacts } = contactsWithData;
+    const contact = contacts[0];
+    const seeded = await page.request.post(
+      `/api/contacts/${contact.id}/methods`,
+      {
+        data: {
+          data: {
+            type: 'contact_methods',
+            attributes: {
+              method_type: 'email',
+              value: 'john.doe@example.com',
+              is_primary: true,
+            },
+          },
+        },
+      }
+    );
+    expect(seeded.ok()).toBe(true);
+
+    await page.goto(`/contacts/${contact.id}`);
+    const email = page.getByRole('button', { name: /^Email address/ }).first();
+    await expect(email).toContainText('john.doe@example.com');
+
+    // Another tab changes a different part of the contact.
+    const elsewhere = await page.request.patch(
+      `/api/contacts/${contact.id}/fields/nick_name`,
+      {
+        data: {
+          data: {
+            type: 'contact_fields',
+            attributes: { value: 'Elsewhere' },
+          },
+        },
+      }
+    );
+    expect(elsewhere.status()).toBe(200);
+
+    const isEmailEdit = (res: {
+      url(): string;
+      request(): { method(): string };
+    }) =>
+      /\/api\/contacts\/[^/]+\/methods\/[^/]+\/fields\/value$/.test(
+        res.url()
+      ) && res.request().method() === 'PATCH';
+    const refused = page.waitForResponse(isEmailEdit);
+    await email.click();
+    const input = page.getByRole('textbox', { name: /^Email address/ });
+    await input.clear();
+    await input.fill('john.new@example.com');
+    await input.press('Enter');
+    expect((await refused).status()).toBe(412);
+
+    // The tag covers the whole contact, so the dialog names what changed.
+    const dialog = page.getByTestId('write-conflict-dialog');
+    await expect(page.getByTestId('write-conflict-changed')).toHaveText(
+      'Changed: Nickname.'
+    );
+
+    const reapplied = page.waitForResponse(isEmailEdit);
+    await dialog.getByRole('button', { name: 'Keep mine' }).click();
+    expect((await reapplied).status()).toBe(200);
+    await expect(dialog).toBeHidden();
+
+    await page.reload();
+    await expect(
+      page.getByRole('button', { name: /^Email address/ }).first()
+    ).toContainText('john.new@example.com');
+    await expect(page.getByTestId('nickname-field')).toContainText('Elsewhere');
+  });
 });

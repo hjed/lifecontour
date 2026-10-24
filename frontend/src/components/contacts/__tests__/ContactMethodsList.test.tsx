@@ -14,13 +14,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContactMethodsList } from '../ContactMethodsList';
 import { ContactMethodResource, ContactMethodType } from '@/types/contacts';
 import * as contactsApi from '@/lib/api/contacts';
+import { PreconditionFailedError } from '@/lib/api/conditional-request';
 
 // Mock the API functions
 jest.mock('@/lib/api/contacts', () => ({
   useAddContactMethod: jest.fn(),
   useDeleteContactMethod: jest.fn(),
   useSetContactValueArchived: jest.fn(),
-  updateContactMethodField: jest.fn(),
+  useUpdateContactMethodField: jest.fn(),
 }));
 
 // Mock toast
@@ -92,9 +93,10 @@ describe('ContactMethodsList', () => {
       isPending: false,
     });
 
-    (contactsApi.updateContactMethodField as jest.Mock).mockImplementation(
-      mockUpdateField
-    );
+    (contactsApi.useUpdateContactMethodField as jest.Mock).mockReturnValue({
+      mutateAsync: mockUpdateField,
+      isPending: false,
+    });
   });
 
   it('renders contact methods list with methods', () => {
@@ -154,7 +156,6 @@ describe('ContactMethodsList', () => {
 
     await waitFor(() => {
       expect(mockDeleteMethod).toHaveBeenCalledWith({
-        contactId: '123',
         methodId: '1',
       });
     });
@@ -256,7 +257,6 @@ describe('ContactMethodsList', () => {
 
       await waitFor(() => {
         expect(mockSetArchived).toHaveBeenCalledWith({
-          contactId: '123',
           kind: 'method',
           id: '1',
           archived: true,
@@ -278,7 +278,6 @@ describe('ContactMethodsList', () => {
 
       await waitFor(() => {
         expect(mockSetArchived).toHaveBeenCalledWith({
-          contactId: '123',
           kind: 'method',
           id: '3',
           archived: false,
@@ -305,12 +304,11 @@ describe('ContactMethodsList', () => {
       await user.keyboard('{Enter}');
 
       await waitFor(() => {
-        expect(mockUpdateField).toHaveBeenCalledWith(
-          '123',
-          '3',
-          'value',
-          'older@example.com'
-        );
+        expect(mockUpdateField).toHaveBeenCalledWith({
+          methodId: '3',
+          fieldName: 'value',
+          value: 'older@example.com',
+        });
       });
       expect(mockSetArchived).not.toHaveBeenCalled();
     });
@@ -357,5 +355,29 @@ describe('ContactMethodsList', () => {
         screen.getByText('No contact methods in use.')
       ).toBeInTheDocument();
     });
+  });
+
+  it('closes the add form when the add is refused as a conflict', async () => {
+    // The conflict dialog holds the new value and can re-apply it; a form
+    // left filled in would invite adding it twice.
+    mockAddMethod.mockRejectedValueOnce(
+      new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {})
+    );
+    render(<ContactMethodsList contactId='123' methods={mockMethods} />, {
+      wrapper: createWrapper(),
+    });
+
+    fireEvent.click(screen.getByLabelText('Add contact method'));
+    fireEvent.change(screen.getByTestId('method-value-input'), {
+      target: { value: 'new@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Method' }));
+
+    await waitFor(() => expect(mockAddMethod).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Add Method' })
+      ).not.toBeInTheDocument()
+    );
   });
 });
