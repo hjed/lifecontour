@@ -819,6 +819,32 @@ class TestOutboxEventProcessor:
         mock_sync_metadata_repo.update_reference_data.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_a_failed_reference_data_write_fails_the_update(
+        self,
+        processor: OutboxEventProcessor,
+        contact_updated_event: OutboxEvent,
+        mock_contact_service: AsyncMock,
+        mock_link_repo: AsyncMock,
+        mock_sync_metadata_repo: AsyncMock,
+    ) -> None:
+        """Retried rather than committed with a stale record (#1820).
+
+        A link that still records an old address fallback would let the push
+        own, and delete, countryless addresses this pull did not import.
+        """
+        self._setup_contact_and_reference_mocks(
+            mock_contact_service, mock_link_repo, {"address_fallback_country": "AU"}
+        )
+        mock_sync_metadata_repo.update_reference_data.side_effect = RuntimeError(
+            "write failed"
+        )
+
+        with pytest.raises(Exception, match="write failed"):
+            await processor.process_event(contact_updated_event)
+
+        mock_sync_metadata_repo.upsert.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_process_contact_updated_omits_reference_data_tags(
         self,
         processor: OutboxEventProcessor,
@@ -836,7 +862,12 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            {"old_key": "old_value", "synced_tags": ["Work"]},
+            # The fallback is recorded already, so tags are all that could change.
+            {
+                "old_key": "old_value",
+                "synced_tags": ["Work"],
+                "address_fallback_country": None,
+            },
         )
 
         await processor.process_event(contact_updated_event)
@@ -860,7 +891,12 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            {"old_key": "old_value", "synced_tags": ["Work"]},
+            # The fallback is recorded already, so tags are all that could change.
+            {
+                "old_key": "old_value",
+                "synced_tags": ["Work"],
+                "address_fallback_country": None,
+            },
         )
 
         # Mock tag_repo as it's accessed directly by the processor

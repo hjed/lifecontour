@@ -5,13 +5,38 @@ Tracks synchronization state between external systems and internal entities.
 Used to implement idempotent sync operations and track sync history.
 """
 
+import json
 from datetime import datetime
 from enum import Enum
+from typing import Final
 
 from sqlalchemy import DateTime, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_shared.models.base import Base
+
+# ``reference_data`` key: the country the last applied inbound pull gave
+# addresses with none (#1820). The backend writes it when it applies a contact
+# event; the Google push merge reads it to own exactly what was imported.
+ADDRESS_FALLBACK_COUNTRY_KEY: Final = "address_fallback_country"
+
+
+def recorded_address_fallback(reference_data: str | None) -> str | None:
+    """The address fallback a link's ``reference_data`` records, if any.
+
+    Anything unreadable counts as no record, which keeps every countryless
+    address in Google: the reading that can never delete one.
+    """
+    if not reference_data:
+        return None
+    try:
+        parsed = json.loads(reference_data)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get(ADDRESS_FALLBACK_COUNTRY_KEY)
+    return value if isinstance(value, str) else None
 
 
 class SyncStatus(Enum):

@@ -7,6 +7,7 @@ addresses imported without one (#1820).
 """
 
 import structlog
+from dishka import AsyncContainer
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -17,9 +18,14 @@ from app.api.settings.schemas import (
     UserSettingsRequest,
     UserSettingsResponse,
 )
-from app.core.settings.models import UserSettings, UserSettingsRepository
+from app.core.integrations.services.google_contacts_resync import (
+    GoogleContactsResync,
+)
+from app.core.integrations.task_queue_service import TaskQueueService
+from app.core.settings.models import UNSET, UserSettings, UserSettingsRepository
 from app.core.settings.services.user_settings_service import UserSettingsService
 from app.infrastructure.auth.models import SessionUser
+from app.infrastructure.auth.oauth_service import OAuthService
 
 router = APIRouter(prefix="/user-settings", tags=["settings"])
 logger = structlog.get_logger()
@@ -64,15 +70,28 @@ async def update_user_settings(
     request_data: UserSettingsRequest,
     user: FromDishka[SessionUser],
     service: FromDishka[UserSettingsService],
+    oauth_service: FromDishka[OAuthService],
+    container: FromDishka[AsyncContainer],
     connection: FromDishka[AsyncConnection],
 ) -> UserSettingsResponse:
-    """Update the fields the body names (upsert); omitted ones are kept."""
+    """Update the fields the body names (upsert); omitted ones are kept.
+
+    Saving the default country forces a full Google contacts re-import, so
+    every contact's countryless addresses take it, not only the contacts
+    Google next changes (#1820). The service clears the sync token with the
+    save; the sync is then queued now, best-effort.
+    """
     try:
+        changes = request_data.to_changes()
         saved = await service.update_settings(
             user_id=str(user.id),
-            changes=request_data.to_changes(),
+            changes=changes,
             transaction=connection,
         )
+        if changes.default_country is not UNSET:
+            await GoogleContactsResync(
+                oauth_service, lambda: _task_queue_service(container)
+            ).request_sync(str(user.id), connection)
 
         logger.info(
             "User settings saved",
@@ -106,3 +125,8 @@ def _response(user_id: str, settings: UserSettings | None) -> UserSettingsRespon
             ),
         )
     )
+
+
+async def _task_queue_service(container: AsyncContainer) -> TaskQueueService:
+    """The task queue, built only when a sync is queued (it connects to Redis)."""
+    return await container.get(TaskQueueService)

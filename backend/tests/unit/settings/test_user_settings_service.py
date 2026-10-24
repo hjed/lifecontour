@@ -21,9 +21,15 @@ def mock_transaction():
 
 
 @pytest.fixture
-def settings_service(mock_settings_repo):
+def mock_contacts_reimport():
+    """Create a mock for forcing a full contacts re-import."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def settings_service(mock_settings_repo, mock_contacts_reimport):
     """Create a UserSettingsService instance."""
-    return UserSettingsService(mock_settings_repo)
+    return UserSettingsService(mock_settings_repo, mock_contacts_reimport)
 
 
 class TestUpdateSettings:
@@ -46,3 +52,30 @@ class TestUpdateSettings:
 
         assert result is saved
         mock_settings_repo.update.assert_awaited_once_with("user-1", changes)
+
+    @pytest.mark.asyncio
+    async def test_a_sent_default_country_forces_a_contacts_re_import(
+        self, settings_service, mock_contacts_reimport, mock_transaction
+    ) -> None:
+        """Even an unchanged one: the save is the recovery for a missed sync."""
+        await settings_service.update_settings(
+            user_id="user-1",
+            changes=UserSettingsChanges(default_country="NZ"),
+            transaction=mock_transaction,
+        )
+
+        mock_contacts_reimport.force_full_contacts_sync.assert_awaited_once_with(
+            "user-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_timezone_change_leaves_the_contacts_alone(
+        self, settings_service, mock_contacts_reimport, mock_transaction
+    ) -> None:
+        await settings_service.update_settings(
+            user_id="user-1",
+            changes=UserSettingsChanges(timezone="Europe/London"),
+            transaction=mock_transaction,
+        )
+
+        mock_contacts_reimport.force_full_contacts_sync.assert_not_awaited()

@@ -27,7 +27,11 @@ from core_shared.models.outbox_events import (
     ContactSyncEventData,
     SyncCompletedEventData,
 )
-from core_shared.models.sync_metadata import SyncMetadata, SyncStatus
+from core_shared.models.sync_metadata import (
+    ADDRESS_FALLBACK_COUNTRY_KEY,
+    SyncMetadata,
+    SyncStatus,
+)
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
@@ -661,7 +665,7 @@ class OutboxEventProcessor:
 
         return False
 
-    async def _update_synced_tags_reference(
+    async def _update_link_reference_data(
         self,
         integration_source: str,
         external_id: str,
@@ -670,26 +674,35 @@ class OutboxEventProcessor:
         link_exists: bool,
         existing_reference_data: str | None,
         contact_data: dict[str, Any],
+        address_fallback_country: str | None,
     ) -> None:
-        """Persist the contact's ``synced_tags`` onto the canonical link.
+        """Record what an applied update imported onto the canonical link.
 
         Writes ``reference_data`` on ``user_id``'s ``sync_metadata`` link keyed
         by ``(integration_source, external_id)``; ``version_hash`` is untouched so a
-        tag-metadata change never registers as a content change for the next sync.
+        metadata change never registers as a content change for the next sync.
+        Two keys are kept, each written only when it changed and every other key
+        left as it is:
+
+        * ``synced_tags`` — the tags the source holds, when the event carries
+          tags, so a tag removed at the source is told apart from a local one;
+        * ``address_fallback_country`` — the country the import gave addresses
+          with none (#1820): a push owns a countryless address only when the
+          last applied pull imported it.
 
         Gated on the link's *existence* — not on whether it already has
         ``reference_data`` — so a link whose ``reference_data`` is NULL (a
-        manual-link or pre-``reference_data``-column row) still gets ``synced_tags``
+        manual-link or pre-``reference_data``-column row) still gets them
         established; missing/NULL ``reference_data`` is treated as ``{}``.
         """
-        if (
-            not link_exists
-            or "tags" not in contact_data
-            or contact_data["tags"] is None
-        ):
+        if not link_exists:
             return
 
-        incoming_tag_names = [tag_data["name"] for tag_data in contact_data["tags"]]
+        updates: dict[str, Any] = {
+            ADDRESS_FALLBACK_COUNTRY_KEY: address_fallback_country
+        }
+        if contact_data.get("tags") is not None:
+            updates["synced_tags"] = [tag["name"] for tag in contact_data["tags"]]
 
         # Missing/NULL reference_data on an existing link starts from an empty dict.
         new_ref_data: dict[str, Any] = {}
@@ -698,11 +711,13 @@ class OutboxEventProcessor:
             if parsed is not None:
                 new_ref_data = parsed
 
-        # Skip update if synced_tags already matches
-        if new_ref_data.get("synced_tags") == incoming_tag_names:
+        if all(
+            key in new_ref_data and new_ref_data[key] == value
+            for key, value in updates.items()
+        ):
             return
 
-        new_ref_data["synced_tags"] = incoming_tag_names
+        new_ref_data.update(updates)
         await self.sync_metadata_repo.update_reference_data(
             integration_source=integration_source,
             external_id=external_id,
@@ -954,6 +969,9 @@ class OutboxEventProcessor:
         }
         if contact.tags:
             initial_ref_data["synced_tags"] = [str(tag.name) for tag in contact.tags]
+        initial_ref_data[ADDRESS_FALLBACK_COUNTRY_KEY] = (
+            payload.address_fallback_country
+        )
 
         # Create initial sync metadata (the canonical integration link).
         # Calculate version hash for the contact data.
@@ -1262,28 +1280,19 @@ class OutboxEventProcessor:
             assert skipped is not None
             return skipped
 
-        # Update reference data with new synced tags. Non-fatal: synced_tags
-        # metadata self-heals on the next sync cycle. Wrapped in a savepoint so a
-        # DB failure rolls back only this write and leaves the outer transaction
-        # healthy — the version-hash upsert and commit below must still succeed
-        # (catching the error alone would not un-poison the asyncpg transaction).
-        try:
-            async with self.connection.begin_nested():
-                await self._update_synced_tags_reference(
-                    integration_source,
-                    external_id,
-                    user_id=payload.user_id,
-                    link_exists=existing_link is not None,
-                    existing_reference_data=existing_reference_data,
-                    contact_data=contact_data,
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Failed to update synced_tags reference data after contact update",
-                error=str(e),
-                external_id=external_id,
-                integration_source=integration_source,
-            )
+        # Record what this update imported on the link. Not swallowed: the push
+        # merge owns countryless addresses by the recorded fallback, so a stale
+        # record could delete ones this pull did not import (#1820). A failure
+        # fails the event, which rolls back and is retried.
+        await self._update_link_reference_data(
+            integration_source,
+            external_id,
+            user_id=payload.user_id,
+            link_exists=existing_link is not None,
+            existing_reference_data=existing_reference_data,
+            contact_data=contact_data,
+            address_fallback_country=payload.address_fallback_country,
+        )
 
         # Update sync metadata with new version hash
         # This is done atomically in the same transaction as the contact update

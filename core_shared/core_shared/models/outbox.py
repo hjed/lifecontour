@@ -115,6 +115,7 @@ class OutboxEvent(Base):
         sync_scope: ContactSyncScope | None = None,
         force_apply: bool = False,
         skipped_addresses: list[SkippedAddress] | None = None,
+        address_fallback_country: str | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -129,6 +130,8 @@ class OutboxEvent(Base):
             sync_scope: The fields the source owns; see ``ContactSyncScope``
             force_apply: Apply even when ``etag`` is unchanged (a full sync)
             skipped_addresses: Addresses the import left out, for review
+            address_fallback_country: The country the import gave addresses
+                with none, if any (#1820)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -147,6 +150,7 @@ class OutboxEvent(Base):
             sync_scope=sync_scope,
             force_apply=force_apply,
             skipped_addresses=skipped_addresses or [],
+            address_fallback_country=address_fallback_country,
         )
         return cls(
             event_type=f"contact.{sync_type}",
