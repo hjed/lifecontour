@@ -34,12 +34,12 @@ import structlog
 from core_shared.sync_base import (
     SyncedEntries,
     remote_unchanged_since_sync,
-    three_way_keys,
+    three_way_entries,
 )
 from pydantic import ValidationError
 
 from api_models import GoogleNickname
-from synced_entries import BaseField, raw_entry_key, raw_synced_entries
+from synced_entries import BaseField, Keys, raw_entry_keys, raw_synced_entries
 from transformer import select_nickname
 
 logger = structlog.get_logger()
@@ -95,9 +95,9 @@ class SyncContext:
         """The field's base keys; a field never recorded has none."""
         return self.base.get(field, frozenset())
 
-    def key_of(self, field: BaseField) -> Callable[[Entry], str | None]:
-        """The key of a raw entry of ``field``, None when inbound skips it."""
-        return lambda entry: raw_entry_key(field, entry, self.address_fallback_country)
+    def keys_of(self, field: BaseField) -> Callable[[Entry], Keys]:
+        """The keys of a raw entry of ``field``, none when inbound skips it."""
+        return lambda entry: raw_entry_keys(field, entry, self.address_fallback_country)
 
 
 @dataclass(frozen=True)
@@ -140,27 +140,34 @@ class KeepUnsynced:
     def merge(
         self, pushed: list[Entry], current: list[Entry], sync: SyncContext
     ) -> FieldMerge:
-        key = sync.key_of(self.field)
-        remote = [(entry, key(entry)) for entry in current]
-        decision = three_way_keys(
-            base=sync.base_of(self.field),
-            local={k for entry in pushed if (k := key(entry)) is not None},
-            remote={k for _, k in remote if k is not None},
+        keys = sync.keys_of(self.field)
+        pushed_keys = [keys(entry) for entry in pushed]
+        remote_keys = [keys(entry) for entry in current]
+        decision = three_way_entries(
+            base=sync.base_of(self.field), local=pushed_keys, remote=remote_keys
         )
-        sent = [entry for entry in pushed if key(entry) not in decision.suppressed]
-        kept: list[Entry] = []
-        for entry, k in remote:
-            writable = _writable(entry)
-            if not _is_contact_entry(entry):
-                continue
-            if k in decision.kept or (
-                k is None and not any(_is_echo(entry, p) for p in sent)
-            ):
-                kept.append(writable)
+        sent = [
+            entry
+            for index, entry in enumerate(pushed)
+            if index not in decision.suppressed
+        ]
+        kept = [
+            _writable(entry)
+            for index, entry in enumerate(current)
+            if _is_contact_entry(entry)
+            and (
+                index in decision.kept
+                or (
+                    not remote_keys[index] and not any(_is_echo(entry, p) for p in sent)
+                )
+            )
+        ]
         return FieldMerge(
             [*sent, *kept],
-            kept=decision.kept,
-            suppressed=decision.suppressed,
+            kept=frozenset().union(*(remote_keys[i] for i in decision.kept)),
+            suppressed=frozenset().union(
+                *(pushed_keys[i] for i in decision.suppressed)
+            ),
             remote_won=decision.remote_won,
         )
 
@@ -171,8 +178,10 @@ class SingletonUnsynced:
 
     Google cannot hold a kept entry beside a pushed one, so the field leaves
     the update mask whenever Google's entry should stand: one inbound never
-    imported, one added in Google since the base, or one edited there while
-    the local value is unchanged. Otherwise the pushed value wins.
+    imported, one added in Google since the base, or one edited or deleted
+    there while the local value is unchanged. Otherwise the pushed value wins.
+    A profile's entry is never written, but one gained since the base is still
+    owed to the next pull, which imports it.
     """
 
     field: BaseField
@@ -180,20 +189,25 @@ class SingletonUnsynced:
     def merge(
         self, pushed: list[Entry], current: list[Entry], sync: SyncContext
     ) -> FieldMerge:
-        key = sync.key_of(self.field)
+        keys = sync.keys_of(self.field)
         base = sync.base_of(self.field)
         contact_entries = [entry for entry in current if _is_contact_entry(entry)]
-        remote = {k for entry in contact_entries if (k := key(entry)) is not None}
+        remote: Keys = frozenset().union(*map(keys, contact_entries))
+        profile: Keys = frozenset().union(
+            *(keys(entry) for entry in current if not _is_contact_entry(entry))
+        )
+        pushed_keys: Keys = keys(pushed[0]) if pushed else frozenset()
+        profile_gained = bool(profile - base - pushed_keys)
         if not pushed:
             if contact_entries and not remote:
-                return FieldMerge(Omit.FIELD)
+                return FieldMerge(Omit.FIELD, remote_won=profile_gained)
             if remote - base:
                 return FieldMerge(Omit.FIELD, remote_won=True)
-            return FieldMerge(pushed)
-        if key(pushed[0]) in base and not remote & base:
+            return FieldMerge(pushed, remote_won=profile_gained)
+        if pushed_keys & base and not remote & base:
             # Local still holds the base value, which Google edited or deleted.
             return FieldMerge(Omit.FIELD, remote_won=True)
-        return FieldMerge(pushed)
+        return FieldMerge(pushed, remote_won=profile_gained)
 
 
 @dataclass(frozen=True)

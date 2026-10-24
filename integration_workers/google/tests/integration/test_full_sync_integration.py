@@ -8,7 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
-from synced_entries import raw_entry_key
+from synced_entries import raw_entry_keys
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 from worker import sync_google_contacts
 
@@ -278,13 +278,13 @@ class TestFullSyncIntegration:
         assert synced == {
             "emailAddresses": [],
             "phoneNumbers": [],
-            "addresses": [
-                raw_entry_key(
+            "addresses": sorted(
+                raw_entry_keys(
                     "addresses",
                     {"streetAddress": "1 Queen St", "city": "Auckland"},
                     "NZ",
                 )
-            ],
+            ),
             "birthdays": [],
         }
 

@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
-from synced_entries import BaseField, raw_entry_key
+from synced_entries import BaseField, raw_entry_keys
 
 pytestmark = pytest.mark.unit
 
@@ -35,10 +35,8 @@ def _google(*entries: dict[str, Any]) -> list[dict[str, Any]]:
 def _keys(
     field: BaseField, *entries: dict[str, Any], fallback: str | None = None
 ) -> frozenset[str]:
-    return frozenset(
-        key
-        for entry in entries
-        if (key := raw_entry_key(field, entry, fallback)) is not None
+    return frozenset().union(
+        *(raw_entry_keys(field, entry, fallback) for entry in entries)
     )
 
 
@@ -141,8 +139,40 @@ class TestPhones:
         )
 
         assert merged.payload["phoneNumbers"] == []
-        assert merged.suppressed["phoneNumbers"] == _keys("phoneNumbers", canonical)
+        assert merged.suppressed["phoneNumbers"] == _keys(
+            "phoneNumbers", {"value": "0412 345 678"}
+        )
         assert merged.pending_import is True
+
+    def test_a_phone_typed_with_its_country_prefix_and_deleted_in_google_stays_gone(
+        self,
+    ) -> None:
+        typed = {"value": "1 (202) 555-0123"}
+        canonical = {**typed, "canonicalForm": "+12025550123"}
+
+        merged = _merge("phoneNumbers", [typed], google=[], base=[canonical])
+
+        assert merged.payload["phoneNumbers"] == []
+
+    def test_a_number_added_in_google_in_another_country_is_kept(self) -> None:
+        """Same national number, different country: a different phone."""
+        held = {"value": "+1 202 555 0123", "canonicalForm": "+12025550123"}
+        added = {"value": "+44 20 2555 0123", "canonicalForm": "+442025550123"}
+
+        merged = _merge("phoneNumbers", [held], google=[held, added], base=[held])
+
+        assert merged.payload["phoneNumbers"] == [held, added]
+
+    def test_a_phone_added_on_both_sides_typed_differently_is_sent_once(
+        self,
+    ) -> None:
+        local = {"value": "+61412345678"}
+        google = {"value": "0412 345 678", "canonicalForm": "+61412345678"}
+
+        merged = _merge("phoneNumbers", [local], google=[google], base=[])
+
+        assert merged.payload["phoneNumbers"] == [local]
+        assert merged.pending_import is False
 
 
 class TestHeldBack:
@@ -239,6 +269,28 @@ class TestAddresses:
 
         assert merged.payload["addresses"] == [pushed]
         assert merged.pending_import is False
+
+
+class TestProfileBirthday:
+    def test_a_birthday_added_to_the_linked_profile_is_owed_to_the_pull(
+        self,
+    ) -> None:
+        """Inbound imports a profile's birthday too; the contact has none."""
+        merged = merge_for_push(
+            {"birthdays": []},
+            {
+                "birthdays": [
+                    {
+                        "metadata": {"source": {"type": "PROFILE"}},
+                        "date": {"year": 1815, "month": 12, "day": 10},
+                    }
+                ]
+            },
+            synced_base={"birthdays": frozenset()},
+        )
+
+        assert merged.payload["birthdays"] == []
+        assert merged.pending_import is True
 
 
 class TestBirthdays:
