@@ -7,10 +7,13 @@ stream, so they are re-homed onto the sender's calendar as they arrive.
 
 from typing import Any
 
-from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
 
 from app.core.integrations.journal_outbox_event_processor import (
-    LEGACY_SHARED_STRAVA_CALENDAR_ID,
     rehome_legacy_strava_calendar,
 )
 

@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
-from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
 from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncStatus,
@@ -119,10 +123,6 @@ _SERIES_DELETION_BUFFER = timedelta(days=1)
 # Integration source of Snipe-IT maintenance imports. Must equal
 # ``INBOUND_SYNC_CHANGED_BY`` in the Snipe-IT worker.
 _SNIPEIT_MAINTENANCE_SOURCE = "snipeit_maintenance"
-
-# The one calendar every user's Strava activities shared until #1856.
-# TODO(#1902): remove once no event naming it can still be in flight.
-LEGACY_SHARED_STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def rehome_legacy_strava_calendar(event_data: dict[str, Any]) -> dict[str, Any]:

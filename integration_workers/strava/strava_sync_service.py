@@ -18,7 +18,11 @@ from typing import Any
 
 import httpx
 import structlog
-from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
 from core_shared.models.journals import JournalType
 from core_shared.models.outbox import OutboxEvent
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
@@ -32,6 +36,19 @@ from strava_models import StravaStreamSet
 from strava_rate_limiter import StravaRateLimitError
 
 logger = structlog.get_logger(__name__)
+
+
+async def _shared_strava_calendar_exists(session: AsyncSession) -> bool:
+    """Whether the calendar every user once shared is still there (#1856).
+
+    Migration 0142 deletes it; until then the backend has not been migrated.
+    """
+    result = await session.execute(
+        text("SELECT 1 FROM calendars WHERE id = CAST(:id AS uuid)"),
+        {"id": LEGACY_SHARED_STRAVA_CALENDAR_ID},
+    )
+    return result.first() is not None
+
 
 # Maximum activities per Strava API page
 _PAGE_SIZE = 100
@@ -95,6 +112,7 @@ class StravaSyncService:
     ) -> None:
         self._api_client = api_client
         self._user_id = user_id
+        self._resolved_calendar_id: str | None = None
         self._transformer = StravaDataTransformer()
 
     # ── Public API ──────────────────────────────────────────────────────
@@ -135,10 +153,12 @@ class StravaSyncService:
             streams = await self._api_client.get_activity_streams(activity.id)
 
         transformed = self._transformer.transform(activity, streams=streams)
+        calendar_id = await self._calendar_id(session)
 
         if existing_journal_id is not None:
             event = self._build_outbox_event(
                 transformed,
+                calendar_id,
                 sync_action="updated",
                 existing_journal_id=existing_journal_id,
             )
@@ -148,7 +168,7 @@ class StravaSyncService:
                 journal_id=existing_journal_id,
             )
         else:
-            event = self._build_outbox_event(transformed)
+            event = self._build_outbox_event(transformed, calendar_id)
             logger.info(
                 "Created outbox event for new Strava activity",
                 strava_activity_id=activity.id,
@@ -287,6 +307,7 @@ class StravaSyncService:
                         str(activity_id), dedup_session
                     ):
                         raise _ActivitySkipped
+                    calendar_id = await self._calendar_id(dedup_session)
 
                 if existing_jid is not None and stored_hash is not None:
                     # Activity is imported AND has a valid version hash —
@@ -313,6 +334,7 @@ class StravaSyncService:
                     # re-process types and fitness data
                     event = self._build_outbox_event(
                         transformed,
+                        calendar_id,
                         sync_action="updated",
                         existing_journal_id=existing_jid,
                     )
@@ -322,7 +344,7 @@ class StravaSyncService:
                         journal_id=existing_jid,
                     )
                 else:
-                    event = self._build_outbox_event(transformed)
+                    event = self._build_outbox_event(transformed, calendar_id)
 
                 # Short transaction just for the write
                 async with session_factory() as session:
@@ -402,7 +424,7 @@ class StravaSyncService:
             )
             return None
 
-        calendar_id = self._calendar_id()
+        calendar_id = await self._calendar_id(session)
         event = OutboxEvent.create_journal_sync_event(
             journal_data={"user_id": self._user_id},
             calendar_info_data={"calendar_id": calendar_id},
@@ -423,14 +445,29 @@ class StravaSyncService:
 
     # ── Internal helpers ────────────────────────────────────────────────
 
-    def _calendar_id(self) -> str:
+    async def _calendar_id(self, session: AsyncSession) -> str:
         """The calendar this user's activities are linked on.
 
         Strava has no calendars, but a journal sync event names one, so each
         user has a synthetic calendar of their own: one shared by every user
         was owned by whoever synced first and hidden from everyone else (#1856).
+
+        Until migration 0142 has moved everyone off the shared calendar, its row
+        is still there and this keeps naming it. A backend not yet migrated
+        knows only that calendar: an event naming the user's own would be
+        matched against no link, so an import would be created twice and a
+        deletion lost. Once migrated, the backend reads the shared id as the
+        user's own (#1902).
         """
-        return synthetic_calendar_id(SyntheticCalendar.STRAVA, self._user_id)
+        if self._resolved_calendar_id is None:
+            # Read once per sync: an answer gone stale mid-sync is the shared
+            # id, which a migrated backend still reads correctly.
+            self._resolved_calendar_id = (
+                LEGACY_SHARED_STRAVA_CALENDAR_ID
+                if await _shared_strava_calendar_exists(session)
+                else synthetic_calendar_id(SyntheticCalendar.STRAVA, self._user_id)
+            )
+        return self._resolved_calendar_id
 
     async def _is_merged_away(
         self, strava_activity_id: str, session: AsyncSession
@@ -552,6 +589,7 @@ class StravaSyncService:
     def _build_outbox_event(
         self,
         transformed: TransformedActivity,
+        calendar_id: str,
         sync_action: str = "created",
         existing_journal_id: int | None = None,
     ) -> OutboxEvent:
@@ -598,7 +636,7 @@ class StravaSyncService:
             journal_data["climbing_data"] = {"indoor": transformed.climbing_indoor}
 
         calendar_info_data: dict[str, Any] = {
-            "calendar_id": self._calendar_id(),
+            "calendar_id": calendar_id,
             "is_all_day": False,
             "location": None,
             "start_time": None,
@@ -611,7 +649,7 @@ class StravaSyncService:
             calendar_info_data=calendar_info_data,
             integration_source="strava",
             external_event_id=f"strava:{transformed.fitness_data_strava_activity_id}",
-            calendar_id=self._calendar_id(),
+            calendar_id=calendar_id,
             sync_action=sync_action,
             existing_journal_id=existing_journal_id,
         )
