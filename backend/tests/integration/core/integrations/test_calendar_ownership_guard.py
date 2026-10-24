@@ -7,15 +7,19 @@ linked on a calendar they could not see (#1856). An event naming a calendar
 someone else owns is refused rather than linked there.
 """
 
+from uuid import uuid4
+
 import pytest
 from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.integrations.journal_outbox_event_processor import (
     EVENT_TYPE_JOURNAL_EVENT_CREATED,
     JournalOutboxEventProcessingError,
 )
+from app.infrastructure.unit_of_work import unit_of_work
+from tests.integration.concurrency_helpers import overlap
 from tests.integration.core.integrations.journal_sync_seeding import (
     build_processor,
     create_calendar,
@@ -104,3 +108,67 @@ async def test_an_event_on_the_users_own_calendar_is_applied(
     await build_processor(async_connection).process_event(event)
 
     assert await _count(async_connection, "SELECT count(*) FROM journals") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_second_user_racing_a_calendars_first_sync_is_refused(
+    async_engine: AsyncEngine,
+) -> None:
+    """Two users' first events naming one calendar, the second arriving mid-insert.
+
+    The second's insert waits on the first's and then finds the row, which a
+    read in the same statement cannot see: its snapshot predates the first's
+    commit. That is when the guard matters most, since it is how one id shared
+    by every user came to be owned by whoever synced first. Committed for real
+    (two connections cannot share the savepoint fixture) and deleted afterwards.
+    """
+    owner, intruder = f"race-owner-{uuid4()}", f"race-intruder-{uuid4()}"
+    calendar_id = str(uuid4())
+
+    async def first_sync(connection: AsyncConnection) -> None:
+        event = sync_event(
+            EVENT_TYPE_JOURNAL_EVENT_CREATED,
+            calendar_id=calendar_id,
+            external_event_id="race-1",
+            user_id=owner,
+        )
+        await build_processor(connection).process_event(event)
+
+    async def racing_sync(connection: AsyncConnection) -> None:
+        event = sync_event(
+            EVENT_TYPE_JOURNAL_EVENT_CREATED,
+            calendar_id=calendar_id,
+            external_event_id="race-2",
+            user_id=intruder,
+        )
+        with pytest.raises(JournalOutboxEventProcessingError, match="another user"):
+            async with unit_of_work(connection):
+                await build_processor(connection).process_event(event)
+
+    try:
+        await overlap(async_engine, first_sync, racing_sync)
+
+        async with async_engine.connect() as check:
+            owners = await check.execute(
+                text("SELECT user_id FROM journals WHERE user_id = ANY(:users)"),
+                {"users": [owner, intruder]},
+            )
+            assert [row.user_id for row in owners] == [owner]
+    finally:
+        async with async_engine.connect() as cleanup:
+            journal_ids = [
+                row.id
+                for row in await cleanup.execute(
+                    text("SELECT id FROM journals WHERE user_id = ANY(:users)"),
+                    {"users": [owner, intruder]},
+                )
+            ]
+            for statement in (
+                "DELETE FROM outbox_events WHERE aggregate_id = ANY(:ids)",
+                "DELETE FROM journals WHERE id = ANY(:ids)",
+                "DELETE FROM calendars WHERE id = CAST(:calendar_id AS uuid)",
+            ):
+                await cleanup.execute(
+                    text(statement), {"ids": journal_ids, "calendar_id": calendar_id}
+                )
+            await cleanup.commit()

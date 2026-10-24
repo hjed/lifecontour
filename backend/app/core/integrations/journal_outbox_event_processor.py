@@ -2115,22 +2115,14 @@ class JournalOutboxEventProcessor:
         name, color = self._INTEGRATION_CALENDAR_DEFAULTS.get(
             integration_source, (f"{integration_source.title()} Calendar", "#808080")
         )
-        # The SELECT reads the statement's snapshot, so it sees a calendar that
-        # was already there and never the one the INSERT adds, which is this
-        # user's anyway.
-        result = await self.connection.execute(
+        await self.connection.execute(
             text("""
-                WITH upsert AS (
-                    INSERT INTO calendars
-                        (id, user_id, name, color, integration_source)
-                    VALUES (:id, :user_id, :name, :color, :integration_source)
-                    ON CONFLICT (id) DO UPDATE
-                        SET integration_source = EXCLUDED.integration_source
-                        WHERE calendars.integration_source IS NULL
-                          AND calendars.user_id = EXCLUDED.user_id
-                )
-                SELECT user_id FROM calendars
-                WHERE id = :id AND user_id <> :user_id
+                INSERT INTO calendars (id, user_id, name, color, integration_source)
+                VALUES (:id, :user_id, :name, :color, :integration_source)
+                ON CONFLICT (id) DO UPDATE
+                    SET integration_source = EXCLUDED.integration_source
+                    WHERE calendars.integration_source IS NULL
+                      AND calendars.user_id = EXCLUDED.user_id
             """),
             {
                 "id": calendar_id,
@@ -2140,7 +2132,15 @@ class JournalOutboxEventProcessor:
                 "integration_source": integration_source,
             },
         )
-        if result.fetchone() is not None:
+        # A statement of its own, so it reads a snapshot taken after the upsert.
+        # A read inside the upsert's statement would miss a calendar another
+        # user's first sync inserted concurrently: the upsert waits for that
+        # insert to commit, but the statement's snapshot predates it.
+        other_owner = await self.connection.execute(
+            text("SELECT 1 FROM calendars WHERE id = :id AND user_id <> :user_id"),
+            {"id": calendar_id, "user_id": user_id},
+        )
+        if other_owner.fetchone() is not None:
             raise JournalOutboxEventProcessingError(
                 f"Calendar {calendar_id} belongs to another user; "
                 f"refusing to link {user_id}'s journal on it"
