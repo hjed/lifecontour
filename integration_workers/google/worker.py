@@ -60,6 +60,7 @@ from core_shared.repositories import (
     UnmatchedParticipantRepository,
     UserSettingsReader,
 )
+from core_shared.sync_base import serialise_synced_entries
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
@@ -88,6 +89,7 @@ from group_mapping import _build_contact_group_mapping, _fetch_contact_group_map
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
 from person_merge import merge_with_current_person
+from synced_entries import synced_entries_of
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
@@ -1767,6 +1769,7 @@ async def _emit_contact_sync_events(
                 if google_person.resource_name in existing_external_ids
                 else "created"
             )
+            fallback_country = transformer.address_fallback_country(google_person)
 
             outbox_event = OutboxEvent.create_contact_sync_event(
                 contact_data=contact_data,
@@ -1778,8 +1781,10 @@ async def _emit_contact_sync_events(
                 sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
                 force_apply=force_apply,
                 skipped_addresses=transformer.skipped_addresses(google_person),
-                address_fallback_country=transformer.address_fallback_country(
-                    google_person
+                address_fallback_country=fallback_country,
+                # The base the next push merges against (#1861).
+                synced_entries=serialise_synced_entries(
+                    synced_entries_of(google_person, fallback_country)
                 ),
             )
 

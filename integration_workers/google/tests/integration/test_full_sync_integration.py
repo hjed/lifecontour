@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import text
 
+from synced_entries import raw_entry_key
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 from worker import sync_google_contacts
 
@@ -259,18 +260,33 @@ class TestFullSyncIntegration:
             text(
                 """
                 SELECT (event_data::jsonb)->'contact_data'->'addresses',
-                       (event_data::jsonb)->>'address_fallback_country'
+                       (event_data::jsonb)->>'address_fallback_country',
+                       (event_data::jsonb)->'synced_entries'
                 FROM outbox_events
                 WHERE (event_data::jsonb)->>'external_id' = 'people/default_country_1'
                 """
             )
         )
-        [(contact_addresses, fallback)] = addresses.all()
+        [(contact_addresses, fallback, synced)] = addresses.all()
         assert [(a["street_line_1"], a["country_code"]) for a in contact_addresses] == [
             ("1 Queen St", "NZ")
         ]
         # The backend records it on the link, for the push merge to own it.
         assert fallback == "NZ"
+        # So is the base the next push merges against, the address keyed in
+        # the country it was imported with (#1861).
+        assert synced == {
+            "emailAddresses": [],
+            "phoneNumbers": [],
+            "addresses": [
+                raw_entry_key(
+                    "addresses",
+                    {"streetAddress": "1 Queen St", "city": "Auckland"},
+                    "NZ",
+                )
+            ],
+            "birthdays": [],
+        }
 
     async def test_full_sync_reports_an_address_whose_region_is_unrecognised(
         self, db_session
