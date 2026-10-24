@@ -306,6 +306,16 @@ class _MaintenanceFailed(Exception):
 # stream consumer's retry budget must outlast it (see stream_consumer_tasks).
 IN_FLIGHT_LOCK_SECONDS = 300
 
+# What releases a pending lock: any error, and the cancellation arq's job timeout
+# delivers (a ``BaseException``), which would otherwise leave the lock held until
+# ``IN_FLIGHT_LOCK_SECONDS`` passed.
+_RELEASES_LOCK = (Exception, asyncio.CancelledError)
+
+
+def _failure_message(exc: BaseException) -> str:
+    """Return the ``error_message`` for a released lock; a cancel has no text."""
+    return str(exc)[:255] or type(exc).__name__
+
 
 # Starts the ``error_message`` of a failed checkout or check-in that retrying will
 # not fix: missing or inverted dates, or an asset Snipe-IT refuses or does not
@@ -2007,8 +2017,10 @@ class SnipeItSyncService:
                 return
             await self._fail_maintenance_claim(journal_id, session_factory, str(exc))
             raise
-        except Exception as exc:
-            await self._fail_maintenance_claim(journal_id, session_factory, str(exc))
+        except _RELEASES_LOCK as exc:
+            await self._fail_maintenance_claim(
+                journal_id, session_factory, _failure_message(exc)
+            )
             raise
 
         logger.info(
@@ -2981,8 +2993,10 @@ class SnipeItSyncService:
             # For 500s or other errors, unlock and raise so it retries
             await self._unlock_pending_checkout(pair, session_factory, str(exc)[:255])
             raise
-        except Exception as exc:
-            await self._unlock_pending_checkout(pair, session_factory, str(exc)[:255])
+        except _RELEASES_LOCK as exc:
+            await self._unlock_pending_checkout(
+                pair, session_factory, _failure_message(exc)
+            )
             raise
 
         checkout_reference: dict[str, Any] = {
@@ -3652,9 +3666,9 @@ class SnipeItSyncService:
                 journal_id, external_id, session_factory, str(exc)[:255]
             )
             raise
-        except Exception as exc:
+        except _RELEASES_LOCK as exc:
             await self._unlock_pending_checkin(
-                journal_id, external_id, session_factory, str(exc)[:255]
+                journal_id, external_id, session_factory, _failure_message(exc)
             )
             raise
 

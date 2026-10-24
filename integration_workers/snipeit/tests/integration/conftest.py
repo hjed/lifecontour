@@ -7,8 +7,10 @@ scoped to this integration subtree. The Snipe-IT-specific HTTP fixtures
 (``MockTransport`` and friends) remain below.
 """
 
+import asyncio
 import json as _json
 import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -126,3 +128,36 @@ def snipeit_sync_service(integration_client: Any) -> Any:
         user_id="user-123",
         snipeit_user_id="5",
     )
+
+
+CancelDuring = Callable[[str, Callable[[], Awaitable[object]]], Awaitable[None]]
+
+
+@pytest.fixture
+def cancel_during(
+    mock_transport: MockTransport, monkeypatch: pytest.MonkeyPatch
+) -> CancelDuring:
+    """Run a push until it POSTs to ``path``, then cancel it as arq's job timeout does.
+
+    The POST never answers, so the push is cancelled mid-request; the returned
+    coroutine finishes once the cancelled push has unwound.
+    """
+
+    async def run(path: str, push: Callable[[], Awaitable[object]]) -> None:
+        posted = asyncio.Event()
+        serve = mock_transport.handle_async_request
+
+        async def hang_on_post(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and path in request.url.path:
+                posted.set()
+                await asyncio.Event().wait()
+            return await serve(request)
+
+        monkeypatch.setattr(mock_transport, "handle_async_request", hang_on_post)
+        task = asyncio.create_task(push())
+        await asyncio.wait_for(posted.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    return run
