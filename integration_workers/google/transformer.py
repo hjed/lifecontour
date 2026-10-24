@@ -273,7 +273,7 @@ class GoogleContactTransformer:
             if (contact_address := import_address(address, fallback_country))
         ]
         held_with_country = {
-            _address_key(contact_address): contact_address
+            address_identity(contact_address): contact_address
             for has_country, contact_address in imported
             if has_country
         }
@@ -282,7 +282,7 @@ class GoogleContactTransformer:
             twin = (
                 None
                 if has_country
-                else held_with_country.get(_address_key(contact_address))
+                else held_with_country.get(address_identity(contact_address))
             )
             if twin is None:
                 transformed.append(contact_address)
@@ -702,7 +702,7 @@ def _import_contact_method(
         return None
 
 
-def _address_key(address: ContactAddress) -> tuple[str, ...]:
+def address_identity(address: ContactAddress) -> tuple[str, ...]:
     """Every part of an imported address, case and spacing aside."""
     parts = (
         address.street_line_1,
