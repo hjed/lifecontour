@@ -202,7 +202,7 @@ fails when a pushed field has none:
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
 | `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
 | `emailAddresses`, `phoneNumbers` | the entries inbound imports | entries it rejects (invalid values) |
-| `addresses` | the entries inbound imports | entries it rejects (no street, or no country code — #1820) |
+| `addresses` | the entries inbound imports (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country code, or an AU/US/CA region naming no state, province or territory — reported on the event as `skipped_addresses` for the user to review (#1820) |
 | `birthdays` | a birthday with a usable date | a text-only birthday: with no local birthday the field leaves the update mask, so Google keeps it |
 | `events` | `anniversary` events | every other event (custom, untyped) |
 | `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |

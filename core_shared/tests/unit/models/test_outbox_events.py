@@ -22,6 +22,7 @@ from core_shared.models.outbox_events import (
     JournalSyncEventData,
     MatchDetectionEventData,
     OutboxEventData,
+    SkippedAddress,
     SyncCompletedEventData,
     parse_outbox_event_data,
 )
@@ -787,3 +788,33 @@ class TestCreateFitnessDurationCorrectionEvent:
             "corrected_duration": 3600,
             "strava_activity_ids": ["123", "456"],
         }
+
+
+class TestContactSyncSkippedAddresses:
+    """Addresses an import skipped for the user to review (#1820)."""
+
+    def test_an_event_queued_before_the_field_skipped_none(
+        self, contact_sync_data: dict[str, Any]
+    ) -> None:
+        payload = ContactSyncEventData.model_validate(contact_sync_data)
+
+        assert payload.skipped_addresses == []
+
+    def test_the_builder_carries_the_skipped_addresses(self) -> None:
+        skipped = SkippedAddress(
+            street_line_1="10 Downing St",
+            locality="London",
+            region="London",
+            country_code="AU",
+            reason="unrecognised_region",
+        )
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Kiri"},
+            integration_source="google",
+            external_id="people/c1",
+            user_id="user-1",
+            skipped_addresses=[skipped],
+        )
+
+        payload = ContactSyncEventData.model_validate(event.event_data)
+        assert payload.skipped_addresses == [skipped]

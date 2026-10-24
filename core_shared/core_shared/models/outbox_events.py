@@ -10,13 +10,30 @@ The models live in ``core_shared`` so they are available to both the
 backend and integration workers.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field, NonNegativeInt
 
 from core_shared.models.contacts.sync_scope import ContactSyncScope
 
 # ── Contact Sync ──────────────────────────────────────────────────────
+
+
+class SkippedAddress(BaseModel):
+    """An address an import left out, for the user to review (#1820).
+
+    ``unrecognised_region``: its AU/US/CA region names no state, province or
+    territory - typically a country inferred from a phone that is not the
+    address's own. The rest of the contact still imports.
+    """
+
+    street_line_1: str
+    street_line_2: str | None = None
+    locality: str | None = None
+    region: str | None = None
+    postal_code: str | None = None
+    country_code: str
+    reason: Literal["unrecognised_region"]
 
 
 class ContactSyncEventData(BaseModel):
@@ -58,6 +75,12 @@ class ContactSyncEventData(BaseModel):
         description="Apply even when the etag matches the stored one: a full "
         "sync re-applies every person, so a field a source newly owns reaches "
         "contacts the provider has not changed since.",
+    )
+    skipped_addresses: list[SkippedAddress] = Field(
+        default_factory=list,
+        description="Addresses the import left out, for the user to review. "
+        "Every applied event replaces the contact's pending ones, so fixing an "
+        "address at the source clears it.",
     )
 
 

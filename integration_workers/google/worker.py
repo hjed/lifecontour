@@ -1747,6 +1747,7 @@ async def _emit_contact_sync_events(
                 user_id=str(user_id),
                 sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
                 force_apply=force_apply,
+                skipped_addresses=transformer.skipped_addresses(google_person),
             )
 
             # Add to session (will be committed with transaction)
