@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.contacts.entities import Contact
 from core_shared.models.journals.journal_relationship_types import (
     JournalContactRelationshipType,
@@ -30,7 +31,8 @@ from app.core.tasks.adapters.sql.task_anchor_repository import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.contact_seeding import OTHER_USER_ID, seed_contact
 
-STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
+# The Strava worker links each user's activities on their own calendar.
+STRAVA_CALENDAR_ID = synthetic_calendar_id(SyntheticCalendar.STRAVA, "test-user-id")
 
 
 async def _create_processor(

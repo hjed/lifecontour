@@ -322,9 +322,13 @@ A `SyntheticCalendar` value is a uuid5 namespace, not the event's
 `integration_source` (`snipeit:maintenance` vs `snipeit_maintenance`), and is never
 changed once used. The processor creates the calendar on the first event naming it,
 owned by that event's user (`_ensure_calendar_exists`), and refuses an event naming a
-calendar another user owns. Migration `0138` moved each owner's Snipe-IT rows off the
-old shared calendar (#1510); a migration doing the same for another integration uses
-`app.migrations.synthetic_calendar_scoping`.
+calendar another user owns. Migrations `0138` (Snipe-IT, #1510) and `0142` (Strava,
+#1856) moved each owner's rows off the old shared calendars, using
+`app.migrations.synthetic_calendar_scoping`. Until no event naming the old shared
+Strava calendar (`LEGACY_SHARED_STRAVA_CALENDAR_ID`) can still be in flight (#1902),
+both sides bridge the deploy: the worker keeps naming it while its row exists (that
+is, until `0142` has run, whichever is deployed first), and the processor reads an
+event naming it as naming its user's own (`rehome_legacy_strava_calendar`).
 
 #### Merged Aliases: a Sync Never Undoes a Merge
 
