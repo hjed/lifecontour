@@ -60,6 +60,19 @@ class TestRawEntryKey:
             "addresses", work, None
         )
 
+    def test_an_address_with_a_second_line_keys_as_the_push_folds_it(self) -> None:
+        """Pulled with ``extendedAddress``; pushed with both lines in the street."""
+        pulled = {
+            "streetAddress": "1 Queen St",
+            "extendedAddress": "Unit 2",
+            "countryCode": "NZ",
+        }
+        pushed = {"streetAddress": "1 Queen St\nUnit 2", "countryCode": "NZ"}
+
+        assert raw_entry_key("addresses", pulled, None) == raw_entry_key(
+            "addresses", pushed, None
+        )
+
     def test_a_countryless_address_keys_with_the_fallback_it_was_read_with(
         self,
     ) -> None:

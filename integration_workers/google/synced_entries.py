@@ -13,6 +13,7 @@ key: it was never held locally.
 """
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any, Final, Literal
 
 from core_shared.sync_base import entry_key
@@ -61,10 +62,21 @@ def phone_key(phone: GooglePhoneNumber) -> str | None:
 
 
 def address_key(address: GoogleAddress, fallback_country: str | None) -> str | None:
-    """The address's key, read with the country a countryless one is given."""
+    """The address's key, read with the country a countryless one is given.
+
+    The street lines count as one: the push folds the second line into
+    ``streetAddress``, so an address pulled with an ``extendedAddress`` must
+    key as the folded one Google then holds.
+    """
     imported = import_address(address, fallback_country)
-    return (
-        None if imported is None else entry_key("address", *address_identity(imported))
+    if imported is None:
+        return None
+    street = " ".join(
+        line for line in (imported.street_line_1, imported.street_line_2) if line
+    )
+    return entry_key(
+        "address",
+        *address_identity(replace(imported, street_line_1=street, street_line_2=None)),
     )
 
 
