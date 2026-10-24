@@ -5,6 +5,7 @@ ContactCreated, ContactUpdated, or ContactDeleted domain events
 are received from the Redis Stream.
 """
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -529,6 +530,16 @@ class TestProcessContactEventErrorHandling:
 
 class TestPushContactToGoogleForEvent:
     """Verify the per-account push helper works correctly."""
+
+    @pytest.fixture(autouse=True)
+    def _no_recorded_address_fallback(self) -> Iterator[None]:
+        """The bare ``AsyncMock`` session cannot answer the link read."""
+        with patch(
+            "worker._recorded_address_fallback",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_push_create_calls_google_create(self) -> None:

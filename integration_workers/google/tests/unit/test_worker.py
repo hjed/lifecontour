@@ -1533,6 +1533,11 @@ class TestPushSyncLogic:
         with (
             patch("worker._lock_contact_for_push", new_callable=AsyncMock),
             patch("worker._read_sync_link", new_callable=AsyncMock, return_value=None),
+            patch(
+                "worker._recorded_address_fallback",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             yield
 

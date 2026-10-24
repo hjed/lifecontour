@@ -5,8 +5,8 @@ Google replaces each named field wholesale (#1732). The push payload is built
 from the local contact only, so without a merge every push wiped what local
 cannot hold: honorifics and phonetic names, custom events, other
 organizations, and every entry inbound sync never imported - extra nicknames,
-invalid emails and phones, addresses with no country code, a text-only birthday
-(#1788). ``merge_with_current_person`` folds those values back in from the
+invalid emails and phones, addresses with no country code and none to infer
+(#1820), a text-only birthday (#1788). ``merge_with_current_person`` folds those values back in from the
 person as Google holds it now, leaving the values the local model owns as
 pushed.
 """
@@ -360,6 +360,70 @@ class TestAddresses:
         assert merged["addresses"] == [
             pushed,
             {"streetAddress": "10 Downing St", "region": "London", "countryCode": "AU"},
+        ]
+
+    def test_owns_a_countryless_address_the_last_pull_imported(self) -> None:
+        """Imported with the recorded fallback, so the push replaces it.
+
+        Keeping it would leave Google with the pushed copy *and* the original,
+        which the next pull imports as two addresses (#1820).
+        """
+        current = {
+            "addresses": [{"metadata": CONTACT_SOURCE, "streetAddress": "1 Queen St"}]
+        }
+        pushed = {"streetAddress": "1 Queen St", "countryCode": "NZ"}
+
+        merged = merge_with_current_person(
+            {"addresses": [pushed]}, current, address_fallback_country="NZ"
+        )
+
+        assert merged["addresses"] == [pushed]
+
+    def test_a_countryless_address_the_last_pull_imported_can_be_deleted(
+        self,
+    ) -> None:
+        current = {
+            "addresses": [{"metadata": CONTACT_SOURCE, "streetAddress": "1 Queen St"}]
+        }
+
+        merged = merge_with_current_person(
+            {"addresses": []}, current, address_fallback_country="NZ"
+        )
+
+        assert merged["addresses"] == []
+
+    def test_keeps_a_countryless_address_no_pull_imported(self) -> None:
+        """Inferable today is not imported: never delete what local never held.
+
+        A phone (or a default set since) could give it a country, but no pull
+        has applied that, so the local contact does not hold it.
+        """
+        countryless = {"metadata": CONTACT_SOURCE, "streetAddress": "1 Queen St"}
+        current = {
+            "addresses": [countryless],
+            "phoneNumbers": [{"metadata": CONTACT_SOURCE, "value": "+6421234567"}],
+        }
+
+        merged = merge_with_current_person({"addresses": []}, current)
+
+        assert merged["addresses"] == [{"streetAddress": "1 Queen St"}]
+
+    def test_keeps_a_countryless_address_whose_region_the_fallback_cannot_place(
+        self,
+    ) -> None:
+        """Given the recorded AU, "London" is skipped inbound, so it stays (#1820)."""
+        london = {
+            "metadata": CONTACT_SOURCE,
+            "streetAddress": "10 Downing St",
+            "region": "London",
+        }
+
+        merged = merge_with_current_person(
+            {"addresses": []}, {"addresses": [london]}, address_fallback_country="AU"
+        )
+
+        assert merged["addresses"] == [
+            {"streetAddress": "10 Downing St", "region": "London"}
         ]
 
     def test_imported_address_deleted_locally_is_not_restored(self) -> None:

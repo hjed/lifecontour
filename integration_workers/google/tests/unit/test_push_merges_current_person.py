@@ -7,7 +7,7 @@ the version it merged with.
 """
 
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -24,16 +24,28 @@ def _client(current: dict[str, Any]) -> AsyncMock:
     return client
 
 
-async def _push(client: AsyncMock, person_data: dict[str, Any]) -> bool:
-    _, recreated = await _update_or_recreate_contact_in_google(
-        AsyncMock(),
-        client,
-        contact_id=1,
-        external_id=_REMOTE,
-        person_data=person_data,
-        etag="stored_etag",
-        user_id="1",
-    )
+async def _push(
+    client: AsyncMock,
+    person_data: dict[str, Any],
+    *,
+    recorded_fallback: str | None = None,
+) -> bool:
+    """Push, with the link recording ``recorded_fallback`` from the last pull."""
+    with patch(
+        "worker._recorded_address_fallback",
+        new_callable=AsyncMock,
+        return_value=recorded_fallback,
+    ) as recorded:
+        _, recreated = await _update_or_recreate_contact_in_google(
+            AsyncMock(),
+            client,
+            contact_id=1,
+            external_id=_REMOTE,
+            person_data=person_data,
+            etag="stored_etag",
+            user_id="1",
+        )
+    recorded.assert_awaited_once()
     return recreated
 
 
@@ -97,3 +109,21 @@ async def test_person_deleted_in_google_is_recreated_from_the_payload() -> None:
     assert recreated is True
     client.update_contact.assert_not_awaited()
     client.create_contact.assert_awaited_once_with({"names": [{"givenName": "Ada"}]})
+
+
+@pytest.mark.asyncio
+async def test_update_merges_with_the_fallback_the_last_pull_recorded() -> None:
+    """The merge owns what the last pull imported (#1820).
+
+    Otherwise the countryless original is kept beside its pushed copy.
+    """
+    client = _client({"etag": "e", "addresses": [{"streetAddress": "1 Rd"}]})
+    pushed = {"streetAddress": "1 Rd", "countryCode": "NZ"}
+
+    await _push(client, {"addresses": [pushed]}, recorded_fallback="NZ")
+
+    update = client.update_contact.await_args.kwargs
+    assert update["contact_data"] == {"addresses": [pushed]}
+    assert update["rebase"]({"addresses": [{"streetAddress": "1 Rd"}]}) == {
+        "addresses": [pushed]
+    }

@@ -49,11 +49,12 @@ from core_shared.models.participant_email import (
     is_recordable_participant_email,
     normalise_participant_email,
 )
-from core_shared.models.sync_metadata import SyncStatus
+from core_shared.models.sync_metadata import SyncStatus, recorded_address_fallback
 from core_shared.repositories import (
     ActiveCalendarChannel,
     CalendarWatchRenewal,
     CalendarWatchRepository,
+    IntegrationLinkRepository,
     MergedAliasRepository,
     SyncJobRepository,
     UnmatchedParticipantRepository,
@@ -1163,6 +1164,21 @@ async def _repoint_sync_link(
     )
 
 
+async def _recorded_address_fallback(
+    session: AsyncSession, external_id: str, *, user_id: str
+) -> str | None:
+    """The address fallback the last applied pull of this person recorded.
+
+    The backend writes it onto the link when it applies a contact event
+    (#1820); ``None`` when no pull has recorded one, which keeps every
+    countryless address in Google.
+    """
+    link = await IntegrationLinkRepository(
+        await session.connection()
+    ).find_link_by_external("google", external_id, user_id=str(user_id))
+    return recorded_address_fallback(link["reference_data"]) if link else None
+
+
 async def _update_or_recreate_contact_in_google(
     session: AsyncSession,
     client: GoogleAPIClient,
@@ -1192,13 +1208,19 @@ async def _update_or_recreate_contact_in_google(
     Returns:
         The Google person, and whether it was recreated rather than updated.
     """
+    # What the last applied pull imported, so the merge owns exactly that.
+    fallback = await _recorded_address_fallback(session, external_id, user_id=user_id)
     try:
         current = await client.get_person(external_id)
         result = await client.update_contact(
             resource_name=external_id,
-            contact_data=merge_with_current_person(person_data, current),
+            contact_data=merge_with_current_person(
+                person_data, current, address_fallback_country=fallback
+            ),
             etag=current.get("etag") or etag,
-            rebase=lambda fresh: merge_with_current_person(person_data, fresh),
+            rebase=lambda fresh: merge_with_current_person(
+                person_data, fresh, address_fallback_country=fallback
+            ),
         )
         return result, False
     except GoogleContactNotFoundError:
