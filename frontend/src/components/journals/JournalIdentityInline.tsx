@@ -32,7 +32,7 @@ export function JournalIdentityInline({
   journal,
   className,
 }: JournalIdentityInlineProps) {
-  const updateJournal = useUpdateJournal();
+  const updateJournal = useUpdateJournal(journal.id);
 
   // The zone the journal's own bounds are anchored in, when it is an event
   // that records one. The editor needs it to read and write the same days the
@@ -46,10 +46,7 @@ export function JournalIdentityInline({
   const handleTitleSave = useCallback(
     async (value: string) => {
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          title: value,
-        },
+        title: value,
       });
     },
     [journal.id, updateJournal]
@@ -59,10 +56,7 @@ export function JournalIdentityInline({
   const handleDateRangeSave = useCallback(
     async (value: EventDateRange) => {
       await updateJournal.mutateAsync({
-        id: journal.id,
-        data: {
-          event_date_range: value,
-        },
+        event_date_range: value,
       });
     },
     [journal.id, updateJournal]

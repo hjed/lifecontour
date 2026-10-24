@@ -41,15 +41,12 @@ export function JournalDetail({
   className,
 }: JournalDetailProps) {
   const router = useRouter();
-  const updateJournal = useUpdateJournal();
+  const updateJournal = useUpdateJournal(journal.id);
 
   // Handle content update
   const handleContentSave = async (value: string) => {
     await updateJournal.mutateAsync({
-      id: journal.id,
-      data: {
-        content: value,
-      },
+      content: value,
     });
   };
 

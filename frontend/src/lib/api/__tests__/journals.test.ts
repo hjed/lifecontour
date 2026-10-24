@@ -40,6 +40,7 @@ import {
   journalKeys,
   reviewItemKeys,
 } from '../journals';
+import { mockApiResponse } from '@/test-utils';
 import { homeDashboardKeys } from '../home-dashboard';
 import { JournalType } from '@/types/journals';
 import { TaskStatus } from '@/types/tasks';
@@ -342,10 +343,7 @@ describe('Journals API', () => {
     it('should fetch single journal successfully', async () => {
       const mockResponse = createMockJournalResponse(createMockJournal('1'));
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse(mockResponse));
 
       const { result } = renderHook(() => useJournal('1'), {
         wrapper: createWrapper,
@@ -1228,19 +1226,13 @@ describe('Journals API', () => {
         })
       );
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(mockApiResponse(mockResponse));
 
-      const { result } = renderHook(() => useUpdateJournal(), {
+      const { result } = renderHook(() => useUpdateJournal('1'), {
         wrapper: createWrapper,
       });
 
-      result.current.mutate({
-        id: '1',
-        data: { title: 'Updated Journal' },
-      });
+      result.current.mutate({ title: 'Updated Journal' });
 
       await waitFor(() => {
         expect(result.current.isSuccess).toBe(true);
@@ -2129,10 +2121,7 @@ describe('journal writes and the home dashboard', () => {
   }
 
   function respondOnce(body: unknown) {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => body,
-    } as Response);
+    mockFetch.mockResolvedValueOnce(mockApiResponse(body));
   }
 
   /** Every mutation that can change what the dashboard would answer. */
@@ -2156,12 +2145,9 @@ describe('journal writes and the home dashboard', () => {
     ],
     [
       'useUpdateJournal',
-      useUpdateJournal,
+      () => useUpdateJournal('1'),
       journalPayload(),
-      {
-        id: '1',
-        data: { title: 'Edited' },
-      },
+      { title: 'Edited' },
     ],
     ['useDeleteJournal', useDeleteJournal, {}, '1'],
     [
@@ -2175,10 +2161,9 @@ describe('journal writes and the home dashboard', () => {
     ],
     [
       'useUpdateJournalField',
-      useUpdateJournalField,
+      () => useUpdateJournalField('1'),
       journalPayload(),
       {
-        journalId: '1',
         fieldName: 'title',
         value: 'Edited',
       },
@@ -2271,16 +2256,15 @@ describe('journal writes and the home dashboard', () => {
     const invalidateQueries = jest.spyOn(queryClient, 'invalidateQueries');
     mockFetch.mockResolvedValueOnce({
       ok: false,
+      status: 422,
       json: async () => ({ errors: [{ detail: 'Nope' }] }),
     } as Response);
 
-    const { result } = renderHook(() => useUpdateJournal(), {
+    const { result } = renderHook(() => useUpdateJournal('1'), {
       wrapper: createWrapper,
     });
 
-    await runAndFlush(() =>
-      result.current.mutate({ id: '1', data: { title: 'Edited' } })
-    );
+    await runAndFlush(() => result.current.mutate({ title: 'Edited' }));
 
     expect(invalidateQueries).not.toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: homeDashboardKeys.all })
