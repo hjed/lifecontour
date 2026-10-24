@@ -35,6 +35,11 @@ from core_shared.models.sync_metadata import (
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    pending_import,
+)
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -675,20 +680,24 @@ class OutboxEventProcessor:
         existing_reference_data: str | None,
         contact_data: dict[str, Any],
         address_fallback_country: str | None,
+        synced_entries: dict[str, list[str]] | None,
     ) -> None:
         """Record what an applied update imported onto the canonical link.
 
         Writes ``reference_data`` on ``user_id``'s ``sync_metadata`` link keyed
         by ``(integration_source, external_id)``; ``version_hash`` is untouched so a
         metadata change never registers as a content change for the next sync.
-        Two keys are kept, each written only when it changed and every other key
+        These keys are kept, each written only when it changed and every other key
         left as it is:
 
         * ``synced_tags`` — the tags the source holds, when the event carries
           tags, so a tag removed at the source is told apart from a local one;
         * ``address_fallback_country`` — the country the import gave addresses
           with none (#1820): a push owns a countryless address only when the
-          last applied pull imported it.
+          last applied pull imported it;
+        * ``synced_entries`` — the base the next push merges against (#1861),
+          cleared by an event that carries none, with ``pending_import``
+          cleared too: this pull has imported what a push left for it.
 
         Gated on the link's *existence* — not on whether it already has
         ``reference_data`` — so a link whose ``reference_data`` is NULL (a
@@ -699,7 +708,9 @@ class OutboxEventProcessor:
             return
 
         updates: dict[str, Any] = {
-            ADDRESS_FALLBACK_COUNTRY_KEY: address_fallback_country
+            ADDRESS_FALLBACK_COUNTRY_KEY: address_fallback_country,
+            SYNCED_ENTRIES_KEY: synced_entries,
+            PENDING_IMPORT_KEY: False,
         }
         if contact_data.get("tags") is not None:
             updates["synced_tags"] = [tag["name"] for tag in contact_data["tags"]]
@@ -972,6 +983,8 @@ class OutboxEventProcessor:
         initial_ref_data[ADDRESS_FALLBACK_COUNTRY_KEY] = (
             payload.address_fallback_country
         )
+        initial_ref_data[SYNCED_ENTRIES_KEY] = payload.synced_entries
+        initial_ref_data[PENDING_IMPORT_KEY] = False
 
         # Create initial sync metadata (the canonical integration link).
         # Calculate version hash for the contact data.
@@ -1037,14 +1050,16 @@ class OutboxEventProcessor:
         Decided against the contact and link as read under their locks.
         """
         # Idempotency: the version is unchanged - unless the event is from a
-        # full sync, which re-applies every person.
+        # full sync, which re-applies every person, or a push kept entries the
+        # contact does not hold: the version is then the push's own, and the
+        # pull must still import them (#1861).
         if self.sync_metadata_repo.should_sync(link, new_version_hash):
             return None
-        if not force_apply:
+        if not (force_apply or pending_import(link.reference_data)):
             return "version_hash_unchanged"
         # The version check is also what keeps a local edit whose push failed:
         # Google's copy is unchanged, so it is skipped and the edit is pushed
-        # on the next cycle. A forced re-apply must not bypass it.
+        # on the next cycle. A re-apply past it must not bypass that.
         if _has_unpushed_local_changes(stored, link):
             return "unpushed_local_changes"
         return None
@@ -1292,6 +1307,7 @@ class OutboxEventProcessor:
             existing_reference_data=existing_reference_data,
             contact_data=contact_data,
             address_fallback_country=payload.address_fallback_country,
+            synced_entries=payload.synced_entries,
         )
 
         # Update sync metadata with new version hash
