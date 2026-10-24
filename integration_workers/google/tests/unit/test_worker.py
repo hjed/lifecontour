@@ -1896,6 +1896,8 @@ class TestPushSyncLogic:
                     etag="etag_metadata",
                     integration_source="google",
                     user_id="1",
+                    # The patched loader reports no version, so it stamps now.
+                    synced_at=None,
                 )
 
 

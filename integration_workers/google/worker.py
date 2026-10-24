@@ -263,8 +263,17 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
         contact_id: Contact ID
 
     Returns:
-        Dictionary with full contact data
+        Dictionary with full contact data, and ``synced_version``: the
+        contact's ``updated_at`` as read *before* the data, which a push
+        records as the version it sent (see ``_upsert_sync_metadata``)
     """
+    synced_version = (
+        await session.execute(
+            text("SELECT updated_at FROM contacts WHERE id = :contact_id"),
+            {"contact_id": contact_id},
+        )
+    ).scalar_one_or_none()
+
     # Load contact methods
     methods_stmt = text("""
         SELECT id, method_type, value, label, is_primary, is_archived
@@ -349,6 +358,7 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     ]
 
     return {
+        "synced_version": synced_version,
         "methods": methods,
         "addresses": addresses,
         "notes": notes,
@@ -1101,7 +1111,11 @@ async def _create_contact_in_google(
     result = await client.create_contact(person_data)
 
     await _record_push_link(
-        session, contact["id"], _created_outcome(result), user_id=user_id
+        session,
+        contact["id"],
+        _created_outcome(result),
+        user_id=user_id,
+        synced_at=contact.get("synced_version"),
     )
 
     logger.info(
@@ -1247,7 +1261,12 @@ def _base_after_update(
 
 
 async def _record_push_link(
-    session: AsyncSession, contact_id: int, outcome: PushOutcome, *, user_id: str
+    session: AsyncSession,
+    contact_id: int,
+    outcome: PushOutcome,
+    *,
+    user_id: str,
+    synced_at: datetime | None,
 ) -> None:
     """Record a push on the contact's link: the etag, the base and the marker.
 
@@ -1265,6 +1284,7 @@ async def _record_push_link(
         etag=outcome.person.get("etag"),
         integration_source="google",
         user_id=user_id,
+        synced_at=synced_at,
     )
     patch: dict[str, Any] = {
         SYNCED_ENTRIES_KEY: serialise_synced_entries(outcome.synced_base)
@@ -1309,11 +1329,18 @@ async def _update_or_recreate_contact_in_google(
     merges: list[tuple[PushMerge, SyncedEntries]] = []
 
     def merge(person: dict[str, Any]) -> dict[str, Any]:
-        base = resolve_synced_base(
-            state.synced_base,
-            person,
-            synced_version=etag,
-            address_fallback_country=fallback,
+        # Resolved from the first read alone: on a link with no recorded base
+        # that read may be the synced version, while a conflict retry's
+        # refetch carries Google's newer etag and would resolve no base.
+        base = (
+            merges[0][1]
+            if merges
+            else resolve_synced_base(
+                state.synced_base,
+                person,
+                synced_version=etag,
+                address_fallback_country=fallback,
+            )
         )
         merged = merge_for_push(
             person_data, person, synced_base=base, address_fallback_country=fallback
@@ -1384,7 +1411,13 @@ async def _update_contact_in_google(
         etag=contact.get("version_hash"),
         user_id=user_id,
     )
-    await _record_push_link(session, contact["id"], outcome, user_id=user_id)
+    await _record_push_link(
+        session,
+        contact["id"],
+        outcome,
+        user_id=user_id,
+        synced_at=contact.get("synced_version"),
+    )
 
     logger.info(
         "Successfully pushed contact update to Google",
@@ -1617,9 +1650,15 @@ async def _upsert_sync_metadata(
     integration_source: str,
     *,
     user_id: str,
+    synced_at: datetime | None = None,
 ) -> None:
     """
     Upsert sync metadata after successful push.
+
+    ``last_synced_at`` is ``synced_at``, the contact version the push sent,
+    when the caller knows it: a local edit that commits while the push is in
+    flight is newer, so it is still owed a push, and a pull never applies
+    over it. Stamping the time the push finished would read it as sent.
 
     The link is keyed by ``(user_id, integration_source, external_id)``: a
     re-push updates the owner's own row, and a resource name another user
@@ -1633,6 +1672,7 @@ async def _upsert_sync_metadata(
         etag: Google ETag
         integration_source: Integration source name
         user_id: The contact's owner
+        synced_at: The contact's ``updated_at`` as pushed; now when unknown
     """
     # Calculate version hash from ETag
     # Use empty string when no ETag is provided (version_hash column is NOT NULL)
@@ -1674,7 +1714,7 @@ async def _upsert_sync_metadata(
             "internal_id": internal_id,
             "integration_source": integration_source,
             "external_id": external_id,
-            "last_synced_at": now,
+            "last_synced_at": synced_at or now,
             "version_hash": version_hash,
             "sync_status": SyncStatus.SUCCESS.value,
             "internal_entity_type": "contact",
@@ -3593,7 +3633,11 @@ async def _push_contact_to_google_for_event(
     if sync_action == "create":
         result = await client.create_contact(person_data)
         await _record_push_link(
-            session, contact_id, _created_outcome(result), user_id=user_id
+            session,
+            contact_id,
+            _created_outcome(result),
+            user_id=user_id,
+            synced_at=contact.get("synced_version"),
         )
         logger.info(
             "Created contact in Google via event",
@@ -3612,7 +3656,13 @@ async def _push_contact_to_google_for_event(
             etag=version_hash,
             user_id=user_id,
         )
-        await _record_push_link(session, contact_id, outcome, user_id=user_id)
+        await _record_push_link(
+            session,
+            contact_id,
+            outcome,
+            user_id=user_id,
+            synced_at=contact.get("synced_version"),
+        )
         logger.info(
             "Pushed contact update to Google via event",
             contact_id=contact_id,
