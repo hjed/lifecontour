@@ -1,7 +1,7 @@
 """force one full Google contacts sync so countryless addresses are imported
 
-Revision ID: 0140
-Revises: 0139
+Revision ID: 0141
+Revises: 0140
 Create Date: 2026-10-21 00:00:00.000000
 
 Google contacts sync now imports an address with no country, giving it the
@@ -23,8 +23,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0140"
-down_revision: str | Sequence[str] | None = "0139"
+revision: str = "0141"
+down_revision: str | Sequence[str] | None = "0140"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
