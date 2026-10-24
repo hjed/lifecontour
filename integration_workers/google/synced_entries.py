@@ -13,7 +13,6 @@ key: it was never held locally.
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from typing import Any, Final, Literal
 
 from core_shared.sync_base import entry_key
@@ -27,7 +26,6 @@ from api_models import (
     GooglePhoneNumber,
 )
 from transformer import (
-    address_identity,
     import_address,
     import_birthday,
     import_email,
@@ -74,9 +72,17 @@ def address_key(address: GoogleAddress, fallback_country: str | None) -> str | N
     street = " ".join(
         line for line in (imported.street_line_1, imported.street_line_2) if line
     )
+    # Normalised as ``transformer._address_key`` does, from the parts rather than a
+    # rebuilt address: one line holding both could fail its length check.
+    parts = (
+        street,
+        imported.locality,
+        imported.region,
+        imported.postal_code,
+        imported.country_code,
+    )
     return entry_key(
-        "address",
-        *address_identity(replace(imported, street_line_1=street, street_line_2=None)),
+        "address", *(" ".join((part or "").split()).casefold() for part in parts)
     )
 
 

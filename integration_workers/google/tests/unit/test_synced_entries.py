@@ -73,6 +73,16 @@ class TestRawEntryKey:
             "addresses", pushed, None
         )
 
+    def test_an_address_whose_lines_are_long_together_still_keys(self) -> None:
+        """Each line is valid alone; keying them as one must not revalidate."""
+        address = {
+            "streetAddress": "1" * 200,
+            "extendedAddress": "2" * 100,
+            "countryCode": "NZ",
+        }
+
+        assert raw_entry_key("addresses", address, None) is not None
+
     def test_a_countryless_address_keys_with_the_fallback_it_was_read_with(
         self,
     ) -> None:
