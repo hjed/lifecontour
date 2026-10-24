@@ -12,7 +12,7 @@ import pytest
 from api_models import GooglePerson
 from synced_entries import (
     BASE_FIELDS,
-    raw_entry_key,
+    raw_entry_keys,
     raw_synced_entries,
     synced_entries_of,
 )
@@ -26,7 +26,14 @@ def _person(**fields: Any) -> GooglePerson:
     return GooglePerson.model_validate({"resourceName": "people/c1", **fields})
 
 
-class TestRawEntryKey:
+def _same_entry(field: Any, first: dict[str, Any], second: dict[str, Any]) -> bool:
+    """Two raw entries are one entry when any of their keys match."""
+    return bool(
+        raw_entry_keys(field, first, None) & raw_entry_keys(field, second, None)
+    )
+
+
+class TestRawEntryKeys:
     def test_an_email_keys_by_value_alone(self) -> None:
         pulled = {
             "metadata": {"primary": True, **_CONTACT},
@@ -36,11 +43,11 @@ class TestRawEntryKey:
         }
         pushed = {"value": "ada@example.com", "type": "home"}
 
-        assert raw_entry_key("emailAddresses", pulled, None) == raw_entry_key(
+        assert raw_entry_keys("emailAddresses", pulled, None) == raw_entry_keys(
             "emailAddresses", pushed, None
         )
 
-    def test_a_phone_keys_by_its_canonical_form(self) -> None:
+    def test_a_phone_matches_however_google_formats_it(self) -> None:
         pulled = {
             "value": "0412 345 678",
             "canonicalForm": "+61412345678",
@@ -48,29 +55,42 @@ class TestRawEntryKey:
         }
         returned = {"value": "+61 412 345 678", "canonicalForm": "+61412345678"}
 
-        assert raw_entry_key("phoneNumbers", pulled, None) == raw_entry_key(
-            "phoneNumbers", returned, None
-        )
+        assert _same_entry("phoneNumbers", pulled, returned)
 
-    def test_a_phone_typed_nationally_keys_as_its_canonical_form(self) -> None:
+    def test_a_phone_typed_nationally_matches_google_s_copy_of_it(self) -> None:
         """A local phone is pushed as typed; Google answers with it canonical."""
         typed = {"value": "0412 345 678"}
         canonical = {"value": "0412 345 678", "canonicalForm": "+61412345678"}
 
-        assert raw_entry_key("phoneNumbers", typed, None) == raw_entry_key(
-            "phoneNumbers", canonical, None
+        assert _same_entry("phoneNumbers", typed, canonical)
+
+    def test_a_phone_typed_with_its_country_prefix_matches_its_canonical_form(
+        self,
+    ) -> None:
+        typed = {"value": "1 (202) 555-0123"}
+        canonical = {"value": "1 (202) 555-0123", "canonicalForm": "+12025550123"}
+
+        assert _same_entry("phoneNumbers", typed, canonical)
+
+    def test_the_same_number_in_two_countries_is_two_phones(self) -> None:
+        assert not _same_entry(
+            "phoneNumbers",
+            {"value": "+1 202 555 0123", "canonicalForm": "+12025550123"},
+            {"value": "+44 20 2555 0123", "canonicalForm": "+442025550123"},
         )
 
     def test_different_values_key_differently(self) -> None:
-        assert raw_entry_key(
-            "emailAddresses", {"value": "ada@example.com"}, None
-        ) != raw_entry_key("emailAddresses", {"value": "kiri@example.com"}, None)
+        assert not _same_entry(
+            "emailAddresses",
+            {"value": "ada@example.com"},
+            {"value": "kiri@example.com"},
+        )
 
     def test_an_address_keys_by_its_parts_not_its_label(self) -> None:
         home = {"streetAddress": "1 Queen St", "city": "Auckland", "countryCode": "NZ"}
         work = {**home, "type": "work", "formattedType": "Work"}
 
-        assert raw_entry_key("addresses", home, None) == raw_entry_key(
+        assert raw_entry_keys("addresses", home, None) == raw_entry_keys(
             "addresses", work, None
         )
 
@@ -83,7 +103,7 @@ class TestRawEntryKey:
         }
         pushed = {"streetAddress": "1 Queen St\nUnit 2", "countryCode": "NZ"}
 
-        assert raw_entry_key("addresses", pulled, None) == raw_entry_key(
+        assert raw_entry_keys("addresses", pulled, None) == raw_entry_keys(
             "addresses", pushed, None
         )
 
@@ -95,7 +115,7 @@ class TestRawEntryKey:
             "countryCode": "NZ",
         }
 
-        assert raw_entry_key("addresses", address, None) is not None
+        assert raw_entry_keys("addresses", address, None)
 
     def test_a_countryless_address_keys_with_the_fallback_it_was_read_with(
         self,
@@ -103,10 +123,10 @@ class TestRawEntryKey:
         countryless = {"streetAddress": "1 Queen St", "city": "Auckland"}
         with_country = {**countryless, "countryCode": "NZ"}
 
-        assert raw_entry_key("addresses", countryless, "NZ") == raw_entry_key(
+        assert raw_entry_keys("addresses", countryless, "NZ") == raw_entry_keys(
             "addresses", with_country, None
         )
-        assert raw_entry_key("addresses", countryless, "AU") != raw_entry_key(
+        assert raw_entry_keys("addresses", countryless, "AU") != raw_entry_keys(
             "addresses", countryless, "NZ"
         )
 
@@ -114,7 +134,7 @@ class TestRawEntryKey:
         first = {"date": {"year": 1990, "month": 3, "day": 4}, "text": "4 March"}
         second = {"metadata": _CONTACT, "date": {"year": 1990, "month": 3, "day": 4}}
 
-        assert raw_entry_key("birthdays", first, None) == raw_entry_key(
+        assert raw_entry_keys("birthdays", first, None) == raw_entry_keys(
             "birthdays", second, None
         )
 
@@ -131,7 +151,7 @@ class TestRawEntryKey:
     def test_an_entry_inbound_never_imports_has_no_key(
         self, field: Any, entry: dict[str, Any]
     ) -> None:
-        assert raw_entry_key(field, entry, None) is None
+        assert raw_entry_keys(field, entry, None) == frozenset()
 
 
 class TestSyncedEntriesOf:
@@ -148,10 +168,10 @@ class TestSyncedEntriesOf:
         )
 
         assert synced_entries_of(person, None) == {
-            "emailAddresses": {raw_entry_key("emailAddresses", email, None)},
-            "phoneNumbers": {raw_entry_key("phoneNumbers", phone, None)},
-            "addresses": {raw_entry_key("addresses", address, None)},
-            "birthdays": {raw_entry_key("birthdays", birthday, None)},
+            "emailAddresses": raw_entry_keys("emailAddresses", email, None),
+            "phoneNumbers": raw_entry_keys("phoneNumbers", phone, None),
+            "addresses": raw_entry_keys("addresses", address, None),
+            "birthdays": raw_entry_keys("birthdays", birthday, None),
         }
 
     def test_records_every_field_even_when_empty(self) -> None:
@@ -165,7 +185,7 @@ class TestSyncedEntriesOf:
 
         synced = synced_entries_of(_person(addresses=[address]), "NZ")
 
-        assert synced["addresses"] == {raw_entry_key("addresses", address, "NZ")}
+        assert synced["addresses"] == raw_entry_keys("addresses", address, "NZ")
 
     def test_a_raw_person_keys_as_the_parsed_one(self) -> None:
         """The push keys Google's raw response; the pull keys the parsed person."""
