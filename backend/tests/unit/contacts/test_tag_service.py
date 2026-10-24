@@ -35,6 +35,10 @@ class DummyTagHierarchyService:
         # Just return empty list or a dummy list for testing since it uses str(tag.name) if empty
         return []
 
+    async def get_all_descendants_bulk(self, tag_ids, _transaction=None, *, user_id):
+        # No hierarchy here; descendant events are covered by the integration tests
+        return []
+
 
 class MockTagRepository:
     def __init__(self):

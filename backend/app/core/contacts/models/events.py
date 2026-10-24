@@ -204,7 +204,11 @@ class TagRemoved(DomainEvent):
 
 @dataclass(frozen=True)
 class TagUpdated(DomainEvent):
-    """Event raised when a tag is updated; ``user_id`` is the tag's owner."""
+    """Event raised when a tag is updated; ``user_id`` is the tag's owner.
+
+    Also raised for each descendant of a renamed, moved, deleted or merged tag,
+    with ``changed_fields`` holding only that descendant's ``full_path`` change.
+    """
 
     def __init__(
         self,

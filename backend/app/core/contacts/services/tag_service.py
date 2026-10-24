@@ -21,6 +21,31 @@ def _compute_path_string(path_tags: list[Tag], fallback_tag: Tag) -> str:
     return str(fallback_tag.name)
 
 
+def _relative_paths(root_id: int, descendants: list[Tag]) -> list[tuple[int, str]]:
+    """Each descendant's id and its path below ``root_id`` (``Child/Grandchild``).
+
+    ``descendants`` may come in any order (the repository sorts by name, not
+    depth), so each path is walked up through the others rather than built
+    from parents seen earlier.
+    """
+    by_id = {tag.id: tag for tag in descendants if tag.id is not None}
+    paths: list[tuple[int, str]] = []
+    for tag_id, tag in by_id.items():
+        segments = [str(tag.name)]
+        parent_id = tag.parent_id
+        while parent_id is not None and parent_id != root_id:
+            parent = by_id[parent_id]
+            segments.append(str(parent.name))
+            parent_id = parent.parent_id
+        paths.append((tag_id, "/".join(reversed(segments))))
+    return paths
+
+
+def _join_path(root: str | None, relative: str) -> str:
+    """A descendant's full path under ``root``, or ``relative`` itself at the root."""
+    return f"{root}/{relative}" if root else relative
+
+
 class TagService:
     """
     Service for tag mutations and event publishing.
@@ -118,6 +143,9 @@ class TagService:
         """
         Update a tag and publish a TagUpdated event.
 
+        A rename or move changes every descendant's path too, so each descendant
+        gets a TagUpdated of its own carrying just that ``full_path`` change.
+
         Args:
             tag_id: ID of the tag to update
             transaction: Active database transaction
@@ -183,7 +211,55 @@ class TagService:
             )
             await self.event_publisher.publish(event)
 
+        if old_path_str != new_path_str:
+            await self._publish_descendant_path_changes(
+                await self._relative_descendant_paths(tag_id, user_id=user_id),
+                old_root=old_path_str,
+                new_root=new_path_str,
+                transaction=transaction,
+                user_id=user_id,
+            )
+
         return tag
+
+    async def _relative_descendant_paths(
+        self, tag_id: int, *, user_id: str
+    ) -> list[tuple[int, str]]:
+        """The tag's descendants, as ids and paths relative to it."""
+        descendants = await self.tag_hierarchy_service.get_all_descendants_bulk(
+            [tag_id], user_id=user_id
+        )
+        return _relative_paths(tag_id, descendants)
+
+    async def _publish_descendant_path_changes(
+        self,
+        descendants: list[tuple[int, str]],
+        *,
+        old_root: str,
+        new_root: str | None,
+        transaction: AsyncConnection,
+        user_id: str,
+    ) -> None:
+        """Publish a ``full_path`` TagUpdated for each descendant that moved.
+
+        No other event says a descendant's path changed, and the Google worker
+        renames a tag's contact group by its old path (#1836). ``new_root`` is
+        None when the descendants became roots, as when their ancestor is deleted.
+        """
+        for descendant_id, relative in descendants:
+            old_path = _join_path(old_root, relative)
+            new_path = _join_path(new_root, relative)
+            if old_path == new_path:
+                continue
+            await self.event_publisher.publish(
+                TagUpdated(
+                    tag_id=descendant_id,
+                    tag_name=new_path,
+                    changed_fields={"full_path": (old_path, new_path)},
+                    transaction=transaction,
+                    user_id=user_id,
+                )
+            )
 
     async def _apply_name_change(
         self,
@@ -260,6 +336,9 @@ class TagService:
     ) -> None:
         """
         Delete a tag cascade removing it from contacts, and publish TagDeleted event.
+
+        Its children become roots (``ON DELETE SET NULL``), so each descendant
+        also gets a TagUpdated for its shortened ``full_path``.
         """
         tag = await self.tag_repo.find_by_id(tag_id, user_id=user_id)
         if not tag:
@@ -269,6 +348,8 @@ class TagService:
             tag_id, user_id=user_id
         )
         path_str = _compute_path_string(path_tags, tag)
+        # Read while they are still descendants: the delete cuts them loose.
+        descendants = await self._relative_descendant_paths(tag_id, user_id=user_id)
 
         # The assignment rows go with it via cascade, which no application code
         # sees — so the contacts losing the tag are marked as changed here,
@@ -287,6 +368,13 @@ class TagService:
             user_id=user_id,
         )
         await self.event_publisher.publish(event)
+        await self._publish_descendant_path_changes(
+            descendants,
+            old_root=path_str,
+            new_root=None,
+            transaction=transaction,
+            user_id=user_id,
+        )
 
     @transactional
     async def merge_tags(
@@ -304,6 +392,8 @@ class TagService:
         1. Reassign all contacts from source to target (handling uniqueness conflicts).
         2. Delete the source tag.
         3. Publish TagDeleted event for the source tag.
+        4. Publish a TagUpdated for each of the source's descendants, whose
+           paths now run through the target.
         """
         if source_id == target_id:
             raise ValueError("Source and target tags must be different")
@@ -328,8 +418,29 @@ class TagService:
         #    which also takes their locks ahead of the rewrites below.
         await touch_contacts_holding_tag(transaction, source_id)
 
+        # Read before the merge re-parents the source's children onto the
+        # target. The target cannot sit under the source (checked above), so
+        # its path is unchanged by the merge.
+        descendants = await self._relative_descendant_paths(source_id, user_id=user_id)
+        source_path = _compute_path_string(
+            await self.tag_hierarchy_service.get_tag_path(source_id, user_id=user_id),
+            source_tag,
+        )
+        target_path = _compute_path_string(
+            await self.tag_hierarchy_service.get_tag_path(target_id, user_id=user_id),
+            target_tag,
+        )
+
         if not await self.tag_repo.merge_into(source_id, target_id, user_id=user_id):
             raise TagNotFoundError(source_id)
 
-        # Delete the source tag itself (this will publish the event)
+        # Delete the source tag itself (this will publish the event). Its
+        # children have moved already, so this publishes no path changes.
         await self.delete_tag(source_id, transaction, user_id=user_id)
+        await self._publish_descendant_path_changes(
+            descendants,
+            old_root=source_path,
+            new_root=target_path,
+            transaction=transaction,
+            user_id=user_id,
+        )

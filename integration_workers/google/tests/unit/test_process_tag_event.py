@@ -155,6 +155,47 @@ class TestProcessTagEvent:
         )
 
     @pytest.mark.asyncio
+    async def test_a_descendant_path_change_renames_its_group(
+        self, mock_session_factory, mock_google_auth_service, mock_google_client
+    ):
+        """#1836: renaming ``Family-Friends`` sends its child's own path change.
+
+        Only the parent segment was sanitised from the group "Family Friends/Extended",
+        and the parent's own group is left for the parent's event.
+        """
+        from worker import process_tag_event
+
+        with (
+            patch("worker.GoogleAuthService", return_value=mock_google_auth_service),
+            patch("worker.GoogleAPIClient", return_value=mock_google_client),
+            patch(
+                "worker._fetch_contact_group_mapping",
+                new_callable=AsyncMock,
+                return_value={
+                    "contactGroups/1": "Family Friends",
+                    "contactGroups/2": "Family Friends/Extended",
+                },
+            ),
+        ):
+            result = await process_tag_event(
+                ctx={"session_factory": mock_session_factory, "job_id": "job123"},
+                event_type="TagUpdated",
+                event_data={
+                    "tag_id": 2,
+                    "tag_name": "Kin/Extended",
+                    "changed_fields": {
+                        "full_path": ["Family-Friends/Extended", "Kin/Extended"]
+                    },
+                    "user_id": 1,
+                },
+            )
+
+        assert result["status"] == "success"
+        mock_google_client.update_contact_group.assert_called_once_with(
+            "contactGroups/2", "Kin/Extended"
+        )
+
+    @pytest.mark.asyncio
     async def test_a_failed_group_listing_is_reported_not_skipped(
         self, mock_session_factory, mock_google_auth_service, mock_google_client
     ):
