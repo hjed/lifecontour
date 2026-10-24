@@ -104,12 +104,14 @@ class SyncContext:
 class FieldMerge:
     """A field's merged value, with what Google keeps that local does not hold.
 
-    ``kept`` is the keys of importable entries kept from Google, and
-    ``remote_won`` whether Google now holds anything local does not.
+    ``kept`` is the keys of importable entries kept from Google, ``suppressed``
+    those of local entries held back because Google deleted or edited them,
+    and ``remote_won`` whether Google now holds anything local does not.
     """
 
     value: Merged
     kept: frozenset[str] = frozenset()
+    suppressed: frozenset[str] = frozenset()
     remote_won: bool = False
 
 
@@ -127,7 +129,10 @@ class FieldPolicy(Protocol):
 class KeepUnsynced:
     """A list local owns only as far as the base: a three-way merge by key.
 
-    Entries inbound does not import are kept, as local never held them.
+    Entries inbound does not import are kept, as local never held them -
+    unless the push sends the same entry, which Google would then hold twice.
+    A profile's entries count as Google's, since inbound imports them too, but
+    are never copied into the contact.
     """
 
     field: BaseField
@@ -136,18 +141,25 @@ class KeepUnsynced:
         self, pushed: list[Entry], current: list[Entry], sync: SyncContext
     ) -> FieldMerge:
         key = sync.key_of(self.field)
-        remote = [(entry, key(entry)) for entry in current if _is_contact_entry(entry)]
+        remote = [(entry, key(entry)) for entry in current]
         decision = three_way_keys(
             base=sync.base_of(self.field),
             local={k for entry in pushed if (k := key(entry)) is not None},
             remote={k for _, k in remote if k is not None},
         )
         sent = [entry for entry in pushed if key(entry) not in decision.suppressed]
-        kept = [
-            _writable(entry) for entry, k in remote if k is None or k in decision.kept
-        ]
+        kept: list[Entry] = []
+        for entry, k in remote:
+            writable = _writable(entry)
+            if not _is_contact_entry(entry):
+                continue
+            if k in decision.kept or (k is None and writable not in sent):
+                kept.append(writable)
         return FieldMerge(
-            [*sent, *kept], kept=decision.kept, remote_won=decision.remote_won
+            [*sent, *kept],
+            kept=decision.kept,
+            suppressed=decision.suppressed,
+            remote_won=decision.remote_won,
         )
 
 
@@ -176,7 +188,8 @@ class SingletonUnsynced:
             if remote - base:
                 return FieldMerge(Omit.FIELD, remote_won=True)
             return FieldMerge(pushed)
-        if remote and not remote & base and key(pushed[0]) in base:
+        if key(pushed[0]) in base and not remote & base:
+            # Local still holds the base value, which Google edited or deleted.
             return FieldMerge(Omit.FIELD, remote_won=True)
         return FieldMerge(pushed)
 
@@ -248,6 +261,9 @@ class PushMerge:
 
     * ``kept`` — per base field, the keys of importable entries kept from
       Google that local does not hold: never part of the next base.
+    * ``suppressed`` — per base field, the keys of local entries held back
+      because Google deleted or edited them: still local's, so part of the
+      next base, and a second push before the pull holds them back again.
     * ``pending_import`` — Google now holds something local does not, so the
       next pull must import it even though the etag will be the push's own.
     * ``merged_fields`` — the base fields the update sends; a field it leaves
@@ -256,6 +272,7 @@ class PushMerge:
 
     payload: Entry
     kept: Mapping[BaseField, frozenset[str]]
+    suppressed: Mapping[BaseField, frozenset[str]]
     pending_import: bool
     merged_fields: frozenset[BaseField]
 
@@ -310,6 +327,7 @@ def merge_for_push(
     )
     merged: Entry = {}
     kept: dict[BaseField, frozenset[str]] = {}
+    suppressed: dict[BaseField, frozenset[str]] = {}
     pending_import = False
     for field, pushed in payload.items():
         policy = FIELD_POLICIES.get(field)
@@ -324,9 +342,11 @@ def merge_for_push(
         merged[field] = result.value
         if isinstance(policy, KeepUnsynced | SingletonUnsynced):
             kept[policy.field] = result.kept
+            suppressed[policy.field] = result.suppressed
     return PushMerge(
         payload=merged,
         kept=kept,
+        suppressed=suppressed,
         pending_import=pending_import,
         merged_fields=frozenset(kept),
     )

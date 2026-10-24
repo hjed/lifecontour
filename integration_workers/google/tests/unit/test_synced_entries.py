@@ -52,6 +52,15 @@ class TestRawEntryKey:
             "phoneNumbers", returned, None
         )
 
+    def test_a_phone_typed_nationally_keys_as_its_canonical_form(self) -> None:
+        """A local phone is pushed as typed; Google answers with it canonical."""
+        typed = {"value": "0412 345 678"}
+        canonical = {"value": "0412 345 678", "canonicalForm": "+61412345678"}
+
+        assert raw_entry_key("phoneNumbers", typed, None) == raw_entry_key(
+            "phoneNumbers", canonical, None
+        )
+
     def test_different_values_key_differently(self) -> None:
         assert raw_entry_key(
             "emailAddresses", {"value": "ada@example.com"}, None

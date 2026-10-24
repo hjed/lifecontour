@@ -109,7 +109,8 @@ class TestEmails:
         assert merged.payload["emailAddresses"] == [ADA, invalid]
         assert merged.pending_import is False
 
-    def test_a_profile_email_is_never_kept(self) -> None:
+    def test_a_profile_email_is_never_copied_into_the_contact(self) -> None:
+        """Inbound imports a profile's email, so the pull is still owed it."""
         merged = merge_for_push(
             {"emailAddresses": [ADA]},
             {"emailAddresses": [{"metadata": {"source": {"type": "PROFILE"}}, **NEW}]},
@@ -117,7 +118,7 @@ class TestEmails:
         )
 
         assert merged.payload["emailAddresses"] == [ADA]
-        assert merged.pending_import is False
+        assert merged.pending_import is True
 
 
 class TestPhones:
@@ -129,6 +130,57 @@ class TestPhones:
 
         assert merged.payload["phoneNumbers"] == [held, added]
         assert merged.pending_import is True
+
+    def test_a_phone_typed_nationally_and_deleted_in_google_is_not_pushed_back(
+        self,
+    ) -> None:
+        canonical = {"value": "0412 345 678", "canonicalForm": "+61412345678"}
+
+        merged = _merge(
+            "phoneNumbers", [{"value": "0412 345 678"}], google=[], base=[canonical]
+        )
+
+        assert merged.payload["phoneNumbers"] == []
+        assert merged.suppressed["phoneNumbers"] == _keys("phoneNumbers", canonical)
+        assert merged.pending_import is True
+
+
+class TestHeldBack:
+    def test_reports_the_local_entries_it_held_back(self) -> None:
+        """Still local's, so the next base holds them: a second push before the
+        pull must hold them back again, not push them as new."""
+        merged = _merge("emailAddresses", [ADA, OLD], google=[ADA], base=[ADA, OLD])
+
+        assert merged.suppressed["emailAddresses"] == _keys("emailAddresses", OLD)
+
+
+class TestProfileEntries:
+    PROFILE = {"source": {"type": "PROFILE", "id": "p1"}}
+
+    def test_a_profile_entry_local_holds_is_neither_kept_nor_pending(self) -> None:
+        """Inbound imports a profile's email too; Google still holds it."""
+        merged = merge_for_push(
+            {"emailAddresses": [ADA]},
+            {"emailAddresses": [{"metadata": self.PROFILE, **ADA}]},
+            synced_base={"emailAddresses": _keys("emailAddresses", ADA)},
+        )
+
+        assert merged.payload["emailAddresses"] == [ADA]
+        assert merged.pending_import is False
+
+
+class TestUnimportable:
+    def test_a_pushed_entry_inbound_cannot_import_is_not_doubled(self) -> None:
+        """Google echoes it back with no key, so it must not be kept beside it."""
+        unplaced = {
+            "streetAddress": "10 Downing St",
+            "region": "London",
+            "countryCode": "AU",
+        }
+
+        merged = _merge("addresses", [unplaced], google=[unplaced], base=[])
+
+        assert merged.payload["addresses"] == [unplaced]
 
 
 class TestAddresses:
@@ -194,6 +246,12 @@ class TestBirthdays:
 
         assert merged.payload["birthdays"] == [self.FIXED]
         assert merged.pending_import is False
+
+    def test_a_birthday_deleted_in_google_is_not_pushed_back(self) -> None:
+        merged = _merge("birthdays", [self.BORN], google=[], base=[self.BORN])
+
+        assert "birthdays" not in merged.payload
+        assert merged.pending_import is True
 
     def test_a_birthday_cleared_locally_is_cleared(self) -> None:
         merged = _merge("birthdays", [], google=[self.BORN], base=[self.BORN])
