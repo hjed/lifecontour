@@ -18,6 +18,7 @@ from core_shared.sync_base import (
     recorded_synced_entries,
     remote_unchanged_since_sync,
     serialise_synced_entries,
+    three_way_entries,
     three_way_keys,
     three_way_value,
 )
@@ -172,6 +173,70 @@ class TestThreeWayKeys:
 
         assert result.dropped == {"old"}
         assert result.kept == frozenset()
+
+
+class TestThreeWayEntries:
+    """Entries that can be written several ways carry a key per spelling.
+
+    A phone typed nationally and the same phone in E.164 are one entry: two
+    entries match when any of their keys does.
+    """
+
+    def test_an_entry_added_remotely_is_kept(self) -> None:
+        result = three_way_entries(
+            base={"a"}, local=[{"a"}], remote=[{"a", "a2"}, {"new", "new2"}]
+        )
+
+        assert result.kept == {1}
+        assert result.suppressed == frozenset()
+        assert result.remote_won is True
+
+    def test_an_entry_held_on_both_sides_under_other_spellings_is_not_kept(
+        self,
+    ) -> None:
+        """Added on both sides, typed differently but sharing one spelling."""
+        result = three_way_entries(
+            base=set(), local=[{"e164", "typed"}], remote=[{"e164", "other"}]
+        )
+
+        assert result.kept == frozenset()
+        assert result.remote_won is False
+
+    def test_an_entry_deleted_locally_is_not_kept(self) -> None:
+        result = three_way_entries(
+            base={"a", "b"}, local=[{"a"}], remote=[{"a"}, {"b"}]
+        )
+
+        assert result.kept == frozenset()
+        assert result.remote_won is False
+
+    def test_an_entry_deleted_remotely_is_suppressed(self) -> None:
+        result = three_way_entries(
+            base={"a", "b", "b-typed"}, local=[{"a"}, {"b-typed"}], remote=[{"a"}]
+        )
+
+        assert result.suppressed == {1}
+        assert result.remote_won is True
+
+    def test_an_entry_still_held_remotely_under_another_spelling_is_not_suppressed(
+        self,
+    ) -> None:
+        result = three_way_entries(
+            base={"b", "b-typed"}, local=[{"b-typed"}], remote=[{"b", "b-typed"}]
+        )
+
+        assert result.suppressed == frozenset()
+
+    def test_an_entry_added_locally_is_neither(self) -> None:
+        result = three_way_entries(base=set(), local=[{"mine"}], remote=[])
+
+        assert (result.kept, result.suppressed) == (frozenset(), frozenset())
+
+    def test_an_entry_with_no_keys_is_neither(self) -> None:
+        """Unkeyed entries are the caller's to judge (e.g. never imported)."""
+        result = three_way_entries(base=set(), local=[set()], remote=[set()])
+
+        assert (result.kept, result.suppressed) == (frozenset(), frozenset())
 
 
 class TestThreeWayValue:

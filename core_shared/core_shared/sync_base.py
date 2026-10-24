@@ -15,14 +15,16 @@ applies that record even though its version is the push's own.
 
 Nothing here knows an integration's fields. A list field (a contact's emails)
 compares key sets with :func:`three_way_keys`; a scalar (an asset's serial)
-compares values with :func:`three_way_value`.
+compares values with :func:`three_way_value`, and entries written several ways
+(a phone in E.164 or as typed) carry a key per spelling for
+:func:`three_way_entries`.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Set
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
@@ -135,6 +137,56 @@ def three_way_keys(*, base: Set[str], local: Set[str], remote: Set[str]) -> Thre
         kept=frozenset(remote - base - local),
         dropped=frozenset((remote & base) - local),
         suppressed=frozenset((local & base) - remote),
+    )
+
+
+@dataclass(frozen=True)
+class EntryThreeWay:
+    """How a pushed list field's entries reconcile, by position.
+
+    * ``kept`` — indices of remote entries to keep: gained remotely since the
+      base, and not held locally.
+    * ``suppressed`` — indices of local entries not to push: in the base, but
+      gone from the remote, so the remote's deletion or edit wins.
+
+    Every other remote entry is either held locally (the local copy is sent)
+    or was deleted locally; every other local entry is pushed.
+    """
+
+    kept: frozenset[int]
+    suppressed: frozenset[int]
+
+    @property
+    def remote_won(self) -> bool:
+        """The remote holds what local does not: the next pull must import it."""
+        return bool(self.kept or self.suppressed)
+
+
+def three_way_entries(
+    *,
+    base: Set[str],
+    local: Sequence[Set[str]],
+    remote: Sequence[Set[str]],
+) -> EntryThreeWay:
+    """:func:`three_way_keys` for entries that carry several keys.
+
+    An entry that can be written several ways (a phone in E.164 or as typed)
+    carries a key per spelling, and two entries are the same entry when any
+    of their keys match. An entry with no keys is in neither result.
+    """
+    local_keys = frozenset().union(*local)
+    remote_keys = frozenset().union(*remote)
+    return EntryThreeWay(
+        kept=frozenset(
+            index
+            for index, keys in enumerate(remote)
+            if keys and not keys & base and not keys & local_keys
+        ),
+        suppressed=frozenset(
+            index
+            for index, keys in enumerate(local)
+            if keys & base and not keys & remote_keys
+        ),
     )
 
 
