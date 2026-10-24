@@ -9,6 +9,7 @@ Both outbound paths are covered — the event handler and the cron push — agai
 the real database, with only the Google API client mocked.
 """
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -118,6 +119,12 @@ async def _google_links(
     ]
 
 
+def _kept_synced_tags(reference_data: str | None) -> Any:
+    """The tag record the repointed link carried over; the push adds its base."""
+    assert reference_data is not None
+    return json.loads(reference_data)["synced_tags"]
+
+
 def _created_payload(client: AsyncMock) -> dict[str, Any]:
     client.create_contact.assert_called_once()
     payload: dict[str, Any] = client.create_contact.call_args.args[0]
@@ -175,9 +182,11 @@ class TestRecreateContactDeletedOnGoogle:
         assert "resourceName" not in payload
         assert payload["names"][0]["givenName"] == "Recreate"
         # One link, re-pointed at the new person, keeping its reference data.
-        assert await _google_links(db_session, linked_contact_id) == [
-            (_RECREATED_REMOTE, _REFERENCE_DATA, "etag_recreated")
-        ]
+        [(external_id, reference_data, etag)] = await _google_links(
+            db_session, linked_contact_id
+        )
+        assert (external_id, etag) == (_RECREATED_REMOTE, "etag_recreated")
+        assert _kept_synced_tags(reference_data) == ["friends"]
 
     async def test_cron_push_recreates_and_relinks(
         self, db_session: AsyncSession, linked_contact_id: int
@@ -209,6 +218,8 @@ class TestRecreateContactDeletedOnGoogle:
         assert "etag" not in payload
         assert "resourceName" not in payload
         # One link, re-pointed at the new person, keeping its reference data.
-        assert await _google_links(db_session, linked_contact_id) == [
-            (_RECREATED_REMOTE, _REFERENCE_DATA, "etag_recreated")
-        ]
+        [(external_id, reference_data, etag)] = await _google_links(
+            db_session, linked_contact_id
+        )
+        assert (external_id, etag) == (_RECREATED_REMOTE, "etag_recreated")
+        assert _kept_synced_tags(reference_data) == ["friends"]

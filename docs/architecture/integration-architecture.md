@@ -225,13 +225,16 @@ dual-write has been removed: every writer now persists the canonical link (plus
 `external_references` anymore:
 
 - The inbound contact create/update paths write the link and its `reference_data`
-  (`resource_name`/`etag`/`synced_tags`/`address_fallback_country`) onto
+  (`resource_name`/`etag`/`synced_tags`/`address_fallback_country`/
+  `synced_entries`/`pending_import`) onto
   `sync_metadata` (the `synced_tags`/`etag` read/write moved here too, via
   `SyncMetadataRepository.update_reference_data`). `address_fallback_country`
   is the country the last *applied* pull gave addresses with none (#1820); a
   skipped event leaves it alone, and the Google push merge owns a countryless
   address only when that record says it was imported
   (`core_shared.models.sync_metadata.recorded_address_fallback`).
+  `synced_entries` and `pending_import` are the synced base and its marker,
+  below.
 - `SyncMetadataRepository.upsert_contact_link` (manual Immich linking) and
   `repoint_contact_links` (contact merge) operate on `sync_metadata` only.
 - `SyncMetadataRepository.repoint_journal_links` does the same for journal merge.
@@ -775,6 +778,42 @@ functions rather than a second list. Each pushed field declares a policy in
 `FIELD_POLICIES`, and a round-trip test (import a person, push it back
 unchanged) fails if anything inbound skipped is lost. See the Google worker
 README for the per-field table.
+
+**Synced base and pending import (any pushing integration).** A push that
+merges local values into the remote record as it stands cannot tell an entry
+the remote *gained* since the last sync from one the local side *deleted*; both
+are "in the remote, not in local" (#1861). `core_shared.sync_base` gives every
+integration the missing piece, the **base**: per field, opaque keys
+(`entry_key`, hashed) of what both sides last agreed on, stored on the link as
+`reference_data.synced_entries`.
+
+- Every **applied pull** records the base it read (the worker sends it on the
+  event; the backend stores it and clears `pending_import`). An event without
+  one clears the base.
+- Every **push** records the base it leaves — read from the remote's
+  *response*, since providers reformat values — merged into `reference_data`
+  in one statement (`IntegrationLinkRepository.patch_reference_data`), so it
+  never races the backend's own keys.
+- The push merges three ways: `three_way_keys` for a list field (kept, dropped,
+  suppressed), `three_way_value` for a scalar (local, remote, same, conflict).
+- A push that leaves the remote holding what local does not sets
+  `pending_import`. The backend then applies the next pull even though its
+  version is the push's own — but never over a local edit still to push, so a
+  failed push stays as safe as before. The stored version always stays the
+  push's own.
+- A link recorded before bases existed falls back on the version:
+  `remote_unchanged_since_sync` means the remote is its own base; otherwise
+  the base is empty and the push keeps everything.
+
+Google contacts uses it for emails, phones, addresses and birthdays
+(`integration_workers/google/synced_entries.py`, `person_merge.py`). Adopting
+it elsewhere:
+
+| Push | Base keys | Helper |
+|---|---|---|
+| Snipe-IT asset (`push_asset_update`) | each pushed column's last synced value | `three_way_value` per column, replacing the whole-push skip on any remote change |
+| Google calendar journal (`_process_journal_upsert_event`) | each PATCHed field | `three_way_value`, with the event etag in `external_version` |
+| Immich person | `name`, `birthDate` | `three_way_value` |
 
 **Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
 than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy

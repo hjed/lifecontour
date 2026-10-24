@@ -124,7 +124,7 @@ async def _seed_linked_contact(db_session: AsyncSession) -> int:
                  version_hash, sync_status, last_synced_at,
                  created_at, updated_at)
             VALUES
-                (:owner, :cid, 'google', :ext, 'etag_stored', 'success',
+                (:owner, :cid, 'google', :ext, 'etag_current', 'success',
                  NOW(), NOW(), NOW())
             """
         ),
