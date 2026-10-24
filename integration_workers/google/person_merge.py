@@ -197,17 +197,18 @@ class SingletonUnsynced:
             *(keys(entry) for entry in current if not _is_contact_entry(entry))
         )
         pushed_keys: Keys = keys(pushed[0]) if pushed else frozenset()
-        profile_gained = bool(profile - base - pushed_keys)
+        # Not the contact's until a pull imports it, so never part of a base.
+        gained = profile - base - pushed_keys
         if not pushed:
             if contact_entries and not remote:
-                return FieldMerge(Omit.FIELD, remote_won=profile_gained)
+                return FieldMerge(Omit.FIELD, kept=gained, remote_won=bool(gained))
             if remote - base:
                 return FieldMerge(Omit.FIELD, remote_won=True)
-            return FieldMerge(pushed, remote_won=profile_gained)
+            return FieldMerge(pushed, kept=gained, remote_won=bool(gained))
         if pushed_keys & base and not remote & base:
             # Local still holds the base value, which Google edited or deleted.
             return FieldMerge(Omit.FIELD, remote_won=True)
-        return FieldMerge(pushed, remote_won=profile_gained)
+        return FieldMerge(pushed, kept=gained, remote_won=bool(gained))
 
 
 @dataclass(frozen=True)

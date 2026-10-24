@@ -75,20 +75,24 @@ def _e164(number: str | None) -> str | None:
 
 
 def phone_keys(phone: GooglePhoneNumber) -> Keys:
-    """The phone's keys: its E.164 form, and its digits as typed.
+    """The phone's keys: its E.164 form, and the digits of a number typed without ``+``.
 
     Google answers a number pushed as typed ("0412 345 678") with an E.164
     ``canonicalForm`` ("+61412345678") beside the typed ``value``, so the
     typed digits match the local copy and the E.164 form matches a copy
-    typed differently. A national number alone names no country, so it is
-    never read as one: the same digits in two countries are two phones.
+    typed differently. A number typed with ``+`` is fully named by its E.164
+    form, so it has no typed key: "+65 6500 1234" never matches a US
+    "(656) 500-1234" by their shared digits.
     """
     if import_phone(phone) is None:
         return _NO_KEYS
     keys = set()
     if (e164 := _e164(phone.canonical_form) or _e164(phone.value)) is not None:
         keys.add(entry_key("phone", "e164", e164))
-    if digits := "".join(char for char in phone.value if char.isdigit()):
+    typed = phone.value.strip()
+    if not typed.startswith("+") and (
+        digits := "".join(char for char in typed if char.isdigit())
+    ):
         keys.add(entry_key("phone", "typed", digits))
     return frozenset(keys)
 
