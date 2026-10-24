@@ -113,12 +113,6 @@ export async function updateUserSettings(
   return response.json();
 }
 
-export async function updateTimezone(
-  timezone: string
-): Promise<UserSettingsResponse> {
-  return updateUserSettings({ timezone }, 'Failed to save timezone');
-}
-
 export function useUserSettings() {
   return useQuery({
     queryKey: userSettingsKeys.detail(),
@@ -197,11 +191,17 @@ export function useJournalTimezone(eventTimezone?: string | null): {
   };
 }
 
-export function useUpdateTimezone() {
+/**
+ * Save the timezone and default country in one PATCH. Send only the fields the
+ * user changed: the timezone cannot be cleared, so sending a zone the user
+ * never chose would turn "not set" into a choice for good (issue #1401).
+ */
+export function useUpdateLocalisation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: updateTimezone,
+    mutationFn: (patch: UserSettingsPatch) =>
+      updateUserSettings(patch, 'Failed to save localisation settings'),
     onSuccess: response => {
       // Typed nullable because a *read* can answer "not set"; a PUT echoes the
       // value it just saved, so this branch is the type system's, not a case.
@@ -235,33 +235,7 @@ export function useUpdateTimezone() {
         { queryKey: journalKeys.lists() },
         { queryKey: taskKeys.all }
       );
-      toast.success('Timezone saved');
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
-}
-
-/** Save the default country, or clear it with `null`. */
-export function useUpdateDefaultCountry() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (defaultCountry: string | null) =>
-      updateUserSettings(
-        { default_country: defaultCountry },
-        'Failed to save default country'
-      ),
-    onSuccess: response => {
-      // Seeded so the settings card shows the saved value straight away. No
-      // other read derives from the country: it only matters to the next
-      // Google contact import.
-      queryClient.setQueryData(userSettingsKeys.detail(), response);
-      void invalidateAfterMutation(queryClient, {
-        queryKey: userSettingsKeys.all,
-      });
-      toast.success('Default country saved');
+      toast.success('Localisation settings saved');
     },
     onError: (error: Error) => {
       toast.error(error.message);

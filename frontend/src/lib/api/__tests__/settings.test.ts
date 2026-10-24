@@ -11,10 +11,8 @@ import {
   clearCachedTimezone,
   fetchUserSettings,
   journalTimezone,
-  updateTimezone,
   updateUserSettings,
-  useUpdateDefaultCountry,
-  useUpdateTimezone,
+  useUpdateLocalisation,
   useUserSettings,
   useUserTimezone,
 } from '../settings';
@@ -65,32 +63,6 @@ describe('settings API', () => {
     });
   });
 
-  describe('updateTimezone', () => {
-    it('PATCHes only the timezone', async () => {
-      const mockResponse = {
-        data: {
-          id: 'user-1',
-          type: 'user_settings',
-          attributes: { timezone: 'America/New_York' },
-        },
-      };
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      } as Response);
-
-      const result = await updateTimezone('America/New_York');
-
-      expect(mockFetch).toHaveBeenCalledWith('/api/user-settings', {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timezone: 'America/New_York' }),
-      });
-      expect(result).toEqual(mockResponse);
-    });
-  });
-
   describe('updateUserSettings', () => {
     it('PATCHes an explicit null to clear the default country', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -126,8 +98,9 @@ describe('settings API', () => {
     });
   });
 
-  describe('useUpdateDefaultCountry', () => {
-    it('seeds the saved country into the settings query', async () => {
+  describe('useUpdateLocalisation', () => {
+    it('PATCHes the timezone and country together and seeds the query', async () => {
+      localStorage.clear();
       const queryClient = new QueryClient({
         defaultOptions: {
           queries: { retry: false },
@@ -138,7 +111,7 @@ describe('settings API', () => {
         data: {
           id: 'user-1',
           type: 'user_settings' as const,
-          attributes: { timezone: null, default_country: 'NZ' },
+          attributes: { timezone: 'Pacific/Auckland', default_country: 'NZ' },
         },
       };
       mockFetch.mockResolvedValueOnce({
@@ -146,21 +119,132 @@ describe('settings API', () => {
         json: async () => saved,
       } as Response);
 
-      const { result } = renderHook(() => useUpdateDefaultCountry(), {
+      const { result } = renderHook(() => useUpdateLocalisation(), {
         wrapper: wrapper(queryClient),
       });
 
-      await result.current.mutateAsync('NZ');
+      await result.current.mutateAsync({
+        timezone: 'Pacific/Auckland',
+        default_country: 'NZ',
+      });
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/user-settings',
         expect.objectContaining({
           method: 'PATCH',
-          body: JSON.stringify({ default_country: 'NZ' }),
+          body: JSON.stringify({
+            timezone: 'Pacific/Auckland',
+            default_country: 'NZ',
+          }),
         })
       );
       expect(queryClient.getQueryData(userSettingsKeys.detail())).toEqual(
         saved
+      );
+      expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBe(
+        'Pacific/Auckland'
+      );
+    });
+
+    /**
+     * Changing the zone changes what "today" is, and two answers are *derived*
+     * from that rather than stored: whether a task has lapsed, and the journal
+     * list's `tasks_due_count`, which is the same rule over a whole page. Both
+     * sit behind the app-wide five-minute `staleTime`, so a mutation that named
+     * only its own namespace would leave the user looking at verdicts reached
+     * in the zone they have just corrected.
+     */
+    it('invalidates the timezone-derived reads, not only its own', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'user-1',
+            type: 'user_settings',
+            attributes: { timezone: 'Australia/Sydney' },
+          },
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useUpdateLocalisation(), {
+        wrapper: wrapper(queryClient),
+      });
+
+      await result.current.mutateAsync({
+        timezone: 'Australia/Sydney',
+        default_country: null,
+      });
+
+      await waitFor(() => {
+        const keys = invalidateSpy.mock.calls.map(
+          ([filters]) => filters?.queryKey
+        );
+        expect(keys).toContainEqual(journalKeys.lists());
+        expect(keys).toContainEqual(taskKeys.all);
+      });
+    });
+
+    /**
+     * The invalidation is fire-and-forget, so between a successful PATCH and the
+     * refetch landing the query still holds the *previous* zone — and a
+     * non-null previous zone outranks everything else in `useUserTimezone`. A
+     * journal written in that window would be anchored in the zone the user
+     * has just replaced, which is why the response is seeded straight into the
+     * query rather than only invalidated.
+     */
+    it('makes the saved zone authoritative before any refetch lands', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      queryClient.setQueryData(userSettingsKeys.detail(), {
+        data: {
+          id: 'user-1',
+          type: 'user_settings',
+          attributes: { timezone: 'Australia/Sydney' },
+        },
+      });
+      // The PUT answers; the refetch the invalidation triggers never lands, so
+      // the only thing that can move the hook off the old zone is the seed.
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'user-1',
+              type: 'user_settings',
+              attributes: { timezone: 'America/New_York' },
+            },
+          }),
+        } as Response)
+        .mockReturnValue(new Promise<Response>(() => {}));
+
+      const { result } = renderHook(
+        () => ({
+          save: useUpdateLocalisation(),
+          timezone: useUserTimezone(),
+        }),
+        { wrapper: wrapper(queryClient) }
+      );
+
+      expect(result.current.timezone).toBe('Australia/Sydney');
+
+      await result.current.save.mutateAsync({
+        timezone: 'America/New_York',
+        default_country: null,
+      });
+
+      await waitFor(() =>
+        expect(result.current.timezone).toBe('America/New_York')
       );
     });
   });
@@ -286,104 +370,6 @@ describe('settings API', () => {
       clearCachedTimezone();
 
       expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBeNull();
-    });
-  });
-
-  describe('useUpdateTimezone', () => {
-    /**
-     * Changing the zone changes what "today" is, and two answers are *derived*
-     * from that rather than stored: whether a task has lapsed, and the journal
-     * list's `tasks_due_count`, which is the same rule over a whole page. Both
-     * sit behind the app-wide five-minute `staleTime`, so a mutation that named
-     * only its own namespace would leave the user looking at verdicts reached
-     * in the zone they have just corrected.
-     */
-    it('invalidates the timezone-derived reads, not only its own', async () => {
-      const queryClient = new QueryClient({
-        defaultOptions: {
-          queries: { retry: false },
-          mutations: { retry: false },
-        },
-      });
-      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          data: {
-            id: 'user-1',
-            type: 'user_settings',
-            attributes: { timezone: 'Australia/Sydney' },
-          },
-        }),
-      } as Response);
-
-      const { result } = renderHook(() => useUpdateTimezone(), {
-        wrapper: wrapper(queryClient),
-      });
-
-      await result.current.mutateAsync('Australia/Sydney');
-
-      await waitFor(() => {
-        const keys = invalidateSpy.mock.calls.map(
-          ([filters]) => filters?.queryKey
-        );
-        expect(keys).toContainEqual(journalKeys.lists());
-        expect(keys).toContainEqual(taskKeys.all);
-      });
-    });
-
-    /**
-     * The invalidation is fire-and-forget, so between a successful PATCH and the
-     * refetch landing the query still holds the *previous* zone — and a
-     * non-null previous zone outranks everything else in `useUserTimezone`. A
-     * journal written in that window would be anchored in the zone the user
-     * has just replaced, which is why the response is seeded straight into the
-     * query rather than only invalidated.
-     */
-    it('makes the saved zone authoritative before any refetch lands', async () => {
-      const queryClient = new QueryClient({
-        defaultOptions: {
-          queries: { retry: false },
-          mutations: { retry: false },
-        },
-      });
-      queryClient.setQueryData(userSettingsKeys.detail(), {
-        data: {
-          id: 'user-1',
-          type: 'user_settings',
-          attributes: { timezone: 'Australia/Sydney' },
-        },
-      });
-      // The PUT answers; the refetch the invalidation triggers never lands, so
-      // the only thing that can move the hook off the old zone is the seed.
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            data: {
-              id: 'user-1',
-              type: 'user_settings',
-              attributes: { timezone: 'America/New_York' },
-            },
-          }),
-        } as Response)
-        .mockReturnValue(new Promise<Response>(() => {}));
-
-      const { result } = renderHook(
-        () => ({
-          save: useUpdateTimezone(),
-          timezone: useUserTimezone(),
-        }),
-        { wrapper: wrapper(queryClient) }
-      );
-
-      expect(result.current.timezone).toBe('Australia/Sydney');
-
-      await result.current.save.mutateAsync('America/New_York');
-
-      await waitFor(() =>
-        expect(result.current.timezone).toBe('America/New_York')
-      );
     });
   });
 });

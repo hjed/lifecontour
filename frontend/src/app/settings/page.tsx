@@ -2,8 +2,7 @@
 
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
-import { DefaultCountrySettings } from '@/components/settings/DefaultCountrySettings';
-import { TimezoneSettings } from '@/components/settings/TimezoneSettings';
+import { LocalisationSettings } from '@/components/settings/LocalisationSettings';
 import { TemplateSettings } from '@/components/settings/TemplateSettings';
 import { APP_NAME } from '@/lib/constants';
 
@@ -20,8 +19,7 @@ export default function SettingsPage() {
 
         <div className='grid gap-6 lg:grid-cols-2'>
           <CalendarSettings />
-          <TimezoneSettings />
-          <DefaultCountrySettings />
+          <LocalisationSettings />
           <TemplateSettings />
         </div>
       </div>
