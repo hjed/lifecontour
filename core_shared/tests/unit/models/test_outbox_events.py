@@ -841,3 +841,26 @@ class TestContactSyncAddressFallback:
 
         payload = ContactSyncEventData.model_validate(event.event_data)
         assert payload.address_fallback_country == "NZ"
+
+
+class TestContactSyncSyncedEntries:
+    """The keys of the entries the import read, per field (#1861)."""
+
+    def test_an_event_queued_before_the_field_records_none(
+        self, contact_sync_data: dict[str, Any]
+    ) -> None:
+        payload = ContactSyncEventData.model_validate(contact_sync_data)
+
+        assert payload.synced_entries is None
+
+    def test_the_builder_carries_the_synced_entries(self) -> None:
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Kiri"},
+            integration_source="google",
+            external_id="people/c1",
+            user_id="user-1",
+            synced_entries={"emailAddresses": ["k1"], "addresses": []},
+        )
+
+        payload = ContactSyncEventData.model_validate(event.event_data)
+        assert payload.synced_entries == {"emailAddresses": ["k1"], "addresses": []}
