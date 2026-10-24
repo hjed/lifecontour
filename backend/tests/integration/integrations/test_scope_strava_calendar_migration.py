@@ -145,6 +145,42 @@ class TestScopeStravaCalendarToOwner:
             (OWNER, True, SHARED, SHARED),
         ]
 
+    async def test_a_link_the_new_worker_already_made_supersedes_the_shared_one(
+        self, throwaway_database: URL, run_alembic: RunAlembic
+    ) -> None:
+        """The new worker can run before this migration does.
+
+        The backend still on the old revision then applies its update of an
+        imported activity on the user's own calendar, linking the journal there
+        beside its shared-calendar link. Moving that link would collide with the
+        newer one, so the newer one is kept.
+        """
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", _PREVIOUS_REVISION)
+        await _shared_calendar(url, OWNER)
+        journal_id = await seed_import(url, OWNER, "strava:9", SHARED)
+        await seed_calendar(
+            url, _own(OWNER), OWNER, source=_SOURCE, name="Strava Activities"
+        )
+        await execute(
+            url,
+            """
+            INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, sync_capability,
+                 sync_status)
+            VALUES (:journal_id, CAST(:calendar_id AS uuid), 'strava:9',
+                    'bidirectional', 'synced')
+            """,
+            {"journal_id": journal_id, "calendar_id": _own(OWNER)},
+        )
+
+        run_alembic(url, "upgrade", _REVISION)
+
+        assert await link_calendars(url) == [(OWNER, _own(OWNER), _own(OWNER))]
+        assert await rows(url, "SELECT CAST(id AS text) FROM calendars") == [
+            (_own(OWNER),)
+        ]
+
     async def test_a_pending_cancellation_moves_with_its_owner(
         self, throwaway_database: URL, run_alembic: RunAlembic
     ) -> None:
