@@ -1228,14 +1228,19 @@ def _base_after_update(
     """The base after an update: Google's response, less what local lacks.
 
     ``updateContact`` returns every field by default, keyed as Google now
-    holds it. A field the update left out keeps its previous base.
+    holds it. The entries the push held back stay in the base: local still
+    holds them, so a second push before the pull holds them back again rather
+    than reading them as new. A field the update left out keeps its previous
+    base.
     """
     returned = raw_synced_entries(person, fallback_country)
     return {
         **base,
         **{
-            field: returned.get(field, frozenset())
-            - merged.kept.get(field, frozenset())
+            field: (
+                returned.get(field, frozenset()) - merged.kept.get(field, frozenset())
+            )
+            | merged.suppressed.get(field, frozenset())
             for field in merged.merged_fields
         },
     }

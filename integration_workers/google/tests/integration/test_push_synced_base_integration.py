@@ -300,3 +300,47 @@ async def test_a_recreated_person_starts_a_fresh_base(
     assert json.loads(link.reference_data)["synced_entries"] == (
         serialise_synced_entries(raw_synced_entries(returned, None))
     )
+
+
+@pytest.mark.asyncio
+async def test_a_second_push_before_the_pull_still_holds_back_a_google_deletion(
+    db_session: AsyncSession,
+) -> None:
+    """The pull waits while local edits are unpushed, so pushes can repeat."""
+    deleted_in_google = {"value": "old@example.com"}
+    contact_id = await _seed(
+        db_session,
+        base={
+            "emailAddresses": [
+                _key("emailAddresses", _HELD),
+                _key("emailAddresses", deleted_in_google),
+            ]
+        },
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO contact_methods (contact_id, method_type, value) "
+            "VALUES (:cid, 'email', 'old@example.com')"
+        ),
+        {"cid": contact_id},
+    )
+    after = {"etag": "etag_pushed", "emailAddresses": _google(_HELD)}
+    client = _client(
+        {"etag": "etag_google_edit", **{k: v for k, v in after.items() if k != "etag"}},
+        after,
+    )
+    await _push(db_session, client)
+
+    # Another local edit lands before any pull is applied.
+    await db_session.execute(
+        text(
+            "UPDATE sync_metadata SET last_synced_at = NOW() - interval '1 minute' "
+            "WHERE external_id = :ext"
+        ),
+        {"ext": _REMOTE},
+    )
+    client.get_person.return_value = {"resourceName": _REMOTE, **after}
+    await _push(db_session, client)
+
+    pushed = client.update_contact.await_args.kwargs["contact_data"]
+    assert [email["value"] for email in pushed["emailAddresses"]] == ["ada@example.com"]
