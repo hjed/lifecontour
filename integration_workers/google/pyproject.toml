@@ -38,6 +38,11 @@ dependencies = [
 
     # Redis client (compatible with ARQ)
     "redis[hiredis]>=8.1.0",
+
+    # Phone number parsing and ISO 3166-1 countries (address country
+    # inference, #1820)
+    "phonenumbers==9.0.41",
+    "pycountry==26.2.16",
 ]
 
 [tool.uv.sources]
