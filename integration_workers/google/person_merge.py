@@ -8,10 +8,21 @@ push changes only what the local contact can represent (#1732).
 The local contact owns exactly what inbound sync (``transformer.py``) imports,
 and the merge asks the import itself: an entry its per-entry functions reject
 (an address with no country code, an invalid email, a text-only birthday) is
-one local never held, so the push keeps it (#1788). Every field a push can send
-has a policy in ``FIELD_POLICIES``; ``tests/unit/test_push_field_ownership.py``
-fails when one is added without. Values held by a person's profile rather than
-the contact itself are never copied into the contact.
+one local never held, so the push keeps it (#1788).
+
+Importable is not the same as held, though: an email added in Google since the
+last pull is importable, but the contact has never seen it. So the emails,
+phones, addresses and birthdays merge three ways against the *synced base* -
+the keys of the entries the last sync agreed both sides held, recorded on the
+link (``synced_entries``, ``core_shared.sync_base``). An entry Google gained
+since the base is kept, one deleted locally is dropped, and one Google deleted
+or edited is not pushed back over it; a push that leaves Google holding what
+local does not reports ``pending_import``, so the next pull imports it (#1861).
+
+Every field a push can send has a policy in ``FIELD_POLICIES``;
+``tests/unit/test_push_field_ownership.py`` fails when one is added without.
+Values held by a person's profile rather than the contact itself are never
+copied into the contact.
 """
 
 from collections.abc import Callable, Mapping
@@ -20,22 +31,16 @@ from enum import Enum
 from typing import Any, Final, Literal, Protocol
 
 import structlog
-from pydantic import BaseModel, ValidationError
+from core_shared.sync_base import (
+    SyncedEntries,
+    remote_unchanged_since_sync,
+    three_way_keys,
+)
+from pydantic import ValidationError
 
-from api_models import (
-    GoogleAddress,
-    GoogleBirthday,
-    GoogleEmailAddress,
-    GoogleNickname,
-    GooglePhoneNumber,
-)
-from transformer import (
-    import_address,
-    import_birthday,
-    import_email,
-    import_phone,
-    select_nickname,
-)
+from api_models import GoogleNickname
+from synced_entries import BaseField, raw_entry_key, raw_synced_entries
+from transformer import select_nickname
 
 logger = structlog.get_logger()
 
@@ -79,27 +84,101 @@ class Omit(Enum):
 type Merged = list[Entry] | Literal[Omit.FIELD]
 
 
+@dataclass(frozen=True)
+class SyncContext:
+    """What a push merges against: the synced base and the address fallback."""
+
+    base: SyncedEntries
+    address_fallback_country: str | None
+
+    def base_of(self, field: BaseField) -> frozenset[str]:
+        """The field's base keys; a field never recorded has none."""
+        return self.base.get(field, frozenset())
+
+    def key_of(self, field: BaseField) -> Callable[[Entry], str | None]:
+        """The key of a raw entry of ``field``, None when inbound skips it."""
+        return lambda entry: raw_entry_key(field, entry, self.address_fallback_country)
+
+
+@dataclass(frozen=True)
+class FieldMerge:
+    """A field's merged value, with what Google keeps that local does not hold.
+
+    ``kept`` is the keys of importable entries kept from Google, and
+    ``remote_won`` whether Google now holds anything local does not.
+    """
+
+    value: Merged
+    kept: frozenset[str] = frozenset()
+    remote_won: bool = False
+
+
 class FieldPolicy(Protocol):
     """How one pushed field merges into the field as Google holds it."""
 
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
         """The value to send, or ``Omit.FIELD`` to leave Google's untouched."""
         ...
 
 
 @dataclass(frozen=True)
-class KeepUnimported:
-    """Local owns the entries inbound imports; every other one is kept."""
+class KeepUnsynced:
+    """A list local owns only as far as the base: a three-way merge by key.
 
-    imports: Callable[[Entry], bool]
+    Entries inbound does not import are kept, as local never held them.
+    """
 
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+    field: BaseField
+
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        key = sync.key_of(self.field)
+        remote = [(entry, key(entry)) for entry in current if _is_contact_entry(entry)]
+        decision = three_way_keys(
+            base=sync.base_of(self.field),
+            local={k for entry in pushed if (k := key(entry)) is not None},
+            remote={k for _, k in remote if k is not None},
+        )
+        sent = [entry for entry in pushed if key(entry) not in decision.suppressed]
         kept = [
-            _writable(entry)
-            for entry in current
-            if _is_contact_entry(entry) and not self.imports(entry)
+            _writable(entry) for entry, k in remote if k is None or k in decision.kept
         ]
-        return [*pushed, *kept]
+        return FieldMerge(
+            [*sent, *kept], kept=decision.kept, remote_won=decision.remote_won
+        )
+
+
+@dataclass(frozen=True)
+class SingletonUnsynced:
+    """A field Google holds once per contact, such as the birthday.
+
+    Google cannot hold a kept entry beside a pushed one, so the field leaves
+    the update mask whenever Google's entry should stand: one inbound never
+    imported, one added in Google since the base, or one edited there while
+    the local value is unchanged. Otherwise the pushed value wins.
+    """
+
+    field: BaseField
+
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        key = sync.key_of(self.field)
+        base = sync.base_of(self.field)
+        contact_entries = [entry for entry in current if _is_contact_entry(entry)]
+        remote = {k for entry in contact_entries if (k := key(entry)) is not None}
+        if not pushed:
+            if contact_entries and not remote:
+                return FieldMerge(Omit.FIELD)
+            if remote - base:
+                return FieldMerge(Omit.FIELD, remote_won=True)
+            return FieldMerge(pushed)
+        if remote and not remote & base and key(pushed[0]) in base:
+            return FieldMerge(Omit.FIELD, remote_won=True)
+        return FieldMerge(pushed)
 
 
 @dataclass(frozen=True)
@@ -113,38 +192,18 @@ class KeepUnchosen:
 
     choose: Callable[[list[Entry]], int | None]
 
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
         if not pushed:
-            return pushed
+            return FieldMerge(pushed)
         owned = self.choose(current)
         kept = [
             _writable(entry)
             for index, entry in enumerate(current)
             if index != owned and _is_contact_entry(entry)
         ]
-        return [*pushed, *kept]
-
-
-@dataclass(frozen=True)
-class SingletonLeaveUnimported:
-    """A field Google holds once per contact; one inbound cannot read stays.
-
-    Google cannot hold a kept entry beside a pushed one, so a pushed value
-    wins. With nothing pushed, a field whose entry inbound never imported
-    leaves the update mask instead, so Google keeps it as it is.
-    """
-
-    imports: Callable[[Entry], bool]
-
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
-        contact_entries = [entry for entry in current if _is_contact_entry(entry)]
-        if (
-            not pushed
-            and contact_entries
-            and not any(self.imports(entry) for entry in contact_entries)
-        ):
-            return Omit.FIELD
-        return pushed
+        return FieldMerge([*pushed, *kept])
 
 
 @dataclass(frozen=True)
@@ -153,8 +212,10 @@ class MergedBy:
 
     merge_entries: Callable[[list[Entry], list[Entry]], list[Entry]]
 
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
-        return self.merge_entries(pushed, current)
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        return FieldMerge(self.merge_entries(pushed, current))
 
 
 @dataclass(frozen=True)
@@ -163,26 +224,10 @@ class WhollyOwned:
 
     reason: str
 
-    def merge(self, pushed: list[Entry], current: list[Entry]) -> Merged:
-        return pushed
-
-
-def _imported_by[M: BaseModel](
-    model: type[M], import_entry: Callable[[M], object | None]
-) -> Callable[[Entry], bool]:
-    """Whether inbound imports a raw entry, read as inbound reads it.
-
-    An entry inbound cannot even parse is one it never imported.
-    """
-
-    def imports(entry: Entry) -> bool:
-        try:
-            parsed = model.model_validate(entry)
-        except ValidationError:
-            return False
-        return import_entry(parsed) is not None
-
-    return imports
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        return FieldMerge(pushed)
 
 
 def _chosen_nickname(current: list[Entry]) -> int | None:
@@ -197,46 +242,110 @@ def _chosen_nickname(current: list[Entry]) -> int | None:
     return next((index for index, n in parsed if n is chosen), None)
 
 
-def merge_with_current_person(
-    payload: Entry, current: Entry, *, address_fallback_country: str | None = None
-) -> Entry:
-    """Return ``payload`` with the values it does not own kept from ``current``.
+@dataclass(frozen=True)
+class PushMerge:
+    """A merged push payload, and what it leaves Google holding beyond local.
+
+    * ``kept`` — per base field, the keys of importable entries kept from
+      Google that local does not hold: never part of the next base.
+    * ``pending_import`` — Google now holds something local does not, so the
+      next pull must import it even though the etag will be the push's own.
+    * ``merged_fields`` — the base fields the update sends; a field it leaves
+      out keeps its previous base.
+    """
+
+    payload: Entry
+    kept: Mapping[BaseField, frozenset[str]]
+    pending_import: bool
+    merged_fields: frozenset[BaseField]
+
+
+def resolve_synced_base(
+    recorded: SyncedEntries | None,
+    current: Entry,
+    *,
+    synced_version: str | None,
+    address_fallback_country: str | None = None,
+) -> SyncedEntries:
+    """The base a push merges against.
+
+    The link's recorded base when it has one. A link from before bases were
+    recorded falls back on the etag: a person unchanged since the last sync is
+    its own base, and a changed one gets an empty base, which keeps every
+    Google entry - nothing tells an addition there from a local deletion.
+    """
+    if recorded is not None:
+        return recorded
+    if remote_unchanged_since_sync(synced_version, current.get("etag")):
+        return raw_synced_entries(current, address_fallback_country)
+    return {}
+
+
+def merge_for_push(
+    payload: Entry,
+    current: Entry,
+    *,
+    synced_base: SyncedEntries | None = None,
+    address_fallback_country: str | None = None,
+) -> PushMerge:
+    """Merge ``payload`` into ``current``, three ways against ``synced_base``.
 
     Only fields the payload carries are merged, and a field leaves it only when
     its policy leaves Google's value untouched. ``payload`` itself is left
     untouched.
 
-    ``address_fallback_country`` is the country the last applied pull gave
-    addresses with none, as the link records it: an address with no country
-    is owned only when that pull imported it (#1820). What the import would
-    infer *now* is not used — an address no pull has imported is not held
-    locally, and owning it would delete it from Google.
+    ``synced_base`` None means ``current`` is the person as last synced, so it
+    is its own base. ``address_fallback_country`` is the country the last
+    applied pull gave addresses with none, as the link records it, so a
+    countryless address is keyed as that pull imported it (#1820). What the
+    import would infer *now* is not used.
     """
-    policies = {
-        **FIELD_POLICIES,
-        "addresses": _address_policy(address_fallback_country),
-    }
+    sync = SyncContext(
+        base=(
+            raw_synced_entries(current, address_fallback_country)
+            if synced_base is None
+            else synced_base
+        ),
+        address_fallback_country=address_fallback_country,
+    )
     merged: Entry = {}
+    kept: dict[BaseField, frozenset[str]] = {}
+    pending_import = False
     for field, pushed in payload.items():
-        policy = policies.get(field)
+        policy = FIELD_POLICIES.get(field)
         if policy is None:
             logger.warning("Pushed Google field has no merge policy", field=field)
             merged[field] = pushed
             continue
-        result = policy.merge(pushed, current.get(field) or [])
-        if result is not Omit.FIELD:
-            merged[field] = result
-    return merged
-
-
-def _address_policy(fallback_country: str | None) -> FieldPolicy:
-    """Addresses: local owns those inbound imports given ``fallback_country``."""
-    return KeepUnimported(
-        _imported_by(
-            GoogleAddress,
-            lambda address: import_address(address, fallback_country),
-        )
+        result = policy.merge(pushed, current.get(field) or [], sync)
+        pending_import = pending_import or result.remote_won
+        if result.value is Omit.FIELD:
+            continue
+        merged[field] = result.value
+        if isinstance(policy, KeepUnsynced | SingletonUnsynced):
+            kept[policy.field] = result.kept
+    return PushMerge(
+        payload=merged,
+        kept=kept,
+        pending_import=pending_import,
+        merged_fields=frozenset(kept),
     )
+
+
+def merge_with_current_person(
+    payload: Entry,
+    current: Entry,
+    *,
+    address_fallback_country: str | None = None,
+    synced_base: SyncedEntries | None = None,
+) -> Entry:
+    """The merged payload alone; see :func:`merge_for_push`."""
+    return merge_for_push(
+        payload,
+        current,
+        synced_base=synced_base,
+        address_fallback_country=address_fallback_country,
+    ).payload
 
 
 def _is_contact_entry(entry: dict[str, Any]) -> bool:
@@ -313,18 +422,14 @@ def _merge_organizations(
 FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
     "names": MergedBy(_merge_names),
     "nicknames": KeepUnchosen(_chosen_nickname),
-    "emailAddresses": KeepUnimported(_imported_by(GoogleEmailAddress, import_email)),
-    "phoneNumbers": KeepUnimported(_imported_by(GooglePhoneNumber, import_phone)),
-    # Rebuilt per push with the person's fallback country, see
-    # ``merge_with_current_person``; this entry is the no-fallback policy.
-    "addresses": _address_policy(None),
+    "emailAddresses": KeepUnsynced("emailAddresses"),
+    "phoneNumbers": KeepUnsynced("phoneNumbers"),
+    "addresses": KeepUnsynced("addresses"),
     "biographies": WhollyOwned("inbound imports every biography as a note"),
     "organizations": MergedBy(_merge_organizations),
     "memberships": WhollyOwned(
         "the push rebuilds reserved groups, starred and every tag's group (#1821)"
     ),
-    "birthdays": SingletonLeaveUnimported(
-        _imported_by(GoogleBirthday, import_birthday)
-    ),
+    "birthdays": SingletonUnsynced("birthdays"),
     "events": MergedBy(_merge_events),
 }

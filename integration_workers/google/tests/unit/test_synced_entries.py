@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from api_models import GooglePerson
-from synced_entries import BASE_FIELDS, raw_entry_key, synced_entries_of
+from synced_entries import (
+    BASE_FIELDS,
+    raw_entry_key,
+    raw_synced_entries,
+    synced_entries_of,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -152,3 +157,19 @@ class TestSyncedEntriesOf:
         synced = synced_entries_of(_person(addresses=[address]), "NZ")
 
         assert synced["addresses"] == {raw_entry_key("addresses", address, "NZ")}
+
+    def test_a_raw_person_keys_as_the_parsed_one(self) -> None:
+        """The push keys Google's raw response; the pull keys the parsed person."""
+        raw = {
+            "resourceName": "people/c1",
+            "emailAddresses": [{"value": "ada@example.com", "formattedType": "Home"}],
+            "phoneNumbers": [
+                {"value": "0412 345 678", "canonicalForm": "+61412345678"}
+            ],
+            "addresses": [{"streetAddress": "1 Queen St"}],
+            "birthdays": [{"date": {"month": 3, "day": 4}}],
+        }
+
+        assert raw_synced_entries(raw, "NZ") == synced_entries_of(
+            GooglePerson.model_validate(raw), "NZ"
+        )
