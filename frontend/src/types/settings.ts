@@ -13,6 +13,20 @@ export interface UserSettingsAttributes {
    * chose UTC on purpose.
    */
   timezone: string | null;
+  /**
+   * The ISO 3166-1 alpha-2 country filled in for imported addresses that have
+   * none, or `null` if the user has not chosen one.
+   */
+  default_country?: string | null;
+}
+
+/**
+ * A partial settings update: an omitted field is left as it is, and
+ * `default_country: null` clears the country. The timezone cannot be cleared.
+ */
+export interface UserSettingsPatch {
+  timezone?: string;
+  default_country?: string | null;
 }
 
 export interface UserSettingsResource {

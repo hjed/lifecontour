@@ -2,7 +2,8 @@
  * User settings API client + React Query hooks.
  *
  * Persists the user's default timezone on the backend so it can be used by
- * server-side AI prompt generation. A localStorage cache is kept in sync so
+ * server-side AI prompt generation, and the default country used to fill in
+ * imported addresses that have none. A localStorage cache is kept in sync so
  * the synchronous {@link getDefaultTimezone} helper (used when creating new
  * events) reflects the latest value without an async fetch.
  */
@@ -11,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import type { JsonApiErrorResponse } from '@/types/api';
-import type { UserSettingsResponse } from '@/types/settings';
+import type { UserSettingsPatch, UserSettingsResponse } from '@/types/settings';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 // `journalKeys` comes from `./journal-keys` rather than `./journals`, which
 // imports *this* module — see that file's header for the cycle it removes.
@@ -90,8 +91,10 @@ export async function fetchUserSettings(): Promise<UserSettingsResponse> {
   return response.json();
 }
 
-export async function updateTimezone(
-  timezone: string
+/** PATCH the fields `patch` names; the others are left as they are. */
+export async function updateUserSettings(
+  patch: UserSettingsPatch,
+  fallbackError = 'Failed to save settings'
 ): Promise<UserSettingsResponse> {
   const response = await fetch(USER_SETTINGS_ENDPOINT, {
     method: 'PATCH',
@@ -99,15 +102,21 @@ export async function updateTimezone(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ timezone }),
+    body: JSON.stringify(patch),
   });
 
   if (!response.ok) {
     const errorData: JsonApiErrorResponse = await response.json();
-    throw new Error(errorData.errors?.[0]?.detail || 'Failed to save timezone');
+    throw new Error(errorData.errors?.[0]?.detail || fallbackError);
   }
 
   return response.json();
+}
+
+export async function updateTimezone(
+  timezone: string
+): Promise<UserSettingsResponse> {
+  return updateUserSettings({ timezone }, 'Failed to save timezone');
 }
 
 export function useUserSettings() {
@@ -227,6 +236,32 @@ export function useUpdateTimezone() {
         { queryKey: taskKeys.all }
       );
       toast.success('Timezone saved');
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/** Save the default country, or clear it with `null`. */
+export function useUpdateDefaultCountry() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (defaultCountry: string | null) =>
+      updateUserSettings(
+        { default_country: defaultCountry },
+        'Failed to save default country'
+      ),
+    onSuccess: response => {
+      // Seeded so the settings card shows the saved value straight away. No
+      // other read derives from the country: it only matters to the next
+      // Google contact import.
+      queryClient.setQueryData(userSettingsKeys.detail(), response);
+      void invalidateAfterMutation(queryClient, {
+        queryKey: userSettingsKeys.all,
+      });
+      toast.success('Default country saved');
     },
     onError: (error: Error) => {
       toast.error(error.message);
