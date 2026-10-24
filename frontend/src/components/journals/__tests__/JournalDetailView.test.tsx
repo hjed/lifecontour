@@ -19,6 +19,7 @@ import {
   type JournalTag,
 } from '@/types/journals';
 import { getTemplate } from '@/lib/api/templates';
+import { PreconditionFailedError } from '@/lib/api/conditional-request';
 
 jest.mock('@/lib/api/templates', () => ({
   getTemplate: jest.fn(),
@@ -119,6 +120,10 @@ jest.mock('@/lib/api/journals', () => ({
     isPending: false,
   }),
   useUpdateTypeData: () => ({
+    mutateAsync: jest.fn(),
+    isPending: false,
+  }),
+  useUpdateTypeDataBatch: () => ({
     mutateAsync: jest.fn(),
     isPending: false,
   }),
@@ -438,10 +443,28 @@ describe('JournalDetailView', () => {
       await user.click(screen.getByTestId('type-section-save-gear_usage'));
 
       expect(mockAddType).toHaveBeenCalledWith({
-        journalId: '1',
         journalType: JournalType.GEAR_USAGE,
         typeData: { gear_item_id: 'gear-1' },
       });
+    });
+
+    it('drops the pending section when its save is refused as a conflict', async () => {
+      // The conflict dialog holds the gear usage and can re-apply it; a
+      // section left behind would show the refused data as if it had saved.
+      const user = userEvent.setup();
+      mockAddType.mockRejectedValueOnce(
+        new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {})
+      );
+      renderWithQueryClient(<JournalDetailView journal={mockJournal} />);
+
+      await user.click(screen.getByTestId('add-gear-usage'));
+      await user.click(screen.getByTestId('type-section-save-gear_usage'));
+
+      await waitFor(() =>
+        expect(
+          screen.queryByTestId('type-section-gear_usage')
+        ).not.toBeInTheDocument()
+      );
     });
 
     it('keeps the section visible after save until the refetch persists it', async () => {
@@ -635,7 +658,6 @@ describe('JournalDetailView', () => {
       await user.click(screen.getByTestId('tag-option-tag-3'));
 
       expect(mockAddTag).toHaveBeenCalledWith({
-        journalId: '1',
         tagId: 'tag-3',
       });
     });
@@ -657,7 +679,6 @@ describe('JournalDetailView', () => {
       await user.click(screen.getByTestId('remove-tag-tag-1'));
 
       expect(mockRemoveTag).toHaveBeenCalledWith({
-        journalId: '1',
         tagId: 'tag-1',
       });
     });
@@ -696,7 +717,6 @@ describe('JournalDetailView', () => {
       });
       await waitFor(() => {
         expect(mockAddTag).toHaveBeenCalledWith({
-          journalId: '1',
           tagId: 'tag-new',
         });
       });

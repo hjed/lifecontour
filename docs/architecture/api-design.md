@@ -259,6 +259,42 @@ unaffected either way; this is for the origins that call the API directly.
 `If-None-Match` / `304 Not Modified` on reads is deliberately **not** supported:
 this is conflict detection, not caching.
 
+### Web client
+
+The web UI sends `If-Match` on every contact and journal write the backend
+guards (`frontend/src/lib/api/conditional-request.ts`, `aggregate-write.ts`).
+The exempt writes above — whole-aggregate deletes and merges among them — go
+without one, as they do from every client.
+
+- **Where the tag lives.** The contact and journal detail queries cache a
+  `Versioned { resource, etag }` envelope, so the body and the tag a refetch
+  brings are replaced together; `select` hands components the bare resource.
+  Every write stores the tag its response carries — a `204` and a field
+  `PATCH` included — and optimistic updates never touch it.
+- **One aggregate, one queue.** The tag is the aggregate's, so two quick edits
+  to one contact sent in parallel would refuse each other. Every write to an
+  aggregate shares a TanStack Query mutation `scope` (`contact:<id>`,
+  `journal:<id>`), which runs them one at a time; each reads the tag inside its
+  `mutationFn`, so it sends the one the previous write returned.
+- **No tag, no precondition.** A write made where the aggregate's detail has
+  not been read — a list or search card, or a journal re-parenting a child it
+  has not opened — goes out unconditionally, exactly as before. Fetching a tag
+  just to send it would guard nothing: that read is already the latest version.
+- **A 412** is handled once, by a global `MutationCache.onError`
+  (`frontend/src/lib/write-conflicts.ts`): it re-reads the aggregate, names the
+  parts of it that changed, and opens a dialog offering **Keep mine** (re-apply
+  the same mutation against the fresh tag) or **Use theirs**. The dialog names
+  the record rather than the field, since the conflicting change may have been
+  to a different row. A write queued behind the refused one runs after the
+  re-read, with the fresh tag.
+
+**`428 Precondition Required` is not used.** `If-Match` stays optional for every
+client, the UI included: the UI deliberately writes unconditionally where it
+holds no tag (above), MCP carries the version as `expected_version` rather
+than a header, and other REST clients rely on unconditional writes working as
+they always have. Requiring the header would refuse those writes and protect
+nothing the UI does not already guard.
+
 ### MCP
 
 Tools have no headers, so the same token travels as data: reads report

@@ -111,7 +111,6 @@ describe('JournalTagsEditor', () => {
     await user.click(screen.getByTestId('tag-option-c'));
 
     expect(mockAddMutate).toHaveBeenCalledWith({
-      journalId: 'j1',
       tagId: 'c',
     });
   });
@@ -123,7 +122,6 @@ describe('JournalTagsEditor', () => {
     await user.click(screen.getByTestId('remove-tag-a'));
 
     expect(mockRemoveMutate).toHaveBeenCalledWith({
-      journalId: 'j1',
       tagId: 'a',
     });
   });
@@ -146,7 +144,6 @@ describe('JournalTagsEditor', () => {
       });
     });
     expect(mockAddMutateAsync).toHaveBeenCalledWith({
-      journalId: 'j1',
       tagId: 'new-id',
     });
     // create resolved before assign was called

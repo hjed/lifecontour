@@ -142,6 +142,28 @@ Mutation handlers must refresh the cache through
   `invalidateQueries` calls were; `await` it only where the handler already
   awaited the refresh.
 
+### Contact and Journal Writes
+
+Edits to a contact or a journal — the record itself or any of its rows — are
+conditional writes ([API Design → Conditional Writes → Web
+client](./api-design.md#web-client)). The exceptions are the writes the backend
+does not guard either: deleting or merging a whole contact or journal, contact
+relationships and the contact summary, and journal series membership. Those
+send no `If-Match` and share no write scope. A new edit hook:
+
+- takes the aggregate's id as its argument (`useAddJournalTag(journalId)`),
+  because a mutation's `scope` is a static option;
+- spreads `guardedWrite(queryClient, contactAggregate(id), send, describe)`
+  (or the journal equivalent), whose `send(variables, ifMatch)` calls a
+  request function built on `sendConditional`; `describe` words the change for
+  the conflict dialog;
+- touches the detail cache only through `versioned-cache.ts`
+  (`updateResource`, `storeVersioned`) — never a raw `setQueryData`, which
+  would drop the tag;
+- reports errors with `toastUnlessConflict`, because a 412 is the conflict
+  dialog's to report. A form that submitted the write awaits it through
+  `closingOnConflict`, so it closes rather than inviting the same change twice.
+
 ### Task Query Keys
 
 `taskKeys` (`frontend/src/lib/api/tasks.ts`) hangs three namespaces off
