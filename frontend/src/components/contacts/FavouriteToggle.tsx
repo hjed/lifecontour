@@ -25,10 +25,10 @@ export function FavouriteToggle({
   className,
   size = 'md',
 }: FavouriteToggleProps) {
-  const toggleFavouriteMutation = useToggleContactFavourite();
+  const toggleFavouriteMutation = useToggleContactFavourite(contactId);
 
   const handleToggle = () => {
-    toggleFavouriteMutation.mutate(contactId);
+    toggleFavouriteMutation.mutate({ favourite: !isFavourite });
   };
 
   const ariaLabel = isFavourite

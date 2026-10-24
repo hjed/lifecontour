@@ -5,6 +5,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
+import { mockApiResponse } from '@/test-utils';
 import {
   contactKeys,
   tagKeys,
@@ -75,16 +76,15 @@ describe('Contact Tag Mutation Hooks', () => {
 
   describe('useAssignContactTag', () => {
     it('should send correct POST request to assign a tag', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
-      const { result } = renderHook(() => useAssignContactTag(), {
+      const { result } = renderHook(() => useAssignContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
@@ -104,18 +104,17 @@ describe('Contact Tag Mutation Hooks', () => {
     });
 
     it('should invalidate contact detail and tags queries on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
-      const { result } = renderHook(() => useAssignContactTag(), {
+      const { result } = renderHook(() => useAssignContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
@@ -139,16 +138,15 @@ describe('Contact Tag Mutation Hooks', () => {
     });
 
     it('should show success toast on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
-      const { result } = renderHook(() => useAssignContactTag(), {
+      const { result } = renderHook(() => useAssignContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
@@ -160,18 +158,18 @@ describe('Contact Tag Mutation Hooks', () => {
     it('should handle API error', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 409,
         json: async () => ({
           errors: [{ detail: 'Tag already assigned' }],
         }),
       } as Response);
 
-      const { result } = renderHook(() => useAssignContactTag(), {
+      const { result } = renderHook(() => useAssignContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await expect(
         result.current.mutateAsync({
-          contactId: '42',
           tagId: '7',
         })
       ).rejects.toThrow('Tag already assigned');
@@ -184,38 +182,36 @@ describe('Contact Tag Mutation Hooks', () => {
 
   describe('useRemoveContactTag', () => {
     it('should send correct DELETE request to remove a tag', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/contacts/42/tags/7', {
-        method: 'DELETE',
-        credentials: 'include',
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/contacts/42/tags/7',
+        expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+      );
     });
 
     it('should invalidate contact detail and tags queries on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
@@ -239,16 +235,15 @@ describe('Contact Tag Mutation Hooks', () => {
     });
 
     it('should show success toast on success', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-      } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '42',
         tagId: '7',
       });
 
@@ -260,18 +255,18 @@ describe('Contact Tag Mutation Hooks', () => {
     it('should handle API error', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 404,
         json: async () => ({
           errors: [{ detail: 'Tag not found on contact' }],
         }),
       } as Response);
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
       await expect(
         result.current.mutateAsync({
-          contactId: '42',
           tagId: '7',
         })
       ).rejects.toThrow('Tag not found on contact');
@@ -293,11 +288,11 @@ describe('Contact Tag Mutation Hooks', () => {
         })
       );
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
-      result.current.mutate({ contactId: '42', tagId: '7' });
+      result.current.mutate({ tagId: '7' });
 
       await waitFor(() => {
         const cached = queryClient.getQueryData(contactKeys.tags('42')) as {
@@ -306,7 +301,7 @@ describe('Contact Tag Mutation Hooks', () => {
         expect(cached.data.map(t => t.id)).toEqual(['8']);
       });
 
-      resolveFetch({ ok: true } as Response);
+      resolveFetch(mockApiResponse(undefined, { status: 204 }));
     });
 
     it('should roll back the optimistic removal when the request fails', async () => {
@@ -320,21 +315,51 @@ describe('Contact Tag Mutation Hooks', () => {
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
+        status: 422,
         json: async () => ({ errors: [{ detail: 'Boom' }] }),
       } as Response);
 
-      const { result } = renderHook(() => useRemoveContactTag(), {
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
         wrapper: createWrapper,
       });
 
-      await expect(
-        result.current.mutateAsync({ contactId: '42', tagId: '7' })
-      ).rejects.toThrow('Boom');
+      await expect(result.current.mutateAsync({ tagId: '7' })).rejects.toThrow(
+        'Boom'
+      );
 
       const cached = queryClient.getQueryData(contactKeys.tags('42')) as {
         data: { id: string }[];
       };
       expect(cached.data.map(t => t.id)).toEqual(['7', '8']);
+    });
+
+    it('does not roll back over the tags a conflict re-read brought', async () => {
+      // On a 412 the conflict handler has already re-read the contact's tags;
+      // restoring the pre-removal snapshot would resurrect a tag another tab
+      // removed.
+      queryClient.setQueryData(contactKeys.tags('42'), {
+        data: [
+          { id: '7', type: 'tags', attributes: { name: 'Removed elsewhere' } },
+          { id: '8', type: 'tags', attributes: { name: 'Stay' } },
+        ],
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 412,
+        json: async () => ({
+          errors: [{ code: 'PRECONDITION_FAILED', meta: {} }],
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useRemoveContactTag('42'), {
+        wrapper: createWrapper,
+      });
+      await result.current.mutateAsync({ tagId: '7' }).catch(() => undefined);
+
+      const cached = queryClient.getQueryData(contactKeys.tags('42')) as {
+        data: { id: string }[];
+      };
+      expect(cached.data.map(t => t.id)).toEqual(['8']);
     });
   });
 

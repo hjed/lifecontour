@@ -11,6 +11,7 @@ import {
   ImportantDateTypeEnum,
 } from '@/types/contacts';
 import * as contactsApi from '@/lib/api/contacts';
+import { PreconditionFailedError } from '@/lib/api/conditional-request';
 
 // Mock the API functions. The inline editor pulls custom date types from the
 // same module, so those hooks have to be mocked too or it cannot render.
@@ -176,7 +177,6 @@ describe('ImportantDatesList', () => {
       expect(mockUpdateDate).toHaveBeenCalledTimes(1);
     });
     expect(mockUpdateDate).toHaveBeenCalledWith({
-      contactId: '123',
       dateId: '1',
       date: expect.objectContaining({
         date_type: ImportantDateTypeEnum.BIRTHDAY,
@@ -243,9 +243,52 @@ describe('ImportantDatesList', () => {
       expect(mockAddDate).toHaveBeenCalledTimes(1);
     });
     expect(mockAddDate).toHaveBeenCalledWith({
-      contactId: '123',
       date: expect.objectContaining({ year: 2001, month: 6, day: 1 }),
     });
+  });
+
+  it('closes the add form when the write is refused as a conflict', async () => {
+    // The conflict dialog holds the date and can re-apply it; a form left
+    // open would invite saving it twice.
+    mockAddDate.mockRejectedValueOnce(
+      new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {})
+    );
+    renderList([]);
+
+    fireEvent.click(screen.getByLabelText('Add important date'));
+    fireEvent.change(screen.getByPlaceholderText('DD'), {
+      target: { value: '1' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('MM'), {
+      target: { value: '6' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('YYYY'), {
+      target: { value: '2001' },
+    });
+    fireEvent.click(screen.getByLabelText('Save date'));
+
+    await waitFor(() => expect(mockAddDate).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Save date')).not.toBeInTheDocument()
+    );
+  });
+
+  it('closes the delete confirmation when the delete is refused as a conflict', async () => {
+    mockDeleteDate.mockRejectedValueOnce(
+      new PreconditionFailedError('moved on', 'PRECONDITION_FAILED', {})
+    );
+    renderList();
+
+    fireEvent.click(screen.getByLabelText('Delete birthday'));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(mockDeleteDate).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    );
   });
 
   it('deletes only the confirmed date, by id', async () => {
@@ -260,7 +303,6 @@ describe('ImportantDatesList', () => {
 
     await waitFor(() => {
       expect(mockDeleteDate).toHaveBeenCalledWith({
-        contactId: '123',
         dateId: '1',
       });
     });

@@ -7,17 +7,27 @@ import { createQueryTestHarness, mockApiResponse } from '@/test-utils';
 import {
   contactKeys,
   useAddContactAddress,
+  useAddContactImportantDate,
   useAddContactMethod,
+  useAssignContactTag,
   useContact,
   useDeleteContactAddress,
+  useDeleteContactImportantDate,
   useDeleteContactMethod,
+  useRemoveContactTag,
   useSetContactValueArchived,
+  useToggleContactFavourite,
   useUpdateContactAddressFields,
   useUpdateContact,
   useUpdateContactField,
+  useUpdateContactImportantDate,
   useUpdateContactMethodField,
 } from '../contacts';
-import { ContactMethodType } from '@/types/contacts';
+import {
+  ContactMethodType,
+  ImportantDatePrecision,
+  ImportantDateTypeEnum,
+} from '@/types/contacts';
 import { readEtag, type Versioned } from '../versioned-cache';
 import type { ContactResponse } from '@/types/contacts';
 
@@ -367,6 +377,161 @@ describe('contact conditional writes', () => {
       expect(harness.queryClient.getQueryData(contactKeys.detail('1'))).toEqual(
         { resource: withMethod, etag: '"e2"' }
       );
+    });
+
+    const birthday = {
+      date_type: ImportantDateTypeEnum.BIRTHDAY,
+      precision: ImportantDatePrecision.FULL,
+      year: 1815,
+      month: 12,
+      day: 10,
+    };
+
+    it('adds an important date', async () => {
+      const { harness, result } = render(() => useAddContactImportantDate('1'));
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ date: birthday }),
+        'POST',
+        '/api/contacts/1/important-dates',
+        201
+      );
+    });
+
+    it('edits an important date', async () => {
+      const { harness, result } = render(() =>
+        useUpdateContactImportantDate('1')
+      );
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ dateId: 'd1', date: birthday }),
+        'PUT',
+        '/api/contacts/1/important-dates/d1',
+        200
+      );
+    });
+
+    it('deletes an important date (204)', async () => {
+      const { harness, result } = render(() =>
+        useDeleteContactImportantDate('1')
+      );
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ dateId: 'd1' }),
+        'DELETE',
+        '/api/contacts/1/important-dates/d1',
+        204
+      );
+    });
+
+    it('assigns a tag', async () => {
+      const { harness, result } = render(() => useAssignContactTag('1'));
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ tagId: 't1' }),
+        'POST',
+        '/api/contacts/1/tags',
+        204
+      );
+    });
+
+    it('removes a tag (204)', async () => {
+      const { harness, result } = render(() => useRemoveContactTag('1'));
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ tagId: 't1' }),
+        'DELETE',
+        '/api/contacts/1/tags/t1',
+        204
+      );
+    });
+
+    it('toggles the favourite', async () => {
+      const { harness, result } = render(() => useToggleContactFavourite('1'));
+      await expectGuarded(
+        harness,
+        () => result.current.mutateAsync({ favourite: true }),
+        'POST',
+        '/api/contacts/1/favourite',
+        200
+      );
+    });
+
+    function favourited(is_favourite: boolean): ContactResponse {
+      return {
+        data: {
+          ...CONTACT.data,
+          attributes: { ...CONTACT.data.attributes, is_favourite },
+        },
+      };
+    }
+
+    it('remembers what a toggle made the contact, so a second identical click is not undone', async () => {
+      // The toggle answers with the contact it left; dropping that body kept
+      // is_favourite stale, and a second "add" toggled the favourite off.
+      const { harness, result } = render(() => useToggleContactFavourite('1'));
+      mockFetch
+        .mockResolvedValueOnce(
+          mockApiResponse(favourited(true), { etag: '"e2"' })
+        )
+        .mockResolvedValueOnce(
+          mockApiResponse(favourited(true), { etag: '"e2"' })
+        );
+
+      await act(() => result.current.mutateAsync({ favourite: true }));
+      await act(() => result.current.mutateAsync({ favourite: true }));
+
+      const posts = mockFetch.mock.calls.filter(
+        call => call[1]?.method === 'POST'
+      );
+      expect(posts).toHaveLength(1);
+      expect(
+        harness.queryClient.getQueryData<Versioned<ContactResponse>>(
+          contactKeys.detail('1')
+        )?.resource.data.attributes.is_favourite
+      ).toBe(true);
+    });
+
+    it('sends no toggle when the server already has what the user wants', async () => {
+      // A re-applied toggle runs after the other tab's change: if that change
+      // was the same one, toggling again would undo both.
+      const { harness, result } = render(() => useToggleContactFavourite('1'));
+      harness.queryClient.setQueryData<Versioned<ContactResponse>>(
+        contactKeys.detail('1'),
+        { resource: favourited(true), etag: '"e9"' }
+      );
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(favourited(true), { etag: '"e9"' })
+      );
+
+      await act(() => result.current.mutateAsync({ favourite: true }));
+
+      expect(mockFetch.mock.calls.map(call => call[1]?.method)).toEqual([
+        undefined,
+      ]);
+      expect(mockFetch.mock.calls[0]?.[0]).toBe('/api/contacts/1');
+    });
+
+    it('re-reads a cached copy that disagrees with the click before deciding', async () => {
+      // The detail was cached before another tab favourited the contact; the
+      // click (from a fresher list) asks to remove it.
+      const { harness, result } = render(() => useToggleContactFavourite('1'));
+      harness.queryClient.setQueryData<Versioned<ContactResponse>>(
+        contactKeys.detail('1'),
+        { resource: favourited(false), etag: '"e1"' }
+      );
+      mockFetch
+        .mockResolvedValueOnce(
+          mockApiResponse(favourited(true), { etag: '"e5"' })
+        )
+        .mockResolvedValueOnce(
+          mockApiResponse(favourited(false), { etag: '"e6"' })
+        );
+
+      await act(() => result.current.mutateAsync({ favourite: false }));
+
+      expect(mockFetch.mock.calls[1]?.[0]).toBe('/api/contacts/1/favourite');
+      expect(sentIfMatch(1)).toBe('"e5"');
     });
   });
 });

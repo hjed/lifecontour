@@ -82,7 +82,7 @@ describe('FavouriteToggle', () => {
     const button = screen.getByRole('button');
     await user.click(button);
 
-    expect(mockMutate).toHaveBeenCalledWith('1');
+    expect(mockMutate).toHaveBeenCalledWith({ favourite: true });
   });
 
   it('should be disabled when mutation is pending', () => {

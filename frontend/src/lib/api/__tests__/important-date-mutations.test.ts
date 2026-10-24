@@ -108,12 +108,11 @@ describe('important date mutations', () => {
         mockApiResponse(editedContactResponse, { etag: '"e2"' })
       );
 
-      const { result } = renderHook(() => useUpdateContactImportantDate(), {
+      const { result } = renderHook(() => useUpdateContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '10',
         dateId: '1',
         date: birthday,
       });
@@ -147,12 +146,11 @@ describe('important date mutations', () => {
         mockApiResponse(editedContactResponse, { etag: '"e2"' })
       );
 
-      const { result } = renderHook(() => useUpdateContactImportantDate(), {
+      const { result } = renderHook(() => useUpdateContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '10',
         dateId: '1',
         date: birthday,
       });
@@ -178,12 +176,11 @@ describe('important date mutations', () => {
         'invalidateQueries'
       );
 
-      const { result } = renderHook(() => useUpdateContactImportantDate(), {
+      const { result } = renderHook(() => useUpdateContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
       await result.current.mutateAsync({
-        contactId: '10',
         dateId: '1',
         date: birthday,
       });
@@ -207,13 +204,12 @@ describe('important date mutations', () => {
         }),
       } as Response);
 
-      const { result } = renderHook(() => useUpdateContactImportantDate(), {
+      const { result } = renderHook(() => useUpdateContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
       await expect(
         result.current.mutateAsync({
-          contactId: '10',
           dateId: '1',
           date: birthday,
         })
@@ -231,11 +227,11 @@ describe('important date mutations', () => {
         mockApiResponse(editedContactResponse, { etag: '"e2"' })
       );
 
-      const { result } = renderHook(() => useAddContactImportantDate(), {
+      const { result } = renderHook(() => useAddContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
-      await result.current.mutateAsync({ contactId: '10', date: birthday });
+      await result.current.mutateAsync({ date: birthday });
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/contacts/10/important-dates',
@@ -255,18 +251,20 @@ describe('important date mutations', () => {
 
   describe('useDeleteContactImportantDate', () => {
     it('DELETEs the date and refreshes details, lists and history', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true } as Response);
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(undefined, { status: 204 })
+      );
 
       const invalidateSpy = jest.spyOn(
         harness.queryClient,
         'invalidateQueries'
       );
 
-      const { result } = renderHook(() => useDeleteContactImportantDate(), {
+      const { result } = renderHook(() => useDeleteContactImportantDate('10'), {
         wrapper: harness.wrapper,
       });
 
-      await result.current.mutateAsync({ contactId: '10', dateId: '1' });
+      await result.current.mutateAsync({ dateId: '1' });
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/contacts/10/important-dates/1',
