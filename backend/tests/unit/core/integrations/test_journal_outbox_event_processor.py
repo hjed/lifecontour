@@ -275,7 +275,7 @@ def _arrange_update(
     """
     journal_row = _make_journal_row() if journal_row is None else journal_row
     connection.execute.side_effect = [
-        MagicMock(),  # _ensure_calendar_exists
+        _mock_empty_result(),  # _ensure_calendar_exists
         _mock_fetchone(journal_row),  # _find_journal_by_id
         _mock_fetchone(_make_link_row() if link_row is None else link_row),
         _mock_empty_result() if calendar_info is None else calendar_info,
@@ -491,7 +491,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -543,7 +543,7 @@ class TestJournalOutboxEventProcessor:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -580,7 +580,7 @@ class TestJournalOutboxEventProcessor:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -807,7 +807,7 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(_make_link_row(external_version='"etag-123"')),
         ]
@@ -841,7 +841,7 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(
                 _make_link_row(external_version='"etag-123"', external_identity=None)
@@ -880,7 +880,7 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(
                 _make_link_row(external_version='"etag-123"', external_identity=None)
@@ -919,7 +919,7 @@ class TestJournalOutboxEventProcessor:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),
             _mock_fetchone(
                 _make_link_row(
@@ -1008,7 +1008,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.create_journal.return_value = _make_journal()
         # Add side_effect so it doesn't return MagicMock directly when _find_external_event_link is called
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1038,7 +1038,7 @@ class TestJournalOutboxEventProcessor:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1072,7 +1072,7 @@ class TestJournalOutboxEventProcessor:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -1108,7 +1108,7 @@ class TestJournalOutboxEventProcessor:
         # Mock execute for: _find_external_event_link, _save_calendar_info, _create_external_event_link,
         # _get_relationships_by_type (returns empty = nothing to delete)
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),
             MagicMock(),
             MagicMock(),
@@ -1150,7 +1150,7 @@ class TestJournalOutboxEventProcessor:
         resolve_no_match.fetchone.return_value = None
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -1225,7 +1225,7 @@ class TestJournalOutboxEventProcessor:
         resolve_match.fetchone.side_effect = [MagicMock(id=100), MagicMock(id=101)]
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # find journal
             _mock_fetchone(_make_link_row()),  # find link
             _mock_empty_result(),  # _find_calendar_info
@@ -1585,7 +1585,7 @@ class TestStravaFitnessDataProcessing:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1608,7 +1608,7 @@ class TestStravaFitnessDataProcessing:
             updated_at=datetime.now(UTC),
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1666,7 +1666,7 @@ class TestStravaFitnessDataProcessing:
         mock_journal_service.create_journal.return_value = _make_journal()
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1704,7 +1704,7 @@ class TestStravaFitnessDataProcessing:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1741,7 +1741,7 @@ class TestStravaFitnessDataProcessing:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1779,7 +1779,7 @@ class TestStravaFitnessDataProcessing:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1841,7 +1841,7 @@ class TestStravaFitnessDataProcessing:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1921,7 +1921,7 @@ class TestStravaFitnessDataProcessing:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -1969,7 +1969,7 @@ class TestStravaFitnessDataProcessing:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2093,7 +2093,7 @@ class TestGPXRouteAndSyncMetadata:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2154,7 +2154,7 @@ class TestGPXRouteAndSyncMetadata:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2212,7 +2212,7 @@ class TestGPXRouteAndSyncMetadata:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2255,7 +2255,7 @@ class TestGPXRouteAndSyncMetadata:
 
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2365,7 +2365,7 @@ class TestStravaMatchDetectionEmission:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2430,7 +2430,7 @@ class TestStravaMatchDetectionEmission:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2489,7 +2489,7 @@ class TestStravaMatchDetectionEmission:
         )
 
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link
             MagicMock(),  # _save_calendar_info
             MagicMock(),  # _create_external_event_link
@@ -2817,7 +2817,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         )
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -2854,7 +2854,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         )
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -2910,7 +2910,7 @@ class TestSeriesMembershipOnCreateAndUpdate(_SeriesProcessorTestBase):
         )
         mock_journal_service.create_journal.return_value = _make_journal()
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_empty_result(),  # _find_external_event_link (idempotency check)
             _mock_empty_result(),  # _save_calendar_info
             _mock_empty_result(),  # _create_external_event_link
@@ -3142,7 +3142,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
             recurring_event_id="master-1",
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(
                 _make_link_row(recurring_event_id=None)
@@ -3178,7 +3178,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
             series_recurring_event_id="master-1",
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(
                 _make_link_row(recurring_event_id=None)
@@ -3212,7 +3212,7 @@ class TestUnchangedEtagBackfill(_SeriesProcessorTestBase):
             recurring_event_id="master-1",
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(_make_journal_row()),  # _find_journal_by_id
             _mock_fetchone(
                 _make_link_row(recurring_event_id="master-1")
@@ -3327,7 +3327,7 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
             etag='"etag-new"',
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(self._unchanged_journal_row()),
             _mock_fetchone(_make_link_row()),
             _mock_empty_result(),  # _find_calendar_info
@@ -3361,7 +3361,7 @@ class TestWhichInboundPathsAnnounceAnAgendaChange:
             ],
         )
         mock_connection.execute.side_effect = [
-            MagicMock(),  # _ensure_calendar_exists
+            _mock_empty_result(),  # _ensure_calendar_exists
             _mock_fetchone(self._unchanged_journal_row()),
             _mock_fetchone(_make_link_row()),
             _mock_empty_result(),  # _find_calendar_info

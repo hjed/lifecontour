@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import structlog
-from core_shared.integration_constants import snipeit_maintenance_calendar_id
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.journals.calendar_info import event_date_in_timezone
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
 from sqlalchemy import text
@@ -603,7 +603,9 @@ async def _journal_holding_maintenance(
         """),
         {
             "external_event_id": external_id,
-            "calendar_id": snipeit_maintenance_calendar_id(user_id),
+            "calendar_id": synthetic_calendar_id(
+                SyntheticCalendar.SNIPEIT_MAINTENANCE, user_id
+            ),
         },
     )
     journal_id: int | None = result.scalar_one_or_none()
@@ -1383,7 +1385,9 @@ class SnipeItSyncService:
                     "user_id": self._user_id,
                     "maintenance_ids": [record.id for record in on_an_asset],
                     "asset_ids": [record.asset_id for record in on_an_asset],
-                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
+                    "calendar_id": synthetic_calendar_id(
+                        SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
+                    ),
                 },
             )
             return {int(row.maintenance_id) for row in result}
@@ -1509,7 +1513,9 @@ class SnipeItSyncService:
                     {
                         "user_id": self._user_id,
                         "external_id": external_id,
-                        "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
+                        "calendar_id": synthetic_calendar_id(
+                            SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
+                        ),
                     },
                 )
                 forgotten = result.fetchone() is not None
@@ -1624,8 +1630,8 @@ class SnipeItSyncService:
                         """),
                         {
                             "external_event_id": external_id,
-                            "calendar_id": snipeit_maintenance_calendar_id(
-                                self._user_id
+                            "calendar_id": synthetic_calendar_id(
+                                SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
                             ),
                         },
                     )
@@ -1757,7 +1763,9 @@ class SnipeItSyncService:
 
                 # Build calendar_info_data
                 calendar_info_data: dict[str, Any] = {
-                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
+                    "calendar_id": synthetic_calendar_id(
+                        SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
+                    ),
                 }
 
                 # Create outbox event
@@ -1768,7 +1776,9 @@ class SnipeItSyncService:
                     calendar_info_data=calendar_info_data,
                     integration_source=INBOUND_SYNC_CHANGED_BY,
                     external_event_id=external_id,
-                    calendar_id=snipeit_maintenance_calendar_id(self._user_id),
+                    calendar_id=synthetic_calendar_id(
+                        SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
+                    ),
                     sync_action=sync_action,
                     existing_journal_id=existing_journal_id,
                 )
@@ -1878,7 +1888,9 @@ class SnipeItSyncService:
                 """),
                 {
                     "journal_id": journal_id,
-                    "calendar_id": snipeit_maintenance_calendar_id(self._user_id),
+                    "calendar_id": synthetic_calendar_id(
+                        SyntheticCalendar.SNIPEIT_MAINTENANCE, self._user_id
+                    ),
                 },
             )
             link_row = link_result.fetchone()

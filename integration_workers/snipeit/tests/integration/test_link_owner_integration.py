@@ -14,6 +14,7 @@ import json
 from typing import Any
 
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -22,7 +23,6 @@ from snipeit_sync_service import (
     GearUsagePair,
     _delete_maintenance_claim,
     _fetch_maintenance_claim,
-    snipeit_maintenance_calendar_id,
 )
 from snipeit_sync_window import ListedRecord
 
@@ -313,7 +313,9 @@ async def _seed_other_users_import(
         """),
         {"journal_id": journal_id, "gear_item_id": gear_item_id},
     )
-    calendar_id = snipeit_maintenance_calendar_id(OTHER_USER)
+    calendar_id = synthetic_calendar_id(
+        SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_USER
+    )
     await async_connection.execute(
         text("""
             INSERT INTO calendars (id, user_id, name, color, integration_source)
@@ -365,11 +367,11 @@ class TestMaintenanceImportLinksAreTheOwners:
     this user's record."""
 
     def test_each_user_has_their_own_maintenance_calendar(self) -> None:
-        assert snipeit_maintenance_calendar_id(OWNER) != (
-            snipeit_maintenance_calendar_id(OTHER_USER)
+        assert synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER) != (
+            synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_USER)
         )
-        assert snipeit_maintenance_calendar_id(OWNER) == (
-            snipeit_maintenance_calendar_id(OWNER)
+        assert synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER) == (
+            synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER)
         )
 
     async def test_a_record_another_user_imported_is_imported_for_this_user(
@@ -399,7 +401,9 @@ class TestMaintenanceImportLinksAreTheOwners:
         [(event_type, event_data)] = await _journal_event_payloads(async_connection)
         assert event_type == "journal_event.created"
         assert event_data.get("existing_journal_id") is None
-        assert event_data["calendar_id"] == snipeit_maintenance_calendar_id(OWNER)
+        assert event_data["calendar_id"] == synthetic_calendar_id(
+            SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER
+        )
         assert event_data["journal_data"]["user_id"] == OWNER
 
     async def test_a_posted_record_another_user_holds_gets_this_journals_row(

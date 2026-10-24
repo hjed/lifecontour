@@ -312,12 +312,17 @@ the global `(integration_source, external_id)` index; its downgrade refuses whil
 two owners hold one external id.
 
 Links are keyed by calendar, not owner: `journal_external_event_links` is unique on
-`(calendar_id, external_event_id)`. A synthetic calendar shared by every user is
-therefore a cross-user key, safe only for ids that are globally unique (Strava's).
-Snipe-IT ids are per instance, so each user imports their maintenances into their own
-calendar, `snipeit_maintenance_calendar_id(user_id)` in
-`core_shared.integration_constants` (`uuid5(NAMESPACE_URL,
-"snipeit:maintenance:{user_id}")`). Migration `0138` moved each owner's rows off the
+`(calendar_id, external_event_id)`. An integration with no calendars of its own
+(Strava, Snipe-IT) therefore never shares a synthetic calendar between users: one
+shared calendar is owned by whoever synced first, hidden from everyone else, and a
+cross-user key wherever ids are not globally unique. Each user's records are linked on
+their own calendar, `synthetic_calendar_id(SyntheticCalendar.<X>, user_id)` in
+`core_shared.integration_constants` (`uuid5(NAMESPACE_URL, "{namespace}:{user_id}")`).
+A `SyntheticCalendar` value is a uuid5 namespace, not the event's
+`integration_source` (`snipeit:maintenance` vs `snipeit_maintenance`), and is never
+changed once used. The processor creates the calendar on the first event naming it,
+owned by that event's user (`_ensure_calendar_exists`), and refuses an event naming a
+calendar another user owns. Migration `0138` moved each owner's Snipe-IT rows off the
 old shared calendar (#1510).
 
 #### Merged Aliases: a Sync Never Undoes a Merge

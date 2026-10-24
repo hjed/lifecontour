@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from core_shared.integration_constants import snipeit_maintenance_calendar_id
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -27,7 +27,9 @@ from tests.integration.core.integrations.journal_sync_seeding import (
 )
 
 # The calendar the Snipe-IT worker imports ``USER_ID``'s maintenances into.
-SNIPEIT_MAINTENANCE_CALENDAR_ID = snipeit_maintenance_calendar_id(USER_ID)
+SNIPEIT_MAINTENANCE_CALENDAR_ID = synthetic_calendar_id(
+    SyntheticCalendar.SNIPEIT_MAINTENANCE, USER_ID
+)
 OTHER_USER_ID = "other-user-456"
 
 
@@ -64,7 +66,9 @@ def _maintenance_event(
     event_data: dict[str, Any] = {
         "integration_source": "snipeit_maintenance",
         "external_event_id": f"snipeit_maint:{maintenance_id}",
-        "calendar_id": snipeit_maintenance_calendar_id(user_id),
+        "calendar_id": synthetic_calendar_id(
+            SyntheticCalendar.SNIPEIT_MAINTENANCE, user_id
+        ),
         "journal_data": {
             "user_id": user_id,
             "title": title,
@@ -78,7 +82,11 @@ def _maintenance_event(
             "journal_types": ["GEAR_MAINTENANCE"],
             "version_hash": version_hash or f"maintenance-hash-{sync_action}",
         },
-        "calendar_info_data": {"calendar_id": snipeit_maintenance_calendar_id(user_id)},
+        "calendar_info_data": {
+            "calendar_id": synthetic_calendar_id(
+                SyntheticCalendar.SNIPEIT_MAINTENANCE, user_id
+            )
+        },
         "sync_timestamp": datetime.now(UTC).isoformat(),
         "sync_action": sync_action,
         "existing_journal_id": existing_journal_id,
@@ -294,7 +302,9 @@ class TestSnipeItMaintenanceImportLink:
             (
                 OTHER_USER_ID,
                 "Their maintenance",
-                snipeit_maintenance_calendar_id(OTHER_USER_ID),
+                synthetic_calendar_id(
+                    SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_USER_ID
+                ),
             ),
             (USER_ID, "My maintenance", SNIPEIT_MAINTENANCE_CALENDAR_ID),
         ]

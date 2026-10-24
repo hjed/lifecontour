@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from core_shared.integration_constants import snipeit_maintenance_calendar_id
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -35,7 +35,7 @@ async def _link_import(
     connection: AsyncConnection, user_id: str, journal_id: int, external_id: str
 ) -> None:
     """Link a journal to the record it was imported from, as the backend does."""
-    calendar_id = snipeit_maintenance_calendar_id(user_id)
+    calendar_id = synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, user_id)
     await connection.execute(
         text(
             """

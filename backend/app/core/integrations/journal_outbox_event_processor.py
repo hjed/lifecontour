@@ -2089,14 +2089,20 @@ class JournalOutboxEventProcessor:
         user_id: str,
         integration_source: str,
     ) -> None:
-        """Ensure the calendar row exists for the given calendar_id.
+        """Ensure the calendar row exists for the given calendar_id, owned by ``user_id``.
 
-        Non-calendar integrations (e.g. Strava) use a synthetic
-        calendar_id that may not exist in the ``calendars`` table yet.
-        This creates it on-demand using ``ON CONFLICT DO NOTHING`` so
-        that subsequent FK-dependent inserts into
-        ``journal_calendar_info`` and ``journal_external_event_links``
-        succeed.
+        Non-calendar integrations (Strava, Snipe-IT) link each user's records on
+        their own synthetic calendar, ``synthetic_calendar_id`` in
+        ``core_shared.integration_constants``, which may not exist in the
+        ``calendars`` table yet. This creates it on demand, owned by the event's
+        user, so that subsequent FK-dependent inserts into
+        ``journal_calendar_info`` and ``journal_external_event_links`` succeed.
+
+        A calendar someone else owns is refused: linking this user's journal
+        there hides it from their calendar list and hands the record to the
+        other user. That is what one id shared by every user did, owned by
+        whoever synced first (#1856), so a worker naming such a calendar is a
+        bug to surface, not a row to write.
 
         The source is recorded on the row because this is where it is known.
         Deleting a journal reads it back to tell each worker which of the
@@ -2109,13 +2115,22 @@ class JournalOutboxEventProcessor:
         name, color = self._INTEGRATION_CALENDAR_DEFAULTS.get(
             integration_source, (f"{integration_source.title()} Calendar", "#808080")
         )
-        await self.connection.execute(
+        # The SELECT reads the statement's snapshot, so it sees a calendar that
+        # was already there and never the one the INSERT adds, which is this
+        # user's anyway.
+        result = await self.connection.execute(
             text("""
-                INSERT INTO calendars (id, user_id, name, color, integration_source)
-                VALUES (:id, :user_id, :name, :color, :integration_source)
-                ON CONFLICT (id) DO UPDATE
-                    SET integration_source = EXCLUDED.integration_source
-                    WHERE calendars.integration_source IS NULL
+                WITH upsert AS (
+                    INSERT INTO calendars
+                        (id, user_id, name, color, integration_source)
+                    VALUES (:id, :user_id, :name, :color, :integration_source)
+                    ON CONFLICT (id) DO UPDATE
+                        SET integration_source = EXCLUDED.integration_source
+                        WHERE calendars.integration_source IS NULL
+                          AND calendars.user_id = EXCLUDED.user_id
+                )
+                SELECT user_id FROM calendars
+                WHERE id = :id AND user_id <> :user_id
             """),
             {
                 "id": calendar_id,
@@ -2125,6 +2140,11 @@ class JournalOutboxEventProcessor:
                 "integration_source": integration_source,
             },
         )
+        if result.fetchone() is not None:
+            raise JournalOutboxEventProcessingError(
+                f"Calendar {calendar_id} belongs to another user; "
+                f"refusing to link {user_id}'s journal on it"
+            )
 
     async def _save_calendar_info(
         self, journal_id: int, calendar_info_data: dict[str, Any]

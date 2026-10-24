@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 import pytest
-from core_shared.integration_constants import snipeit_maintenance_calendar_id
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -183,8 +183,8 @@ async def _event_calendars(url: str) -> list[tuple[Any, ...]]:
 @pytest.mark.slow
 class TestScopeSnipeItMaintenanceCalendarToOwner:
     def test_the_migration_names_calendars_as_the_worker_does(self) -> None:
-        assert migration.owner_calendar_id(OWNER) == snipeit_maintenance_calendar_id(
-            OWNER
+        assert migration.owner_calendar_id(OWNER) == synthetic_calendar_id(
+            SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER
         )
 
     async def test_each_owners_rows_move_to_their_own_calendar(
@@ -201,8 +201,10 @@ class TestScopeSnipeItMaintenanceCalendarToOwner:
 
         run_alembic(url, "upgrade", _REVISION)
 
-        mine_id = snipeit_maintenance_calendar_id(OWNER)
-        theirs_id = snipeit_maintenance_calendar_id(OTHER_OWNER)
+        mine_id = synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER)
+        theirs_id = synthetic_calendar_id(
+            SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_OWNER
+        )
         assert sorted(
             await _rows(
                 url,
@@ -279,7 +281,13 @@ class TestScopeSnipeItMaintenanceCalendarToOwner:
         calendar row leads the downgrade to it."""
         url = throwaway_database.render_as_string(hide_password=False)
         run_alembic(url, "upgrade", _REVISION)
-        await _event(url, OWNER, calendar_id=snipeit_maintenance_calendar_id(OWNER))
+        await _event(
+            url,
+            OWNER,
+            calendar_id=synthetic_calendar_id(
+                SyntheticCalendar.SNIPEIT_MAINTENANCE, OWNER
+            ),
+        )
 
         run_alembic(url, "downgrade", _PREVIOUS_REVISION)
 
@@ -300,13 +308,18 @@ class TestScopeSnipeItMaintenanceCalendarToOwner:
             VALUES (CAST(:id AS uuid), :owner, 'Snipe-IT Maintenance', '#808080',
                     'snipeit_maintenance')
             """,
-            {"id": snipeit_maintenance_calendar_id(OTHER_OWNER), "owner": OTHER_OWNER},
+            {
+                "id": synthetic_calendar_id(
+                    SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_OWNER
+                ),
+                "owner": OTHER_OWNER,
+            },
         )
         await _import(
             url,
             OTHER_OWNER,
             "snipeit_maint:9",
-            snipeit_maintenance_calendar_id(OTHER_OWNER),
+            synthetic_calendar_id(SyntheticCalendar.SNIPEIT_MAINTENANCE, OTHER_OWNER),
         )
 
         with pytest.raises(RuntimeError, match="snipeit_maint:9"):
