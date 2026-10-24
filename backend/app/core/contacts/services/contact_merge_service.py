@@ -134,8 +134,9 @@ class ContactMergeService:
         """Absorb the source contact into the survivor, returning the unified contact.
 
         Re-points and dedupes the full aggregate (relationships, journal links,
-        methods, addresses, notes, important dates, tags, task links), re-points
-        the source's top-level ``field_history`` rows onto the survivor so the
+        methods, addresses, notes, important dates, tags, task links, import
+        issues), re-points the source's top-level ``field_history`` rows onto
+        the survivor so the
         unified record carries both contacts' audit trail, applies the scalar
         identity fields, deletes the source, records an inline ``merged_from``
         history row carrying provenance, and requests regeneration of the
@@ -200,6 +201,9 @@ class ContactMergeService:
             source_id, survivor_id, transaction
         )
         await self.contact_repo.repoint_tags(source_id, survivor_id, transaction)
+        await self.contact_repo.repoint_import_issues(
+            source_id, survivor_id, transaction
+        )
 
         # 1b. Carry the source's top-level ``contact`` history rows onto the
         #     survivor so the unified record's aggregate history is complete.

@@ -33,7 +33,7 @@ table's DDL:
 
 | Area | Owner-bearing tables |
 |---|---|
-| Contacts | `contacts`, `tags`, `custom_date_types`, `contact_suggestion_ignores` |
+| Contacts | `contacts`, `tags`, `custom_date_types`, `contact_suggestion_ignores`, `contact_import_issues` |
 | Journals | `journals`, `journal_tags`, `journal_series`, `journal_series_recurrence_aliases`, `journal_merged_aliases`, `journal_review_items`, `journal_daily_summaries`, `outdoor_activity_dismissals`, `activity_templates`, `gear_items`, `calendars` |
 | Tasks | `tasks`; `field_history` (task rows) |
 | Integrations | `sync_metadata`, `sync_jobs`, `pending_entity_mappings`, `strava_athlete_mappings`, `calendar_sync_tokens`, and the per-user credentials and settings: `user_google_auth`, `user_google_integration`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`, `user_immich_auth` |
@@ -42,6 +42,11 @@ table's DDL:
 `user_settings` holds one row per user: `timezone` (IANA name) and `default_country` (ISO 3166-1
 alpha-2, filled in for imported addresses that have no country — #1820). Both are nullable, and NULL
 means "not chosen", the same as no row (#1401).
+
+`contact_import_issues` holds what an integration import left out of a contact for the user to
+review (#1820) - today, a Google address whose AU/US/CA region names no state, province or
+territory. Each applied import replaces the contact's rows from that source, so fixing it at the
+source clears it; a `dismissed` row stays dismissed while the same payload keeps arriving.
 
 **Known gap:** email uniqueness on `contact_methods` (`0027`, `LOWER(BTRIM(value))`) is
 system-wide, because the table has no owner. A second user cannot store an address another user's

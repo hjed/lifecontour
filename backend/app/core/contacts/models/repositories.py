@@ -406,6 +406,14 @@ class ContactRepository(ABC):
         ``contact_tags`` composite primary key (union of both contacts' tags)."""
         pass
 
+    @abstractmethod
+    async def repoint_import_issues(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's import issues onto the survivor; where
+        both hold the same issue the survivor's copy (and its status) wins."""
+        pass
+
 
 class TagRepository(ABC):
     """Repository interface for tag operations."""

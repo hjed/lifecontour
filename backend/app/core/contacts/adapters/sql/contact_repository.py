@@ -1053,6 +1053,45 @@ class SqlContactRepository(ContactRepository):
             params,
         )
 
+    async def repoint_import_issues(
+        self, source_id: int, survivor_id: int, transaction: AsyncConnection
+    ) -> None:
+        """Re-point the source contact's import issues onto the survivor (#1820).
+
+        They cascade on the source's delete, and the import only records them
+        again when Google changes the contact, so a merge that left them would
+        lose the flags and their dismissals. Where the survivor already holds
+        the same issue its copy, and so its status, wins.
+        """
+        params = {"source_id": source_id, "survivor_id": survivor_id}
+        await transaction.execute(
+            text(
+                """
+                DELETE FROM contact_import_issues src
+                WHERE src.contact_id = :source_id
+                AND EXISTS (
+                    SELECT 1 FROM contact_import_issues tgt
+                    WHERE tgt.contact_id = :survivor_id
+                    AND tgt.user_id = src.user_id
+                    AND tgt.integration_source = src.integration_source
+                    AND tgt.kind = src.kind
+                    AND tgt.payload_hash = src.payload_hash
+                )
+                """
+            ),
+            params,
+        )
+        await transaction.execute(
+            text(
+                """
+                UPDATE contact_import_issues
+                SET contact_id = :survivor_id, updated_at = now()
+                WHERE contact_id = :source_id
+                """
+            ),
+            params,
+        )
+
     async def add_method(self, contact_id: int, method: ContactMethod) -> ContactMethod:
         """Add a contact method."""
         try:
