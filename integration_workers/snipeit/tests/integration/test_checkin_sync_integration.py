@@ -2598,3 +2598,91 @@ class TestPreviousAssetHeldElsewhereIntegration:
         assert (abandoned.fetchone() is None) == (
             "/api/v1/hardware/41/checkin" in posts
         )
+
+
+async def _error_message(
+    async_connection: AsyncConnection, *, source: str, journal_id: int
+) -> str | None:
+    result = await async_connection.execute(
+        text("""
+            SELECT error_message FROM sync_metadata
+            WHERE integration_source = :source AND internal_uuid = :journal_id
+        """),
+        {"source": source, "journal_id": str(journal_id)},
+    )
+    message: str | None = result.scalar_one()
+    return message
+
+
+class TestCancelledPushReleasesItsLock:
+    """A push cancelled mid-POST (arq's job timeout) releases its pending lock.
+
+    Left pending, the lock would refuse every event for the pair as in flight
+    until ``IN_FLIGHT_LOCK_SECONDS`` passed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelled_checkout_releases_its_lock(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        cancel_during: Any,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        _queue_asset_dates(mock_transport)
+
+        await cancel_during(
+            _CHECKOUT_POST,
+            lambda: snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            ),
+        )
+
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "failed"
+        }
+        assert (
+            await _error_message(
+                async_connection, source="snipeit_checkout", journal_id=journal_id
+            )
+            == "CancelledError"
+        )
+        # The cancelled POST may have landed, so its retry must look for it.
+        reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert reference["posting"] is True
+
+    @pytest.mark.asyncio
+    async def test_cancelled_checkin_releases_its_lock(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        cancel_during: Any,
+    ) -> None:
+        journal_id = await _sydney_trip(async_connection)
+        await _insert_checkout_metadata(
+            async_connection, asset_id="42", journal_id=journal_id
+        )
+
+        await cancel_during(
+            _CHECKIN_POST,
+            lambda: snipeit_sync_service.push_checkin_create(
+                GearUsagePair(journal_id, 42),
+                session_factory=lambda: _session_factory(async_connection),
+            ),
+        )
+
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "success",
+            "snipeit_checkin": "failed",
+        }
+        assert (
+            await _error_message(
+                async_connection, source="snipeit_checkin", journal_id=journal_id
+            )
+            == "CancelledError"
+        )

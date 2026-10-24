@@ -1264,6 +1264,33 @@ class TestMaintenanceCreateClaim:
         assert await _push_rows(async_connection, journal_id) == ["snipeit_maint:8"]
 
     @pytest.mark.asyncio
+    async def test_cancelled_post_releases_the_claim(
+        self,
+        snipeit_sync_service: Any,
+        async_connection: AsyncConnection,
+        cancel_during: Any,
+    ) -> None:
+        # arq's job timeout cancels the push mid-POST; a claim left pending
+        # would defer every redelivery as in flight.
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Harness"
+        )
+
+        await cancel_during(
+            "/maintenances",
+            lambda: snipeit_sync_service.push_maintenance_create(
+                journal_id=journal_id,
+                session_factory=_joined_session_factory(async_connection),
+            ),
+        )
+
+        claim = await _claim_row(async_connection, journal_id)
+        assert claim.sync_status == "failed"
+        # The cancelled POST may have created the record, so the claim stays.
+        assert json.loads(claim.reference_data) == _RETIRE_HARNESS_CLAIM
+
+    @pytest.mark.asyncio
     async def test_rejected_post_releases_the_claim(
         self,
         snipeit_sync_service: Any,
