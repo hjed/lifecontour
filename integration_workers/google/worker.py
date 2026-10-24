@@ -9,6 +9,7 @@ It runs as a separate process from the main FastAPI application.
 import asyncio
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -60,7 +61,13 @@ from core_shared.repositories import (
     UnmatchedParticipantRepository,
     UserSettingsReader,
 )
-from core_shared.sync_base import serialise_synced_entries
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    SyncedEntries,
+    recorded_synced_entries,
+    serialise_synced_entries,
+)
 from core_shared.telemetry import setup_telemetry, trace_arq_job
 from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
@@ -88,8 +95,8 @@ from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
-from person_merge import merge_with_current_person
-from synced_entries import synced_entries_of
+from person_merge import PushMerge, merge_for_push, resolve_synced_base
+from synced_entries import raw_synced_entries, synced_entries_of
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
@@ -1093,14 +1100,8 @@ async def _create_contact_in_google(
 
     result = await client.create_contact(person_data)
 
-    # Update sync metadata
-    await _upsert_sync_metadata(
-        session=session,
-        internal_id=contact["id"],
-        external_id=result["resourceName"],
-        etag=result.get("etag"),
-        integration_source="google",
-        user_id=user_id,
+    await _record_push_link(
+        session, contact["id"], _created_outcome(result), user_id=user_id
     )
 
     logger.info(
@@ -1166,19 +1167,108 @@ async def _repoint_sync_link(
     )
 
 
-async def _recorded_address_fallback(
-    session: AsyncSession, external_id: str, *, user_id: str
-) -> str | None:
-    """The address fallback the last applied pull of this person recorded.
+@dataclass(frozen=True)
+class LinkSyncState:
+    """What a contact's link records for the next push to merge against.
 
-    The backend writes it onto the link when it applies a contact event
-    (#1820); ``None`` when no pull has recorded one, which keeps every
-    countryless address in Google.
+    Both are written by the backend when it applies a pull, and the base by
+    every push too. ``None`` is no record: no countryless address is owned,
+    and the base falls back on the etag (``resolve_synced_base``).
     """
+
+    address_fallback_country: str | None = None
+    synced_base: SyncedEntries | None = None
+
+
+async def _read_link_sync_state(
+    session: AsyncSession, external_id: str, *, user_id: str
+) -> LinkSyncState:
+    """The fallback (#1820) and synced base (#1861) a link records."""
     link = await IntegrationLinkRepository(
         await session.connection()
     ).find_link_by_external("google", external_id, user_id=str(user_id))
-    return recorded_address_fallback(link["reference_data"]) if link else None
+    if link is None:
+        return LinkSyncState()
+    return LinkSyncState(
+        address_fallback_country=recorded_address_fallback(link["reference_data"]),
+        synced_base=recorded_synced_entries(link["reference_data"]),
+    )
+
+
+@dataclass(frozen=True)
+class PushOutcome:
+    """The person a push left in Google, and what the link should record.
+
+    ``synced_base`` is what both sides hold after the push, and
+    ``pending_import`` whether Google holds anything local does not, for the
+    next pull to import.
+    """
+
+    person: dict[str, Any]
+    recreated: bool
+    synced_base: SyncedEntries
+    pending_import: bool = False
+
+
+def _created_outcome(person: dict[str, Any], *, recreated: bool = False) -> PushOutcome:
+    """A person created from the local contact holds exactly what local does.
+
+    The base is read from Google's copy (``createContact`` returns every field
+    by default), so values Google reformats are keyed as it holds them.
+    """
+    return PushOutcome(person, recreated, raw_synced_entries(person, None))
+
+
+def _base_after_update(
+    person: dict[str, Any],
+    merged: PushMerge,
+    base: SyncedEntries,
+    fallback_country: str | None,
+) -> SyncedEntries:
+    """The base after an update: Google's response, less what local lacks.
+
+    ``updateContact`` returns every field by default, keyed as Google now
+    holds it. A field the update left out keeps its previous base.
+    """
+    returned = raw_synced_entries(person, fallback_country)
+    return {
+        **base,
+        **{
+            field: returned.get(field, frozenset())
+            - merged.kept.get(field, frozenset())
+            for field in merged.merged_fields
+        },
+    }
+
+
+async def _record_push_link(
+    session: AsyncSession, contact_id: int, outcome: PushOutcome, *, user_id: str
+) -> None:
+    """Record a push on the contact's link: the etag, the base and the marker.
+
+    The etag is always the push's own, so a failed later push still leaves the
+    next pull skipping the contact. A push that left Google holding what local
+    does not marks the link ``pending_import`` instead, which only the backend
+    clears, when a pull is applied. The keys are merged into
+    ``reference_data`` in one statement beside the backend's own.
+    """
+    resource_name = outcome.person["resourceName"]
+    await _upsert_sync_metadata(
+        session=session,
+        internal_id=contact_id,
+        external_id=resource_name,
+        etag=outcome.person.get("etag"),
+        integration_source="google",
+        user_id=user_id,
+    )
+    patch: dict[str, Any] = {
+        SYNCED_ENTRIES_KEY: serialise_synced_entries(outcome.synced_base)
+    }
+    if outcome.pending_import:
+        patch[PENDING_IMPORT_KEY] = True
+    await IntegrationLinkRepository(await session.connection()).patch_reference_data(
+        "google", resource_name, patch, user_id=user_id
+    )
 
 
 async def _update_or_recreate_contact_in_google(
@@ -1190,41 +1280,57 @@ async def _update_or_recreate_contact_in_google(
     etag: str | None,
     *,
     user_id: str,
-) -> tuple[dict[str, Any], bool]:
+) -> PushOutcome:
     """Update the linked Google person, recreating it if Google deleted it.
 
     A push only happens when the contact has local edits, so a linked person
     that no longer exists in Google (a 404) is recreated from the local data
     rather than failing the push forever. The dead link is re-pointed at the
     new person: ``sync_metadata`` is unique on the remote id, so upserting the
-    new resource name alone would leave the dead row beside it — two links for
-    one contact. The caller then upserts the returned person's etag onto it.
+    new resource name alone would leave the dead row beside it - two links for
+    one contact. The caller then records the outcome on it.
 
     The update replaces every field the payload names, so the person is read
-    first and the payload merged into it: Google values the local model cannot
-    represent (honorifics, custom events, other organizations, entries inbound
-    sync never imported) survive the push. The update goes out against the etag of the version merged with, and
-    a conflict retry merges again into the person the client refetches, so a
-    Google edit landing between the read and the write is not reverted.
-
-    Returns:
-        The Google person, and whether it was recreated rather than updated.
+    first and the payload merged into it, three ways against the synced base
+    the link records (``etag`` is the version it was synced at): Google values
+    the local model cannot represent, and entries Google gained since the last
+    sync, survive the push. The update goes out against the etag of the
+    version merged with, and a conflict retry merges again into the person the
+    client refetches, so a Google edit landing between the read and the write
+    is not reverted; the outcome reports the merge actually sent.
     """
-    # What the last applied pull imported, so the merge owns exactly that.
-    fallback = await _recorded_address_fallback(session, external_id, user_id=user_id)
+    state = await _read_link_sync_state(session, external_id, user_id=user_id)
+    fallback = state.address_fallback_country
+    merges: list[tuple[PushMerge, SyncedEntries]] = []
+
+    def merge(person: dict[str, Any]) -> dict[str, Any]:
+        base = resolve_synced_base(
+            state.synced_base,
+            person,
+            synced_version=etag,
+            address_fallback_country=fallback,
+        )
+        merged = merge_for_push(
+            person_data, person, synced_base=base, address_fallback_country=fallback
+        )
+        merges.append((merged, base))
+        return merged.payload
+
     try:
         current = await client.get_person(external_id)
         result = await client.update_contact(
             resource_name=external_id,
-            contact_data=merge_with_current_person(
-                person_data, current, address_fallback_country=fallback
-            ),
+            contact_data=merge(current),
             etag=current.get("etag") or etag,
-            rebase=lambda fresh: merge_with_current_person(
-                person_data, fresh, address_fallback_country=fallback
-            ),
+            rebase=merge,
         )
-        return result, False
+        merged, base = merges[-1]
+        return PushOutcome(
+            result,
+            recreated=False,
+            synced_base=_base_after_update(result, merged, base, fallback),
+            pending_import=merged.pending_import,
+        )
     except GoogleContactNotFoundError:
         logger.warning(
             "Linked Google contact no longer exists, recreating it",
@@ -1241,7 +1347,7 @@ async def _update_or_recreate_contact_in_google(
     await _repoint_sync_link(
         session, external_id, result["resourceName"], user_id=user_id
     )
-    return result, True
+    return _created_outcome(result, recreated=True)
 
 
 async def _update_contact_in_google(
@@ -1264,7 +1370,7 @@ async def _update_contact_in_google(
         google_account_email=google_account_email,
     )
 
-    result, recreated = await _update_or_recreate_contact_in_google(
+    outcome = await _update_or_recreate_contact_in_google(
         session,
         client,
         contact_id=contact["id"],
@@ -1273,25 +1379,17 @@ async def _update_contact_in_google(
         etag=contact.get("version_hash"),
         user_id=user_id,
     )
-
-    # Update sync metadata with new ETag
-    await _upsert_sync_metadata(
-        session=session,
-        internal_id=contact["id"],
-        external_id=result["resourceName"],
-        etag=result.get("etag"),
-        integration_source="google",
-        user_id=user_id,
-    )
+    await _record_push_link(session, contact["id"], outcome, user_id=user_id)
 
     logger.info(
         "Successfully pushed contact update to Google",
         contact_id=contact["id"],
-        resource_name=result["resourceName"],
-        recreated=recreated,
+        resource_name=outcome.person["resourceName"],
+        recreated=outcome.recreated,
+        pending_import=outcome.pending_import,
     )
 
-    return recreated
+    return outcome.recreated
 
 
 def _handle_http_error(
@@ -3489,13 +3587,8 @@ async def _push_contact_to_google_for_event(
 
     if sync_action == "create":
         result = await client.create_contact(person_data)
-        await _upsert_sync_metadata(
-            session=session,
-            internal_id=contact_id,
-            external_id=result["resourceName"],
-            etag=result.get("etag"),
-            integration_source="google",
-            user_id=user_id,
+        await _record_push_link(
+            session, contact_id, _created_outcome(result), user_id=user_id
         )
         logger.info(
             "Created contact in Google via event",
@@ -3505,7 +3598,7 @@ async def _push_contact_to_google_for_event(
         return {"status": "created", "resource_name": result["resourceName"]}
 
     elif sync_action == "update":
-        result, recreated = await _update_or_recreate_contact_in_google(
+        outcome = await _update_or_recreate_contact_in_google(
             session,
             client,
             contact_id=contact_id,
@@ -3514,23 +3607,17 @@ async def _push_contact_to_google_for_event(
             etag=version_hash,
             user_id=user_id,
         )
-        await _upsert_sync_metadata(
-            session=session,
-            internal_id=contact_id,
-            external_id=result["resourceName"],
-            etag=result.get("etag"),
-            integration_source="google",
-            user_id=user_id,
-        )
+        await _record_push_link(session, contact_id, outcome, user_id=user_id)
         logger.info(
             "Pushed contact update to Google via event",
             contact_id=contact_id,
-            resource_name=result["resourceName"],
-            recreated=recreated,
+            resource_name=outcome.person["resourceName"],
+            recreated=outcome.recreated,
+            pending_import=outcome.pending_import,
         )
         return {
-            "status": "recreated" if recreated else "updated",
-            "resource_name": result["resourceName"],
+            "status": "recreated" if outcome.recreated else "updated",
+            "resource_name": outcome.person["resourceName"],
         }
 
     return {"status": "skipped", "reason": f"unknown_sync_action_{sync_action}"}

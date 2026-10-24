@@ -201,15 +201,39 @@ fails when a pushed field has none:
 |---|---|---|
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
 | `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
-| `emailAddresses`, `phoneNumbers` | the entries inbound imports | entries it rejects (invalid values) |
-| `addresses` | the entries inbound imports, including a countryless one the last applied pull gave a country (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country and none recorded, or an AU/US/CA region naming no state, province or territory in the country it is imported with — reported on the event as `skipped_addresses` for the user to review (#1820) |
-| `birthdays` | a birthday with a usable date | a text-only birthday: with no local birthday the field leaves the update mask, so Google keeps it |
+| `emailAddresses`, `phoneNumbers` | the entries inbound imports that are in the synced base | entries it rejects (invalid values), and entries added in Google since the base |
+| `addresses` | the entries inbound imports that are in the synced base, including a countryless one the last applied pull gave a country (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country and none recorded, or an AU/US/CA region naming no state, province or territory in the country it is imported with — reported on the event as `skipped_addresses` for the user to review (#1820); and entries added in Google since the base |
+| `birthdays` | a birthday with a usable date | a text-only birthday, or one added or edited in Google since the base while the local one is unchanged: the field leaves the update mask, so Google keeps it |
 | `events` | `anniversary` events | every other event (custom, untyped) |
 | `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
 | `biographies`, `memberships` | everything | nothing (memberships: see #1821) |
 
 Parts of an owned entry the local model cannot hold (an address's type, a
 phone's formatting) are still replaced (#1823).
+
+**Synced base (#1861).** Importable is not the same as held: an email added in
+Google after the last pull is importable, but the contact has never seen it.
+So the emails, phones, addresses and birthdays merge **three ways** against the
+synced base — the keys (`synced_entries.py`) of the entries the last sync
+agreed both sides held, recorded on the link (see the integration architecture
+doc). A key covers only the imported value: an email's address, a phone's
+canonical form, an address's parts in the country it was imported with, a
+birthday's date.
+
+- An entry Google gained since the base is **kept**, and the link is marked
+  `pending_import`, so the next pull imports it despite the push's own etag.
+- An entry in the base the contact no longer holds was deleted locally: it is
+  **dropped**.
+- An entry in the base Google no longer holds was deleted or edited there: the
+  unchanged local copy is **not pushed back** over it, and the next pull
+  removes or updates it locally.
+- An entry both sides hold is sent once.
+
+The pull sends the base it read on the contact event; every push records the
+base Google's response holds (less what it kept), because Google reformats
+values such as phone numbers. A link with no base yet uses the etag: a person
+unchanged since the last sync is its own base, and a changed one keeps every
+entry until a pull records a base.
 
 **Address country (#1820).** The local model requires a country, but Google
 often holds addresses without a `countryCode`. Inbound gives such an address
