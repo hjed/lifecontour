@@ -403,3 +403,29 @@ async def test_a_conflict_retry_on_a_link_with_no_base_keeps_the_first_reads_bas
     assert [email["value"] for email in retried[0]["emailAddresses"]] == [
         "ada@example.com"
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_rename_after_the_push_read_the_name_is_still_owed_a_push(
+    db_session: AsyncSession,
+) -> None:
+    """The cron reads names first; the version recorded must be that read's."""
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    contacts = await find_contacts_to_push(db_session, user_id=CONTACT_OWNER)
+    await db_session.execute(
+        text(
+            "UPDATE contacts SET first_name = 'Augusta', updated_at = clock_timestamp()"
+        )
+    )
+    held = {"etag": "etag_synced", "emailAddresses": _google(_HELD)}
+    client = _client(held, {**held, "etag": "etag_pushed"})
+
+    await push_contacts_to_google(
+        session=db_session,
+        client=client,
+        contacts=contacts,
+        google_account_email="base-it@example.com",
+        user_id=CONTACT_OWNER,
+    )
+
+    assert len(await find_contacts_to_push(db_session, user_id=CONTACT_OWNER)) == 1

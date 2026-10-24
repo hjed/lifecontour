@@ -263,17 +263,8 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
         contact_id: Contact ID
 
     Returns:
-        Dictionary with full contact data, and ``synced_version``: the
-        contact's ``updated_at`` as read *before* the data, which a push
-        records as the version it sent (see ``_upsert_sync_metadata``)
+        Dictionary with full contact data
     """
-    synced_version = (
-        await session.execute(
-            text("SELECT updated_at FROM contacts WHERE id = :contact_id"),
-            {"contact_id": contact_id},
-        )
-    ).scalar_one_or_none()
-
     # Load contact methods
     methods_stmt = text("""
         SELECT id, method_type, value, label, is_primary, is_archived
@@ -358,7 +349,6 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     ]
 
     return {
-        "synced_version": synced_version,
         "methods": methods,
         "addresses": addresses,
         "notes": notes,
@@ -1539,6 +1529,11 @@ async def _push_single_contact(
             contact["sync_action"] = "update"
             contact["external_id"] = link.external_id
             contact["version_hash"] = link.version_hash
+
+        # The version read with the names, the push's earliest read of the
+        # contact: the link records it as the version sent, so an edit landing
+        # after any of the reads is still owed a push (_upsert_sync_metadata).
+        contact["synced_version"] = contact.get("updated_at")
 
         # Load full contact data (methods, addresses, notes, tags)
         full_contact_data = await _load_full_contact(session, contact["id"])
@@ -3593,7 +3588,7 @@ async def _push_contact_to_google_for_event(
     # Load base contact data from DB
     base_stmt = text("""
         SELECT first_name, last_name, middle_name, nick_name, is_favourite,
-               company, job_title
+               company, job_title, updated_at
         FROM contacts
         WHERE id = :contact_id
     """)
@@ -3607,6 +3602,8 @@ async def _push_contact_to_google_for_event(
         )
         return {"status": "skipped", "reason": "contact_not_found"}
 
+    # The version read with the names: see _push_single_contact.
+    contact["synced_version"] = getattr(base_row, "updated_at", None)
     contact["first_name"] = base_row.first_name
     contact["last_name"] = base_row.last_name
     contact["middle_name"] = base_row.middle_name
