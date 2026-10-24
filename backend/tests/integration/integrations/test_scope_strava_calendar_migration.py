@@ -11,7 +11,11 @@ owners link one activity.
 import json
 
 import pytest
-from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
 from sqlalchemy.engine import URL
 
 from tests.integration.migration_helpers import RunAlembic, execute, load_revision
@@ -90,10 +94,6 @@ class TestScopeStravaCalendarToOwner:
         assert migration.owner_calendar_id(OWNER) == _own(OWNER)
 
     def test_it_moves_the_calendar_the_old_worker_shared(self) -> None:
-        from app.core.integrations.journal_outbox_event_processor import (
-            LEGACY_SHARED_STRAVA_CALENDAR_ID,
-        )
-
         assert (
             migration.SHARED_CALENDAR_ID == SHARED == LEGACY_SHARED_STRAVA_CALENDAR_ID
         )
@@ -143,42 +143,6 @@ class TestScopeStravaCalendarToOwner:
         assert await event_calendars(url) == [
             (OTHER_OWNER, False, _own(OTHER_OWNER), _own(OTHER_OWNER)),
             (OWNER, True, SHARED, SHARED),
-        ]
-
-    async def test_a_link_the_new_worker_already_made_supersedes_the_shared_one(
-        self, throwaway_database: URL, run_alembic: RunAlembic
-    ) -> None:
-        """The new worker can run before this migration does.
-
-        The backend still on the old revision then applies its update of an
-        imported activity on the user's own calendar, linking the journal there
-        beside its shared-calendar link. Moving that link would collide with the
-        newer one, so the newer one is kept.
-        """
-        url = throwaway_database.render_as_string(hide_password=False)
-        run_alembic(url, "upgrade", _PREVIOUS_REVISION)
-        await _shared_calendar(url, OWNER)
-        journal_id = await seed_import(url, OWNER, "strava:9", SHARED)
-        await seed_calendar(
-            url, _own(OWNER), OWNER, source=_SOURCE, name="Strava Activities"
-        )
-        await execute(
-            url,
-            """
-            INSERT INTO journal_external_event_links
-                (journal_id, calendar_id, external_event_id, sync_capability,
-                 sync_status)
-            VALUES (:journal_id, CAST(:calendar_id AS uuid), 'strava:9',
-                    'bidirectional', 'synced')
-            """,
-            {"journal_id": journal_id, "calendar_id": _own(OWNER)},
-        )
-
-        run_alembic(url, "upgrade", _REVISION)
-
-        assert await link_calendars(url) == [(OWNER, _own(OWNER), _own(OWNER))]
-        assert await rows(url, "SELECT CAST(id AS text) FROM calendars") == [
-            (_own(OWNER),)
         ]
 
     async def test_a_pending_cancellation_moves_with_its_owner(

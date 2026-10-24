@@ -10,13 +10,16 @@ someone else owns is refused rather than linked there.
 from uuid import uuid4
 
 import pytest
-from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.integrations.journal_outbox_event_processor import (
     EVENT_TYPE_JOURNAL_EVENT_CREATED,
-    LEGACY_SHARED_STRAVA_CALENDAR_ID,
     JournalOutboxEventProcessingError,
 )
 from app.infrastructure.unit_of_work import unit_of_work
