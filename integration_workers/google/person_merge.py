@@ -153,7 +153,9 @@ class KeepUnsynced:
             writable = _writable(entry)
             if not _is_contact_entry(entry):
                 continue
-            if k in decision.kept or (k is None and writable not in sent):
+            if k in decision.kept or (
+                k is None and not any(_is_echo(entry, p) for p in sent)
+            ):
                 kept.append(writable)
         return FieldMerge(
             [*sent, *kept],
@@ -372,6 +374,20 @@ def _is_contact_entry(entry: dict[str, Any]) -> bool:
     """Whether an entry belongs to the contact rather than a linked profile."""
     source_type = (entry.get("metadata") or {}).get("source", {}).get("type")
     return source_type not in _PROFILE_SOURCE_TYPES
+
+
+def _is_echo(current: Entry, pushed: Entry) -> bool:
+    """Whether Google's ``current`` entry is ``pushed`` as Google holds it.
+
+    Compared on the parts the push writes: Google adds its own (a formatted
+    value, a country name) and both sides carry metadata.
+    """
+    held = _writable(current)
+    return all(
+        held.get(part) == value
+        for part, value in pushed.items()
+        if part not in _OUTPUT_ONLY_KEYS
+    )
 
 
 def _writable(entry: dict[str, Any]) -> dict[str, Any]:

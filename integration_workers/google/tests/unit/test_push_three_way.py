@@ -171,16 +171,34 @@ class TestProfileEntries:
 
 class TestUnimportable:
     def test_a_pushed_entry_inbound_cannot_import_is_not_doubled(self) -> None:
-        """Google echoes it back with no key, so it must not be kept beside it."""
-        unplaced = {
+        """Google echoes it back with no key, so it must not be kept beside it.
+
+        The echo carries what Google adds (a formatted value, the country
+        name) and the pushed copy its primary flag; the parts the push writes
+        are what make it the same entry.
+        """
+        pushed = {
             "streetAddress": "10 Downing St",
             "region": "London",
             "countryCode": "AU",
+            "metadata": {"primary": True},
+        }
+        echoed = {
+            "metadata": {"primary": True, **CONTACT_SOURCE},
+            "streetAddress": "10 Downing St",
+            "region": "London",
+            "countryCode": "AU",
+            "country": "Australia",
+            "formattedValue": "10 Downing St\nLondon\nAustralia",
         }
 
-        merged = _merge("addresses", [unplaced], google=[unplaced], base=[])
+        merged = merge_for_push(
+            {"addresses": [pushed]},
+            {"addresses": [echoed]},
+            synced_base={"addresses": frozenset()},
+        )
 
-        assert merged.payload["addresses"] == [unplaced]
+        assert merged.payload["addresses"] == [pushed]
 
 
 class TestAddresses:
