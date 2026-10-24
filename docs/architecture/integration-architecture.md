@@ -323,7 +323,8 @@ A `SyntheticCalendar` value is a uuid5 namespace, not the event's
 changed once used. The processor creates the calendar on the first event naming it,
 owned by that event's user (`_ensure_calendar_exists`), and refuses an event naming a
 calendar another user owns. Migration `0138` moved each owner's Snipe-IT rows off the
-old shared calendar (#1510).
+old shared calendar (#1510); a migration doing the same for another integration uses
+`app.migrations.synthetic_calendar_scoping`.
 
 #### Merged Aliases: a Sync Never Undoes a Merge
 
