@@ -3,7 +3,9 @@
 ITER15-001 Phase 3 consolidates integration entity links onto ``sync_metadata``.
 This repository provides the unified link-lookup reads used by both the backend
 consumer and the integration workers, replacing the legacy
-``external_references`` reads. Writes remain on the existing upsert paths.
+``external_references`` reads. Writes remain on the existing upsert paths,
+apart from :meth:`IntegrationLinkRepository.patch_reference_data`, which a
+worker uses to record per-link sync state without racing the backend's writes.
 
 The repository provides the link-lookup reads (plus the contact reads behind an
 outbound sync) used by both ``core_shared`` consumers and the integration workers,
@@ -12,6 +14,8 @@ in the same constructor and raw-SQL style as the rest of the data layer.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Any
 
 import structlog
@@ -207,6 +211,41 @@ class IntegrationLinkRepository:
             query, {"user_id": user_id, "person_ids": person_ids}
         )
         return {row.external_id: row.internal_id for row in result.fetchall()}
+
+    async def patch_reference_data(
+        self,
+        integration_source: str,
+        external_id: str,
+        patch: Mapping[str, Any],
+        *,
+        user_id: str,
+    ) -> None:
+        """Merge ``patch`` into ``user_id``'s link's ``reference_data``.
+
+        One statement, so a concurrent writer's keys on the same row are never
+        lost to a read-modify-write here. Stored data that is not a JSON object
+        (NULL, or unreadable) is replaced by ``patch`` alone.
+        """
+        await self._conn.execute(
+            text("""
+                UPDATE sync_metadata
+                SET reference_data = (
+                    CASE WHEN reference_data IS JSON OBJECT
+                         THEN reference_data::jsonb
+                         ELSE '{}'::jsonb
+                    END || CAST(:patch AS jsonb)
+                )::text
+                WHERE user_id = :user_id
+                  AND integration_source = :integration_source
+                  AND external_id = :external_id
+            """),
+            {
+                "patch": json.dumps(dict(patch)),
+                "user_id": user_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
