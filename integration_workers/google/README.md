@@ -216,9 +216,11 @@ Google after the last pull is importable, but the contact has never seen it.
 So the emails, phones, addresses and birthdays merge **three ways** against the
 synced base — the keys (`synced_entries.py`) of the entries the last sync
 agreed both sides held, recorded on the link (see the integration architecture
-doc). A key covers only the imported value: an email's address, a phone's
-canonical form, an address's parts in the country it was imported with, a
-birthday's date.
+doc). A key covers only the imported value: an email's address, an address's
+parts (both street lines as one) in the country it was imported with, a
+birthday's date. A phone carries a key per spelling - its E.164 form and its
+digits as typed - since the push sends a number as typed and Google answers
+with it canonical; two entries are one when any key matches.
 
 - An entry Google gained since the base is **kept**, and the link is marked
   `pending_import`, so the next pull imports it despite the push's own etag.

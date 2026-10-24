@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from google_client import GoogleContactNotFoundError
-from synced_entries import raw_entry_key, raw_synced_entries
+from synced_entries import raw_entry_keys, raw_synced_entries
 from worker import find_contacts_to_push, push_contacts_to_google
 
 CONTACT_OWNER = "1"
@@ -37,8 +37,8 @@ def _google(*entries: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _key(field: Any, entry: dict[str, Any]) -> str:
-    key = raw_entry_key(field, entry, None)
-    assert key is not None
+    """The one key of an entry written only one way (an email)."""
+    [key] = raw_entry_keys(field, entry, None)
     return key
 
 
@@ -193,7 +193,7 @@ async def test_a_phone_pushed_again_before_a_pull_is_not_duplicated(
         phone="0412 345 678",
         base={
             "emailAddresses": [_key("emailAddresses", _HELD)],
-            "phoneNumbers": [_key("phoneNumbers", canonical)],
+            "phoneNumbers": sorted(raw_entry_keys("phoneNumbers", canonical, None)),
         },
     )
     held = {
