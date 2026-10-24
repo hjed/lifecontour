@@ -15,11 +15,12 @@ For each owner with anything on the shared calendar this creates their calendar
 and moves onto it their journals' links and calendar info, their series,
 recurrence aliases and merged aliases, and the outbox events not yet relayed
 that would otherwise recreate the shared calendar. The shared calendar is then
-deleted. Strava activity ids are globally unique and the worker only ever
-updated a journal it found for the syncing user, so unlike ``0138`` no pending
-update aims at another owner's journal. The ids are computed here, frozen,
-rather than imported from ``core_shared``: a migration must keep meaning what it
-meant when it ran.
+deleted. A link the new worker already made on the owner's calendar, when it ran
+before this migration, supersedes the shared one. Strava activity ids are
+globally unique and the worker only ever updated a journal it found for the
+syncing user, so unlike ``0138`` no pending update aims at another owner's
+journal. The ids are computed here, frozen, rather than imported from
+``core_shared``: a migration must keep meaning what it meant when it ran.
 
 Downgrading moves everything back onto the shared calendar, owned by one of the
 users, refusing while two owners link the same activity (two accounts connected
@@ -29,10 +30,12 @@ to one athlete): the shared calendar's key cannot represent that.
 from collections.abc import Sequence
 from uuid import NAMESPACE_URL, uuid5
 
+import sqlalchemy as sa
 from alembic import op
 
 from app.migrations.synthetic_calendar_scoping import (
     SyntheticCalendarSpec,
+    owners_on,
     return_to_shared,
     scope_to_owners,
 )
@@ -62,9 +65,43 @@ _CALENDAR = SyntheticCalendarSpec(
 )
 
 
+def _drop_links_superseded_on_own_calendar(connection: sa.Connection) -> None:
+    """Drop a shared-calendar link whose journal is already linked on its own.
+
+    The new worker can run before this migration does. The backend still on the
+    old revision then applies its update of an imported activity on the user's
+    own calendar, linking the journal there beside its shared-calendar link,
+    and moving the older link would collide with it. The newer one stands.
+    """
+    for owner in owners_on(connection, SHARED_CALENDAR_ID):
+        connection.execute(
+            sa.text(
+                """
+                DELETE FROM journal_external_event_links shared
+                USING journals j
+                WHERE shared.calendar_id = CAST(:shared AS uuid)
+                  AND j.id = shared.journal_id
+                  AND j.user_id = :owner
+                  AND EXISTS (
+                      SELECT 1 FROM journal_external_event_links own
+                      WHERE own.journal_id = shared.journal_id
+                        AND own.calendar_id = CAST(:own AS uuid)
+                  )
+                """
+            ),
+            {
+                "shared": SHARED_CALENDAR_ID,
+                "owner": owner,
+                "own": owner_calendar_id(owner),
+            },
+        )
+
+
 def upgrade() -> None:
     """Move every owner's Strava rows onto their own calendar."""
-    scope_to_owners(op.get_bind(), _CALENDAR)
+    connection = op.get_bind()
+    _drop_links_superseded_on_own_calendar(connection)
+    scope_to_owners(connection, _CALENDAR)
 
 
 def downgrade() -> None:
