@@ -6,7 +6,7 @@ whose key the base lacks was added in Google since, so it is kept rather than
 deleted. See ``core_shared.sync_base``.
 
 A key covers only the value inbound imports - an email's address, a phone's
-canonical form, an address's parts, a birthday's date - never its label,
+national number, an address's parts, a birthday's date - never its label,
 primary flag or formatting, so the pull, the push and Google's response agree
 on an entry however each presents it. An entry inbound does not import has no
 key: it was never held locally.
@@ -15,6 +15,7 @@ key: it was never held locally.
 from collections.abc import Callable, Mapping
 from typing import Any, Final, Literal
 
+import phonenumbers
 from core_shared.sync_base import SyncedEntries, entry_key
 from pydantic import BaseModel, ValidationError
 
@@ -53,10 +54,28 @@ def email_key(email: GoogleEmailAddress) -> str | None:
     return None if method is None else entry_key("email", _normalised(method.value))
 
 
+def _national_number(value: str) -> str:
+    """A phone's national significant number, however it was written.
+
+    Google answers a number pushed as typed ("0412 345 678") with an E.164
+    ``canonicalForm`` ("+61412345678"); both read as "412345678". A national
+    number names no country, so its trunk prefix is dropped by its leading
+    zeros - the common convention, and only ever compared within one contact.
+    """
+    if value.strip().startswith("+"):
+        try:
+            return str(phonenumbers.parse(value, None).national_number)
+        except phonenumbers.NumberParseException:
+            pass
+    return "".join(char for char in value if char.isdigit()).lstrip("0")
+
+
 def phone_key(phone: GooglePhoneNumber) -> str | None:
-    """The phone's key, from the canonical form inbound reads when Google has one."""
+    """The phone's key: its national number, read as inbound reads it."""
     method = import_phone(phone)
-    return None if method is None else entry_key("phone", "".join(method.value.split()))
+    return (
+        None if method is None else entry_key("phone", _national_number(method.value))
+    )
 
 
 def address_key(address: GoogleAddress, fallback_country: str | None) -> str | None:
