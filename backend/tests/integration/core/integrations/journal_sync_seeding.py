@@ -90,6 +90,7 @@ def sync_event(
     timezone: str | None = None,
     contact_relationships: list[dict[str, Any]] | None = None,
     split_adopted_from: str | None = None,
+    integration_source: str = "google",
 ) -> OutboxEvent:
     """A `journal_event.created` / `.updated` / `.cancelled` outbox event.
 
@@ -101,7 +102,7 @@ def sync_event(
     start = start or (datetime.now(UTC) + timedelta(days=10))
     end = end or (start + timedelta(hours=1))
     event_data: dict[str, Any] = {
-        "integration_source": "google",
+        "integration_source": integration_source,
         "external_event_id": external_event_id,
         "calendar_id": calendar_id,
         "journal_data": {

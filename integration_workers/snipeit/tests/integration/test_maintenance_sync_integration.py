@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.repositories.merged_alias_repository import (
     ExternalRecord,
     MergedAliasRepository,
@@ -31,7 +32,6 @@ from snipeit_models import SnipeItMaintenance
 from snipeit_sync_service import (
     IN_FLIGHT_LOCK_SECONDS,
     SnipeItSyncInProgress,
-    snipeit_maintenance_calendar_id,
 )
 from snipeit_sync_window import ListedRecord
 
@@ -559,7 +559,9 @@ class TestOutboundMaintenanceSyncIntegration:
 
 
 # The synthetic calendar the syncing user's maintenance journals are imported into.
-_MAINTENANCE_CALENDAR_ID = snipeit_maintenance_calendar_id("user-123")
+_MAINTENANCE_CALENDAR_ID = synthetic_calendar_id(
+    SyntheticCalendar.SNIPEIT_MAINTENANCE, "user-123"
+)
 
 # Maintenance 17 as production Snipe-IT returns it: text HTML-escaped on output.
 _SNIPEIT_MAINTENANCE_17: dict[str, Any] = {

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, NamedTuple
 
 import pytest
-from core_shared.integration_constants import snipeit_maintenance_calendar_id
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.journals import (
     EventDateRange,
     Journal,
@@ -594,7 +594,9 @@ class TestJournalServiceFiltering:
 
 
 _GOOGLE_CALENDAR_ID = "11111111-1111-5111-8111-111111111111"
-_SNIPEIT_MAINTENANCE_CALENDAR_ID = snipeit_maintenance_calendar_id("user123")
+_SNIPEIT_MAINTENANCE_CALENDAR_ID = synthetic_calendar_id(
+    SyntheticCalendar.SNIPEIT_MAINTENANCE, "user123"
+)
 
 
 class _Link(NamedTuple):

@@ -498,6 +498,18 @@ See [Integration Architecture → Merged Aliases](../../../docs/architecture/int
 
 ---
 
+### No calendars of your own: one synthetic calendar per user
+
+A journal sync event names a calendar, and links are unique per calendar. If the
+integration has no calendars (like Strava or Snipe-IT), add a member to
+`SyntheticCalendar` in `core_shared/core_shared/integration_constants.py` and send
+`synthetic_calendar_id(SyntheticCalendar.<X>, user_id)` as both `calendar_id` and
+`calendar_info_data.calendar_id`. Add the calendar's display name and colour to
+`_INTEGRATION_CALENDAR_DEFAULTS` in
+`backend/app/core/integrations/journal_outbox_event_processor.py`. Never use one fixed
+calendar id for every user: the backend refuses an event on a calendar another user
+owns.
+
 ## (c) Add the canonical Dockerfile
 
 Create `integration_workers/<name>/Dockerfile`. It extends the shared `pms-python-base`
