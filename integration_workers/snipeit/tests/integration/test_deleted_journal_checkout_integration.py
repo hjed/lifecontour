@@ -218,6 +218,83 @@ class TestReleaseDeletedJournalIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        ("sync_status", "age_seconds"),
+        [("failed", 0), ("pending", 3600)],
+        ids=["refused", "abandoned-before-posting"],
+    )
+    async def test_a_pair_that_cannot_hold_the_asset_does_not_block_the_return(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        sync_status: str,
+        age_seconds: int,
+    ) -> None:
+        """A later journal refused as not available took nothing (#1730).
+
+        The deleted journal's lost post is why it was refused: left out, the
+        asset would never come back, since the other pair keeps being refused.
+        """
+        await _insert_checkout_row(async_connection, asset_id=41, sync_status="failed")
+        await _insert_checkout_row(
+            async_connection,
+            asset_id=41,
+            journal_id=OTHER_JOURNAL_ID,
+            sync_status=sync_status,
+            age_seconds=age_seconds,
+            posted=False,
+        )
+        _queue_asset(mock_transport, _MAPPED_USER)
+        mock_transport.add_response(
+            "/hardware/41/checkin",
+            json_data={"status": "success", "messages": "Checked in."},
+            method="POST",
+        )
+
+        await _release(snipeit_sync_service, async_connection)
+
+        assert _posts(mock_transport) == [_CHECKIN_41]
+        assert await _checkout_rows(async_connection) == {
+            ("user-123", f"snipeit_checkout:41:{OTHER_JOURNAL_ID}")
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("posted", [False, True], ids=["linking", "posting"])
+    async def test_a_pair_in_flight_on_the_asset_defers_the_release(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        posted: bool,
+    ) -> None:
+        """Its outcome decides who holds the asset, so the event is redelivered.
+
+        Forgetting the deleted journal's rows now would lose the only record of
+        its lost post should the other attempt then be refused.
+        """
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        await _insert_checkout_row(async_connection, asset_id=41, sync_status="failed")
+        await _insert_checkout_row(
+            async_connection,
+            asset_id=41,
+            journal_id=OTHER_JOURNAL_ID,
+            sync_status="pending",
+            posted=posted,
+        )
+        _queue_asset(mock_transport, _MAPPED_USER)
+
+        with pytest.raises(SnipeItSyncInProgress):
+            await _release(snipeit_sync_service, async_connection)
+
+        assert _posts(mock_transport) == []
+        assert await _checkout_rows(async_connection) == {
+            ("user-123", f"snipeit_checkout:41:{DELETED_JOURNAL_ID}"),
+            ("user-123", f"snipeit_checkout:41:{OTHER_JOURNAL_ID}"),
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         ("assigned_to", "checkin_status"),
         [(None, 404), (_MAPPED_USER, 403), (_MAPPED_USER, 404)],
         ids=["asset-gone", "checkin-forbidden", "checkin-not-found"],

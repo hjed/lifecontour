@@ -2960,11 +2960,15 @@ class SnipeItSyncService:
                         asset_id=snipeit_asset_id,
                         payload=payload,
                     )
-                except SnipeItAPIError as exc:
-                    # Snipe-IT answered and refused, so this post took nothing.
-                    # An earlier post whose answer was lost may hold the asset
-                    # (the likely cause of the refusal), so its marker stays.
-                    if exc.status_code < 500 and not previously_posted:
+                except (SnipeItAPIError, SnipeItRateLimitError) as exc:
+                    # Snipe-IT answered and refused (or its throttle stopped the
+                    # request first), so this post took nothing. An earlier post
+                    # whose answer was lost may hold the asset (the likely cause
+                    # of the refusal), so its marker stays.
+                    refused = (
+                        isinstance(exc, SnipeItRateLimitError) or exc.status_code < 500
+                    )
+                    if refused and not previously_posted:
                         await self._mark_checkout_posting(
                             journal_id,
                             external_id,
@@ -3086,22 +3090,32 @@ class SnipeItSyncService:
         Snipe-IT may have checked the asset out. Once the journal no longer lists
         the gear item that asset would stay out with no sync row left to return
         it, so it is returned first — but only while Snipe-IT shows it checked
-        out to the mapped user and no other pair may hold it. A pending or failed
-        attempt by another pair counts as holding it, since that attempt may have
-        checked the asset out too; leaving it out is recoverable, returning an
-        asset still in use is not.
+        out to the mapped user and no other pair may hold it; leaving it out is
+        recoverable, returning an asset still in use is not.
 
         Only an attempt that got as far as posting the checkout (its row carries
         the ``posting`` marker) can have checked the asset out. One that failed
         before posting — missing dates, a failed read, or a link to a checkout
         already in Snipe-IT — did not, and an asset out to the mapped user then
-        is another checkout's, such as one made by hand.
+        is another checkout's, such as one made by hand. The same goes for
+        another pair: it may hold the asset when its checkout is recorded and
+        not yet returned, or when its failed attempt carries the marker. One
+        Snipe-IT refused (see :meth:`_push_pair_checkout`) took nothing, though
+        it was most likely refused because this attempt's checkout holds the
+        asset; counting it would strand the asset, as its retries keep being
+        refused. Another pair's attempt still in flight may be about to take
+        the asset, or to link this attempt's entry as its own, so the return
+        waits for its outcome.
 
         Returns whether the asset is dealt with (never posted for, returned, not
         out to the mapped user, gone, or not ours to return — a 403/404 on
         either call), so the pair can be forgotten. ``False`` while another
         pair may hold it: the pair is kept, so a later sync retries the return
         rather than lose the only record that the asset may be out.
+
+        Raises:
+            SnipeItSyncInProgress: Another pair's checkout of the asset is in
+                flight; retry once it finishes.
         """
         if not self._recorded_posting(checkout_row.reference_data):
             return True
@@ -3123,26 +3137,48 @@ class SnipeItSyncService:
         async with session_factory() as session:
             held_elsewhere = await session.execute(
                 text(f"""
-                    SELECT 1
-                    FROM sync_metadata co
-                    LEFT JOIN sync_metadata ci
-                        ON {_CHECKIN_OF_CHECKOUT}
-                        AND ci.sync_status = 'success'
-                    WHERE co.user_id = :user_id
-                      AND co.integration_source = 'snipeit_checkout'
-                      AND co.external_id LIKE :asset_prefix
-                      AND co.external_id <> :external_id
-                      AND (co.sync_status <> 'success' OR ci.id IS NULL)
-                    LIMIT 1
+                    SELECT bool_or(holder.in_flight) AS in_flight
+                    FROM (
+                        SELECT co.sync_status = 'pending'
+                               AND co.updated_at
+                                   > now() - make_interval(secs => :in_flight)
+                               AS in_flight,
+                               co.sync_status,
+                               co.reference_data,
+                               ci.id AS checkin_id
+                        FROM sync_metadata co
+                        LEFT JOIN sync_metadata ci
+                            ON {_CHECKIN_OF_CHECKOUT}
+                            AND ci.sync_status = 'success'
+                        WHERE co.user_id = :user_id
+                          AND co.integration_source = 'snipeit_checkout'
+                          AND co.external_id LIKE :asset_prefix
+                          AND co.external_id <> :external_id
+                    ) holder
+                    WHERE holder.in_flight
+                       OR (holder.sync_status = 'success'
+                           AND holder.checkin_id IS NULL)
+                       OR (holder.sync_status <> 'success'
+                           AND holder.reference_data LIKE :posting_pattern
+                           AND (holder.reference_data::jsonb ->> :posting)
+                               = 'true')
                 """),
                 {
                     "user_id": self._user_id,
                     "asset_prefix": f"snipeit_checkout:{asset_id}:%",
                     "external_id": pair.checkout_external_id,
+                    "in_flight": IN_FLIGHT_LOCK_SECONDS,
+                    "posting_pattern": f'%"{_POSTING}"%',
+                    "posting": _POSTING,
                 },
             )
-            if held_elsewhere.fetchone():
-                return False
+            in_flight = held_elsewhere.scalar_one()
+        if in_flight:
+            raise SnipeItSyncInProgress(
+                f"Another checkout of asset {asset_id} is in flight"
+            )
+        if in_flight is not None:
+            return False
 
         try:
             await self._api_client.checkin_asset(
@@ -3175,7 +3211,7 @@ class SnipeItSyncService:
         one made by hand. The marker also tells an abandoned attempt that may
         have taken the asset (see :meth:`_return_abandoned_asset`) from one that
         cannot have. ``posting=False`` clears it, keeping the dates, once
-        Snipe-IT has refused the post.
+        Snipe-IT has refused the post or rate limited it.
         """
         async with session_factory() as session:
             async with session.begin():
@@ -4052,7 +4088,8 @@ class SnipeItSyncService:
         else may hold it, the pair is kept for a later sync to retry.
 
         Raises:
-            SnipeItSyncInProgress: The pair's checkout is being posted now.
+            SnipeItSyncInProgress: The pair's checkout, or another pair's
+                checkout of the asset, is in flight.
         """
         if checkout_row.sync_status == "success":
             if checkout_row.checkin_status == "success":
@@ -4088,7 +4125,9 @@ class SnipeItSyncService:
             SnipeItSyncInProgress: A pair's checkout is being posted now; the
                 event is redelivered, and checks the asset in once it lands. A
                 post that outlives the lock lands after its rows are forgotten,
-                which every abandoned lock already accepts.
+                which every abandoned lock already accepts. Raised too while
+                another journal's checkout of an abandoned pair's asset is in
+                flight: its outcome decides whether the asset is returned.
         """
         recorded = await self._recorded_checkouts(journal_id, session_factory)
         for asset_id, checkout_row in sorted(recorded.items()):
