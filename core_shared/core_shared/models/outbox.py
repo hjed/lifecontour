@@ -116,6 +116,7 @@ class OutboxEvent(Base):
         force_apply: bool = False,
         skipped_addresses: list[SkippedAddress] | None = None,
         address_fallback_country: str | None = None,
+        synced_entries: dict[str, list[str]] | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -132,6 +133,8 @@ class OutboxEvent(Base):
             skipped_addresses: Addresses the import left out, for review
             address_fallback_country: The country the import gave addresses
                 with none, if any (#1820)
+            synced_entries: Per field, the keys of the entries the import
+                read, if the worker records them (#1861)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -151,6 +154,7 @@ class OutboxEvent(Base):
             force_apply=force_apply,
             skipped_addresses=skipped_addresses or [],
             address_fallback_country=address_fallback_country,
+            synced_entries=synced_entries,
         )
         return cls(
             event_type=f"contact.{sync_type}",
