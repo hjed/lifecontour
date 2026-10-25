@@ -862,11 +862,14 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            # The fallback is recorded already, so tags are all that could change.
+            # The fallback and base are recorded already, so tags are all that
+            # could change.
             {
                 "old_key": "old_value",
                 "synced_tags": ["Work"],
                 "address_fallback_country": None,
+                "synced_entries": None,
+                "pending_import": False,
             },
         )
 
@@ -891,11 +894,14 @@ class TestOutboxEventProcessor:
         self._setup_contact_and_reference_mocks(
             mock_contact_service,
             mock_link_repo,
-            # The fallback is recorded already, so tags are all that could change.
+            # The fallback and base are recorded already, so tags are all that
+            # could change.
             {
                 "old_key": "old_value",
                 "synced_tags": ["Work"],
                 "address_fallback_country": None,
+                "synced_entries": None,
+                "pending_import": False,
             },
         )
 
