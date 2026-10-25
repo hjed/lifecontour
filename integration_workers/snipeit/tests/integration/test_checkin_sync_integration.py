@@ -33,11 +33,13 @@ async def _insert_checkout_metadata(
     journal_id: int,
     sync_status: str = "success",
     posted: bool = False,
+    age_seconds: int = 0,
 ) -> None:
     """Insert a ``snipeit_checkout`` sync_metadata row (successful by default).
 
     ``posted`` marks an attempt that got as far as posting the checkout, as a
     lost response leaves it: only such an attempt can have taken the asset.
+    The row was last touched ``age_seconds`` ago.
     """
     await async_connection.execute(
         text("""
@@ -48,13 +50,15 @@ async def _insert_checkout_metadata(
             VALUES
                 ('user-123', 'snipeit_checkout', :external_id, :journal_id,
                  now(), 'hash', :sync_status, :reference_data, NULL, 0,
-                 now(), now())
+                 now() - make_interval(secs => :age_seconds),
+                 now() - make_interval(secs => :age_seconds))
         """),
         {
             "external_id": f"snipeit_checkout:{asset_id}:{journal_id}",
             "journal_id": str(journal_id),
             "sync_status": sync_status,
             "reference_data": json.dumps({"posting": True}) if posted else None,
+            "age_seconds": age_seconds,
         },
     )
 
@@ -2269,6 +2273,45 @@ class TestRefusedCheckoutPostIntegration:
             # The dates read before posting are kept for the retry either way.
             assert "asset_dates_before" in reference
 
+    @pytest.mark.asyncio
+    async def test_a_rate_limited_post_drops_its_marker(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A rate limit stops the request before Snipe-IT acts on it.
+
+        Kept, the marker would make every later refusal look like the answer
+        to an earlier post that may have landed, so it would never clear.
+        """
+        from snipeit_rate_limiter import SnipeItRateLimitError
+
+        async def rate_limited(**_: Any) -> dict[str, Any]:
+            raise SnipeItRateLimitError("Snipe-IT API rate limited (429).")
+
+        journal_id = await _sydney_trip(async_connection)
+        _queue_asset_dates(mock_transport)
+        monkeypatch.setattr(
+            snipeit_sync_service._api_client, "checkout_asset", rate_limited
+        )
+
+        with pytest.raises(SnipeItRateLimitError):
+            await snipeit_sync_service.push_checkout_create(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        assert await _sync_statuses(async_connection, journal_id) == {
+            "snipeit_checkout": "failed"
+        }
+        reference = await _reference_data(
+            async_connection, source="snipeit_checkout", journal_id=journal_id
+        )
+        assert "posting" not in reference
+        assert "asset_dates_before" in reference
+
 
 class TestSupersededAssetRetryIntegration:
     """A failed return of a removed item's asset is retried against that asset."""
@@ -2480,51 +2523,25 @@ class TestLateCheckinRerecordIntegration:
 class TestPreviousAssetHeldElsewhereIntegration:
     """A removed item's asset is only returned when no other pair may be using it."""
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("other_checkout_status", "other_checkin_status", "posts"),
-        [
-            # A pending or failed attempt may have checked the asset out anyway.
-            (
-                "pending",
-                "failed",
-                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
-            ),
-            (
-                "failed",
-                "failed",
-                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
-            ),
-            # Checked out and not yet returned.
-            (
-                "success",
-                "failed",
-                ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"],
-            ),
-            # The other journal already returned it, so the lost attempt holds it.
-            (
-                "success",
-                "success",
-                [
-                    "/api/v1/hardware/41/checkin",
-                    "/api/v1/hardware/42/checkout",
-                    "/api/v1/hardware/42/checkin",
-                ],
-            ),
-        ],
-        ids=["other-pending", "other-failed", "other-still-out", "other-returned"],
-    )
-    async def test_previous_asset_is_left_while_another_journal_may_hold_it(
+    _RETURNED = [
+        "/api/v1/hardware/41/checkin",
+        "/api/v1/hardware/42/checkout",
+        "/api/v1/hardware/42/checkin",
+    ]
+    _LEFT_OUT = ["/api/v1/hardware/42/checkout", "/api/v1/hardware/42/checkin"]
+
+    async def _abandoned_pair_beside_another(
         self,
-        snipeit_sync_service: Any,
-        mock_transport: Any,
         async_connection: AsyncConnection,
+        mock_transport: Any,
+        *,
         other_checkout_status: str,
         other_checkin_status: str,
-        posts: list[str],
-    ) -> None:
-        """Returning an asset another journal is still using would be worse than
-        leaving it out for that journal's own retry or the periodic sweep."""
+        other_posted: bool = False,
+        other_age_seconds: int = 0,
+    ) -> int:
+        """A journal whose removed asset 41 a lost post may hold, beside another
+        journal's pair on that asset; returns the first journal's id."""
         journal_id = await _insert_gear_usage_journal(
             async_connection,
             start="2025-03-07T13:00:00+00:00",
@@ -2544,6 +2561,8 @@ class TestPreviousAssetHeldElsewhereIntegration:
             asset_id="41",
             journal_id=other_journal_id,
             sync_status=other_checkout_status,
+            posted=other_posted,
+            age_seconds=other_age_seconds,
         )
         await async_connection.execute(
             text("""
@@ -2576,6 +2595,75 @@ class TestPreviousAssetHeldElsewhereIntegration:
             json_data={"status": "success", "messages": "Checked in."},
         )
         _queue_checkout_and_checkin(mock_transport)
+        return journal_id
+
+    async def _abandoned_row_kept(
+        self, async_connection: AsyncConnection, journal_id: int
+    ) -> bool:
+        result = await async_connection.execute(
+            text("""
+                SELECT 1 FROM sync_metadata
+                WHERE integration_source = 'snipeit_checkout'
+                  AND external_id = :external_id
+            """),
+            {"external_id": f"snipeit_checkout:41:{journal_id}"},
+        )
+        return result.fetchone() is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        (
+            "other_checkout_status",
+            "other_checkin_status",
+            "other_posted",
+            "other_age_seconds",
+            "posts",
+        ),
+        [
+            # A failed attempt that posted may have checked the asset out.
+            ("failed", "failed", True, 0, _LEFT_OUT),
+            # A stale pending attempt that posted may have too.
+            ("pending", "failed", True, 3600, _LEFT_OUT),
+            # Refused (e.g. as not available, because the lost post holds the
+            # asset): it took nothing, so it must not block the return.
+            ("failed", "failed", False, 0, _RETURNED),
+            # Abandoned before it posted: it cannot have taken the asset.
+            ("pending", "failed", False, 3600, _RETURNED),
+            # Checked out and not yet returned.
+            ("success", "failed", False, 0, _LEFT_OUT),
+            # The other journal already returned it, so the lost attempt holds it.
+            ("success", "success", False, 0, _RETURNED),
+        ],
+        ids=[
+            "other-failed-after-posting",
+            "other-abandoned-after-posting",
+            "other-refused",
+            "other-abandoned-before-posting",
+            "other-still-out",
+            "other-returned",
+        ],
+    )
+    async def test_previous_asset_is_left_while_another_journal_may_hold_it(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        other_checkout_status: str,
+        other_checkin_status: str,
+        other_posted: bool,
+        other_age_seconds: int,
+        posts: list[str],
+    ) -> None:
+        """Returning an asset another journal is still using would be worse than
+        leaving it out for that journal's own retry or the periodic sweep."""
+        journal_id = await self._abandoned_pair_beside_another(
+            async_connection,
+            mock_transport,
+            other_checkout_status=other_checkout_status,
+            other_checkin_status=other_checkin_status,
+            other_posted=other_posted,
+            other_age_seconds=other_age_seconds,
+        )
 
         await snipeit_sync_service.reconcile_gear_usage(
             journal_id=journal_id,
@@ -2587,17 +2675,39 @@ class TestPreviousAssetHeldElsewhereIntegration:
         ] == posts
         # The abandoned pair is forgotten only once its asset was dealt with:
         # left out for another pair, its row stays so a later sync retries it.
-        abandoned = await async_connection.execute(
-            text("""
-                SELECT 1 FROM sync_metadata
-                WHERE integration_source = 'snipeit_checkout'
-                  AND external_id = :external_id
-            """),
-            {"external_id": f"snipeit_checkout:41:{journal_id}"},
+        assert await self._abandoned_row_kept(async_connection, journal_id) == (
+            "/api/v1/hardware/41/checkin" not in posts
         )
-        assert (abandoned.fetchone() is None) == (
-            "/api/v1/hardware/41/checkin" in posts
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("other_posted", [False, True], ids=["linking", "posting"])
+    async def test_previous_asset_waits_for_another_journals_checkout_in_flight(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        other_posted: bool,
+    ) -> None:
+        """An attempt in flight may be about to take the asset, or to link the
+        lost post's entry as its own, so the release waits for its outcome."""
+        from snipeit_sync_service import SnipeItSyncInProgress
+
+        journal_id = await self._abandoned_pair_beside_another(
+            async_connection,
+            mock_transport,
+            other_checkout_status="pending",
+            other_checkin_status="failed",
+            other_posted=other_posted,
         )
+
+        with pytest.raises(SnipeItSyncInProgress):
+            await snipeit_sync_service.reconcile_gear_usage(
+                journal_id=journal_id,
+                session_factory=lambda: _session_factory(async_connection),
+            )
+
+        assert [r for r in mock_transport.requests if r.method == "POST"] == []
+        assert await self._abandoned_row_kept(async_connection, journal_id)
 
 
 async def _error_message(
