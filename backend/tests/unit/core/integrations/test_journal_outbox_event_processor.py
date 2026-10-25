@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
+from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.history import Provenance
 from core_shared.models.journal_external_event_link import (
     ExternalEventLinkSyncStatus,
@@ -529,7 +530,7 @@ class TestJournalOutboxEventProcessor:
         """
         from uuid import UUID
 
-        strava_calendar_id = "00000000-0000-0000-0000-000000000001"
+        strava_calendar_id = synthetic_calendar_id(SyntheticCalendar.STRAVA, "1")
         event_data = _make_journal_event_data(
             sync_action="created",
             calendar_id=strava_calendar_id,

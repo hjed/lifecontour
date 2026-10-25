@@ -12,6 +12,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.integration_constants import (
+    LEGACY_SHARED_STRAVA_CALENDAR_ID,
+    SyntheticCalendar,
+    synthetic_calendar_id,
+)
+from core_shared.models.outbox import OutboxEvent
 
 from strava_data_transformer import TransformedActivity
 from strava_models import StravaActivity, StravaStreamSet
@@ -32,6 +38,22 @@ def _no_merged_aliases():  # type: ignore[no-untyped-def]
         "strava_sync_service.MergedAliasRepository", return_value=repo
     ) as repo_class:
         yield repo_class
+
+
+@pytest.fixture(autouse=True)
+def _shared_calendar_gone():  # type: ignore[no-untyped-def]
+    """Migration 0142 has run: the calendar every user shared is gone.
+
+    The lookup would otherwise read the mocked session's result as the row. It
+    is covered against a real database in
+    ``tests/integration/test_strava_calendar_integration.py``.
+    """
+    with patch(
+        "strava_sync_service._shared_strava_calendar_exists",
+        new_callable=AsyncMock,
+        return_value=False,
+    ) as exists:
+        yield exists
 
 
 def _make_activity(
@@ -95,6 +117,17 @@ def mock_api_client() -> AsyncMock:
     client.get_activity_streams = AsyncMock()
     client.close = AsyncMock()
     return client
+
+
+def _assert_on_users_own_calendar(event: OutboxEvent, user_id: str) -> None:
+    """The event names the syncing user's own Strava calendar, both times.
+
+    One calendar shared by every user was owned by whoever synced first and
+    hidden from everyone else (#1856).
+    """
+    calendar_id = synthetic_calendar_id(SyntheticCalendar.STRAVA, user_id)
+    assert event.event_data["calendar_id"] == calendar_id
+    assert event.event_data["calendar_info_data"]["calendar_id"] == calendar_id
 
 
 @pytest.fixture()
@@ -175,6 +208,7 @@ class TestSyncSingleActivity:
         assert len(events) == 1
         event = events[0]
         assert event.event_type == "journal_event.created"
+        _assert_on_users_own_calendar(event, "user-123")
 
     @pytest.mark.asyncio()
     async def test_fetches_streams_when_gps_available(
@@ -251,6 +285,7 @@ class TestSyncSingleActivity:
         event = events[0]
         assert event.event_type == "journal_event.updated"
         assert event.event_data["existing_journal_id"] == 42
+        _assert_on_users_own_calendar(event, "user-123")
 
 
 class TestListActivityBatches:
@@ -798,6 +833,7 @@ class TestDeleteHandling:
 
         assert event is not None
         assert event.event_type == "journal_event.cancelled"
+        _assert_on_users_own_calendar(event, "user-123")
 
     @pytest.mark.asyncio()
     async def test_returns_none_when_activity_not_found(
@@ -1136,3 +1172,79 @@ class TestLookupsAreTheSyncingUsers:
         [(query, params)] = calls
         assert "user_id = :user_id" in query
         assert params["user_id"] == sync_service._user_id
+
+
+class TestCalendarBeforeTheMigration:
+    """Until migration 0142 has run, events keep naming the shared calendar.
+
+    A backend not yet migrated knows only that calendar, so an event naming
+    the user's own would be matched against no link (#1856).
+    """
+
+    @pytest.mark.asyncio()
+    async def test_a_deletion_names_the_shared_calendar_while_it_exists(
+        self,
+        sync_service: StravaSyncService,
+        mock_session: MagicMock,
+        _shared_calendar_gone: AsyncMock,
+    ) -> None:
+        _shared_calendar_gone.return_value = True
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = MagicMock(journal_id=42)
+        mock_session.execute.return_value = mock_result
+
+        event = await sync_service.handle_delete(
+            activity_id=12345, session=mock_session
+        )
+
+        assert event is not None
+        assert event.event_data["calendar_id"] == LEGACY_SHARED_STRAVA_CALENDAR_ID
+        assert event.event_data["calendar_info_data"]["calendar_id"] == (
+            LEGACY_SHARED_STRAVA_CALENDAR_ID
+        )
+
+    @pytest.mark.asyncio()
+    async def test_an_import_names_the_shared_calendar_while_it_exists(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+        _shared_calendar_gone: AsyncMock,
+    ) -> None:
+        _shared_calendar_gone.return_value = True
+        mock_api_client.get_activity.return_value = _make_activity()
+
+        with patch.object(
+            sync_service,
+            "_find_existing_journal_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            [event] = await sync_service.sync_single_activity(
+                activity_id=12345, session=mock_session
+            )
+
+        assert event.event_data["calendar_id"] == LEGACY_SHARED_STRAVA_CALENDAR_ID
+
+    @pytest.mark.asyncio()
+    async def test_the_calendar_is_looked_up_once_per_sync(
+        self,
+        sync_service: StravaSyncService,
+        mock_api_client: AsyncMock,
+        mock_session: MagicMock,
+        _shared_calendar_gone: AsyncMock,
+    ) -> None:
+        mock_api_client.get_activity.return_value = _make_activity()
+
+        with patch.object(
+            sync_service,
+            "_find_existing_journal_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            for _ in range(3):
+                await sync_service.sync_single_activity(
+                    activity_id=12345, session=mock_session
+                )
+
+        assert _shared_calendar_gone.await_count == 1

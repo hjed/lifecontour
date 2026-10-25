@@ -8,6 +8,12 @@ STRAVA_ARQ_QUEUE_NAME = "strava"
 SNIPEIT_ARQ_QUEUE_NAME = "arq:snipeit"
 IMMICH_ARQ_QUEUE_NAME = "arq:immich"
 
+# The one calendar every user's Strava activities shared until #1856. The worker
+# keeps naming it while its row still exists, i.e. until migration 0142 has run,
+# and the backend reads an event naming it as naming its user's own calendar.
+# TODO(#1902): remove once no event naming it can still be in flight.
+LEGACY_SHARED_STRAVA_CALENDAR_ID = "00000000-0000-0000-0000-000000000001"
+
 
 class SyntheticCalendar(StrEnum):
     """An integration whose records are linked on a calendar it makes up.
