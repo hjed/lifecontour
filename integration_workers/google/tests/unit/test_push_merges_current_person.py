@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from google_client import GoogleContactNotFoundError
-from worker import _update_or_recreate_contact_in_google
+from worker import LinkSyncState, _update_or_recreate_contact_in_google
 
 _REMOTE = "people/c1"
 
@@ -30,23 +30,32 @@ async def _push(
     *,
     recorded_fallback: str | None = None,
 ) -> bool:
-    """Push, with the link recording ``recorded_fallback`` from the last pull."""
+    """Push, with the link recording ``recorded_fallback`` from the last pull.
+
+    The link records no base, and was synced at the person's current etag, so
+    the person is its own base: these tests are about the read and the merge,
+    not about entries Google gained since a pull (``test_push_three_way.py``).
+    """
+    current = client.get_person.return_value
+    synced_at = (
+        current.get("etag", "stored_etag") if isinstance(current, dict) else None
+    )
     with patch(
-        "worker._recorded_address_fallback",
+        "worker._read_link_sync_state",
         new_callable=AsyncMock,
-        return_value=recorded_fallback,
+        return_value=LinkSyncState(address_fallback_country=recorded_fallback),
     ) as recorded:
-        _, recreated = await _update_or_recreate_contact_in_google(
+        outcome = await _update_or_recreate_contact_in_google(
             AsyncMock(),
             client,
             contact_id=1,
             external_id=_REMOTE,
             person_data=person_data,
-            etag="stored_etag",
+            etag=synced_at,
             user_id="1",
         )
     recorded.assert_awaited_once()
-    return recreated
+    return outcome.recreated
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from worker import LinkSyncState
+
 # The owner every event below names; the mocked accounts belong to it.
 OWNER = "1"
 
@@ -535,9 +537,9 @@ class TestPushContactToGoogleForEvent:
     def _no_recorded_address_fallback(self) -> Iterator[None]:
         """The bare ``AsyncMock`` session cannot answer the link read."""
         with patch(
-            "worker._recorded_address_fallback",
+            "worker._read_link_sync_state",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value=LinkSyncState(),
         ):
             yield
 
