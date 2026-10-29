@@ -80,18 +80,16 @@ class SnipeItDataTransformer:
         raw_name = _first_non_blank(
             _decode(asset.name), decoded_model_name
         ) or html.unescape(asset.asset_tag)
-        name = raw_name[:MAX_GEAR_ITEM_NAME_LENGTH]
+        name = normalise_name(raw_name)
 
         # Serial number
-        serial_number = _truncate(_decode(asset.serial), MAX_GEAR_ITEM_FIELD_LENGTH)
+        serial_number = normalise_field(_decode(asset.serial))
 
         # Model name from nested object
-        model_name = _truncate(decoded_model_name, MAX_GEAR_ITEM_FIELD_LENGTH)
+        model_name = normalise_field(decoded_model_name)
 
         # Manufacturer name from nested object
-        manufacturer_name = _truncate(
-            _decode(asset.manufacturer_name), MAX_GEAR_ITEM_FIELD_LENGTH
-        )
+        manufacturer_name = normalise_field(_decode(asset.manufacturer_name))
 
         # Purchase date parsing
         purchase_date_value = _parse_date(asset.purchase_date_str)
@@ -113,6 +111,20 @@ class SnipeItDataTransformer:
             snipeit_asset_id=asset.id,
             version_hash=version_hash,
         )
+
+
+def normalise_name(value: str) -> str:
+    """A gear name as an import stores it: stripped, then truncated.
+
+    The outbound merge keys local names the same way, so a name typed with
+    surrounding spaces still matches what Snipe-IT gives back.
+    """
+    return value.strip()[:MAX_GEAR_ITEM_NAME_LENGTH]
+
+
+def normalise_field(value: str | None) -> str | None:
+    """Any other gear text field as an import stores it: truncated."""
+    return _truncate(value, MAX_GEAR_ITEM_FIELD_LENGTH)
 
 
 def _decode(value: str | None) -> str | None:
