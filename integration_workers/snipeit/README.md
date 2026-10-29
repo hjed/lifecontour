@@ -125,6 +125,24 @@ completed run's cursor, refetching everything changed since it, until the last
 full sync is over 7 days old; from then on every smart sync runs as a full one. At
 worst that costs what every sync cost before smart syncs existed.
 
+### Outbound gear edits
+
+A `GearItemUpdated` event pushes the gear item's `name`, `serial_number` and
+`purchase_date` to its asset, column by column (`asset_merge.py`). Each is
+compared with the value both sides last agreed on, recorded on the asset's
+`sync_metadata` link (`reference_data.synced_entries`) by every pull and push:
+
+- only local changed it: it is sent, and a pull before the push keeps it;
+- only Snipe-IT changed it: it is left alone, and the next pull imports it
+  (`pending_import`), even at an unchanged version;
+- both changed it: the local value wins.
+
+A link recorded before bases existed falls back on its version hash, then on
+the event's old values. `model` and `manufacturer` are never pushed, and a pull
+overwrites local edits to them. A push that fails on every delivery is
+dead-lettered and logged; the edit stays local, and the next push of that gear
+item sends it.
+
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default**. The worker inherits
