@@ -9,6 +9,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
+from core_shared.sync_base import pending_import
+
 
 class InboundSyncAction(StrEnum):
     """Action to take for an inbound Google Calendar event."""
@@ -33,6 +35,9 @@ class ExternalEventLinkProtocol(Protocol):
 
     @property
     def sync_capability(self) -> str: ...
+
+    @property
+    def reference_data(self) -> str | None: ...
 
 
 class GoogleEventProtocol(Protocol):
@@ -110,10 +115,14 @@ class InboundSyncClassifier:
         if existing_link.sync_capability == "outbound":
             return InboundSyncAction.SKIP_ONE_WAY
 
-        # ETag comparison: unchanged events are skipped
+        # ETag comparison: unchanged events are skipped — unless a push kept
+        # a Google value the journal does not hold yet (#1899): it records
+        # its own etag, so the event looks unchanged, and marks the link
+        # ``pending_import`` for this pull to apply it.
         if (
             existing_link.external_version is not None
             and existing_link.external_version == google_event.etag
+            and not pending_import(existing_link.reference_data)
         ):
             return InboundSyncAction.SKIP_UNCHANGED
 

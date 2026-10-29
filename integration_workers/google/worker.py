@@ -22,7 +22,7 @@ from core_shared import (
     generate_interval_cron,
     redis_settings_from_url,
 )
-from core_shared.calendar_sync_base import google_event_times
+from core_shared.calendar_sync_base import google_event_keys, google_event_times
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
@@ -95,6 +95,7 @@ from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
+from link_schema import link_reference_data_ready
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
 from synced_entries import empty_at_source, raw_synced_entries, synced_entries_of
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
@@ -4613,6 +4614,22 @@ def _is_account_level_failure(error: Exception) -> bool:
     return isinstance(error, HttpError) and error.resp.status == 401
 
 
+_INBOUND_LINK_COLUMNS = """
+    SELECT journal_id, external_event_id, external_version, sync_capability,
+           sync_status, recurring_event_id, external_identity, {reference_data}
+    FROM journal_external_event_links
+    WHERE calendar_id = :calendar_id
+      AND external_event_id = :external_event_id
+"""
+_INBOUND_LINK_SELECT = text(
+    _INBOUND_LINK_COLUMNS.format(reference_data="reference_data")
+)
+# Before migration 0143 (see ``link_schema``).
+_INBOUND_LINK_SELECT_UNMIGRATED = text(
+    _INBOUND_LINK_COLUMNS.format(reference_data="NULL AS reference_data")
+)
+
+
 async def _sync_calendar_inbound(
     session: Any,
     client: Any,
@@ -4726,6 +4743,14 @@ async def _sync_calendar_inbound(
             all_raw_events, key=lambda e: e.get("status") == "cancelled"
         )
 
+    # Read once per calendar: until the backend has migrated, the link has no
+    # base to read, and a push marks none pending.
+    link_select = (
+        _INBOUND_LINK_SELECT
+        if await link_reference_data_ready(session)
+        else _INBOUND_LINK_SELECT_UNMIGRATED
+    )
+
     # Process each event
     calendar_errors = 0
     for raw_event in all_raw_events:
@@ -4739,16 +4764,8 @@ async def _sync_calendar_inbound(
                 continue
 
             # Lookup existing link
-            link_stmt = text("""
-                SELECT journal_id, external_event_id, external_version,
-                       sync_capability, sync_status, recurring_event_id,
-                       external_identity
-                FROM journal_external_event_links
-                WHERE calendar_id = :calendar_id
-                AND external_event_id = :external_event_id
-            """)
             link_result = await session.execute(
-                link_stmt,
+                link_select,
                 {
                     "calendar_id": calendar_id,
                     "external_event_id": google_event.id,
@@ -5080,6 +5097,14 @@ async def _sync_calendar_inbound(
                     google_event.recurring_event_id
                 ),
                 split_adopted_from=split_adopted_from,
+                # The keys of Google's values: the base the backend records
+                # for the next push to merge against (#1899).
+                synced_entries=serialise_synced_entries(
+                    {
+                        field: frozenset({key})
+                        for field, key in google_event_keys(raw_event).items()
+                    }
+                ),
             )
             session.add(outbox_event)
             metrics["events_processed"] += 1
