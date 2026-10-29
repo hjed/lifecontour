@@ -336,6 +336,7 @@ def _make_link_row(
     row.updated_at = updated_at or datetime(2026, 3, 16, tzinfo=UTC)
     row.recurring_event_id = recurring_event_id
     row.external_identity = external_identity
+    row.reference_data = None
     return row
 
 

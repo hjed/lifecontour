@@ -5,6 +5,7 @@ pull's and the push response's — so each test pins two spellings that must key
 equal, or two values that must not.
 """
 
+import json
 from datetime import UTC, datetime, time
 from uuid import uuid4
 
@@ -13,10 +14,14 @@ import pytest
 from core_shared.calendar_sync_base import (
     IMPORTABLE_ON_UPDATE,
     CalendarSyncField,
+    agreed_after_apply,
     changed,
     description_key,
     local_when,
+    locally_changed,
     location_key,
+    recorded_calendar_base,
+    remote_keys,
     summary_key,
     when_key,
 )
@@ -163,3 +168,70 @@ def test_description_is_not_importable_on_update() -> None:
         CalendarSyncField.LOCATION,
         CalendarSyncField.WHEN,
     }
+
+
+SUMMARY = CalendarSyncField.SUMMARY
+DESCRIPTION = CalendarSyncField.DESCRIPTION
+LOCATION = CalendarSyncField.LOCATION
+WHEN = CalendarSyncField.WHEN
+
+
+class TestRecordedCalendarBase:
+    def test_reads_the_fields_it_knows(self) -> None:
+        reference_data = json.dumps(
+            {"synced_entries": {"summary": ["a"], "when": ["b", "c"]}}
+        )
+
+        assert recorded_calendar_base(reference_data) == {
+            SUMMARY: frozenset({"a"}),
+            WHEN: frozenset({"b", "c"}),
+        }
+
+    def test_ignores_a_field_it_does_not_know(self) -> None:
+        reference_data = json.dumps({"synced_entries": {"colour": ["a"]}})
+
+        assert recorded_calendar_base(reference_data) == {}
+
+    def test_no_base_reads_as_none(self) -> None:
+        assert recorded_calendar_base(None) is None
+        assert recorded_calendar_base(json.dumps({"pending_import": True})) is None
+
+
+class TestRemoteKeys:
+    def test_takes_each_fields_key(self) -> None:
+        assert remote_keys({"summary": ["a"], "location": ["b"]}) == {
+            SUMMARY: "a",
+            LOCATION: "b",
+        }
+
+    def test_skips_unknown_and_empty_fields(self) -> None:
+        assert remote_keys({"colour": ["a"], "summary": []}) == {}
+
+
+class TestLocallyChanged:
+    def test_a_field_whose_local_key_left_the_base_changed(self) -> None:
+        base = {SUMMARY: frozenset({"old"}), LOCATION: frozenset({"here"})}
+
+        assert locally_changed(base, {SUMMARY: "new", LOCATION: "here"}) == {SUMMARY}
+
+    def test_a_field_without_a_base_is_left_to_the_caller(self) -> None:
+        assert locally_changed({}, {SUMMARY: "new"}) == frozenset()
+
+
+class TestAgreedAfterApply:
+    def test_a_field_local_took_is_agreed_on_googles_key(self) -> None:
+        agreed = agreed_after_apply(
+            remote={SUMMARY: "google"}, local_after={SUMMARY: "google"}
+        )
+
+        assert agreed == {SUMMARY: frozenset({"google"})}
+
+    def test_a_field_local_kept_is_left_out(self) -> None:
+        # Left as the link holds it when the write lands, so a key a push
+        # recorded since the pull read the base is not lost.
+        agreed = agreed_after_apply(
+            remote={SUMMARY: "google", DESCRIPTION: "google notes"},
+            local_after={SUMMARY: "mine", DESCRIPTION: "mine"},
+        )
+
+        assert agreed == {}
