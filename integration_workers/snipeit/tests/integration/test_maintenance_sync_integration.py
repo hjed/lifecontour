@@ -24,14 +24,18 @@ from core_shared.repositories.merged_alias_repository import (
     ExternalRecord,
     MergedAliasRepository,
 )
+from core_shared.sync_base import serialise_synced_entries
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
+import maintenance_merge
 from snipeit_api_client import SnipeItAPIError
+from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
 from snipeit_models import SnipeItMaintenance
 from snipeit_sync_service import (
     IN_FLIGHT_LOCK_SECONDS,
     SnipeItSyncInProgress,
+    _snipeit_record_payload,
 )
 from snipeit_sync_window import ListedRecord
 
@@ -427,7 +431,7 @@ class TestOutboundMaintenanceSyncIntegration:
         # Step 5: Verify sync_metadata was created
         meta_result = await async_connection.execute(
             text("""
-                SELECT user_id, internal_uuid, sync_status
+                SELECT user_id, internal_uuid, sync_status, reference_data
                 FROM sync_metadata
                 WHERE integration_source = 'snipeit_maintenance'
                   AND external_id = 'snipeit_maint:501'
@@ -438,6 +442,13 @@ class TestOutboundMaintenanceSyncIntegration:
         assert meta_row.user_id == "user-123"
         assert meta_row.internal_uuid == str(journal_id)
         assert meta_row.sync_status == "success"
+        # The record holds what was posted: the base a later push merges against.
+        posted = json.loads(
+            next(r for r in mock_transport.requests if r.method == "POST").content
+        )
+        assert json.loads(meta_row.reference_data)[
+            "synced_entries"
+        ] == serialise_synced_entries(maintenance_merge.base_of(posted))
 
     @pytest.mark.asyncio
     async def test_push_maintenance_update_patches_snipeit(
@@ -910,18 +921,8 @@ async def _seed_import_record(
 
 async def _updated_event_maintenance_type(async_connection: AsyncConnection) -> str:
     """The maintenance type the one ``journal_event.updated`` would apply."""
-    row = (
-        await async_connection.execute(
-            text("""
-                SELECT event_data FROM outbox_events
-                WHERE event_type = 'journal_event.updated'
-            """)
-        )
-    ).one()
-    event_data = row.event_data
-    if isinstance(event_data, str):
-        event_data = json.loads(event_data)
-    return str(event_data["journal_data"]["gear_maintenance_data"]["maintenance_type"])
+    journal_data = await _updated_event_journal_data(async_connection)
+    return str(journal_data["gear_maintenance_data"]["maintenance_type"])
 
 
 class TestInboundMaintenanceTypeIsLossless:
@@ -3034,3 +3035,163 @@ class TestAMergedAwayImportStaysMerged:
 
         assert result == {"synced": 0, "skipped": 1, "failed": 0}
         assert await _journal_events(async_connection) == []
+
+
+def _record_17(**changes: Any) -> dict[str, Any]:
+    """Maintenance 17 as last synced with its journal, with ``changes``."""
+    return {
+        **_SNIPEIT_MAINTENANCE_17,
+        "title": "Rewaxed",
+        "asset_maintenance_type": "Maintenance",
+        **changes,
+    }
+
+
+def _record_17_version(record: dict[str, Any]) -> str:
+    """The version an import of ``record`` records (the gear item is not hashed)."""
+    return (
+        SnipeItMaintenanceTransformer()
+        .transform(
+            SnipeItMaintenance.model_validate(record),
+            user_id="user-123",
+            gear_item_id="unused",
+        )
+        .version_hash
+    )
+
+
+async def _seed_record_17_import(
+    async_connection: AsyncConnection,
+    *,
+    title: str,
+    version_hash: str,
+    pending: bool,
+) -> str:
+    """An imported maintenance 17 and its journal, last synced as ``_record_17()``."""
+    gear_item_id = await _seed_synced_asset(async_connection, 51)
+    await _seed_maintenance_journal(
+        async_connection, gear_item_id=gear_item_id, title=title, imported_from=17
+    )
+    await _seed_import_record(
+        async_connection, maintenance_id=17, version_hash=version_hash
+    )
+    base = maintenance_merge.base_of(_snipeit_record_payload(_record_17_model()))
+    await async_connection.execute(
+        text("""
+            UPDATE sync_metadata SET reference_data = :reference_data
+            WHERE integration_source = 'snipeit_maintenance'
+              AND external_id = 'snipeit_maint:17'
+        """),
+        {
+            "reference_data": json.dumps(
+                {
+                    "synced_entries": serialise_synced_entries(base),
+                    "pending_import": pending,
+                }
+            )
+        },
+    )
+    return gear_item_id
+
+
+def _record_17_model() -> SnipeItMaintenance:
+    return SnipeItMaintenance.model_validate(_record_17())
+
+
+async def _updated_event_journal_data(async_connection: AsyncConnection) -> Any:
+    """The journal data the one ``journal_event.updated`` would apply."""
+    row = (
+        await async_connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'journal_event.updated'
+            """)
+        )
+    ).one()
+    event_data = row.event_data
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    return event_data["journal_data"]
+
+
+async def _record_17_reference(async_connection: AsyncConnection) -> Any:
+    row = (
+        await async_connection.execute(
+            text("""
+                SELECT reference_data FROM sync_metadata
+                WHERE integration_source = 'snipeit_maintenance'
+                  AND external_id = 'snipeit_maint:17'
+            """)
+        )
+    ).one()
+    return json.loads(row.reference_data)
+
+
+class TestMaintenancePullMergesPerField:
+    """A pull of an imported record keeps the journal's edits still to push (#1898)."""
+
+    @pytest.mark.asyncio
+    async def test_a_pending_import_is_applied_at_an_unchanged_version(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # A push sent the journal's title and left Snipe-IT's completion date
+        # for this pull, recording the record's version after it.
+        remote = _record_17(
+            title="Waxed",
+            completion_date={"date": "2026-09-20", "formatted": "2026-09-20"},
+        )
+        await _seed_record_17_import(
+            async_connection,
+            title="Waxed",
+            version_hash=_record_17_version(remote),
+            pending=True,
+        )
+        mock_transport.add_response("/maintenances/17", json_data=remote)
+
+        result = await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert result == {"synced": 1, "skipped": 0, "failed": 0}
+        journal_data = await _updated_event_journal_data(async_connection)
+        assert journal_data["title"] == "Waxed"
+        assert journal_data["event_date_range_end"].startswith("2026-09-20")
+        reference = await _record_17_reference(async_connection)
+        assert reference["pending_import"] is False
+        assert reference["synced_entries"] == serialise_synced_entries(
+            maintenance_merge.base_of(
+                _snipeit_record_payload(SnipeItMaintenance.model_validate(remote))
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_pull_keeps_a_title_edit_still_to_push(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection,
+            title="Waxed again",
+            version_hash="an-older-version",
+            pending=False,
+        )
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_record_17(notes="Edges sharpened")
+        )
+
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        journal_data = await _updated_event_journal_data(async_connection)
+        assert (journal_data["title"], journal_data["content"]) == (
+            "Waxed again",
+            "Edges sharpened",
+        )
