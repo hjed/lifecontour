@@ -8,6 +8,8 @@ read the base back off the link:
 * a field the journal now holds Google's value for advances to Google's key;
   one local kept (a local edit, or the description an update never writes)
   keeps its old key, so the push still sees which side moved;
+* with a base, a field is protected only if local changed *that* field — a
+  local content edit no longer holds back Google's title;
 * ``pending_import`` applies an event whose etag is the push's own, without
   overwriting a local edit still to be pushed.
 """
@@ -160,6 +162,18 @@ async def _edit_journal(
     )
 
 
+async def _set_location(
+    connection: AsyncConnection, journal_id: int, location: str
+) -> None:
+    await connection.execute(
+        text(
+            "UPDATE journal_calendar_info SET location = :location"
+            " WHERE journal_id = :id"
+        ),
+        {"location": location, "id": journal_id},
+    )
+
+
 async def _journal(connection: AsyncConnection, journal_id: int) -> Any:
     result = await connection.execute(
         text(
@@ -251,6 +265,167 @@ class TestBaseRecordedByAnAppliedPull:
         )
 
         assert await _base(async_connection, journal_id) == {}
+
+
+class TestPerFieldProtection:
+    async def test_googles_title_applies_despite_a_local_content_edit(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(processor, calendar, title="Physio")
+        await _edit_journal(async_connection, journal_id, content="my notes")
+
+        await _update(processor, calendar, journal_id, title="Physio (moved)")
+
+        assert (await _journal(async_connection, journal_id)).title == "Physio (moved)"
+
+    async def test_a_local_title_edit_is_kept_and_its_base_unchanged(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(processor, calendar, title="Physio")
+        await _edit_journal(async_connection, journal_id, title="My physio")
+
+        await _update(processor, calendar, journal_id, title="Physio (moved)")
+
+        assert (await _journal(async_connection, journal_id)).title == "My physio"
+        assert (await _base(async_connection, journal_id))[
+            CalendarSyncField.SUMMARY
+        ] == {summary_key("Physio")}
+
+    async def test_a_local_time_edit_is_kept(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(processor, calendar, title="Physio")
+        moved_locally = START + timedelta(days=1)
+        await _edit_journal(
+            async_connection,
+            journal_id,
+            event_date_range_start=moved_locally,
+            event_date_range_end=moved_locally + timedelta(hours=1),
+        )
+
+        await _update(
+            processor,
+            calendar,
+            journal_id,
+            title="Physio",
+            start=START + timedelta(hours=3),
+            end=END + timedelta(hours=3),
+        )
+
+        journal = await _journal(async_connection, journal_id)
+        assert journal.event_date_range_start == moved_locally
+
+    async def test_a_local_location_edit_is_kept(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(
+            processor, calendar, title="Physio", location="Clinic"
+        )
+        await _set_location(async_connection, journal_id, "Home visit")
+
+        await _update(
+            processor, calendar, journal_id, title="Physio", location="New clinic"
+        )
+
+        journal = await _journal(async_connection, journal_id)
+        assert journal.location == "Home visit"
+        assert (await _base(async_connection, journal_id))[
+            CalendarSyncField.LOCATION
+        ] == {location_key("Clinic")}
+
+    async def test_googles_location_applies_when_local_left_it_alone(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(
+            processor, calendar, title="Physio", location="Clinic"
+        )
+
+        await _update(
+            processor, calendar, journal_id, title="Physio", location="New clinic"
+        )
+
+        assert (await _journal(async_connection, journal_id)).location == "New clinic"
+
+    async def test_a_link_without_a_base_keeps_the_journal_wide_rule(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        processor = build_processor(async_connection)
+        calendar = await create_calendar(async_connection)
+        journal_id = await _created(processor, calendar, title="Physio", synced=False)
+        await _edit_journal(async_connection, journal_id, content="my notes")
+
+        await _update(processor, calendar, journal_id, title="Physio (moved)")
+
+        # A local edit anywhere protects the title, as before bases existed.
+        assert (await _journal(async_connection, journal_id)).title == "Physio"
+
+    async def test_a_link_on_another_calendar_keeps_the_journal_wide_rule(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        # The push only keeps the displayed calendar's base current, so a
+        # second calendar's base would protect a locally pushed title forever.
+        processor = build_processor(async_connection)
+        displayed = await create_calendar(async_connection, name="Displayed")
+        other = await create_calendar(async_connection, name="Other")
+        journal_id = await _created(processor, displayed, title="Physio")
+        await async_connection.execute(
+            text(
+                """
+                INSERT INTO journal_external_event_links
+                    (journal_id, calendar_id, external_event_id,
+                     external_version, reference_data, sync_capability,
+                     sync_status, created_at, updated_at)
+                VALUES (:journal_id, :calendar_id, :event_id, '"other-1"',
+                        :reference_data, 'bidirectional', 'synced',
+                        :now, :now)
+                """
+            ),
+            {
+                "journal_id": journal_id,
+                "calendar_id": other,
+                "event_id": "other-calendar-copy",
+                "reference_data": json.dumps(
+                    {SYNCED_ENTRIES_KEY: {"summary": [summary_key("Stale")]}}
+                ),
+                "now": FAR_FUTURE,
+            },
+        )
+        event = _event(
+            "journal_event.updated",
+            other,
+            title="Physio (moved)",
+            etag='"other-2"',
+            existing_journal_id=journal_id,
+        )
+        event.event_data["external_event_id"] = "other-calendar-copy"
+
+        await processor.process_event(event)
+
+        assert (await _journal(async_connection, journal_id)).title == "Physio (moved)"
 
 
 class TestPendingImport:
