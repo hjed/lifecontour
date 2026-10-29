@@ -687,78 +687,6 @@ class TestPushMaintenanceUpdate:
     """Tests for push_maintenance_update method."""
 
     @pytest.mark.asyncio
-    async def test_updates_maintenance_in_snipeit(self) -> None:
-        """Happy path: patches maintenance record via PATCH."""
-        api_client = _mock_api_client()
-        api_client.update_maintenance.return_value = MagicMock(id=201)
-
-        journal_row = MagicMock(
-            title="Updated Inspection",
-            content="New notes",
-            event_date_range_start="2024-06-01",
-            event_date_range_end="2024-06-03",
-        )
-        maintenance_data_row = MagicMock(
-            gear_item_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            maintenance_type="repairing gear",
-        )
-        asset_sync_meta_row = MagicMock(external_id="42")
-
-        # For update, we need a 4th query result: maintenance sync metadata
-        mock_session = MagicMock()
-        mock_session_ctx = MagicMock()
-        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        maint_sync_row = MagicMock(external_id="snipeit_maint:201")
-
-        # Set up results for the 4 queries + 1 metadata update
-        results = [
-            MagicMock(fetchone=MagicMock(return_value=journal_row)),  # journal
-            MagicMock(
-                fetchone=MagicMock(return_value=maintenance_data_row)
-            ),  # maintenance data
-            MagicMock(
-                fetchone=MagicMock(return_value=asset_sync_meta_row)
-            ),  # asset sync
-            MagicMock(fetchone=MagicMock(return_value=None)),  # not imported
-            MagicMock(
-                fetchone=MagicMock(return_value=maint_sync_row)
-            ),  # maintenance sync
-            MagicMock(),  # metadata UPDATE result
-        ]
-        mock_session.execute = AsyncMock(side_effect=results)
-        mock_session.connection = AsyncMock(return_value=MagicMock(execute=AsyncMock()))
-
-        mock_begin = MagicMock()
-        mock_begin.__aenter__ = AsyncMock(return_value=None)
-        mock_begin.__aexit__ = AsyncMock(return_value=False)
-        mock_session.begin.return_value = mock_begin
-
-        session_factory = MagicMock(return_value=mock_session_ctx)
-
-        service = SnipeItSyncService(
-            api_client=api_client,
-            user_id="user-1",
-        )
-
-        await service.push_maintenance_update(
-            journal_id=100,
-            session_factory=session_factory,
-        )
-
-        # Verify PATCH was called
-        api_client.update_maintenance.assert_called_once()
-        call_args = api_client.update_maintenance.call_args
-        assert call_args.args[0] == 201  # maintenance_id
-        payload = call_args.args[1]
-        assert payload["name"] == "Updated Inspection"
-        assert payload["asset_maintenance_type"] == "Repair"
-
-        # Verify sync metadata was updated (6th execute call)
-        assert mock_session.execute.call_count == 6
-
-    @pytest.mark.asyncio
     async def test_skips_when_no_maintenance_sync_metadata(self) -> None:
         """No existing maintenance sync metadata means skip (was never synced to Snipe-IT)."""
         api_client = _mock_api_client()
@@ -811,9 +739,9 @@ class TestPushMaintenanceUpdate:
 
     @pytest.mark.asyncio
     async def test_handles_api_404(self) -> None:
-        """404 from Snipe-IT during update logs and returns (doesn't raise)."""
+        """A record Snipe-IT no longer has is logged and left (doesn't raise)."""
         api_client = _mock_api_client()
-        api_client.update_maintenance.side_effect = SnipeItAPIError(
+        api_client.get_maintenance.side_effect = SnipeItAPIError(
             "Not found", status_code=404
         )
 
@@ -862,6 +790,8 @@ class TestPushMaintenanceUpdate:
             journal_id=100,
             session_factory=session_factory,
         )
+
+        api_client.update_maintenance.assert_not_called()
 
 
 def _sql_routed_session_factory(rows: dict[str, object]) -> MagicMock:
@@ -934,6 +864,9 @@ class TestPushMaintenanceOfImportedJournals:
         """An already-echoed journal carries a push row naming the echo; its
         edits still go to the record it was imported from."""
         api_client = _mock_api_client()
+        api_client.get_maintenance.return_value = SnipeItMaintenance(
+            id=17, asset_id=51, title="Before the edit"
+        )
         service = SnipeItSyncService(api_client=api_client, user_id="user-1")
         rows = self._imported_journal_rows(
             **{"'snipeit_maintenance'": MagicMock(external_id="snipeit_maint:20")}
