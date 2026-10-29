@@ -38,7 +38,7 @@ from sqlalchemy import text
 
 from asset_merge import (
     AssetValues,
-    base_after_push,
+    base_after,
     base_of,
     holds_other_values,
     merge_pull,
@@ -1287,7 +1287,7 @@ class SnipeItSyncService:
             )
             # A redelivered push whose PATCH landed before its base was recorded
             # finds the two sides agreeing: that agreement is the base.
-            settled = base_after_push(
+            settled = base_after(
                 base, local=local, after=AssetValues.of(remote.gear_item)
             )
             if settled != recorded_synced_entries(link.reference_data):
@@ -1335,7 +1335,7 @@ class SnipeItSyncService:
                     external_id,
                     {
                         SYNCED_ENTRIES_KEY: serialise_synced_entries(
-                            base_after_push(base, local=local, after=after)
+                            base_after(base, local=local, after=after)
                         ),
                         PENDING_IMPORT_KEY: holds_other_values(after, local),
                     },
