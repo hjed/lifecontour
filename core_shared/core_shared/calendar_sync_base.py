@@ -214,14 +214,18 @@ MERGED_REFERENCE_DATA_SQL: Final = f"""(
 def merged_reference_data_params(
     *,
     agreed: Mapping[CalendarSyncField, frozenset[str]],
-    pending_import: bool,
+    pending_import: bool | None,
     seeded: Mapping[CalendarSyncField, frozenset[str]] | None = None,
 ) -> dict[str, str]:
-    """The bind parameters :data:`MERGED_REFERENCE_DATA_SQL` takes."""
+    """The bind parameters :data:`MERGED_REFERENCE_DATA_SQL` takes.
+
+    ``pending_import=None`` leaves the flag as the link holds it.
+    """
+    flags = {} if pending_import is None else {PENDING_IMPORT_KEY: pending_import}
     return {
         "agreed": json.dumps(serialise_synced_entries(agreed)),
         "seeded": json.dumps(serialise_synced_entries(seeded or {})),
-        "flags": json.dumps({PENDING_IMPORT_KEY: pending_import}),
+        "flags": json.dumps(flags),
     }
 
 
