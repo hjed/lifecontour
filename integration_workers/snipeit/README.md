@@ -143,6 +143,17 @@ overwrites local edits to them. A push that fails on every delivery is
 dead-lettered and logged; the edit stays local, and the next push of that gear
 item sends it.
 
+### Outbound maintenance edits
+
+A `JournalUpdated` event for a `GEAR_MAINTENANCE` journal pushes its title,
+content, type and dates to the Snipe-IT maintenance record field by field
+(`maintenance_merge.py`), against the base the record's sync row keeps, just as
+gear edits are. A field changed only in Snipe-IT is never overwritten. For a
+record imported from Snipe-IT the next pull imports it (`pending_import`), and
+a pull keeps a journal edit still to push. A record the app created is never
+pulled, so a field changed in Snipe-IT stays there until the journal changes
+that field. A row recorded before bases existed sends every field that differs.
+
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default**. The worker inherits
