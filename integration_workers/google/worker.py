@@ -22,6 +22,7 @@ from core_shared import (
     generate_interval_cron,
     redis_settings_from_url,
 )
+from core_shared.calendar_sync_base import google_event_times
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
@@ -78,7 +79,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_models import GooglePerson, ListConnectionsResponse
 
 # Import worker-specific services
-from event_transformer import google_event_times
 from google_auth_service import (
     GoogleAuthService,
     GoogleAuthTokensNotFoundError,

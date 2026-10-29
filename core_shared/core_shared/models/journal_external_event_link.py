@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     Uuid,
     text,
 )
@@ -48,6 +49,10 @@ class JournalExternalEventLink(Base):
     however many calendars it appears in. Nothing outside the worker
     interprets it: the only rule here is that two links sharing a token for
     the same user describe the same thing, and so belong to one journal.
+
+    ``reference_data`` is JSON text holding the synced base the journal push
+    merges against and its ``pending_import`` marker (``core_shared.sync_base``,
+    ``core_shared.calendar_sync_base``).
     """
 
     __tablename__ = "journal_external_event_links"
@@ -68,6 +73,7 @@ class JournalExternalEventLink(Base):
     external_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     recurring_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_identity: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    reference_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     sync_capability: Mapped[str] = mapped_column(String(32), nullable=False)
     sync_status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

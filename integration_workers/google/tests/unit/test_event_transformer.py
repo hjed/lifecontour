@@ -1033,7 +1033,7 @@ class TestGoogleEventTimes:
         return CalendarInfo(**fields)
 
     def test_all_day_event_uses_the_local_date_in_the_event_timezone(self) -> None:
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             self.SYDNEY_MIDNIGHT_5_SEPT,
@@ -1045,7 +1045,7 @@ class TestGoogleEventTimes:
         assert end == {"date": "2026-09-06"}
 
     def test_all_day_event_without_timezone_uses_the_utc_date(self) -> None:
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             datetime(2023, 12, 25, tzinfo=UTC),
@@ -1061,7 +1061,7 @@ class TestGoogleEventTimes:
         assert end == {"date": "2023-12-27"}
 
     def test_timed_event_anchors_clock_times_to_the_local_date(self) -> None:
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             self.SYDNEY_MIDNIGHT_5_SEPT,
@@ -1086,7 +1086,7 @@ class TestGoogleEventTimes:
     def test_timed_event_without_clock_times_pushes_the_stored_instants(
         self,
     ) -> None:
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             datetime(2023, 10, 27, 10, 0, tzinfo=UTC),
@@ -1103,7 +1103,7 @@ class TestGoogleEventTimes:
     def test_timed_event_without_a_timezone_pushes_the_stored_instants(self) -> None:
         """Clock times are only meaningful in the zone they were entered in;
         without one the stored instants are the truth."""
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             datetime(2026, 9, 4, 16, 0, tzinfo=UTC),
@@ -1118,7 +1118,7 @@ class TestGoogleEventTimes:
         """Los Angeles repeats 01:00-02:00 on 2026-11-01. A stored 01:30 names
         two instants; the ``TIME`` column cannot record which, so the stored
         instant decides. Here the event was in the second (PST) hour."""
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, end = google_event_times(
             datetime(2026, 11, 1, 9, 30, tzinfo=UTC),  # 01:30 PST, second pass
@@ -1136,7 +1136,7 @@ class TestGoogleEventTimes:
         assert end["dateTime"] == "2026-11-01T10:30:00Z"
 
     def test_an_ambiguous_clock_time_in_the_first_pass_stays_there(self) -> None:
-        from event_transformer import google_event_times
+        from core_shared.calendar_sync_base import google_event_times
 
         start, _end = google_event_times(
             datetime(2026, 11, 1, 8, 30, tzinfo=UTC),  # 01:30 PDT, first pass

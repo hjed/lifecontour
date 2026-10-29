@@ -199,6 +199,13 @@ class JournalSyncEventData(BaseModel):
             "instead of starting another. Null for every other event."
         ),
     )
+    synced_entries: dict[str, list[str]] | None = Field(
+        default=None,
+        description="Per event field, the keys of the values the source holds "
+        "(see core_shared.calendar_sync_base), or None from a worker that "
+        "records none. Recorded on the link for the fields the apply takes: "
+        "the base the next push merges against (#1899).",
+    )
 
 
 class JournalStatusEventData(BaseModel):

@@ -370,6 +370,20 @@ class TestJournalSyncEventData:
         model = JournalSyncEventData.model_validate(journal_sync_data)
         assert model.etag is None
 
+    def test_synced_entries_default_to_none(
+        self, journal_sync_data: dict[str, Any]
+    ) -> None:
+        """A worker that records no base sends none."""
+        model = JournalSyncEventData.model_validate(journal_sync_data)
+        assert model.synced_entries is None
+
+    def test_synced_entries_roundtrip(self, journal_sync_data: dict[str, Any]) -> None:
+        """The event's base survives serialisation, field by field (#1899)."""
+        journal_sync_data["synced_entries"] = {"summary": ["k1"], "when": ["k2"]}
+        model = JournalSyncEventData.model_validate(journal_sync_data)
+        assert JournalSyncEventData.model_validate(model.model_dump()) == model
+        assert model.synced_entries == {"summary": ["k1"], "when": ["k2"]}
+
 
 # ── MatchDetectionEventData Tests ─────────────────────────────────────
 
