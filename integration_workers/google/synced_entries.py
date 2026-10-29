@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Final, Literal
 
 import phonenumbers
+from core_shared.models.contacts.sync_scope import ContactSyncField
 from core_shared.sync_base import SyncedEntries, entry_key
 from pydantic import BaseModel, ValidationError
 
@@ -198,3 +199,24 @@ def raw_synced_entries(
         )
         for field in BASE_FIELDS
     }
+
+
+# The contact lists inbound sends as None when Google holds no entries in them,
+# each with the base field that records what Google held. Notes join once
+# biographies are in the base (#1925).
+LIST_BASES: Final[Mapping[ContactSyncField, BaseField]] = {
+    ContactSyncField.ADDRESSES: "addresses",
+}
+
+
+def empty_at_source(person: GooglePerson) -> dict[ContactSyncField, BaseField]:
+    """The lists ``person`` holds no entries in at all, with their base fields.
+
+    The backend clears such a list when the link's base recorded entries for it:
+    Google deleted them all since the last sync (#1909). An entry inbound cannot
+    import still counts as held, since Google keeps it.
+    """
+    held: dict[ContactSyncField, list[Any]] = {
+        ContactSyncField.ADDRESSES: person.addresses,
+    }
+    return {field: base for field, base in LIST_BASES.items() if not held[field]}

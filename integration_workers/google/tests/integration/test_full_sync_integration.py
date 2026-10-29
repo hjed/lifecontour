@@ -181,6 +181,20 @@ class TestFullSyncIntegration:
             )
             assert [row[0] for row in result_force] == [True, True]
 
+            # Neither person holds an address, so the backend clears addresses
+            # Google deleted since the last sync (#1909).
+            result_empty = await db_session.execute(
+                text(
+                    """
+                    SELECT (event_data::jsonb)->'empty_at_source'
+                    FROM outbox_events
+                    WHERE (event_data::jsonb)->>'external_id'
+                          IN ('people/full_sync_1', 'people/full_sync_2')
+                    """
+                )
+            )
+            assert [row[0] for row in result_empty] == [{"addresses": "addresses"}] * 2
+
     async def test_full_sync_gives_a_countryless_address_the_default_country(
         self, db_session
     ) -> None:
@@ -261,13 +275,16 @@ class TestFullSyncIntegration:
                 """
                 SELECT (event_data::jsonb)->'contact_data'->'addresses',
                        (event_data::jsonb)->>'address_fallback_country',
-                       (event_data::jsonb)->'synced_entries'
+                       (event_data::jsonb)->'synced_entries',
+                       (event_data::jsonb)->'empty_at_source'
                 FROM outbox_events
                 WHERE (event_data::jsonb)->>'external_id' = 'people/default_country_1'
                 """
             )
         )
-        [(contact_addresses, fallback, synced)] = addresses.all()
+        [(contact_addresses, fallback, synced, empty)] = addresses.all()
+        # Google holds the address, so the backend never clears it (#1909).
+        assert empty == {}
         assert [(a["street_line_1"], a["country_code"]) for a in contact_addresses] == [
             ("1 Queen St", "NZ")
         ]

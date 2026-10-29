@@ -751,6 +751,16 @@ branch of `contact.created`) pass the incoming contact through
 - **Unowned scalar** (nickname, avatar, …): keeps the stored value.
 - **Unowned list** (methods, addresses, notes, tags): set to None, which the save
   leaves untouched.
+- **Emptied at the source:** a source sends None for a list it holds no entries
+  in, so a contact it never held entries for keeps its local ones. The event's
+  `empty_at_source` names those lists, each with the `synced_entries` field that
+  records them. When the link's base (below) recorded entries there, the source
+  deleted them all since the last sync, and `apply_source_deletions` clears the
+  list instead (archived values are still kept; #1909). Google reports
+  addresses only when its raw list is empty: an address inbound cannot import
+  still counts as held. A contact whose last address was deleted before this
+  shipped already has an empty base, so the next push recreates the address
+  once.
 - **Important dates:** owned per type. Incoming dates of owned types replace the
   stored ones (an empty list clears them); stored dates of every other type are
   kept. A None list still means "leave the dates alone": the transformers send
@@ -790,6 +800,9 @@ integration the missing piece, the **base**: per field, opaque keys
 - Every **applied pull** records the base it read (the worker sends it on the
   event; the backend stores it and clears `pending_import`). An event without
   one clears the base.
+- Before recording it, a pull reads the base it replaces: a list the event
+  reports `empty_at_source` is cleared when that base held entries for it
+  (see *Emptied at the source* above).
 - Every **push** records the base it leaves — read from the remote's
   *response*, since providers reformat values — merged into `reference_data`
   in one statement (`IntegrationLinkRepository.patch_reference_data`), so it

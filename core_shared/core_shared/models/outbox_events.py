@@ -10,11 +10,15 @@ The models live in ``core_shared`` so they are available to both the
 backend and integration workers.
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, Field, NonNegativeInt
+from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, NonNegativeInt
 
-from core_shared.models.contacts.sync_scope import ContactSyncScope
+from core_shared.models.contacts.sync_scope import (
+    ContactSyncField,
+    ContactSyncScope,
+    require_list_fields,
+)
 
 # ── Contact Sync ──────────────────────────────────────────────────────
 
@@ -95,6 +99,16 @@ class ContactSyncEventData(BaseModel):
         "(see core_shared.sync_base), or None from a worker that records none. "
         "Recorded on the link when the event is applied: the base the next "
         "push merges against, so an entry the source gains later is kept (#1861).",
+    )
+    empty_at_source: Annotated[
+        dict[ContactSyncField, str], AfterValidator(require_list_fields)
+    ] = Field(
+        default_factory=dict,
+        description="The list fields the source holds no entries in at all, "
+        "each with the synced_entries field that records what it held. The "
+        "contact data carries them as None, so a contact the source never held "
+        "entries for keeps its own; when the link's base recorded entries, the "
+        "source deleted them since the last sync and the list is cleared (#1909).",
     )
 
 

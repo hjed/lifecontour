@@ -96,7 +96,7 @@ from group_mapping import _build_contact_group_mapping, _fetch_contact_group_map
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
-from synced_entries import raw_synced_entries, synced_entries_of
+from synced_entries import empty_at_source, raw_synced_entries, synced_entries_of
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
@@ -1924,6 +1924,8 @@ async def _emit_contact_sync_events(
                 synced_entries=serialise_synced_entries(
                     synced_entries_of(google_person, fallback_country)
                 ),
+                # The lists Google emptied, for the backend to clear (#1909).
+                empty_at_source=empty_at_source(google_person),
             )
 
             # Add to session (will be committed with transaction)

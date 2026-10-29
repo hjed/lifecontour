@@ -10,13 +10,14 @@ it requests from its provider, so a field added to contacts later is safe from
 every sync until a source claims it.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from core_shared.models.contacts.entities import Contact
 from core_shared.models.contacts.important_date_types import ImportantDateType
+from core_shared.sync_base import SyncedEntries
 
 
 class ContactSyncField(StrEnum):
@@ -107,3 +108,36 @@ def apply_sync_scope(
         *(d for d in incoming.important_dates if d.date_type in owned_types),
         *(d for d in stored.important_dates or [] if d.date_type not in owned_types),
     ]
+
+
+def require_list_fields[V](
+    fields: Mapping[ContactSyncField, V],
+) -> Mapping[ContactSyncField, V]:
+    """``fields``, refused unless every key is a list field.
+
+    Only a list can be sent as None for "the source holds nothing here".
+    """
+    scalars = sorted(field.value for field in fields.keys() & _SCALAR_FIELDS)
+    if scalars:
+        raise ValueError(f"not list fields: {', '.join(scalars)}")
+    return fields
+
+
+def apply_source_deletions(
+    incoming: Contact,
+    empty_at_source: Mapping[ContactSyncField, str],
+    recorded: SyncedEntries | None,
+) -> None:
+    """Clear, in place, each list the source emptied since the last sync (#1909).
+
+    A source sends None for a list it holds no entries in, which the save
+    leaves untouched, so a contact it never held entries for keeps its local
+    ones. ``empty_at_source`` names those lists, each with the base field that
+    records what the source held; ``recorded`` is the link's base. Keys there
+    mean the source held entries at the last sync and has deleted them all
+    since, so the list is cleared instead. No base, or none for the field,
+    leaves it alone.
+    """
+    for field, base_field in empty_at_source.items():
+        if getattr(incoming, field.value) is None and (recorded or {}).get(base_field):
+            setattr(incoming, field.value, [])
