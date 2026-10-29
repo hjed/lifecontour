@@ -226,10 +226,11 @@ class TestStreamConsumerIntegration:
         asset_id = 456
 
         await _configure_snipeit(async_connection, user_id, snipeit_user_id)
+        # The event follows the edit, so the gear item already holds it.
         await async_connection.execute(
             text("""
                 INSERT INTO gear_items (id, user_id, name, serial_number, created_at, updated_at)
-                VALUES (:id, :user_id, 'Old Name', 'Old Serial', now(), now())
+                VALUES (:id, :user_id, 'New Name', 'New Serial', now(), now())
             """),
             {"id": gear_item_uuid, "user_id": user_id},
         )
@@ -266,8 +267,10 @@ class TestStreamConsumerIntegration:
             },
         )
 
-        # Mock GET response (used for conflict check)
-        mock_transport.add_response(f"/hardware/{asset_id}", json_data=asset_json)
+        # Mock GET response (the asset the push merges with)
+        mock_transport.add_response(
+            f"/hardware/{asset_id}", json_data=asset_json, method="GET"
+        )
 
         # Mock PATCH response
         updated_asset_json = {**asset_json, "name": "New Name", "serial": "New Serial"}
@@ -275,6 +278,11 @@ class TestStreamConsumerIntegration:
             f"/hardware/{asset_id}",
             status_code=200,
             json_data={"status": "success", "payload": updated_asset_json},
+            method="PATCH",
+        )
+        # Mock GET response (the asset re-read after the PATCH)
+        mock_transport.add_response(
+            f"/hardware/{asset_id}", json_data=updated_asset_json, method="GET"
         )
 
         mock_session_factory = _joined_session_factory(async_connection)
@@ -312,9 +320,13 @@ class TestStreamConsumerIntegration:
         )
         meta_row = meta_result.fetchone()
         assert meta_row is not None
+        # The hash is the re-read asset's
         assert (
-            meta_row.version_hash != version_hash
-        )  # Hash should be updated to the new one
+            meta_row.version_hash
+            == SnipeItDataTransformer()
+            .transform(SnipeItAsset.model_validate(updated_asset_json), user_id=user_id)
+            .version_hash
+        )
 
     @pytest.mark.asyncio
     async def test_journal_deleted_clears_a_claim_without_snipeit_settings(
