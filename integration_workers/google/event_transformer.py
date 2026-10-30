@@ -1,7 +1,13 @@
 import uuid
-from datetime import UTC, datetime, time, timedelta, tzinfo
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
+from core_shared.calendar_sync_base import (
+    UTC_OFFSET_SUFFIX,
+    google_event_times,
+    local_datetime,
+    zone,
+)
 from core_shared.models.journals import (
     CalendarInfo,
     EventDateRange,
@@ -12,38 +18,6 @@ from core_shared.models.journals.event_state import EventState
 
 from calendar_models import GoogleEvent, GoogleEventStartEnd
 
-UTC_OFFSET_SUFFIX = "+00:00"
-
-
-def _zone(timezone_str: str | None) -> tzinfo | None:
-    """The zone ``timezone_str`` names, or ``None`` when absent or unknown."""
-    if not timezone_str:
-        return None
-    try:
-        from zoneinfo import ZoneInfo
-
-        return ZoneInfo(timezone_str)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _anchor(instant: datetime, clock: time, tz: tzinfo) -> datetime:
-    """``clock`` on the local date of ``instant`` in ``tz``, as a UTC instant.
-
-    On the day clocks go back a wall time in the repeated hour names two
-    instants, and the ``TIME`` column that held ``clock`` cannot say which.
-    The stored instant can: if the second pass reproduces it, that is the
-    one meant; otherwise the first pass, which is also what an unambiguous
-    time resolves to.
-    """
-    first = datetime.combine(instant.astimezone(tz).date(), clock, tzinfo=tz)
-    second = first.replace(fold=1)
-    # Compared in UTC: an ambiguous aware datetime never compares equal
-    # across zones (PEP 495), so a direct comparison would always be false.
-    if second.utcoffset() != first.utcoffset() and second.astimezone(UTC) == instant:
-        return second.astimezone(UTC)
-    return first.astimezone(UTC)
-
 
 def _previous_local_midnight(instant: datetime, timezone_str: str | None) -> datetime:
     """The local midnight one calendar day before ``instant``, in UTC.
@@ -53,57 +27,9 @@ def _previous_local_midnight(instant: datetime, timezone_str: str | None) -> dat
     the day Sydney's clocks go forward is 23 hours long, and 24 hours before
     the next midnight is before that day even starts.
     """
-    tz = _zone(timezone_str) or UTC
+    tz = zone(timezone_str) or UTC
     previous_day = instant.astimezone(tz).date() - timedelta(days=1)
     return datetime.combine(previous_day, time.min, tzinfo=tz).astimezone(UTC)
-
-
-def _local_datetime(dt_utc: datetime, timezone_str: str | None) -> datetime:
-    """``dt_utc`` read in ``timezone_str``, or unchanged when there is no zone."""
-    tz = _zone(timezone_str)
-    return dt_utc if tz is None else dt_utc.astimezone(tz)
-
-
-def google_event_times(
-    start_dt: datetime, end_dt: datetime, calendar_info: CalendarInfo
-) -> tuple[dict[str, str], dict[str, str]]:
-    """The ``start`` and ``end`` blocks of a Google Calendar event payload.
-
-    Journal date-range bounds are UTC instants of *local* midnight, so the
-    calendar date an event falls on has to be read in the event's timezone:
-    midnight on 5 Sept in Sydney is 14:00 UTC on 4 Sept. Without a zone the
-    UTC date is used.
-
-    An all-day event becomes a ``date`` pair with Google's exclusive end (the
-    day after the last day). A timed event becomes a ``dateTime`` pair. Its
-    clock times are only meaningful in the zone they were entered in, so they
-    are anchored to the local date in the event's *own* zone and otherwise
-    left alone: an event with no zone, or no clock times, pushes the stored
-    instants as they are. (An imported event's times are local to the Google
-    event's zone; re-anchoring them in any other zone would move the event.)
-    """
-    if calendar_info.is_all_day:
-        local_start = _local_datetime(start_dt, calendar_info.timezone)
-        local_end = _local_datetime(end_dt, calendar_info.timezone)
-        return (
-            {"date": local_start.strftime("%Y-%m-%d")},
-            {"date": (local_end + timedelta(days=1)).strftime("%Y-%m-%d")},
-        )
-
-    tz = _zone(calendar_info.timezone)
-    if tz is not None:
-        if calendar_info.start_time is not None:
-            start_dt = _anchor(start_dt, calendar_info.start_time, tz)
-        if calendar_info.end_time is not None:
-            end_dt = _anchor(end_dt, calendar_info.end_time, tz)
-
-    # ISO 8601 with a 'Z' suffix for UTC; Google accepts offsets either way.
-    start_payload = {"dateTime": start_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
-    end_payload = {"dateTime": end_dt.isoformat().replace(UTC_OFFSET_SUFFIX, "Z")}
-    if calendar_info.timezone:
-        start_payload["timeZone"] = calendar_info.timezone
-        end_payload["timeZone"] = calendar_info.timezone
-    return start_payload, end_payload
 
 
 class GoogleEventTransformer:
@@ -227,7 +153,7 @@ class GoogleEventTransformer:
     ) -> datetime | None:
         if not dt_utc:
             return None
-        return _local_datetime(dt_utc, timezone_str)
+        return local_datetime(dt_utc, timezone_str)
 
     def _extract_timezone(self, google_event: GoogleEvent) -> str | None:
         """Extract IANA timezone from Google event start/end.
@@ -312,7 +238,7 @@ class GoogleEventTransformer:
         except ValueError:
             return None, False
         local_midnight = datetime.combine(
-            parsed_date, datetime.min.time(), tzinfo=_zone(timezone_str) or UTC
+            parsed_date, datetime.min.time(), tzinfo=zone(timezone_str) or UTC
         )
         return local_midnight.astimezone(UTC), True
 

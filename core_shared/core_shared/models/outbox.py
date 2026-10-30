@@ -213,6 +213,7 @@ class OutboxEvent(Base):
         external_identity: str | None = None,
         series_recurring_event_id: str | None = None,
         split_adopted_from: str | None = None,
+        synced_entries: dict[str, list[str]] | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for journal calendar event synchronization.
@@ -242,6 +243,8 @@ class OutboxEvent(Base):
             split_adopted_from: Series key of the old recurrence whose journal
                 this update adopts, when the source split a recurrence under
                 an unrelated id
+            synced_entries: Per event field, the keys of the values the source
+                holds: the base the next push merges against
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -264,6 +267,7 @@ class OutboxEvent(Base):
             external_identity=external_identity,
             series_recurring_event_id=series_recurring_event_id,
             split_adopted_from=split_adopted_from,
+            synced_entries=synced_entries,
         )
         return cls(
             event_type=f"journal_event.{sync_action}",
