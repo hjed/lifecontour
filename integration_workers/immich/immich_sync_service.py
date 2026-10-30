@@ -38,12 +38,18 @@ from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
 )
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    recorded_synced_entries,
+    serialise_synced_entries,
+)
 from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
 from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson, ImmichSharedLink
-from person_base import parse_birth_date
+from person_base import parse_birth_date, plan_push, resolve_base
 
 logger = structlog.get_logger(__name__)
 
@@ -374,9 +380,13 @@ class ImmichSyncService:
     async def sync_contact_outbound(self, contact_id: int) -> dict[str, Any]:
         """Sync a local contact update to Immich.
 
-        Checks if the contact is linked to an Immich person. If so, fetches
-        the contact's details (name, full precision birthday) and pushes
-        updates to Immich.
+        Merges the contact's name and full-precision birthday into the linked
+        Immich person three ways against the base the last sync recorded
+        (``person_base``), so a field edited only in Immich since is kept
+        rather than overwritten. Only the fields local wins are PUT. The link
+        then records the person's version, the contact version the push read,
+        the new base and - when Immich keeps a birthday local lacks -
+        ``pending_import`` for the next pull.
 
         Args:
             contact_id: Local contact ID.
@@ -402,53 +412,76 @@ class ImmichSyncService:
         if not contact_data:
             return {"status": "error", "reason": "contact_not_found"}
 
-        # 3. Build update payload for Immich
-        update_data: dict[str, Any] = {}
-        name_parts = []
-        if contact_data.get("first_name"):
-            name_parts.append(contact_data["first_name"])
-        if contact_data.get("middle_name"):
-            name_parts.append(contact_data["middle_name"])
-        if contact_data.get("last_name"):
-            name_parts.append(contact_data["last_name"])
-        if name_parts:
-            update_data["name"] = " ".join(name_parts)
+        # 3. Merge against the person as Immich holds it now
+        current = await self._api.get_person(person_id)
+        plan = plan_push(
+            local_name=self._local_name(contact_data),
+            local_birth_date=self._local_birth_date(contact_data),
+            current=current,
+            base=resolve_base(
+                recorded_synced_entries(link["reference_data"]),
+                current,
+                recorded_version=link["version_hash"],
+                current_version=self.calculate_version_hash(current),
+            ),
+        )
 
-        if (
-            contact_data.get("year")
-            and contact_data.get("month")
-            and contact_data.get("day")
-        ):
-            update_data["birthDate"] = (
-                f"{contact_data['year']:04d}-{contact_data['month']:02d}-{contact_data['day']:02d}"
-            )
-        else:
-            # Preserve Immich's existing birthday when local has no
-            # full-precision birthday (source-of-truth enforcement).
-            immich_person = await self._api.get_person(person_id)
-            if immich_person and immich_person.birth_date:
-                update_data["birthDate"] = immich_person.birth_date
+        # 4. Push the fields local wins
+        pushed = (
+            await self._api.update_person(person_id, plan.update_data)
+            if plan.update_data
+            else current
+        )
 
-        if not update_data:
-            return {"status": "skipped", "reason": "no_changes"}
-
-        # 4. Push update to Immich
-        updated_person = await self._api.update_person(person_id, update_data)
-
-        # 5. Update sync metadata version hash
-        new_hash = self.calculate_version_hash(updated_person)
+        # 5. Record the push on the link
         await self._upsert_sync_metadata(
             external_id=person_id,
             internal_id=contact_id,
-            version_hash=new_hash,
+            version_hash=self.calculate_version_hash(pushed),
+            synced_at=contact_data["updated_at"],
+        )
+        outcome = plan.settle(pushed)
+        patch: dict[str, Any] = {
+            SYNCED_ENTRIES_KEY: serialise_synced_entries(outcome.base)
+        }
+        if outcome.pending_import:
+            patch[PENDING_IMPORT_KEY] = True
+        await link_repo.patch_reference_data(
+            self._integration_source, person_id, patch, user_id=self._user_id
         )
 
         logger.info(
             "Outbound contact sync successful",
             contact_id=contact_id,
             person_id=person_id,
+            pushed_fields=sorted(plan.update_data),
+            pending_import=outcome.pending_import,
         )
         return {"status": "success", "person_id": person_id}
+
+    @staticmethod
+    def _local_name(contact_data: dict[str, Any]) -> str | None:
+        """The contact's full name as Immich holds one, or ``None`` without one."""
+        parts = [
+            contact_data[part]
+            for part in ("first_name", "middle_name", "last_name")
+            if contact_data.get(part)
+        ]
+        return " ".join(parts) if parts else None
+
+    @staticmethod
+    def _local_birth_date(contact_data: dict[str, Any]) -> str | None:
+        """The contact's full-precision birthday as ``YYYY-MM-DD``, if it has one."""
+        if not (
+            contact_data.get("year")
+            and contact_data.get("month")
+            and contact_data.get("day")
+        ):
+            return None
+        return (
+            f"{contact_data['year']:04d}-{contact_data['month']:02d}"
+            f"-{contact_data['day']:02d}"
+        )
 
     # -- Static helpers ---------------------------------------------------
 
@@ -899,8 +932,13 @@ class ImmichSyncService:
         external_id: str,
         internal_id: int,
         version_hash: str,
+        synced_at: datetime | None = None,
     ) -> None:
         """Create or update SyncMetadata for a person-to-contact mapping.
+
+        ``synced_at`` is the contact version the link is in step with: a push
+        passes the version it read, so an edit landing mid-push still reads
+        as unpushed. It defaults to now.
 
         The link is the syncing user's, keyed by ``(user_id, integration_source,
         external_id)``: a person another user already links is refused by the
@@ -916,7 +954,7 @@ class ImmichSyncService:
                  retry_count, created_at, updated_at)
             VALUES
                 (:user_id, :internal_id, :integration_source, :external_id,
-                 :now, :version_hash, 'success',
+                 :synced_at, :version_hash, 'success',
                  :internal_entity_type, :external_entity_type,
                  0, :now, :now)
             ON CONFLICT (user_id, integration_source, external_id)
@@ -944,6 +982,7 @@ class ImmichSyncService:
                 "version_hash": version_hash,
                 "internal_entity_type": self._INTERNAL_ENTITY_TYPE,
                 "external_entity_type": self._EXTERNAL_ENTITY_TYPE,
+                "synced_at": synced_at or now,
                 "now": now,
             },
         )
