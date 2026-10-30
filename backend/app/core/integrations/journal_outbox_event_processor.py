@@ -6,11 +6,19 @@ journal_event.conflicted, and journal_event.cancelled outbox events
 from integration workers to create/update journals in the core system.
 """
 
+import json
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
+from core_shared.calendar_sync_base import (
+    MERGED_REFERENCE_DATA_SQL,
+    agreed_after_apply,
+    merged_reference_data_params,
+    recorded_calendar_base,
+    remote_keys,
+)
 from core_shared.integration_constants import (
     LEGACY_SHARED_STRAVA_CALENDAR_ID,
     SyntheticCalendar,
@@ -57,6 +65,11 @@ from core_shared.repositories.merged_alias_repository import (
     MergedAlias,
     MergedAliasRepository,
 )
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    pending_import,
+)
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -76,6 +89,10 @@ from app.core.integrations.adapters.sql.unmatched_participant_email_repository i
 )
 from app.core.integrations.cancelled_recurrence_tidier import (
     CancelledRecurrenceTidier,
+)
+from app.core.integrations.journal_synced_base import (
+    local_event_keys,
+    stored_calendar_info,
 )
 from app.core.integrations.models.unmatched_participant import (
     UnmatchedParticipantEmail,
@@ -601,6 +618,14 @@ class JournalOutboxEventProcessor:
             recurring_event_id=payload.recurring_event_id,
             external_identity=payload.external_identity,
         )
+        if payload.synced_entries is not None:
+            await self._record_synced_base(
+                created_journal.id,
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+                synced_entries=payload.synced_entries,
+                user_timezone=await self._user_timezone(created_journal.user_id),
+            )
 
         # Auto-link recurring instances into a journal series
         await self._ensure_series_membership(
@@ -762,10 +787,14 @@ class JournalOutboxEventProcessor:
             calendar_id=UUID(calendar_id),
             external_event_id=external_event_id,
         )
+        # A push that kept Google's value for a field records its own etag
+        # and ``pending_import``: the event is unchanged since, but the journal
+        # does not hold it yet.
         if (
             etag is not None
             and existing_link is not None
             and existing_link.external_version == etag
+            and not pending_import(existing_link.reference_data)
         ):
             # Backfill promotion: the worker re-sends unchanged events whose
             # link predates a feature, carrying the SAME etag. Whatever the
@@ -877,6 +906,14 @@ class JournalOutboxEventProcessor:
             )
         link_updated_at = existing_link.updated_at if existing_link else None
         adopting = split_adoption is not None
+        reference_data = existing_link.reference_data if existing_link else None
+        base = recorded_calendar_base(reference_data)
+        # Keys are only read where there is a base to compare or record.
+        user_timezone = (
+            await self._user_timezone(existing_journal.user_id)
+            if base is not None or payload.synced_entries is not None
+            else None
+        )
 
         def _merged(stored: Journal) -> Journal | None:
             return self._merged_journal(
@@ -928,6 +965,14 @@ class JournalOutboxEventProcessor:
             recurring_event_id=payload.recurring_event_id,
             external_identity=payload.external_identity,
         )
+        if payload.synced_entries is not None or reference_data is not None:
+            await self._record_synced_base(
+                saved_journal.id,
+                calendar_id=UUID(calendar_id),
+                external_event_id=external_event_id,
+                synced_entries=payload.synced_entries,
+                user_timezone=user_timezone,
+            )
 
         # Surface any journal that turns out to describe the same event
         await self._flag_duplicate_journals(
@@ -1751,6 +1796,93 @@ class JournalOutboxEventProcessor:
 
         return merged
 
+    async def _user_timezone(self, user_id: str) -> str | None:
+        """The user's configured zone, or ``None`` when unset.
+
+        Read raw rather than with the default filled in: an all-day event
+        with no zone of its own is pushed in this zone, and the base must key
+        its date the way the push sends it.
+        """
+        result = await self.connection.execute(
+            text("SELECT timezone FROM user_settings WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        )
+        timezone: str | None = result.scalar()
+        return timezone
+
+    async def _record_synced_base(
+        self,
+        journal_id: int | None,
+        *,
+        calendar_id: UUID,
+        external_event_id: str,
+        synced_entries: dict[str, list[str]] | None,
+        user_timezone: str | None,
+    ) -> None:
+        """Record on the link the synced base an applied pull leaves (#1899).
+
+        A field the journal now holds Google's value for takes Google's key;
+        one it kept is not written, and keeps whatever key the link holds
+        when this lands — a push may have recorded one since this pull read
+        the base (see ``agreed_after_apply``). The pull has now applied what a
+        push left for it, so ``pending_import`` is cleared. An event from a
+        worker that sends no base clears the base, and the next push falls
+        back to sending every field.
+
+        Agreement is judged against the journal as it stands now, not the
+        read this pull started from: a local edit, and the push recording its
+        keys, may have committed since. The caller has already written the
+        link row, so a push still to record waits for this one to commit.
+        """
+        journal = (
+            await self._find_journal_by_id(journal_id)
+            if synced_entries is not None and journal_id is not None
+            else None
+        )
+        if synced_entries is None or journal is None or journal.id is None:
+            await self.connection.execute(
+                text("""
+                    UPDATE journal_external_event_links
+                    SET reference_data = (
+                        CASE WHEN reference_data IS JSON OBJECT
+                             THEN reference_data::jsonb
+                             ELSE '{}'::jsonb
+                        END || CAST(:patch AS jsonb)
+                    )::text
+                    WHERE calendar_id = :calendar_id
+                      AND external_event_id = :external_event_id
+                """),
+                {
+                    "patch": json.dumps(
+                        {SYNCED_ENTRIES_KEY: None, PENDING_IMPORT_KEY: False}
+                    ),
+                    "calendar_id": calendar_id,
+                    "external_event_id": external_event_id,
+                },
+            )
+            return
+        local_after = local_event_keys(
+            journal,
+            stored_calendar_info(await self._find_calendar_info(journal.id)),
+            user_timezone=user_timezone,
+        )
+        agreed = agreed_after_apply(
+            remote=remote_keys(synced_entries), local_after=local_after
+        )
+        await self.connection.execute(
+            text(f"""
+                UPDATE journal_external_event_links
+                SET reference_data = {MERGED_REFERENCE_DATA_SQL}
+                WHERE calendar_id = :calendar_id
+                  AND external_event_id = :external_event_id
+            """),  # noqa: S608 - a constant fragment, every value is bound
+            {
+                **merged_reference_data_params(agreed=agreed, pending_import=False),
+                "calendar_id": calendar_id,
+                "external_event_id": external_event_id,
+            },
+        )
+
     async def _persist_fitness_and_types(
         self, journal_id: int, journal_data: dict[str, Any]
     ) -> None:
@@ -2340,12 +2472,14 @@ class JournalOutboxEventProcessor:
     async def _find_calendar_info(self, journal_id: int) -> Any | None:
         """Find calendar info for a journal by its ID.
 
-        Returns the raw row or None if no calendar info exists.
-        Used to check private_description during inbound sync.
+        Returns the raw row or None if no calendar info exists. Used to
+        check private_description during inbound sync, and for the values the
+        synced base is keyed from.
         """
         result = await self.connection.execute(
             text("""
-                SELECT private_description
+                SELECT private_description, calendar_id, is_all_day,
+                       start_time, end_time, timezone, location
                 FROM journal_calendar_info
                 WHERE journal_id = :journal_id
             """),
@@ -2363,7 +2497,7 @@ class JournalOutboxEventProcessor:
             text("""
                 SELECT external_version, journal_id, sync_capability,
                        sync_status, updated_at, recurring_event_id,
-                       external_identity
+                       external_identity, reference_data
                 FROM journal_external_event_links
                 WHERE calendar_id = :calendar_id
                   AND external_event_id = :external_event_id

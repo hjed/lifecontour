@@ -18,6 +18,7 @@ inbound transformer normalises it, and the event's times as the
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from enum import StrEnum
@@ -25,7 +26,13 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from core_shared.models.journals import CalendarInfo
-from core_shared.sync_base import entry_key
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    entry_key,
+    recorded_synced_entries,
+    serialise_synced_entries,
+)
 
 # The title a pull gives an event Google holds with a blank summary, and the
 # one the push sends for an untitled journal.
@@ -100,6 +107,107 @@ def when_key(start: Mapping[str, object], end: Mapping[str, object]) -> str:
 def changed(key: str, base: frozenset[str] | None) -> bool:
     """Whether a value moved away from the base; with no base, always."""
     return base is None or key not in base
+
+
+def recorded_calendar_base(reference_data: str | None) -> CalendarBase | None:
+    """The base a calendar link records, or ``None`` when it records none.
+
+    A field this module does not know is left out, so it reads as never
+    synced.
+    """
+    recorded = recorded_synced_entries(reference_data)
+    if recorded is None:
+        return None
+    return {
+        CalendarSyncField(field): keys
+        for field, keys in recorded.items()
+        if field in CalendarSyncField._value2member_map_
+    }
+
+
+def remote_keys(
+    synced_entries: Mapping[str, list[str]],
+) -> dict[CalendarSyncField, str]:
+    """The key per field of the values a pull read, as its event carries them."""
+    return {
+        CalendarSyncField(field): keys[0]
+        for field, keys in synced_entries.items()
+        if field in CalendarSyncField._value2member_map_ and keys
+    }
+
+
+def locally_changed(
+    base: CalendarBase, local: Mapping[CalendarSyncField, str]
+) -> frozenset[CalendarSyncField]:
+    """The fields local moved away from the base since the last sync.
+
+    A field the base does not record is in neither answer: whoever asks
+    decides what an unknown base means for it.
+    """
+    return frozenset(
+        field
+        for field, keys in base.items()
+        if field in local and changed(local[field], keys)
+    )
+
+
+def agreed_after_apply(
+    *,
+    remote: Mapping[CalendarSyncField, str],
+    local_after: Mapping[CalendarSyncField, str],
+) -> dict[CalendarSyncField, frozenset[str]]:
+    """The fields an applied pull leaves agreed on, keyed as Google holds them.
+
+    Only these are written to the base. A field local kept — a local edit
+    still to push, or one the pull does not write at all — is left as the
+    link holds it when the write lands (see :data:`MERGED_REFERENCE_DATA_SQL`),
+    so a key a push recorded since the pull read the base is not lost.
+    """
+    return {
+        field: frozenset({key})
+        for field, key in remote.items()
+        if local_after.get(field) == key
+    }
+
+
+_STORED: Final = (
+    "(CASE WHEN reference_data IS JSON OBJECT"
+    " THEN reference_data::jsonb ELSE '{}'::jsonb END)"
+)
+
+# ``reference_data`` with a base write merged in field by field, in one
+# statement. A field in ``:agreed`` replaces the stored one; one in ``:seeded``
+# is written only where the link holds none; every other field is left as
+# stored. Two writers — the push and an applied pull — can each decide a base
+# from a read the other has since overtaken, so neither may rewrite a field it
+# did not decide. ``:flags`` is merged into the top level.
+MERGED_REFERENCE_DATA_SQL: Final = f"""(
+    {_STORED}
+    || jsonb_build_object(
+        '{SYNCED_ENTRIES_KEY}',
+        CAST(:seeded AS jsonb)
+        || CASE WHEN jsonb_typeof({_STORED} -> '{SYNCED_ENTRIES_KEY}') = 'object'
+                THEN {_STORED} -> '{SYNCED_ENTRIES_KEY}'
+                ELSE '{{}}'::jsonb
+           END
+        || CAST(:agreed AS jsonb)
+    )
+    || CAST(:flags AS jsonb)
+)::text"""
+
+
+def merged_reference_data_params(
+    *,
+    agreed: Mapping[CalendarSyncField, frozenset[str]],
+    pending_import: bool,
+    seeded: Mapping[CalendarSyncField, frozenset[str]] | None = None,
+) -> dict[str, str]:
+    """The bind parameters :data:`MERGED_REFERENCE_DATA_SQL` takes."""
+    return {
+        "agreed": json.dumps(serialise_synced_entries(agreed)),
+        "seeded": json.dumps(serialise_synced_entries(seeded or {})),
+        "flags": json.dumps({PENDING_IMPORT_KEY: pending_import}),
+    }
 
 
 def zone(timezone_str: str | None) -> tzinfo | None:
