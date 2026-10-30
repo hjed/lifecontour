@@ -22,7 +22,7 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final
+from typing import Any, Final
 from zoneinfo import ZoneInfo
 
 from core_shared.models.journals import CalendarInfo
@@ -102,6 +102,21 @@ def _instant(block: Mapping[str, object]) -> tuple[str, str] | None:
 def when_key(start: Mapping[str, object], end: Mapping[str, object]) -> str:
     """The key of an event's ``start`` and ``end`` blocks, as one field."""
     return entry_key(_instant(start), _instant(end))
+
+
+def _block(event: Mapping[str, Any], name: str) -> Mapping[str, object]:
+    block = event.get(name)
+    return block if isinstance(block, Mapping) else {}
+
+
+def google_event_keys(event: Mapping[str, Any]) -> dict[CalendarSyncField, str]:
+    """The key of each field of a Google event, as the API returns it."""
+    return {
+        CalendarSyncField.SUMMARY: summary_key(event.get("summary")),
+        CalendarSyncField.DESCRIPTION: description_key(event.get("description")),
+        CalendarSyncField.LOCATION: location_key(event.get("location")),
+        CalendarSyncField.WHEN: when_key(_block(event, "start"), _block(event, "end")),
+    }
 
 
 def changed(key: str, base: frozenset[str] | None) -> bool:

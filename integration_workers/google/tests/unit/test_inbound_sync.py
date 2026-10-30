@@ -73,6 +73,36 @@ class TestInboundSyncClassifier:
         )
         assert result == InboundSyncAction.UPDATE_JOURNAL
 
+    def test_classify_unchanged_event_with_a_pending_import_as_update(
+        self, classifier: InboundSyncClassifier, sample_google_event: GoogleEvent
+    ) -> None:
+        """A push left Google's value for the pull: its own etag still applies."""
+        existing_link = _make_link(
+            external_version='"etag-new-abc"',
+            sync_capability="bidirectional",
+            reference_data='{"pending_import": true}',
+        )
+        result = classifier.classify_inbound_event(
+            google_event=sample_google_event,
+            existing_link=existing_link,
+        )
+        assert result == InboundSyncAction.UPDATE_JOURNAL
+
+    def test_classify_outbound_only_with_a_pending_import_still_one_way(
+        self, classifier: InboundSyncClassifier, sample_google_event: GoogleEvent
+    ) -> None:
+        """An outbound-only link is never pulled, pending import or not."""
+        existing_link = _make_link(
+            external_version='"etag-new-abc"',
+            sync_capability="outbound",
+            reference_data='{"pending_import": true}',
+        )
+        result = classifier.classify_inbound_event(
+            google_event=sample_google_event,
+            existing_link=existing_link,
+        )
+        assert result == InboundSyncAction.SKIP_ONE_WAY
+
     def test_classify_outbound_only_rejects_inbound(
         self, classifier: InboundSyncClassifier, sample_google_event: GoogleEvent
     ) -> None:
@@ -262,15 +292,26 @@ class TestInboundFieldMerger:
 class _FakeExternalEventLink:
     """Minimal stand-in for JournalExternalEventLink for testing."""
 
-    def __init__(self, external_version: str, sync_capability: str) -> None:
+    def __init__(
+        self,
+        external_version: str,
+        sync_capability: str,
+        reference_data: str | None = None,
+    ) -> None:
         self.external_version = external_version
         self.sync_capability = sync_capability
+        self.reference_data = reference_data
 
 
-def _make_link(external_version: str, sync_capability: str) -> _FakeExternalEventLink:
+def _make_link(
+    external_version: str,
+    sync_capability: str,
+    reference_data: str | None = None,
+) -> _FakeExternalEventLink:
     return _FakeExternalEventLink(
         external_version=external_version,
         sync_capability=sync_capability,
+        reference_data=reference_data,
     )
 
 
