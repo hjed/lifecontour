@@ -1,12 +1,14 @@
 """Integration tests for the Immich person's synced base (#1900).
 
-The push records the base and ``pending_import`` on the real link.
+The push records the base and ``pending_import`` on the real link, and the
+pull - which skips an unchanged person itself, before the backend sees it -
+honours ``pending_import`` and carries the base on its event.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -69,6 +71,19 @@ async def _link_row(connection: Any) -> Any:
         {"user_id": USER_ID, "external_id": PERSON_ID},
     )
     return result.one()
+
+
+async def _updated_events(connection: Any) -> list[dict[str, Any]]:
+    result = await connection.execute(
+        text("SELECT event_data FROM outbox_events WHERE event_type = :event_type"),
+        {"event_type": "contact.updated"},
+    )
+    events = [json.loads(row.event_data) for row in result.fetchall()]
+    return [e for e in events if e.get("external_id") == PERSON_ID]
+
+
+def _person_dict(person: ImmichPerson) -> dict[str, Any]:
+    return person.model_dump()
 
 
 class TestPushRecordsTheBase:
@@ -165,3 +180,108 @@ class TestPushRecordsTheBase:
         assert reference_data[SYNCED_ENTRIES_KEY] == serialise_synced_entries(
             {"name": name_keys("Ada King"), "birthDate": frozenset()}
         )
+
+
+class TestPullHonoursPendingImport:
+    @pytest.mark.asyncio
+    async def test_unchanged_person_left_for_the_pull_is_emitted_with_its_base(
+        self, async_connection: Any
+    ) -> None:
+        contact_id = await seed_contact(
+            async_connection, first_name="Ada", last_name="Lovelace", user_id=USER_ID
+        )
+        person = ImmichPerson(id=PERSON_ID, name="Ada King", birth_date="1815-12-11")
+        service = _service(async_connection)
+        await _link(
+            async_connection,
+            service,
+            contact_id,
+            person=person,
+            reference_data={
+                SYNCED_ENTRIES_KEY: serialise_synced_entries(
+                    {"name": name_keys("Ada Lovelace"), "birthDate": frozenset()}
+                ),
+                PENDING_IMPORT_KEY: True,
+            },
+        )
+
+        result = await service.sync_people_batch([_person_dict(person)])
+
+        assert result.errors == 0, result.error_details
+        assert result.updated == 1
+        [event] = await _updated_events(async_connection)
+        # The pull imports the birthday but never the name of a linked contact,
+        # so the recorded name base is carried forward.
+        assert event["synced_entries"] == serialise_synced_entries(
+            {
+                "name": name_keys("Ada Lovelace"),
+                "birthDate": birth_date_keys("1815-12-11"),
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_unchanged_person_without_the_flag_is_skipped(
+        self, async_connection: Any
+    ) -> None:
+        contact_id = await seed_contact(
+            async_connection, first_name="Ada", last_name="Lovelace", user_id=USER_ID
+        )
+        person = ImmichPerson(id=PERSON_ID, name="Ada Lovelace")
+        service = _service(async_connection)
+        await _link(
+            async_connection, service, contact_id, person=person, reference_data={}
+        )
+
+        result = await service.sync_people_batch([_person_dict(person)])
+
+        assert result.unchanged == 1
+        assert await _updated_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_flag_waits_while_a_local_edit_is_unpushed(
+        self, async_connection: Any
+    ) -> None:
+        """The backend would skip it, so emitting it every sync is pointless."""
+        contact_id = await seed_contact(
+            async_connection, first_name="Ada", last_name="Lovelace", user_id=USER_ID
+        )
+        person = ImmichPerson(
+            id=PERSON_ID, name="Ada Lovelace", birth_date="1815-12-11"
+        )
+        service = _service(async_connection)
+        await _link(
+            async_connection,
+            service,
+            contact_id,
+            person=person,
+            reference_data={PENDING_IMPORT_KEY: True},
+            synced_at=datetime(2000, 1, 1, tzinfo=UTC),
+        )
+
+        result = await service.sync_people_batch([_person_dict(person)])
+
+        assert result.unchanged == 1
+        assert await _updated_events(async_connection) == []
+
+
+class TestAutoLinkApplies:
+    @pytest.mark.asyncio
+    async def test_auto_link_forces_the_apply_and_leaves_the_birthday_alone(
+        self, async_connection: Any
+    ) -> None:
+        """The link carries the person's version, so only a forced event applies."""
+        await seed_contact(
+            async_connection, first_name="Ada", last_name="Lovelace", user_id=USER_ID
+        )
+        person = ImmichPerson(id=PERSON_ID, name="Ada Lovelace")
+
+        result = await _service(async_connection).sync_people_batch(
+            [_person_dict(person)]
+        )
+
+        assert result.linked == 1
+        [event] = await _updated_events(async_connection)
+        assert event["force_apply"] is True
+        # No Immich birthday: the contact's own is left alone, and not agreed.
+        assert event["contact_data"].get("important_dates") is None
+        assert event["synced_entries"] == {}
