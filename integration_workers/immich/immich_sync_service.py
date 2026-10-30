@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
 from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson, ImmichSharedLink
+from person_base import parse_birth_date
 
 logger = structlog.get_logger(__name__)
 
@@ -606,17 +607,9 @@ class ImmichSyncService:
     ) -> tuple[int, int, int] | None:
         """Parse an ISO-8601 date string into ``(year, month, day)``.
 
-        Returns:
-            Tuple of ``(year, month, day)`` or ``None`` if invalid.
+        Delegates to :func:`person_base.parse_birth_date`.
         """
-        if not birth_date:
-            return None
-        try:
-            dt = datetime.strptime(birth_date, "%Y-%m-%d")  # noqa: DTZ007
-            return (dt.year, dt.month, dt.day)
-        except ValueError:
-            logger.warning("Invalid birth date format", birth_date=birth_date)
-            return None
+        return parse_birth_date(birth_date)
 
     # -- Private implementation -------------------------------------------
 
