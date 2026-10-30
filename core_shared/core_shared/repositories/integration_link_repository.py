@@ -114,7 +114,10 @@ class IntegrationLinkRepository:
     async def find_contact_with_birthday(
         self, contact_id: int
     ) -> dict[str, Any] | None:
-        """Fetch a contact's name fields and full-precision birthday.
+        """Fetch a contact's name fields, full-precision birthday and version.
+
+        ``updated_at`` is the version a push reads, recorded as the link's
+        ``last_synced_at`` so an edit landing mid-push is still owed one.
 
         Reads the ``contacts`` / ``contact_important_dates`` tables (not a link
         table); colocated here so the integration workers have a single
@@ -127,7 +130,7 @@ class IntegrationLinkRepository:
             Dictionary with name and birthday fields, or ``None``.
         """
         query = text("""
-            SELECT c.first_name, c.last_name, c.middle_name,
+            SELECT c.first_name, c.last_name, c.middle_name, c.updated_at,
                    d.year, d.month, d.day
             FROM contacts c
             LEFT JOIN contact_important_dates d
@@ -146,6 +149,7 @@ class IntegrationLinkRepository:
             "year": row.year,
             "month": row.month,
             "day": row.day,
+            "updated_at": row.updated_at,
         }
 
     async def get_immich_person_id(

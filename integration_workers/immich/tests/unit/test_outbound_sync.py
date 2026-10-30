@@ -7,12 +7,23 @@ to Immich via PUT /people/{id}.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    serialise_synced_entries,
+)
 
 from immich_models import ImmichPerson
 from immich_sync_service import ImmichSyncService
+from person_base import birth_date_keys, name_keys
+
+CONTACT_UPDATED_AT = datetime(2026, 10, 1, 9, 30, tzinfo=UTC)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,6 +48,7 @@ def _make_person(
 def _make_link_dict(
     external_id: str = "person-uuid-1",
     internal_id: int = 42,
+    reference_data: str | None = None,
 ) -> dict[str, object]:
     """Create a canonical link dict as returned by IntegrationLinkRepository."""
     return {
@@ -46,7 +58,7 @@ def _make_link_dict(
         "external_id": external_id,
         "internal_entity_type": "contact",
         "external_entity_type": "person",
-        "reference_data": None,
+        "reference_data": reference_data,
         "version_hash": None,
     }
 
@@ -67,7 +79,13 @@ def _make_contact_data(
         "year": year,
         "month": month,
         "day": day,
+        "updated_at": CONTACT_UPDATED_AT,
     }
+
+
+def _reference_data(**base: frozenset[str]) -> str:
+    """A link's reference_data recording ``base`` as its synced entries."""
+    return json.dumps({SYNCED_ENTRIES_KEY: serialise_synced_entries(base)})
 
 
 # ---------------------------------------------------------------------------
@@ -75,13 +93,13 @@ def _make_contact_data(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_api_client() -> AsyncMock:
     """Mock ImmichApiClient."""
     return AsyncMock()
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_connection() -> AsyncMock:
     """Mock async database connection."""
     conn = AsyncMock()
@@ -89,7 +107,7 @@ def mock_connection() -> AsyncMock:
     return conn
 
 
-@pytest.fixture()
+@pytest.fixture
 def service(
     mock_api_client: AsyncMock,
     mock_connection: AsyncMock,
@@ -118,7 +136,9 @@ class TestOutboundSyncSkipsUnlinkedContact:
         mock_api_client: AsyncMock,
     ) -> None:
         """Contact with no link returns skipped status."""
-        with patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo:
+        with patch(
+            "immich_sync_service.IntegrationLinkRepository", autospec=True
+        ) as MockLinkRepo:
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(return_value=None)
 
@@ -145,7 +165,9 @@ class TestOutboundSyncPushesNameToImmich:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -180,7 +202,9 @@ class TestOutboundSyncNameFormatting:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -211,7 +235,9 @@ class TestOutboundSyncNameFormatting:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -244,7 +270,9 @@ class TestOutboundSyncBirthdayPrecision:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -278,7 +306,9 @@ class TestOutboundSyncBirthdayPrecision:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -292,9 +322,8 @@ class TestOutboundSyncBirthdayPrecision:
             result = await service.sync_contact_outbound(contact_id=42)
 
         assert result["status"] == "success"
-        call_args = mock_api_client.update_person.call_args
-        # birthDate should NOT be sent when no full-precision birthday
-        assert "birthDate" not in call_args[0][1]
+        # The name already matches and there is no birthday to send.
+        mock_api_client.update_person.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_preserves_immich_birthday_when_local_null(
@@ -304,8 +333,7 @@ class TestOutboundSyncBirthdayPrecision:
     ) -> None:
         """When local has no FULL birthday but Immich has one, preserve Immich's.
 
-        Source of truth enforcement: do not clear Immich's existing birthDate
-        when the local contact doesn't have a full-precision birthday.
+        A birthDate is never sent without a local full-precision birthday.
         """
         # Immich already has a birthday set
         immich_person = _make_person(name="John Smith", birth_date="1985-03-20")
@@ -314,7 +342,9 @@ class TestOutboundSyncBirthdayPrecision:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -328,9 +358,8 @@ class TestOutboundSyncBirthdayPrecision:
             result = await service.sync_contact_outbound(contact_id=42)
 
         assert result["status"] == "success"
-        call_args = mock_api_client.update_person.call_args
-        # Should preserve Immich's existing birthday
-        assert call_args[0][1]["birthDate"] == "1985-03-20"
+        # Nothing is sent, so Immich keeps its own birthday.
+        mock_api_client.update_person.assert_not_called()
 
 
 class TestOutboundSyncMetadataUpdate:
@@ -356,7 +385,9 @@ class TestOutboundSyncMetadataUpdate:
         upsert_mock.fetchone.return_value = upsert_row
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -387,7 +418,9 @@ class TestOutboundSyncContactNotFound:
     ) -> None:
         """Contact referenced but not found returns error status."""
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -422,7 +455,9 @@ class TestOutboundSyncSourceOfTruth:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -456,7 +491,9 @@ class TestOutboundSyncSourceOfTruth:
         mock_api_client.update_person = AsyncMock(return_value=updated_person)
 
         with (
-            patch("immich_sync_service.IntegrationLinkRepository") as MockLinkRepo,
+            patch(
+                "immich_sync_service.IntegrationLinkRepository", autospec=True
+            ) as MockLinkRepo,
         ):
             link_instance = MockLinkRepo.return_value
             link_instance.find_external_by_internal = AsyncMock(
@@ -472,3 +509,144 @@ class TestOutboundSyncSourceOfTruth:
         call_args = mock_api_client.update_person.call_args
         # Local birthday wins
         assert call_args[0][1]["birthDate"] == "1990-06-15"
+
+
+@pytest.fixture
+def link_repo() -> Iterator[MagicMock]:
+    """The patched IntegrationLinkRepository instance the service builds."""
+    with patch(
+        "immich_sync_service.IntegrationLinkRepository", autospec=True
+    ) as mock_repo:
+        yield mock_repo.return_value
+
+
+def _given_link(
+    link_repo: MagicMock,
+    *,
+    reference_data: str | None,
+    contact_data: dict[str, object],
+) -> None:
+    link_repo.find_external_by_internal = AsyncMock(
+        return_value=_make_link_dict(reference_data=reference_data)
+    )
+    link_repo.find_contact_with_birthday = AsyncMock(return_value=contact_data)
+
+
+class TestOutboundSyncThreeWay:
+    """The push merges against the base the last sync recorded (#1900)."""
+
+    @pytest.mark.asyncio
+    async def test_name_edited_in_immich_is_not_overwritten(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        link_repo: MagicMock,
+    ) -> None:
+        """Immich renamed the person since the base; local did not."""
+        mock_api_client.get_person = AsyncMock(
+            return_value=_make_person(name="Johnny Smith")
+        )
+        _given_link(
+            link_repo,
+            reference_data=_reference_data(
+                name=name_keys("John Smith"), birthDate=frozenset()
+            ),
+            contact_data=_make_contact_data(first_name="John", last_name="Smith"),
+        )
+
+        result = await service.sync_contact_outbound(contact_id=42)
+
+        assert result["status"] == "success"
+        mock_api_client.update_person.assert_not_called()
+        link_repo.patch_reference_data.assert_awaited_once_with(
+            "immich",
+            "person-uuid-1",
+            {
+                SYNCED_ENTRIES_KEY: serialise_synced_entries(
+                    {"name": name_keys("John Smith"), "birthDate": frozenset()}
+                )
+            },
+            user_id="user-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_birthday_edited_in_immich_is_kept_for_the_pull(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        link_repo: MagicMock,
+    ) -> None:
+        """Immich changed the birthday since the base; local did not."""
+        mock_api_client.get_person = AsyncMock(
+            return_value=_make_person(name="John Smith", birth_date="1990-05-16")
+        )
+        _given_link(
+            link_repo,
+            reference_data=_reference_data(
+                name=name_keys("John Smith"),
+                birthDate=birth_date_keys("1990-05-15"),
+            ),
+            contact_data=_make_contact_data(year=1990, month=5, day=15),
+        )
+
+        await service.sync_contact_outbound(contact_id=42)
+
+        mock_api_client.update_person.assert_not_called()
+        patch_data = link_repo.patch_reference_data.await_args.args[2]
+        assert patch_data[PENDING_IMPORT_KEY] is True
+        assert patch_data[SYNCED_ENTRIES_KEY]["birthDate"] == sorted(
+            birth_date_keys("1990-05-15")
+        )
+
+    @pytest.mark.asyncio
+    async def test_local_edit_is_pushed_and_the_base_read_from_the_response(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        link_repo: MagicMock,
+    ) -> None:
+        """Local renamed the contact; Immich still holds the base."""
+        mock_api_client.get_person = AsyncMock(
+            return_value=_make_person(name="John Smith")
+        )
+        mock_api_client.update_person = AsyncMock(
+            return_value=_make_person(name="Jon Smith")
+        )
+        _given_link(
+            link_repo,
+            reference_data=_reference_data(
+                name=name_keys("John Smith"), birthDate=frozenset()
+            ),
+            contact_data=_make_contact_data(first_name="Jon", last_name="Smith"),
+        )
+
+        await service.sync_contact_outbound(contact_id=42)
+
+        mock_api_client.update_person.assert_awaited_once_with(
+            "person-uuid-1", {"name": "Jon Smith"}
+        )
+        patch_data = link_repo.patch_reference_data.await_args.args[2]
+        assert PENDING_IMPORT_KEY not in patch_data
+        assert patch_data[SYNCED_ENTRIES_KEY]["name"] == sorted(name_keys("Jon Smith"))
+
+    @pytest.mark.asyncio
+    async def test_link_records_the_contact_version_the_push_read(
+        self,
+        service: ImmichSyncService,
+        mock_api_client: AsyncMock,
+        mock_connection: AsyncMock,
+        link_repo: MagicMock,
+    ) -> None:
+        """last_synced_at is the contact's updated_at, not the push's end."""
+        mock_api_client.get_person = AsyncMock(
+            return_value=_make_person(name="Old Name")
+        )
+        mock_api_client.update_person = AsyncMock(
+            return_value=_make_person(name="John Smith")
+        )
+        _given_link(link_repo, reference_data=None, contact_data=_make_contact_data())
+
+        await service.sync_contact_outbound(contact_id=42)
+
+        params = mock_connection.execute.await_args.args[1]
+        assert params["synced_at"] == CONTACT_UPDATED_AT
