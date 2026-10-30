@@ -7,6 +7,7 @@ from integration workers to create/update journals in the core system.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -14,7 +15,9 @@ from uuid import UUID
 import structlog
 from core_shared.calendar_sync_base import (
     MERGED_REFERENCE_DATA_SQL,
+    CalendarBase,
     agreed_after_apply,
+    locally_changed,
     merged_reference_data_params,
     recorded_calendar_base,
     remote_keys,
@@ -91,7 +94,9 @@ from app.core.integrations.cancelled_recurrence_tidier import (
     CancelledRecurrenceTidier,
 )
 from app.core.integrations.journal_synced_base import (
+    kept_calendar_info_data,
     local_event_keys,
+    protected_journal_fields,
     stored_calendar_info,
 )
 from app.core.integrations.models.unmatched_participant import (
@@ -176,6 +181,19 @@ _PROVENANCE_BY_INTEGRATION_SOURCE: dict[str, Provenance] = {
     "strava": Provenance.STRAVA,
     "google": Provenance.GOOGLE_CALENDAR,
 }
+
+
+def _has_local_edits(journal: Journal, link_updated_at: datetime | None) -> bool:
+    """Whether the journal was edited since the link last synced.
+
+    The journal-wide signal, used for whatever the synced base does not
+    decide: ``journals.updated_at`` after the link's ``updated_at``.
+    """
+    return (
+        link_updated_at is not None
+        and journal.updated_at is not None
+        and journal.updated_at > link_updated_at
+    )
 
 
 def _provenance_for_source(integration_source: str | None) -> Provenance:
@@ -915,7 +933,9 @@ class JournalOutboxEventProcessor:
             else None
         )
 
-        def _merged(stored: Journal) -> Journal | None:
+        def _merged(
+            stored: Journal, protected: frozenset[str] | None = None
+        ) -> Journal | None:
             return self._merged_journal(
                 stored,
                 adopted_journal_data(journal_data, stored)
@@ -923,6 +943,7 @@ class JournalOutboxEventProcessor:
                 else journal_data,
                 private_description=private_description,
                 link_updated_at=link_updated_at,
+                protected=protected,
             )
 
         # Skip a no-op inbound sync entirely so it produces no event/history.
@@ -932,7 +953,25 @@ class JournalOutboxEventProcessor:
         # opposite order to a split adoption.
         saved_journal = existing_journal
         fields_changed = False
-        if _merged(existing_journal) is not None:
+        # Against a base, which fields are protected depends on the calendar
+        # info as well as the journal, and a location or time edit on its own
+        # leaves the journal unchanged: the decision is always taken under the
+        # journal's lock, which local calendar info edits take too. Only the
+        # displayed calendar's link has its base kept current by the push.
+        if base is not None and self._is_displayed_calendar(
+            existing_calendar_info, calendar_id
+        ):
+            written, saved_journal, calendar_info_data = await self._merge_against_base(
+                existing_journal_id,
+                base=base,
+                merged=_merged,
+                calendar_info_data=calendar_info_data,
+                link_updated_at=link_updated_at,
+                user_timezone=user_timezone,
+                integration_source=payload.integration_source,
+            )
+            fields_changed = written is not None
+        elif _merged(existing_journal) is not None:
             locked_journal = existing_journal
 
             async def _merge_inbound(stored: Journal) -> Journal | None:
@@ -1699,6 +1738,7 @@ class JournalOutboxEventProcessor:
         *,
         private_description: bool,
         link_updated_at: datetime | None,
+        protected: frozenset[str] | None = None,
     ) -> Journal | None:
         """The journal an inbound update would save over ``stored``, if any.
 
@@ -1709,6 +1749,8 @@ class JournalOutboxEventProcessor:
 
         Under ``private_description`` the inbound content is replaced with the
         stored content (rather than dropped), so the merge always has one.
+        ``protected`` names the fields to keep, when the synced base decides
+        them; without it a local edit protects the title and content.
         """
         inbound_data: dict[str, Any] = {
             "title": journal_data.get("title", ""),
@@ -1724,6 +1766,7 @@ class JournalOutboxEventProcessor:
             existing_journal=stored,
             inbound_data=inbound_data,
             link_updated_at=link_updated_at,
+            protected=protected,
         )
 
         merged_journal_data = dict(journal_data)
@@ -1756,45 +1799,105 @@ class JournalOutboxEventProcessor:
         existing_journal: Journal,
         inbound_data: dict[str, Any],
         link_updated_at: datetime | None,
+        protected: frozenset[str] | None = None,
     ) -> dict[str, Any]:
         """Apply InboundFieldMerger logic: protect local edits.
 
-        If the journal's updated_at is more recent than the link's
-        updated_at (used as last_synced_at proxy), then title and content
-        are considered locally edited and are preserved. Time fields
-        always take inbound values.
+        ``protected`` names the fields to keep as stored, when the synced base
+        decides them per field. Without it, if the journal's updated_at is
+        more recent than the link's updated_at (used as last_synced_at
+        proxy), then title and content are considered locally edited and are
+        preserved, and time fields always take inbound values.
 
         Args:
             existing_journal: Current journal from database
             inbound_data: Inbound data from external event
             link_updated_at: Link's updated_at timestamp (last sync time proxy)
+            protected: The fields to keep, or None for the journal-wide rule
 
         Returns:
             Merged data dictionary
         """
-        # Always-update fields (time fields always take inbound values)
-        always_update = {"event_date_range_start", "event_date_range_end"}
-        # Protected fields when local edits detected
-        protected = {"title", "content"}
+        if protected is None:
+            protected = (
+                frozenset({"title", "content"})
+                if _has_local_edits(existing_journal, link_updated_at)
+                else frozenset()
+            )
 
-        has_local_edits = (
-            link_updated_at is not None
-            and existing_journal.updated_at is not None
-            and existing_journal.updated_at > link_updated_at
+        stored: dict[str, Any] = {
+            "title": existing_journal.title,
+            "content": existing_journal.content,
+            "event_date_range_start": (
+                existing_journal.event_date_range.start.isoformat()
+            ),
+            "event_date_range_end": existing_journal.event_date_range.end.isoformat(),
+        }
+        return {
+            key: stored[key] if key in protected else value
+            for key, value in inbound_data.items()
+        }
+
+    @staticmethod
+    def _is_displayed_calendar(calendar_info_row: Any, calendar_id: str) -> bool:
+        """Whether ``calendar_id`` is the one the journal is displayed in."""
+        return calendar_info_row is not None and calendar_info_row.calendar_id == UUID(
+            calendar_id
         )
 
-        merged: dict[str, Any] = {}
+    async def _merge_against_base(
+        self,
+        journal_id: int,
+        *,
+        base: CalendarBase,
+        merged: Callable[[Journal, frozenset[str] | None], Journal | None],
+        calendar_info_data: dict[str, Any],
+        link_updated_at: datetime | None,
+        user_timezone: str | None,
+        integration_source: str,
+    ) -> tuple[Journal | None, Journal, dict[str, Any]]:
+        """Merge an inbound update field by field against the synced base.
 
-        for key, value in inbound_data.items():
-            if key in always_update:
-                merged[key] = value
-            elif has_local_edits and key in protected:
-                # Preserve existing local values
-                merged[key] = getattr(existing_journal, key, value)
-            else:
-                merged[key] = value
+        Google's value is taken for each field local has not changed since the
+        base; local's is kept for the rest, in the journal and in the calendar
+        info. Both are read under the journal's row lock, so a local edit
+        committed meanwhile is what the comparison sees.
 
-        return merged
+        Returns what was written (``None`` for nothing), the journal as it now
+        stands, and the calendar info to save.
+        """
+        locked: list[Journal] = []
+        kept_info = calendar_info_data
+
+        async def _merge(stored: Journal) -> Journal | None:
+            nonlocal kept_info
+            locked.append(stored)
+            stored_info = stored_calendar_info(
+                await self._find_calendar_info(journal_id)
+            )
+            changed = locally_changed(
+                base, local_event_keys(stored, stored_info, user_timezone=user_timezone)
+            )
+            kept_info = kept_calendar_info_data(
+                calendar_info_data, stored_info, changed
+            )
+            return merged(
+                stored,
+                protected_journal_fields(
+                    base,
+                    changed,
+                    local_edits=_has_local_edits(stored, link_updated_at),
+                ),
+            )
+
+        written = await self.journal_service.modify_journal(
+            journal_id,
+            _merge,
+            self.connection,
+            changed_by=integration_source or "system",
+            source=_provenance_for_source(integration_source),
+        )
+        return written, written if written is not None else locked[-1], kept_info
 
     async def _user_timezone(self, user_id: str) -> str | None:
         """The user's configured zone, or ``None`` when unset.
@@ -2473,8 +2576,8 @@ class JournalOutboxEventProcessor:
         """Find calendar info for a journal by its ID.
 
         Returns the raw row or None if no calendar info exists. Used to
-        check private_description during inbound sync, and for the values the
-        synced base is keyed from.
+        check private_description during inbound sync, and for the values a
+        merge against the synced base compares.
         """
         result = await self.connection.execute(
             text("""

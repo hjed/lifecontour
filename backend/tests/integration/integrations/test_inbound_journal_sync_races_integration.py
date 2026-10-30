@@ -225,7 +225,13 @@ class TestInboundJournalSyncOverlappingAMerge:
 GOOGLE_NOTES = "Synced from Google Calendar"
 
 
-def _synced_update(synced: Synced, *, title: str, etag: str) -> OutboxEvent:
+def _synced_update(
+    synced: Synced,
+    *,
+    etag: str,
+    title: str = "Physio appointment",
+    location: str | None = None,
+) -> OutboxEvent:
     """An update as the worker sends it: no description, and Google's base."""
     event = sync_event(
         "journal_event.updated",
@@ -237,11 +243,13 @@ def _synced_update(synced: Synced, *, title: str, etag: str) -> OutboxEvent:
         etag=etag,
         existing_journal_id=synced.journal_id,
     )
-    del event.event_data["journal_data"]["content"]
-    event.event_data["synced_entries"] = {
+    data: dict[str, Any] = event.event_data  # type: ignore[assignment]
+    del data["journal_data"]["content"]
+    data["calendar_info_data"]["location"] = location
+    data["synced_entries"] = {
         CalendarSyncField.SUMMARY: [summary_key(title)],
         CalendarSyncField.DESCRIPTION: [description_key(GOOGLE_NOTES)],
-        CalendarSyncField.LOCATION: [location_key(None)],
+        CalendarSyncField.LOCATION: [location_key(location)],
         CalendarSyncField.WHEN: [
             when_key(
                 {"dateTime": START.isoformat()},
@@ -283,7 +291,7 @@ class TestAppliedPullOverlappingAPush:
             async with async_engine.connect() as connection:
                 await _process(
                     connection,
-                    _synced_update(synced, title="Physio appointment", etag='"b-1"'),
+                    _synced_update(synced, etag='"b-1"'),
                 )
                 await connection.execute(
                     text("UPDATE journals SET content = :c WHERE id = :id"),
@@ -338,7 +346,7 @@ class TestAppliedPullOverlappingAPush:
             async with async_engine.connect() as connection:
                 await _process(
                     connection,
-                    _synced_update(synced, title="Physio appointment", etag='"b-1"'),
+                    _synced_update(synced, etag='"b-1"'),
                 )
 
             async def rename_and_push(connection: AsyncConnection) -> None:
@@ -365,10 +373,104 @@ class TestAppliedPullOverlappingAPush:
             async def inbound(connection: AsyncConnection) -> None:
                 await _process(
                     connection,
-                    _synced_update(synced, title="Physio appointment", etag='"b-2"'),
+                    _synced_update(synced, etag='"b-2"'),
                 )
 
             await overlap(async_engine, rename_and_push, inbound)
 
             entries = await _synced_entries(async_engine, synced.journal_id)
             assert entries[CalendarSyncField.SUMMARY] == [summary_key("Local title")]
+
+
+async def _stored_location(async_engine: AsyncEngine, journal_id: int) -> str | None:
+    async with async_engine.connect() as check:
+        result = await check.execute(
+            text("SELECT location FROM journal_calendar_info WHERE journal_id = :id"),
+            {"id": journal_id},
+        )
+        location: str | None = result.scalar()
+        return location
+
+
+@pytest.mark.integration
+class TestInboundJournalSyncAgainstABaseOverlappingALocalEdit:
+    async def test_a_local_location_edit_committed_first_is_kept(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """#1899: a location-only change is decided under the journal's lock.
+
+        It leaves the journal row as it was, so without taking the lock the
+        apply would compare the location it read before the local edit and
+        overwrite that edit with Google's.
+        """
+        async with synced_journals(async_engine) as synced:
+            async with async_engine.connect() as connection:
+                # The applied pull that records a base.
+                await _process(
+                    connection,
+                    _synced_update(synced, location="Clinic", etag='"b-1"'),
+                )
+
+            async def local_edit(connection: AsyncConnection) -> None:
+                # A calendar info edit, as the journal write service makes it:
+                # the journal's lock first, then the row.
+                await connection.execute(
+                    text("SELECT id FROM journals WHERE id = :id FOR UPDATE"),
+                    {"id": synced.journal_id},
+                )
+                await connection.execute(
+                    text(
+                        "UPDATE journal_calendar_info SET location = 'Home visit'"
+                        " WHERE journal_id = :id"
+                    ),
+                    {"id": synced.journal_id},
+                )
+
+            async def inbound(connection: AsyncConnection) -> None:
+                await _process(
+                    connection,
+                    _synced_update(synced, location="New clinic", etag='"b-2"'),
+                )
+
+            await overlap(async_engine, local_edit, inbound)
+
+            assert await _stored_location(async_engine, synced.journal_id) == (
+                "Home visit"
+            )
+
+    async def test_a_pull_waiting_on_another_compares_the_base_it_left(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """#1899: a pull never compares a base another pull has overtaken.
+
+        Two pulls of one calendar serialise on its row, which
+        ``_ensure_calendar_exists`` upserts (``ON CONFLICT DO UPDATE`` locks
+        it) before either reads the link. Were the second to read the base
+        before the first committed, the location the first applied would look
+        like a local edit, and Google's next location would be refused for
+        good.
+        """
+        async with synced_journals(async_engine) as synced:
+            async with async_engine.connect() as connection:
+                await _process(
+                    connection,
+                    _synced_update(synced, location="Clinic", etag='"b-1"'),
+                )
+
+            async def first(connection: AsyncConnection) -> None:
+                await _process(
+                    connection,
+                    _synced_update(synced, location="New clinic", etag='"b-2"'),
+                )
+
+            async def second(connection: AsyncConnection) -> None:
+                await _process(
+                    connection,
+                    _synced_update(synced, location="Newest clinic", etag='"b-3"'),
+                )
+
+            await overlap(async_engine, first, second)
+
+            assert await _stored_location(async_engine, synced.journal_id) == (
+                "Newest clinic"
+            )
