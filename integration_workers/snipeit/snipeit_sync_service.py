@@ -38,7 +38,7 @@ from sqlalchemy import text
 
 from asset_merge import (
     AssetValues,
-    base_after_push,
+    base_after,
     base_of,
     holds_other_values,
     merge_pull,
@@ -1277,7 +1277,7 @@ class SnipeItSyncService:
                     external_id,
                     {
                         SYNCED_ENTRIES_KEY: serialise_synced_entries(
-                            base_after_push(base, local=local, after=after)
+                            base_after(base, local=local, after=after)
                         ),
                         PENDING_IMPORT_KEY: holds_other_values(after, local),
                     },

@@ -23,8 +23,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final, Literal, assert_never
 
-from core_shared.sync_base import SyncedEntries, Winner, entry_key, three_way_value
+from core_shared.sync_base import SyncedEntries, entry_key
 
+from field_merge import base_after_push, complete_base, reconcile
 from snipeit_data_transformer import normalise_field, normalise_name
 
 type PushedColumn = Literal["name", "serial_number", "purchase_date"]
@@ -126,12 +127,6 @@ def base_of(values: AssetValues) -> Base:
     }
 
 
-def _complete(recorded: SyncedEntries | None, fallback: Base) -> Base:
-    """The recorded base, with ``fallback`` for each column it does not record."""
-    recorded = recorded or {}
-    return {column: recorded.get(column, fallback[column]) for column in PUSHED_COLUMNS}
-
-
 def push_base(
     recorded: SyncedEntries | None,
     *,
@@ -160,7 +155,7 @@ def push_base(
             )
             for column in PUSHED_COLUMNS
         }
-    return _complete(recorded, fallback)
+    return complete_base(recorded, fallback)
 
 
 def pull_base(recorded: SyncedEntries | None, *, local: AssetValues) -> Base:
@@ -169,49 +164,29 @@ def pull_base(recorded: SyncedEntries | None, *, local: AssetValues) -> Base:
     A column the link does not record takes local as its base, so the remote
     wins it, as every column did before bases existed.
     """
-    return _complete(recorded, base_of(local))
-
-
-def _winner(
-    base: Base, column: PushedColumn, local: AssetValues, remote: AssetValues
-) -> Winner:
-    return three_way_value(
-        base=base[column],
-        local=column_key(column, local.pushed(column)),
-        remote=column_key(column, remote.pushed(column)),
-    )
+    return complete_base(recorded, base_of(local))
 
 
 def merge_push(base: Base, *, local: AssetValues, remote: AssetValues) -> PushMerge:
     """Which columns a push sends, reconciled one by one against ``base``."""
-    send: dict[PushedColumn, object] = {}
-    remote_won = False
-    for column in PUSHED_COLUMNS:
-        winner = _winner(base, column, local, remote)
-        match winner:
-            case Winner.LOCAL | Winner.CONFLICT:
-                send[column] = local.pushed(column)
-            case Winner.REMOTE:
-                remote_won = True
-            case Winner.SAME:
-                pass
-            case _:
-                assert_never(winner)
-    return PushMerge(send=send, remote_won=remote_won)
+    merged = reconcile(base, local=base_of(local), remote=base_of(remote))
+    return PushMerge(
+        send={
+            column: local.pushed(column)
+            for column in PUSHED_COLUMNS
+            if column in merged.local_fields
+        },
+        remote_won=merged.remote_won,
+    )
 
 
 def merge_pull(base: Base, local: AssetValues, remote: AssetValues) -> AssetValues:
     """The values a pull stores: the remote's, less local edits still to push."""
-    kept: dict[PushedColumn, object] = {}
-    for column in PUSHED_COLUMNS:
-        winner = _winner(base, column, local, remote)
-        match winner:
-            case Winner.LOCAL | Winner.CONFLICT:
-                kept[column] = local.pushed(column)
-            case Winner.REMOTE | Winner.SAME:
-                kept[column] = remote.pushed(column)
-            case _:
-                assert_never(winner)
+    owned = reconcile(base, local=base_of(local), remote=base_of(remote)).local_fields
+    kept = {
+        column: (local if column in owned else remote).pushed(column)
+        for column in PUSHED_COLUMNS
+    }
     return AssetValues(
         name=str(kept["name"]),
         serial_number=_optional_str(kept["serial_number"]),
@@ -221,22 +196,9 @@ def merge_pull(base: Base, local: AssetValues, remote: AssetValues) -> AssetValu
     )
 
 
-def base_after_push(base: Base, *, local: AssetValues, after: AssetValues) -> Base:
-    """The base a push leaves: Snipe-IT's values, where local now holds them.
-
-    A column Snipe-IT still holds otherwise keeps the base the push merged
-    against, so the next pull sees local unchanged and imports the remote's
-    value, and a second push before it leaves the column alone again.
-    """
-    return {
-        column: (
-            after_key
-            if (after_key := column_key(column, after.pushed(column)))
-            == column_key(column, local.pushed(column))
-            else base[column]
-        )
-        for column in PUSHED_COLUMNS
-    }
+def base_after(base: Base, *, local: AssetValues, after: AssetValues) -> Base:
+    """The base a push leaves (``field_merge.base_after_push``)."""
+    return base_after_push(base, local=base_of(local), after=base_of(after))
 
 
 def holds_other_values(remote: AssetValues, local: AssetValues) -> bool:
