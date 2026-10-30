@@ -1054,7 +1054,7 @@ class SnipeItSyncService:
                                 "internal_uuid": gear_id,
                             },
                         )
-                        await self._record_pulled_base(session, external_id, remote)
+                        await self._record_synced_base(session, external_id, remote)
                 return not (existing_meta and existing_meta.internal_uuid)
 
             except _AssetSkipped:
@@ -1147,10 +1147,10 @@ class SnipeItSyncService:
         )
         return merge_pull(base, local, remote)
 
-    async def _record_pulled_base(
+    async def _record_synced_base(
         self, session: Any, external_id: str, remote: AssetValues
     ) -> None:
-        """Record the asset as pulled: its values are the base, nothing is pending."""
+        """Record the asset as synced: its values are the base, nothing is pending."""
         await IntegrationLinkRepository(
             await session.connection()
         ).patch_reference_data(
@@ -1266,6 +1266,13 @@ class SnipeItSyncService:
                         "version_hash": updated_transformed.version_hash,
                         "external_id": external_id,
                     },
+                )
+                # The asset was unchanged since it was synced, so after the PATCH
+                # it holds what both sides agree on: that is the pull's new base.
+                await self._record_synced_base(
+                    session,
+                    external_id,
+                    AssetValues.of(updated_transformed.gear_item),
                 )
 
         logger.info(
