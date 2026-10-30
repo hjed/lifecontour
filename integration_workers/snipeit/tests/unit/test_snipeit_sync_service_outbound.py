@@ -728,6 +728,7 @@ class TestPushMaintenanceUpdate:
             MagicMock(),  # metadata UPDATE result
         ]
         mock_session.execute = AsyncMock(side_effect=results)
+        mock_session.connection = AsyncMock(return_value=MagicMock(execute=AsyncMock()))
 
         mock_begin = MagicMock()
         mock_begin.__aenter__ = AsyncMock(return_value=None)
@@ -880,6 +881,7 @@ def _sql_routed_session_factory(rows: dict[str, object]) -> MagicMock:
 
     session = MagicMock()
     session.execute = AsyncMock(side_effect=execute)
+    session.connection = AsyncMock(return_value=MagicMock(execute=AsyncMock()))
     begin = MagicMock()
     begin.__aenter__ = AsyncMock(return_value=None)
     begin.__aexit__ = AsyncMock(return_value=False)

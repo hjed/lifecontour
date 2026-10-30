@@ -3195,3 +3195,40 @@ class TestMaintenancePullMergesPerField:
             "Waxed again",
             "Edges sharpened",
         )
+
+
+class TestMaintenancePushRecordsTheBase:
+    @pytest.mark.asyncio
+    async def test_a_remote_change_after_a_push_is_pulled(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        session_factory = _joined_session_factory(async_connection)
+        await _seed_record_17_import(
+            async_connection,
+            title="Waxed again",
+            version_hash=_record_17_version(_record_17()),
+            pending=False,
+        )
+        journal_id = (
+            await async_connection.execute(
+                text("SELECT id FROM journals WHERE title = 'Waxed again'")
+            )
+        ).scalar_one()
+        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id, session_factory=session_factory
+        )
+
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_record_17(title="Waxed remotely")
+        )
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17], session_factory=session_factory
+        )
+
+        journal_data = await _updated_event_journal_data(async_connection)
+        assert journal_data["title"] == "Waxed remotely"

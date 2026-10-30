@@ -2732,12 +2732,11 @@ class SnipeItSyncService:
                 return
             raise
 
-        # A push row records what was pushed. An import has none: its sync row
-        # tracks the record as fetched, and the next inbound sync refreshes it.
-        if context.imported_external_id is None:
-            version_hash = _payload_version_hash(payload)
-            async with session_factory() as session:
-                async with session.begin():
+        async with session_factory() as session:
+            async with session.begin():
+                # A push row records what was pushed. An import does not: its
+                # version is the record as fetched, which the next pull refreshes.
+                if context.imported_external_id is None:
                     await session.execute(
                         text("""
                             UPDATE sync_metadata
@@ -2750,10 +2749,24 @@ class SnipeItSyncService:
                         """),
                         {
                             "user_id": self._user_id,
-                            "version_hash": version_hash,
+                            "version_hash": _payload_version_hash(payload),
                             "journal_id": str(journal_id),
                         },
                     )
+                # Every field was written, so the record now holds the payload:
+                # that is the base the next pull merges against.
+                await IntegrationLinkRepository(
+                    await session.connection()
+                ).patch_reference_data(
+                    "snipeit_maintenance",
+                    external_id,
+                    {
+                        SYNCED_ENTRIES_KEY: serialise_synced_entries(
+                            maintenance_merge.base_of(payload)
+                        )
+                    },
+                    user_id=self._user_id,
+                )
 
         logger.info(
             "Successfully pushed maintenance update to Snipe-IT",
