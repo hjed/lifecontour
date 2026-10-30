@@ -13,6 +13,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from unittest.mock import patch
@@ -532,22 +533,21 @@ class TestOutboundMaintenanceSyncIntegration:
             {"journal_id": str(journal_id)},
         )
 
-        # Step 2: Mock Snipe-IT PATCH response
-        mock_transport.add_response(
-            "/maintenances/501",
-            json_data={
-                "status": "success",
-                "messages": "Asset Maintenance updated successfully.",
-                "payload": {
-                    "id": 501,
-                    "asset_id": 55,
-                    "title": "Updated Harness Check",
-                    "asset_maintenance_type": "Repair",
-                    "start_date": {"date": "2024-07-01"},
-                    "completion_date": {"date": "2024-07-03"},
-                    "notes": "Updated notes",
-                },
-            },
+        # Step 2: Mock the record before the edit, the PATCH, and the record after
+        after = {
+            "id": 501,
+            "asset_id": 55,
+            "title": "Updated Harness Check",
+            "asset_maintenance_type": "Repair",
+            "start_date": {"date": "2024-07-01"},
+            "completion_date": {"date": "2024-07-03"},
+            "notes": "Updated notes",
+        }
+        _queue_maintenance_push(
+            mock_transport,
+            501,
+            before={**after, "title": "Harness Check", "notes": "Old notes"},
+            after=after,
         )
 
         # Step 3
@@ -565,8 +565,29 @@ class TestOutboundMaintenanceSyncIntegration:
             session_factory=mock_session_factory,
         )
 
-        # Step 4: All mock responses consumed (PATCH was made)
+        # Step 4: Only the fields the journal changed were sent
         assert len(mock_transport.responses) == 0
+        assert _patch_bodies(mock_transport) == [
+            {"name": "Updated Harness Check", "notes": "Updated notes"}
+        ]
+
+
+def _queue_maintenance_push(
+    mock_transport: Any,
+    maintenance_id: int,
+    *,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> None:
+    """Snipe-IT's answers to an update push: the record, the PATCH, the record again."""
+    path = f"/maintenances/{maintenance_id}"
+    mock_transport.add_response(path, json_data=before, method="GET")
+    # A write's payload names the asset flat, where a GET nests it.
+    written = {"asset_id": after.get("asset_id") or after["asset"]["id"], **after}
+    mock_transport.add_response(
+        path, json_data={"status": "success", "payload": written}, method="PATCH"
+    )
+    mock_transport.add_response(path, json_data=after, method="GET")
 
 
 # The synthetic calendar the syncing user's maintenance journals are imported into.
@@ -807,7 +828,13 @@ class TestMaintenanceEchoPrevention:
         await _seed_push_record(
             async_connection, journal_id=journal_id, maintenance_id=20
         )
-        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+        # The journal's kind differs from the record's, so the push has a field to send.
+        _queue_maintenance_push(
+            mock_transport,
+            17,
+            before=_SNIPEIT_MAINTENANCE_17,
+            after={**_SNIPEIT_MAINTENANCE_17, "asset_maintenance_type": "Maintenance"},
+        )
         mock_transport.add_response("/maintenances/20", json_data=_write_response(20))
 
         await snipeit_sync_service.push_maintenance_update(
@@ -1033,6 +1060,19 @@ async def _imported_event_dates(
     )
 
 
+def _queue_checked_title_push(mock_transport: Any) -> None:
+    """Snipe-IT's answers to pushing maintenance 17's journal, retitled ``(checked)``."""
+    _queue_maintenance_push(
+        mock_transport,
+        17,
+        before=_SNIPEIT_MAINTENANCE_17,
+        after={
+            **_SNIPEIT_MAINTENANCE_17,
+            "title": "Split Canyoneroo 50 -> 34 + 15 (checked)",
+        },
+    )
+
+
 class TestImportedMaintenanceEditsArePushed:
     """A user's edit to an imported maintenance journal updates the record it
     was imported from."""
@@ -1052,7 +1092,7 @@ class TestImportedMaintenanceEditsArePushed:
             imported_from=17,
             maintenance_type="configuration change",
         )
-        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+        _queue_checked_title_push(mock_transport)
 
         await snipeit_sync_service.push_maintenance_update(
             journal_id=journal_id,
@@ -1060,14 +1100,9 @@ class TestImportedMaintenanceEditsArePushed:
         )
 
         assert _snipeit_writes(mock_transport) == ["PATCH /api/v1/maintenances/17"]
+        # Only the edited title is sent: the record keeps its own kind and dates.
         assert _patch_bodies(mock_transport) == [
-            {
-                "name": "Split Canyoneroo 50 -> 34 + 15 (checked)",
-                "notes": "",
-                "asset_maintenance_type": "Configuration Change",
-                "start_date": "2026-09-11",
-                "completion_date": "2026-09-11",
-            }
+            {"name": "Split Canyoneroo 50 -> 34 + 15 (checked)"}
         ]
         pushed = await async_connection.execute(
             text("""
@@ -1086,7 +1121,7 @@ class TestImportedMaintenanceEditsArePushed:
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
-        """Pushing an untouched date must not move it a day earlier."""
+        """Pushing an edit must not move an untouched date a day earlier."""
         session_factory = _joined_session_factory(async_connection)
         await async_connection.execute(
             text("""
@@ -1105,7 +1140,7 @@ class TestImportedMaintenanceEditsArePushed:
         journal_id = await _seed_maintenance_journal(
             async_connection,
             gear_item_id=gear_item_id,
-            title="Split Canyoneroo 50 -> 34 + 15",
+            title="Split Canyoneroo 50 -> 34 + 15 (checked)",
             imported_from=17,
             maintenance_type="configuration change",
         )
@@ -1119,15 +1154,16 @@ class TestImportedMaintenanceEditsArePushed:
             """),
             {"start": start, "end": end, "journal_id": journal_id},
         )
-        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+        _queue_checked_title_push(mock_transport)
 
         await snipeit_sync_service.push_maintenance_update(
             journal_id=journal_id, session_factory=session_factory
         )
 
-        [body] = _patch_bodies(mock_transport)
-        assert body["start_date"] == "2026-09-11"
-        assert body["completion_date"] == "2026-09-11"
+        # The dates read back as the record's own, so only the title is sent.
+        assert _patch_bodies(mock_transport) == [
+            {"name": "Split Canyoneroo 50 -> 34 + 15 (checked)"}
+        ]
 
 
 # The claim ``_seed_maintenance_journal``'s journal titled "Retire Harness" makes
@@ -1536,8 +1572,11 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         mock_transport.add_response(
             "/maintenances", json_data=_write_response(10), method="POST"
         )
-        mock_transport.add_response(
-            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+        _queue_maintenance_push(
+            mock_transport,
+            9,
+            before=_listed(9),
+            after=_listed(9, title="Retire Frayed Harness"),
         )
 
         await snipeit_sync_service.push_maintenance_create(
@@ -1569,8 +1608,11 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         await _seed_push_record(
             async_connection, journal_id=journal_id, maintenance_id=9
         )
-        mock_transport.add_response(
-            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+        _queue_maintenance_push(
+            mock_transport,
+            9,
+            before=_listed(9),
+            after=_listed(9, title="Retire Frayed Harness"),
         )
 
         await snipeit_sync_service.push_maintenance_create(
@@ -1603,8 +1645,9 @@ class TestMaintenanceCreateLinksAClaimedRecord:
         mock_transport.add_response(
             "/maintenances?", status_code=500, json_data={}, method="GET"
         )
+        # The record already holds the journal's values: read, and left alone.
         mock_transport.add_response(
-            "/maintenances/9", json_data=_write_response(9), method="PATCH"
+            "/maintenances/9", json_data=_listed(9), method="GET"
         )
 
         await snipeit_sync_service.push_maintenance_create(
@@ -1612,7 +1655,10 @@ class TestMaintenanceCreateLinksAClaimedRecord:
             session_factory=_joined_session_factory(async_connection),
         )
 
-        assert [r.url.path for r in mock_transport.requests if r.method == "GET"] == []
+        assert [r.url.path for r in mock_transport.requests if r.method == "GET"] == [
+            "/api/v1/maintenances/9"
+        ]
+        assert _snipeit_writes(mock_transport) == []
 
     @pytest.mark.asyncio
     async def test_a_match_on_a_later_page_is_linked(
@@ -3094,8 +3140,8 @@ async def _seed_record_17_import(
     return gear_item_id
 
 
-def _record_17_model() -> SnipeItMaintenance:
-    return SnipeItMaintenance.model_validate(_record_17())
+def _record_17_model(**changes: Any) -> SnipeItMaintenance:
+    return SnipeItMaintenance.model_validate(_record_17(**changes))
 
 
 async def _updated_event_journal_data(async_connection: AsyncConnection) -> Any:
@@ -3197,6 +3243,154 @@ class TestMaintenancePullMergesPerField:
         )
 
 
+async def _journal_titled(async_connection: AsyncConnection, title: str) -> int:
+    return int(
+        (
+            await async_connection.execute(
+                text("SELECT id FROM journals WHERE title = :title"),
+                {"title": title},
+            )
+        ).scalar_one()
+    )
+
+
+@dataclass(frozen=True)
+class MaintenancePushCase:
+    """A journal title edit pushed to imported maintenance 17, last synced as
+    ``_record_17()``, which Snipe-IT may have changed too."""
+
+    before: dict[str, Any]
+    after: dict[str, Any]
+    pending_import: bool
+
+
+MAINTENANCE_PUSH_CASES = [
+    pytest.param(
+        MaintenancePushCase(
+            before=_record_17(
+                completion_date={"date": "2026-09-20", "formatted": "2026-09-20"}
+            ),
+            after=_record_17(
+                title="Waxed",
+                completion_date={"date": "2026-09-20", "formatted": "2026-09-20"},
+            ),
+            pending_import=True,
+        ),
+        id="a-remote-only-change-is-left-for-the-pull",
+    ),
+    pytest.param(
+        MaintenancePushCase(
+            before=_record_17(title="Retitled in Snipe-IT"),
+            after=_record_17(title="Waxed"),
+            pending_import=False,
+        ),
+        id="a-conflict-sends-the-journal-value",
+    ),
+]
+
+
+class TestMaintenancePushMergesPerField:
+    """A push sends only the fields the journal changed (#1898)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", MAINTENANCE_PUSH_CASES)
+    async def test_an_import_is_patched_with_the_journal_edit_only(
+        self,
+        case: MaintenancePushCase,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection,
+            title="Waxed",
+            version_hash=_record_17_version(_record_17()),
+            pending=False,
+        )
+        journal_id = await _journal_titled(async_connection, "Waxed")
+        _queue_maintenance_push(
+            mock_transport, 17, before=case.before, after=case.after
+        )
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _patch_bodies(mock_transport) == [{"name": "Waxed"}]
+        reference = await _record_17_reference(async_connection)
+        # A field left for the pull keeps its base, so the pull reads it as
+        # Snipe-IT's change rather than an edit of the journal's.
+        assert reference["synced_entries"] == serialise_synced_entries(
+            maintenance_merge.base_of(
+                _snipeit_record_payload(_record_17_model(title="Waxed"))
+            )
+        )
+        assert reference["pending_import"] is case.pending_import
+        version = (
+            await async_connection.execute(
+                text("""
+                    SELECT version_hash FROM sync_metadata
+                    WHERE external_id = 'snipeit_maint:17'
+                """)
+            )
+        ).scalar_one()
+        assert version == _record_17_version(case.after)
+
+    @pytest.mark.asyncio
+    async def test_a_record_pushed_from_a_journal_keeps_a_snipeit_edit(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        gear_item_id = await _seed_synced_asset(async_connection, 51)
+        journal_id = await _seed_maintenance_journal(
+            async_connection, gear_item_id=gear_item_id, title="Retire Frayed Harness"
+        )
+        await _seed_push_record(
+            async_connection, journal_id=journal_id, maintenance_id=9
+        )
+        base = maintenance_merge.base_of(
+            _snipeit_record_payload(SnipeItMaintenance.model_validate(_listed(9)))
+        )
+        await async_connection.execute(
+            text("""
+                UPDATE sync_metadata SET reference_data = :reference_data
+                WHERE external_id = 'snipeit_maint:9'
+            """),
+            {
+                "reference_data": json.dumps(
+                    {"synced_entries": serialise_synced_entries(base)}
+                )
+            },
+        )
+        edited = {**_listed(9), "notes": "Checked in Snipe-IT"}
+        _queue_maintenance_push(
+            mock_transport,
+            9,
+            before=edited,
+            after={**edited, "title": "Retire Frayed Harness"},
+        )
+
+        await snipeit_sync_service.push_maintenance_update(
+            journal_id=journal_id,
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        assert _patch_bodies(mock_transport) == [{"name": "Retire Frayed Harness"}]
+        row = (
+            await async_connection.execute(
+                text("""
+                    SELECT reference_data FROM sync_metadata
+                    WHERE external_id = 'snipeit_maint:9'
+                """)
+            )
+        ).one()
+        # Never pulled, so nothing is left pending for a pull.
+        assert "pending_import" not in json.loads(row.reference_data)
+
+
 class TestMaintenancePushRecordsTheBase:
     @pytest.mark.asyncio
     async def test_a_remote_change_after_a_push_is_pulled(
@@ -3212,12 +3406,13 @@ class TestMaintenancePushRecordsTheBase:
             version_hash=_record_17_version(_record_17()),
             pending=False,
         )
-        journal_id = (
-            await async_connection.execute(
-                text("SELECT id FROM journals WHERE title = 'Waxed again'")
-            )
-        ).scalar_one()
-        mock_transport.add_response("/maintenances/17", json_data=_write_response(17))
+        journal_id = await _journal_titled(async_connection, "Waxed again")
+        _queue_maintenance_push(
+            mock_transport,
+            17,
+            before=_record_17(),
+            after=_record_17(title="Waxed again"),
+        )
 
         await snipeit_sync_service.push_maintenance_update(
             journal_id=journal_id, session_factory=session_factory

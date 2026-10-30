@@ -530,6 +530,24 @@ def _snipeit_record_payload(maintenance: SnipeItMaintenance) -> dict[str, Any]:
     return payload
 
 
+async def _maintenance_sync_reference(
+    session: Any, external_id: str, *, user_id: str
+) -> str | None:
+    """The ``reference_data`` of a maintenance record's sync row, if it has one."""
+    result = await session.execute(
+        text("""
+            SELECT reference_data
+            FROM sync_metadata
+            WHERE user_id = :user_id
+              AND integration_source = 'snipeit_maintenance'
+              AND external_id = :external_id
+        """),
+        {"user_id": user_id, "external_id": external_id},
+    )
+    reference_data = result.scalar_one_or_none()
+    return reference_data if isinstance(reference_data, str) else None
+
+
 async def _lock_asset_maintenances(session: Any, asset_id: int) -> None:
     """Serialise writes of maintenance claims and sync rows on one Snipe-IT asset."""
     await session.execute(
@@ -2671,7 +2689,16 @@ class SnipeItSyncService:
         journal_id: int,
         session_factory: Any,
     ) -> None:
-        """Push an updated GEAR_MAINTENANCE journal to Snipe-IT.
+        """Push an updated GEAR_MAINTENANCE journal to Snipe-IT, field by field.
+
+        Each field is reconciled against the base the record's sync row records
+        (``maintenance_merge``): one only the journal changed is sent, one only
+        Snipe-IT changed is left alone, and a conflict sends the journal's
+        value (#1898). The record is read again after the PATCH so the row
+        records the version and base the next sync sees. An import left holding
+        what its journal does not is marked ``pending_import`` for the pull; a
+        record pushed from a journal is never pulled, so Snipe-IT keeps a field
+        changed there until the journal changes it.
 
         Args:
             journal_id: Internal journal ID.
@@ -2716,11 +2743,36 @@ class SnipeItSyncService:
             )
             return
 
-        payload = context.snipeit_payload()
+        local = context.snipeit_payload()
+        remote = await self._fetch_maintenance_for_push(
+            journal_id, snipeit_maintenance_id
+        )
+        if remote is None:
+            return
+        async with session_factory() as session:
+            recorded = await _maintenance_sync_reference(
+                session, external_id, user_id=self._user_id
+            )
+        base = maintenance_merge.push_base(
+            recorded_synced_entries(recorded),
+            remote=_snipeit_record_payload(remote),
+        )
+        merged = maintenance_merge.merge(
+            base, local=local, remote=_snipeit_record_payload(remote)
+        )
+        if not merged.local_fields:
+            logger.debug(
+                "No journal change for Snipe-IT maintenance export",
+                journal_id=journal_id,
+                remote_changed=merged.remote_won,
+            )
+            return
 
-        # PATCH the Snipe-IT maintenance record
         try:
-            await self._api_client.update_maintenance(snipeit_maintenance_id, payload)
+            await self._api_client.update_maintenance(
+                snipeit_maintenance_id,
+                maintenance_merge.payload_for(merged.local_fields, local),
+            )
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
                 logger.warning(
@@ -2732,39 +2784,55 @@ class SnipeItSyncService:
                 return
             raise
 
+        after = await self._api_client.get_maintenance(snipeit_maintenance_id)
+        after_payload = _snipeit_record_payload(after)
+        imported = context.imported_external_id is not None
+        reference: dict[str, Any] = {
+            SYNCED_ENTRIES_KEY: serialise_synced_entries(
+                maintenance_merge.base_after(base, local=local, after=after_payload)
+            )
+        }
+        if imported:
+            # Only an import is pulled, so only an import can be left a field
+            # to import; a record pushed from a journal is the journal's.
+            reference[PENDING_IMPORT_KEY] = maintenance_merge.base_of(
+                after_payload
+            ) != maintenance_merge.base_of(local)
         async with session_factory() as session:
             async with session.begin():
-                # A push row records what was pushed. An import does not: its
-                # version is the record as fetched, which the next pull refreshes.
-                if context.imported_external_id is None:
-                    await session.execute(
-                        text("""
-                            UPDATE sync_metadata
-                            SET version_hash = :version_hash,
-                                last_synced_at = now(),
-                                updated_at = now()
-                            WHERE user_id = :user_id
-                              AND integration_source = 'snipeit_maintenance'
-                              AND internal_uuid = :journal_id
-                        """),
-                        {
-                            "user_id": self._user_id,
-                            "version_hash": _payload_version_hash(payload),
-                            "journal_id": str(journal_id),
-                        },
-                    )
-                # Every field was written, so the record now holds the payload:
-                # that is the base the next pull merges against.
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET version_hash = :version_hash,
+                            last_synced_at = now(),
+                            updated_at = now()
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_maintenance'
+                          AND external_id = :external_id
+                    """),
+                    {
+                        "user_id": self._user_id,
+                        "external_id": external_id,
+                        # Each kind of row keeps the version its readers compare:
+                        # the pull's for an import, the payload's for a push.
+                        "version_hash": (
+                            SnipeItMaintenanceTransformer.transform(
+                                after,
+                                user_id=self._user_id,
+                                gear_item_id=str(context.maintenance.gear_item_id),
+                                zone=_snipeit_zone(context.journal),
+                            ).version_hash
+                            if imported
+                            else _payload_version_hash(after_payload)
+                        ),
+                    },
+                )
                 await IntegrationLinkRepository(
                     await session.connection()
                 ).patch_reference_data(
                     "snipeit_maintenance",
                     external_id,
-                    {
-                        SYNCED_ENTRIES_KEY: serialise_synced_entries(
-                            maintenance_merge.base_of(payload)
-                        )
-                    },
+                    reference,
                     user_id=self._user_id,
                 )
 
@@ -2773,6 +2841,23 @@ class SnipeItSyncService:
             journal_id=journal_id,
             snipeit_maintenance_id=snipeit_maintenance_id,
         )
+
+    async def _fetch_maintenance_for_push(
+        self, journal_id: int, snipeit_maintenance_id: int
+    ) -> SnipeItMaintenance | None:
+        """The record a push merges with, or ``None`` when Snipe-IT has none."""
+        try:
+            return await self._api_client.get_maintenance(snipeit_maintenance_id)
+        except SnipeItAPIError as exc:
+            if exc.status_code in (403, 404):
+                logger.warning(
+                    "Snipe-IT maintenance not found during export",
+                    journal_id=journal_id,
+                    snipeit_maintenance_id=snipeit_maintenance_id,
+                    status_code=exc.status_code,
+                )
+                return None
+            raise
 
     async def delete_pushed_maintenance(
         self, journal_id: int, session_factory: Any

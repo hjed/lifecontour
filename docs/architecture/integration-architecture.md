@@ -838,8 +838,14 @@ Snipe-IT gear uses `three_way_value` per pushed column (`name`, `serial_number`,
   the same way: it keeps a local edit still to push rather than overwriting it.
 - `model` and `manufacturer` are pull-only: Snipe-IT holds them as references
   to other records, so its value always wins.
-- The maintenance push (`push_maintenance_update`) still PATCHes every field;
-  it follows in a stacked PR under #1898.
+- Maintenance journals merge the same way, per pushed field (`name`, `notes`,
+  `asset_maintenance_type`, `start_date`, `completion_date`, compared in the
+  shape a push sends them; `maintenance_merge.py`), with the base on the
+  record's `snipeit_maintenance` sync row. Only a record imported from Snipe-IT
+  is pulled, so only an import is marked `pending_import`. A record the app
+  created is never pulled: the push leaves a field changed in Snipe-IT alone,
+  but the journal does not import it.
+- The per-field reconciliation both share is `field_merge.py`.
 
 Adopting it elsewhere:
 
