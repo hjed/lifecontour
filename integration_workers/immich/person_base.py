@@ -12,13 +12,15 @@ field as ``core_shared.sync_base`` keys - each field is merged three ways:
 
 A birthday the push leaves in Immich unimported marks the link
 ``pending_import`` so the next pull imports it. A name never does: the pull
-imports a name only when it creates the contact.
+imports a name only when it creates the contact, so for a linked contact the
+pull carries the recorded ``name`` base forward instead of recording Immich's.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Final, Literal
 
 import structlog
@@ -39,6 +41,18 @@ type Keys = frozenset[str]
 type PersonBase = dict[PersonBaseField, Keys]
 
 _NO_KEYS: Final[Keys] = frozenset()
+
+
+class PullKind(Enum):
+    """How a pull applies a person, which decides what it agrees on."""
+
+    # A new contact: its name and birthday are Immich's.
+    CREATED = "created"
+    # A linked contact: the pull imports the birthday, never the name.
+    LINKED = "linked"
+    # A contact just matched by name: as linked, but an Immich person without
+    # a birthday leaves the contact's own alone.
+    AUTO_LINKED = "auto_linked"
 
 
 def parse_birth_date(birth_date: str | None) -> tuple[int, int, int] | None:
@@ -90,6 +104,31 @@ def person_entries(person: ImmichPerson) -> PersonBase:
         "name": _keys_of(person, "name"),
         "birthDate": _keys_of(person, "birthDate"),
     }
+
+
+def pulled_base(
+    person: ImmichPerson, *, recorded: SyncedEntries | None, kind: PullKind
+) -> PersonBase:
+    """The base a pull of ``person`` leaves: the fields it makes both sides agree on.
+
+    A field the pull does not import keeps the link's recorded base, and is
+    left out when there is none.
+    """
+    known: SyncedEntries = recorded or {}
+    base: PersonBase = {}
+
+    if kind is PullKind.CREATED:
+        base["name"] = name_keys(person.name)
+    elif "name" in known:
+        base["name"] = known["name"]
+
+    if person.birth_date and parse_birth_date(person.birth_date) is None:
+        # Unreadable: the pull leaves the contact's birthday alone.
+        if "birthDate" in known:
+            base["birthDate"] = known["birthDate"]
+    elif person.birth_date or kind is not PullKind.AUTO_LINKED:
+        base["birthDate"] = birth_date_keys(person.birth_date)
+    return base
 
 
 def resolve_base(

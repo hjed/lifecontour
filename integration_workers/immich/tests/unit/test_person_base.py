@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from immich_models import ImmichPerson
 from person_base import (
+    PullKind,
     birth_date_keys,
     name_keys,
     person_entries,
     plan_push,
+    pulled_base,
     resolve_base,
 )
 
@@ -42,6 +44,52 @@ class TestKeys:
 
     def test_no_birth_date_has_no_key(self) -> None:
         assert birth_date_keys(None) == frozenset()
+
+
+class TestPulledBase:
+    def test_created_contact_records_both_fields(self) -> None:
+        person = _person(birth_date="1815-12-10")
+
+        assert pulled_base(person, recorded=None, kind=PullKind.CREATED) == {
+            "name": name_keys("Ada Lovelace"),
+            "birthDate": birth_date_keys("1815-12-10"),
+        }
+
+    def test_linked_contact_carries_the_recorded_name_forward(self) -> None:
+        recorded = {"name": name_keys("Ada King"), "birthDate": frozenset()}
+        person = _person(birth_date="1815-12-10")
+
+        assert pulled_base(person, recorded=recorded, kind=PullKind.LINKED) == {
+            "name": name_keys("Ada King"),
+            "birthDate": birth_date_keys("1815-12-10"),
+        }
+
+    def test_linked_contact_without_a_recorded_name_records_none(self) -> None:
+        person = _person()
+
+        assert pulled_base(person, recorded=None, kind=PullKind.LINKED) == {
+            "birthDate": frozenset()
+        }
+
+    def test_unreadable_birth_date_carries_the_recorded_one_forward(self) -> None:
+        recorded = {"birthDate": birth_date_keys("1815-12-10")}
+        person = _person(birth_date="not-a-date")
+
+        assert pulled_base(person, recorded=recorded, kind=PullKind.LINKED) == {
+            "birthDate": birth_date_keys("1815-12-10")
+        }
+
+    def test_auto_link_without_a_birthday_records_none(self) -> None:
+        # The auto-link leaves the contact's own birthday alone, so the sides
+        # do not agree on one.
+        assert pulled_base(_person(), recorded=None, kind=PullKind.AUTO_LINKED) == {}
+
+    def test_auto_link_with_a_birthday_records_it(self) -> None:
+        person = _person(birth_date="1815-12-10")
+
+        assert pulled_base(person, recorded=None, kind=PullKind.AUTO_LINKED) == {
+            "birthDate": birth_date_keys("1815-12-10")
+        }
 
 
 class TestResolveBase:

@@ -348,7 +348,9 @@ class TestSyncPeopleFlow:
         mock_connection.execute = AsyncMock(
             side_effect=[
                 _make_fetchone_result(id=1, internal_entity_id=42),  # ext ref
-                _make_fetchone_result(version_hash=version_hash),  # sync meta
+                _make_fetchone_result(
+                    version_hash=version_hash, reference_data=None
+                ),  # sync meta
             ]
         )
 
@@ -376,7 +378,9 @@ class TestSyncPeopleFlow:
         mock_connection.execute = AsyncMock(
             side_effect=[
                 _make_fetchone_result(id=1, internal_entity_id=42),  # ext ref
-                _make_fetchone_result(version_hash="old-stale-hash"),  # sync meta
+                _make_fetchone_result(
+                    version_hash="old-stale-hash", reference_data=None
+                ),  # sync meta
                 generic_result,  # outbox event insert
                 generic_result,  # sync metadata upsert
             ]
@@ -703,7 +707,9 @@ class TestPhotoUrlSync:
         mock_connection.execute = AsyncMock(
             side_effect=[
                 _make_fetchone_result(id=1, internal_entity_id=42),  # ext ref
-                _make_fetchone_result(version_hash="old-stale-hash"),  # sync meta
+                _make_fetchone_result(
+                    version_hash="old-stale-hash", reference_data=None
+                ),  # sync meta
                 MagicMock(),  # outbox event insert
                 MagicMock(),  # sync metadata upsert
             ]
@@ -755,6 +761,17 @@ class TestBuildContactData:
         assert data["last_name"] == "Doe"
         assert data["photo_url"] == "/api/contacts/10/avatar"
         assert data["important_dates"] == []
+
+    def test_build_contact_data_can_keep_a_missing_birthday(
+        self, service: ImmichSyncService
+    ) -> None:
+        """An auto-link leaves the contact's birthday when Immich has none."""
+        person = _make_person("p1", "Jane Doe")
+        data = service._build_contact_data(
+            person, contact_id=10, keep_missing_birthday=True
+        )
+
+        assert data.get("important_dates") is None
 
     def test_build_contact_data_unreadable_birthday_leaves_dates_alone(
         self, service: ImmichSyncService
