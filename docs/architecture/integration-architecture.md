@@ -824,18 +824,61 @@ integration the missing piece, the **base**: per field, opaque keys
   the base is empty and the push keeps everything.
 
 Google contacts uses it for emails, phones, addresses and birthdays
-(`integration_workers/google/synced_entries.py`, `person_merge.py`). Adopting
-it elsewhere:
+(`integration_workers/google/synced_entries.py`, `person_merge.py`).
+
+**Google calendar journals (#1899)** keep the base on the link itself
+(`journal_external_event_links.reference_data`), for the four fields the push
+writes: `summary`, `description`, `location` and `when` (start and end as one
+field, since Google refuses a timed start with an all-day end).
+`core_shared.calendar_sync_base` keys them for both sides — the journal's
+values in the form the push sends them (`local_when`), Google's as the API
+returns them (`google_event_keys`) — and a field's base is a *set* of keys, the
+value sent and the value Google answered with, so a reformatted value still
+counts as agreed.
+
+- **Push** (`calendar_push_merge.py`, `bidirectional` links only): PATCHes only
+  the fields whose local key is not in the base, with no read of Google first;
+  nothing changed means no call. A location cleared locally is sent as `""`.
+  For a field it left alone, Google's PATCH response shows what Google holds:
+  if that is not in the base, the base stays and the link is marked
+  `pending_import`. A link without a base pushes every field and records one.
+  A push that fails after Google may have applied it leaves the fields it sent
+  `unconfirmed` (a key no value matches), so the next push re-sends them and a
+  pull keeps local's value meanwhile.
+  `outbound` links are never pulled, so they keep pushing every field.
+- **Pull** sends Google's keys on the event (`JournalSyncEventData.synced_entries`)
+  and does not skip an unchanged etag on a `pending_import` link.
+- **Apply** (backend, displayed calendar's link with a base): Google's value is
+  taken for every field whose local key is still in the base, and local's kept
+  for the rest — decided under the journal's row lock, calendar info included.
+  The new base takes Google's key only for a field the journal now holds, so
+  the description, which an update never writes, keeps its old key and the
+  next push still leaves Google's description alone. Links without a base, or
+  on a de-duplicated other calendar, keep the journal-wide `updated_at` rule.
+- **Base writes are per field.** The push and an applied pull can each read
+  the base before the other commits, so each writes only the fields it decided
+  (`MERGED_REFERENCE_DATA_SQL`): the push the fields it sent, the pull the
+  fields the journal now holds Google's value for. A field either one left
+  alone keeps whatever key the other recorded meanwhile.
+
+Accepted divergences: a Google description edit stays in Google and is not
+imported on update; a local value whose push fails for good (dead-lettered,
+or an `eventTypeRestriction` Google refuses) is kept locally rather than
+overwritten by the next pull.
+
+Adopting it elsewhere:
 
 | Push | Base keys | Helper |
 |---|---|---|
 | Snipe-IT asset (`push_asset_update`) | each pushed column's last synced value | `three_way_value` per column, replacing the whole-push skip on any remote change |
-| Google calendar journal (`_process_journal_upsert_event`) | each PATCHed field | `three_way_value`, with the event etag in `external_version` |
 | Immich person | `name`, `birthDate` | `three_way_value` |
 
 **Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
 than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy
-the backend no later than the workers.
+the backend no later than the workers. For calendar journals the Google worker checks
+for the `reference_data` column migration `0143` adds (`link_schema.py`) and,
+until the backend has run it, reads and records no base and pushes every
+field as before.
 
 ### 2. External Data References (Immich)
 
