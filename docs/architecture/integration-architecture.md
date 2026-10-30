@@ -824,12 +824,27 @@ integration the missing piece, the **base**: per field, opaque keys
   the base is empty and the push keeps everything.
 
 Google contacts uses it for emails, phones, addresses and birthdays
-(`integration_workers/google/synced_entries.py`, `person_merge.py`). Adopting
-it elsewhere:
+(`integration_workers/google/synced_entries.py`, `person_merge.py`).
+
+Snipe-IT gear uses `three_way_value` per pushed column (`name`, `serial_number`,
+`purchase_date`; `integration_workers/snipeit/asset_merge.py`, #1898):
+
+- The push sends only the columns local changed; a conflict sends the local
+  value, an edit made here on purpose. It reads the asset again after the PATCH,
+  whose payload is the raw record rather than the GET form, so the link records
+  the version and values the next pull sees.
+- A column only Snipe-IT changed keeps its old base and sets `pending_import`,
+  so the next pull imports it. The pull (in the worker, not the backend) merges
+  the same way: it keeps a local edit still to push rather than overwriting it.
+- `model` and `manufacturer` are pull-only: Snipe-IT holds them as references
+  to other records, so its value always wins.
+- The maintenance push (`push_maintenance_update`) still PATCHes every field;
+  it follows in a stacked PR under #1898.
+
+Adopting it elsewhere:
 
 | Push | Base keys | Helper |
 |---|---|---|
-| Snipe-IT asset (`push_asset_update`) | each pushed column's last synced value | `three_way_value` per column, replacing the whole-push skip on any remote change |
 | Google calendar journal (`_process_journal_upsert_event`) | each PATCHed field | `three_way_value`, with the event etag in `external_version` |
 | Immich person | `name`, `birthDate` | `three_way_value` |
 

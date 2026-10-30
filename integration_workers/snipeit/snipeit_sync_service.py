@@ -31,13 +31,24 @@ from core_shared.sync_base import (
     SYNCED_ENTRIES_KEY,
     pending_import,
     recorded_synced_entries,
+    remote_unchanged_since_sync,
     serialise_synced_entries,
 )
 from sqlalchemy import text
 
-from asset_merge import AssetValues, base_of, merge_pull, pull_base
+from asset_merge import (
+    AssetValues,
+    base_after_push,
+    base_of,
+    holds_other_values,
+    merge_pull,
+    merge_push,
+    payload_for,
+    pull_base,
+    push_base,
+)
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
-from snipeit_data_transformer import SnipeItDataTransformer
+from snipeit_data_transformer import SnipeItDataTransformer, TransformResult
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
 from snipeit_models import (
     SNIPEIT_DATETIME_FORMAT,
@@ -1169,85 +1180,77 @@ class SnipeItSyncService:
         changed_fields: dict[str, Any],
         session_factory: Any,
     ) -> None:
-        """Push local gear item changes to Snipe-IT.
+        """Push a gear item's local edits to Snipe-IT, merged column by column.
+
+        Each pushed column is reconciled against the base the asset's link
+        records (``asset_merge``): one only local changed is sent, one only
+        Snipe-IT changed is left for the next pull, which the link's
+        ``pending_import`` then applies, and a conflict sends the local value.
+        A remote change to anything else no longer holds the edit back (#1898).
+
+        The asset is read again after the PATCH, whose payload is the raw
+        record rather than the form a GET returns, so the link records the
+        version and values the next pull will see.
 
         Args:
             gear_item_id: Internal gear item UUID.
-            changed_fields: Dictionary of field name to (old, new) array/tuple.
+            changed_fields: Field name to ``(old, new)``; the old values stand
+                in for the base on a link synced before bases were recorded.
             session_factory: Async session factory for DB queries.
         """
         async with session_factory() as session:
-            # 1. Get sync metadata for this gear item
             result = await session.execute(
                 text("""
-                    SELECT external_id, version_hash
-                    FROM sync_metadata
-                    WHERE integration_source = 'snipeit'
-                      AND internal_uuid = :internal_uuid
-                    FOR UPDATE
+                    SELECT sm.external_id, sm.version_hash, sm.reference_data,
+                           g.name, g.serial_number, g.purchase_date,
+                           g.model, g.manufacturer
+                    FROM sync_metadata sm
+                    JOIN gear_items g ON g.id::text = sm.internal_uuid
+                    WHERE sm.user_id = :user_id
+                      AND sm.integration_source = 'snipeit'
+                      AND sm.internal_uuid = :internal_uuid
                 """),
-                {"internal_uuid": gear_item_id},
+                {"user_id": self._user_id, "internal_uuid": gear_item_id},
             )
-            meta = result.fetchone()
+            link = result.fetchone()
 
-            if not meta:
-                logger.debug(
-                    "Skipping Snipe-IT export, no sync metadata found",
-                    gear_item_id=gear_item_id,
-                )
-                return
-
-            external_id = meta.external_id
-            local_version_hash = meta.version_hash
-
-        # 2. Fetch the current asset from Snipe-IT to verify hash
-        try:
-            asset = await self._api_client.get_asset(int(external_id))
-        except SnipeItAPIError as exc:
-            if exc.status_code == 404:
-                logger.warning(
-                    "Snipe-IT asset not found during export",
-                    gear_item_id=gear_item_id,
-                    external_id=external_id,
-                )
-                return
-            raise
-
-        transformed = self._transformer.transform(asset=asset, user_id=self._user_id)
-
-        # 3. Check for conflict
-        if transformed.version_hash != local_version_hash:
-            logger.info(
-                "Snipe-IT export conflict: remote asset changed since last sync. Skipping update.",
-                gear_item_id=gear_item_id,
-                external_id=external_id,
-            )
-            return
-
-        # 4. Map changed fields to Snipe-IT API payload
-        payload = {}
-        if "name" in changed_fields:
-            payload["name"] = changed_fields["name"][1]
-        if "serial_number" in changed_fields:
-            payload["serial"] = changed_fields["serial_number"][1]
-        if "purchase_date" in changed_fields:
-            new_date = changed_fields["purchase_date"][1]
-            payload["purchase_date"] = new_date if new_date is not None else ""
-
-        if not payload:
+        if not link:
             logger.debug(
-                "No mapped fields changed for Snipe-IT export",
+                "Skipping Snipe-IT export, no sync metadata found",
                 gear_item_id=gear_item_id,
             )
             return
 
-        # 5. Push the update
-        updated_asset = await self._api_client.update_asset(int(external_id), payload)
+        external_id = link.external_id
+        remote = await self._fetch_asset_for_push(gear_item_id, external_id)
+        if remote is None:
+            return
 
-        # 6. Update sync metadata with the new version hash
-        updated_transformed = self._transformer.transform(
-            asset=updated_asset, user_id=self._user_id
+        local = AssetValues.of(link)
+        base = push_base(
+            recorded_synced_entries(link.reference_data),
+            local=local,
+            remote=AssetValues.of(remote.gear_item),
+            remote_unchanged=remote_unchanged_since_sync(
+                link.version_hash, remote.version_hash
+            ),
+            changed_fields=changed_fields,
         )
+        merged = merge_push(base, local=local, remote=AssetValues.of(remote.gear_item))
+        if not merged.send:
+            logger.debug(
+                "No local gear change for Snipe-IT export",
+                gear_item_id=gear_item_id,
+                remote_changed=merged.remote_won,
+            )
+            return
+
+        await self._api_client.update_asset(int(external_id), payload_for(merged.send))
+        pushed = self._transformer.transform(
+            asset=await self._api_client.get_asset(int(external_id)),
+            user_id=self._user_id,
+        )
+        after = AssetValues.of(pushed.gear_item)
 
         async with session_factory() as session:
             async with session.begin():
@@ -1263,23 +1266,47 @@ class SnipeItSyncService:
                     """),
                     {
                         "user_id": self._user_id,
-                        "version_hash": updated_transformed.version_hash,
+                        "version_hash": pushed.version_hash,
                         "external_id": external_id,
                     },
                 )
-                # The asset was unchanged since it was synced, so after the PATCH
-                # it holds what both sides agree on: that is the pull's new base.
-                await self._record_synced_base(
-                    session,
+                await IntegrationLinkRepository(
+                    await session.connection()
+                ).patch_reference_data(
+                    "snipeit",
                     external_id,
-                    AssetValues.of(updated_transformed.gear_item),
+                    {
+                        SYNCED_ENTRIES_KEY: serialise_synced_entries(
+                            base_after_push(base, local=local, after=after)
+                        ),
+                        PENDING_IMPORT_KEY: holds_other_values(after, local),
+                    },
+                    user_id=self._user_id,
                 )
 
         logger.info(
             "Successfully pushed gear item update to Snipe-IT",
             gear_item_id=gear_item_id,
             external_id=external_id,
+            columns=sorted(merged.send),
         )
+
+    async def _fetch_asset_for_push(
+        self, gear_item_id: str, external_id: str
+    ) -> TransformResult | None:
+        """The linked asset as Snipe-IT holds it, or ``None`` when it is gone."""
+        try:
+            asset = await self._api_client.get_asset(int(external_id))
+        except SnipeItAPIError as exc:
+            if exc.status_code == 404:
+                logger.warning(
+                    "Snipe-IT asset not found during export",
+                    gear_item_id=gear_item_id,
+                    external_id=external_id,
+                )
+                return None
+            raise
+        return self._transformer.transform(asset=asset, user_id=self._user_id)
 
     # -- Maintenance Sync Methods ------------------------------------------
 

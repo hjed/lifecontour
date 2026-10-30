@@ -1,8 +1,8 @@
 """Integration tests for the per-column merge of gear edits with Snipe-IT (#1898).
 
-The pull records the base the asset's link merges against, keeps an edit still
-to be pushed rather than overwriting it, and applies a link a push left
-``pending_import``.
+A gear edit is pushed column by column against the base the asset's link
+records, so a remote change to anything else no longer drops it, and the pull
+keeps an edit still to be pushed rather than overwriting it.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -159,6 +160,147 @@ async def _gear(connection: AsyncConnection, gear_id: str) -> Any:
     ).one()
 
 
+def _queue_push(transport: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
+    """Snipe-IT's answers to a push: the asset, the PATCH, the asset again."""
+    transport.add_response(f"/hardware/{ASSET_ID}", json_data=before, method="GET")
+    transport.add_response(
+        f"/hardware/{ASSET_ID}",
+        json_data={"status": "success", "messages": "ok", "payload": after},
+        method="PATCH",
+    )
+    transport.add_response(f"/hardware/{ASSET_ID}", json_data=after, method="GET")
+
+
+def _patch_bodies(transport: Any) -> list[dict[str, Any]]:
+    return [
+        json.loads(request.content)
+        for request in transport.requests
+        if request.method == "PATCH"
+    ]
+
+
+@dataclass(frozen=True)
+class PushCase:
+    """A gear edit pushed against an asset Snipe-IT may have changed too.
+
+    ``base`` is the asset whose values the link should record as its base.
+    """
+
+    local_name: str
+    reference_data: dict[str, Any] | None
+    before: dict[str, Any]
+    after: dict[str, Any]
+    base: dict[str, Any]
+    pending_import: bool
+
+
+PUSH_CASES = [
+    pytest.param(
+        PushCase(
+            local_name="Big Tent",
+            reference_data=_synced_reference(),
+            before=_asset(**CHECKED_OUT),
+            after=_asset(name="Big Tent", **CHECKED_OUT),
+            base=_asset(name="Big Tent", **CHECKED_OUT),
+            pending_import=False,
+        ),
+        id="pushed-although-the-asset-was-checked-out",
+    ),
+    pytest.param(
+        PushCase(
+            local_name="Big Tent",
+            reference_data=_synced_reference(),
+            before=_asset(serial="SN-2"),
+            after=_asset(name="Big Tent", serial="SN-2"),
+            # The serial keeps its base, so the pull reads it as Snipe-IT's change.
+            base=_asset(name="Big Tent"),
+            pending_import=True,
+        ),
+        id="a-remote-only-change-is-left-for-the-pull",
+    ),
+    pytest.param(
+        PushCase(
+            local_name="Big Tent",
+            reference_data=_synced_reference(),
+            before=_asset(name="Remote Tent"),
+            after=_asset(name="Big Tent"),
+            base=_asset(name="Big Tent"),
+            pending_import=False,
+        ),
+        id="a-conflict-sends-the-local-value",
+    ),
+    pytest.param(
+        PushCase(
+            local_name="Big Tent",
+            reference_data=None,
+            before=_asset(serial="SN-2"),
+            after=_asset(name="Big Tent", serial="SN-2"),
+            base=_asset(name="Big Tent"),
+            pending_import=True,
+        ),
+        id="a-link-without-a-base-merges-against-the-old-values",
+    ),
+]
+
+
+class TestPushAssetUpdate:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", PUSH_CASES)
+    async def test_only_the_local_edit_is_patched(
+        self,
+        case: PushCase,
+        snipeit_sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: SessionFactory,
+    ) -> None:
+        gear_id = await _linked_gear(
+            async_connection,
+            name=case.local_name,
+            reference_data=case.reference_data,
+        )
+        _queue_push(mock_transport, case.before, case.after)
+
+        await snipeit_sync_service.push_asset_update(
+            gear_item_id=gear_id,
+            changed_fields={"name": ["Tent", case.local_name]},
+            session_factory=session_factory,
+        )
+
+        assert _patch_bodies(mock_transport) == [{"name": case.local_name}]
+        link = await _link(async_connection)
+        assert link.version_hash == _version(case.after)
+        reference = json.loads(link.reference_data)
+        assert reference["synced_entries"] == _serialised_base(case.base)
+        assert reference["pending_import"] is case.pending_import
+
+    @pytest.mark.asyncio
+    async def test_nothing_local_to_push_sends_nothing(
+        self,
+        snipeit_sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: SessionFactory,
+    ) -> None:
+        gear_id = await _linked_gear(
+            async_connection, reference_data=_synced_reference()
+        )
+        mock_transport.add_response(
+            f"/hardware/{ASSET_ID}", json_data=_asset(serial="SN-2"), method="GET"
+        )
+
+        await snipeit_sync_service.push_asset_update(
+            gear_item_id=gear_id,
+            changed_fields={"model": ["Hubba", "Hubba Hubba"]},
+            session_factory=session_factory,
+        )
+
+        assert _patch_bodies(mock_transport) == []
+        link = await _link(async_connection)
+        assert link.version_hash == _version(_asset())
+        assert json.loads(link.reference_data) == _synced_reference()
+
+
 class TestPullKeepsTheBase:
     @pytest.mark.asyncio
     async def test_a_pull_records_the_base_on_a_link_without_one(
@@ -260,14 +402,7 @@ class TestPushRecordsTheBase:
             async_connection, name="Big Tent", reference_data=_synced_reference()
         )
         pushed = _asset(name="Big Tent")
-        mock_transport.add_response(
-            f"/hardware/{ASSET_ID}", json_data=_asset(), method="GET"
-        )
-        mock_transport.add_response(
-            f"/hardware/{ASSET_ID}",
-            json_data={"status": "success", "messages": "ok", "payload": pushed},
-            method="PATCH",
-        )
+        _queue_push(mock_transport, _asset(), pushed)
 
         await snipeit_sync_service.push_asset_update(
             gear_id, {"name": ["Tent", "Big Tent"]}, session_factory
