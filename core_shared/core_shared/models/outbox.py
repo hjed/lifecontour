@@ -7,6 +7,7 @@ database transaction as the business data changes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -15,7 +16,7 @@ from sqlalchemy import Column, DateTime, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
-from .contacts.sync_scope import ContactSyncScope
+from .contacts.sync_scope import ContactSyncField, ContactSyncScope
 from .outbox_events import (
     ContactSyncEventData,
     FitnessDurationCorrectedData,
@@ -117,6 +118,7 @@ class OutboxEvent(Base):
         skipped_addresses: list[SkippedAddress] | None = None,
         address_fallback_country: str | None = None,
         synced_entries: dict[str, list[str]] | None = None,
+        empty_at_source: Mapping[ContactSyncField, str] | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -135,6 +137,8 @@ class OutboxEvent(Base):
                 with none, if any (#1820)
             synced_entries: Per field, the keys of the entries the import
                 read, if the worker records them (#1861)
+            empty_at_source: The list fields the source holds no entries in,
+                each with the ``synced_entries`` field that records them (#1909)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -155,6 +159,7 @@ class OutboxEvent(Base):
             skipped_addresses=skipped_addresses or [],
             address_fallback_country=address_fallback_country,
             synced_entries=synced_entries,
+            empty_at_source=dict(empty_at_source or {}),
         )
         return cls(
             event_type=f"contact.{sync_type}",

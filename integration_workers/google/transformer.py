@@ -153,8 +153,10 @@ class GoogleContactTransformer:
         methods.extend(self._transform_phone_numbers(google_person.phone_numbers))
         contact.methods = methods
 
-        # Addresses, notes, tags: use None when Google provides no data
-        # so that locally-managed data is preserved on sync updates.
+        # Addresses, notes: use None when Google provides no data so that
+        # locally-managed data is preserved on sync updates. The event's
+        # ``empty_at_source`` lets the backend clear addresses Google held at
+        # the last sync and has deleted since (#1909).
         transformed_addresses = self._transform_addresses(
             google_person.addresses,
             fallback_country=self.address_fallback_country(google_person),

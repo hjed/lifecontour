@@ -20,6 +20,7 @@ from core_shared.models.contacts.important_date_types import (
 from core_shared.models.contacts.sync_scope import (
     ContactSyncField,
     ContactSyncScope,
+    apply_source_deletions,
     apply_sync_scope,
 )
 from core_shared.models.outbox import OutboxEvent
@@ -254,3 +255,98 @@ class TestContactSyncScopeOnTheEvent:
     def test_unknown_field_name_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ContactSyncScope.model_validate({"fields": ["nickname"]})
+
+
+class TestApplySourceDeletions:
+    """A list the source emptied since the last sync is cleared, not kept (#1909).
+
+    The source sends None for a list it holds nothing in, so that a contact it
+    never held entries for keeps its local ones. The recorded base tells the
+    two apart: keys there mean the source held entries at the last sync.
+    """
+
+    EMPTY_ADDRESSES = {ContactSyncField.ADDRESSES: "addresses"}
+
+    def _incoming(self) -> Contact:
+        return Contact(user_id="user-1", first_name="Rob", addresses=None)
+
+    def test_a_list_the_base_recorded_entries_for_is_cleared(self) -> None:
+        incoming = self._incoming()
+
+        apply_source_deletions(
+            incoming, self.EMPTY_ADDRESSES, {"addresses": frozenset({"k-addr"})}
+        )
+
+        assert incoming.addresses == []
+
+    @pytest.mark.parametrize(
+        "recorded",
+        [
+            None,
+            {},
+            {"addresses": frozenset()},
+            {"emailAddresses": frozenset({"k-email"})},
+        ],
+        ids=["no-base", "empty-base", "field-empty", "field-missing"],
+    )
+    def test_a_list_the_source_never_held_entries_for_is_left_alone(
+        self, recorded: dict[str, frozenset[str]] | None
+    ) -> None:
+        incoming = self._incoming()
+
+        apply_source_deletions(incoming, self.EMPTY_ADDRESSES, recorded)
+
+        assert incoming.addresses is None
+
+    def test_a_list_the_source_did_not_report_empty_is_left_alone(self) -> None:
+        incoming = self._incoming()
+
+        apply_source_deletions(incoming, {}, {"addresses": frozenset({"k-addr"})})
+
+        assert incoming.addresses is None
+
+    def test_a_list_the_event_carries_is_left_as_sent(self) -> None:
+        incoming = Contact(
+            user_id="user-1",
+            first_name="Rob",
+            methods=[ContactMethod(MethodType.EMAIL, "rob@example.com", contact_id=1)],
+        )
+
+        apply_source_deletions(
+            incoming,
+            {ContactSyncField.METHODS: "emailAddresses"},
+            {"emailAddresses": frozenset({"k-email"})},
+        )
+
+        assert incoming.methods is not None
+        assert [method.value for method in incoming.methods] == ["rob@example.com"]
+
+
+class TestEmptyAtSourceOnTheEvent:
+    def _event(self, **kwargs: object) -> OutboxEvent:
+        return OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Kiri"},
+            integration_source="google",
+            external_id="people/c1",
+            user_id="user-1",
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_the_builder_carries_it_through_json(self) -> None:
+        event = self._event(empty_at_source={ContactSyncField.ADDRESSES: "addresses"})
+
+        parsed = ContactSyncEventData.model_validate(
+            json.loads(json.dumps(event.event_data))
+        )
+
+        assert parsed.empty_at_source == {ContactSyncField.ADDRESSES: "addresses"}
+
+    def test_an_event_queued_before_the_field_reports_nothing_empty(self) -> None:
+        data = self._event().event_data
+        del data["empty_at_source"]
+
+        assert ContactSyncEventData.model_validate(data).empty_at_source == {}
+
+    def test_a_scalar_field_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            self._event(empty_at_source={ContactSyncField.NICK_NAME: "nicknames"})

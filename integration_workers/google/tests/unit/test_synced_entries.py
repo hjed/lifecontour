@@ -8,14 +8,18 @@ orders or formats it, so a key covers only the value inbound imports.
 from typing import Any
 
 import pytest
+from core_shared.models.contacts.sync_scope import ContactSyncField
 
 from api_models import GooglePerson
 from synced_entries import (
     BASE_FIELDS,
+    LIST_BASES,
+    empty_at_source,
     raw_entry_keys,
     raw_synced_entries,
     synced_entries_of,
 )
+from transformer import GOOGLE_CONTACT_SYNC_SCOPE
 
 pytestmark = pytest.mark.unit
 
@@ -212,3 +216,21 @@ class TestSyncedEntriesOf:
         assert raw_synced_entries(raw, "NZ") == synced_entries_of(
             GooglePerson.model_validate(raw), "NZ"
         )
+
+
+class TestEmptyAtSource:
+    """The lists Google holds no entries in, for the backend to clear (#1909)."""
+
+    def test_a_person_with_no_addresses_reports_them_empty(self) -> None:
+        assert empty_at_source(_person()) == {ContactSyncField.ADDRESSES: "addresses"}
+
+    def test_an_address_inbound_cannot_import_still_counts_as_held(self) -> None:
+        """Google still holds it, so the contact's addresses are not cleared."""
+        person = _person(addresses=[{"streetAddress": "1 Nowhere Rd"}])
+
+        assert synced_entries_of(person, None)["addresses"] == frozenset()
+        assert empty_at_source(person) == {}
+
+    def test_every_list_base_is_a_base_field_of_an_owned_list(self) -> None:
+        assert set(LIST_BASES.values()) <= set(BASE_FIELDS)
+        assert set(LIST_BASES) <= GOOGLE_CONTACT_SYNC_SCOPE.fields

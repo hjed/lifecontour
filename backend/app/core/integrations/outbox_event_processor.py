@@ -20,7 +20,10 @@ from core_shared.models.contacts.serialization import (
     ContactDeserializationError,
     deserialize_contact,
 )
-from core_shared.models.contacts.sync_scope import apply_sync_scope
+from core_shared.models.contacts.sync_scope import (
+    apply_source_deletions,
+    apply_sync_scope,
+)
 from core_shared.models.contacts.value_objects import Provenance
 from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
@@ -39,6 +42,7 @@ from core_shared.sync_base import (
     PENDING_IMPORT_KEY,
     SYNCED_ENTRIES_KEY,
     pending_import,
+    recorded_synced_entries,
 )
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -1188,6 +1192,13 @@ class OutboxEventProcessor:
             # lookup above is scoped to it, so another user's contact is never
             # found here.
             updated_contact_data.id = contact_id
+            # Before archived values are kept: a cleared list keeps them too.
+            if payload.empty_at_source:
+                apply_source_deletions(
+                    updated_contact_data,
+                    payload.empty_at_source,
+                    recorded_synced_entries(sync_metadata.reference_data),
+                )
             _keep_archived_values(updated_contact_data, stored)
 
             # Find the existing integration link (canonical sync_metadata store)
