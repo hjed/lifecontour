@@ -17,6 +17,7 @@ from core_shared.calendar_sync_base import (
     agreed_after_apply,
     changed,
     description_key,
+    google_event_keys,
     local_when,
     locally_changed,
     location_key,
@@ -235,3 +236,31 @@ class TestAgreedAfterApply:
         )
 
         assert agreed == {}
+
+
+class TestGoogleEventKeys:
+    def test_keys_an_event_as_its_journal_would_hold_it(self) -> None:
+        event = {
+            "summary": " Lunch ",
+            "description": "notes\n",
+            "location": "Cafe",
+            "start": {"dateTime": "2026-10-29T12:00:00+11:00"},
+            "end": {"dateTime": "2026-10-29T13:00:00+11:00"},
+        }
+
+        assert google_event_keys(event) == {
+            SUMMARY: summary_key("Lunch"),
+            DESCRIPTION: description_key("notes"),
+            LOCATION: location_key("Cafe"),
+            WHEN: when_key(
+                {"dateTime": "2026-10-29T01:00:00Z"},
+                {"dateTime": "2026-10-29T02:00:00Z"},
+            ),
+        }
+
+    def test_an_event_missing_fields_keys_them_as_empty(self) -> None:
+        keys = google_event_keys({})
+
+        assert keys[SUMMARY] == summary_key("Untitled Event")
+        assert keys[LOCATION] == location_key(None)
+        assert keys[WHEN] == when_key({}, {})

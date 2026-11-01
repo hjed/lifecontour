@@ -61,7 +61,7 @@ def parse_reference_data(reference_data: str | None) -> dict[str, Any]:
         return {}
     try:
         parsed = json.loads(reference_data)
-    except ValueError:
+    except ValueError, TypeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 

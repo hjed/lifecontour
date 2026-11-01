@@ -56,6 +56,19 @@ from googleapiclient.errors import HttpError
 pytest_plugins = ["core_shared.testing"]
 
 
+@pytest.fixture(autouse=True)
+def _link_reference_data_migrated() -> None:
+    """Every test runs against a migrated schema; ``test_link_schema`` asks.
+
+    Without this the first test to sync a calendar would spend one of its
+    mocked statements on the schema check, and which test that is depends on
+    the order they run in.
+    """
+    import link_schema
+
+    link_schema.READINESS.ready = True
+
+
 @pytest.fixture
 def valid_person_data() -> dict[str, Any]:
     """Provide a valid person data dictionary from Google Contacts."""
