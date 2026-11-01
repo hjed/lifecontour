@@ -13,6 +13,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import date
 from typing import Any
 
+import httpx
 import pytest
 from core_shared.sync_base import serialise_synced_entries
 from sqlalchemy import text
@@ -159,6 +160,15 @@ async def _gear(connection: AsyncConnection, gear_id: str) -> Any:
     ).one()
 
 
+async def _renamed_gear(connection: AsyncConnection, transport: Any) -> str:
+    """A gear item renamed "Big Tent" here, its asset as last synced."""
+    gear_id = await _linked_gear(
+        connection, name="Big Tent", reference_data=_synced_reference()
+    )
+    transport.add_response(f"/hardware/{ASSET_ID}", json_data=_asset(), method="GET")
+    return gear_id
+
+
 class TestPullKeepsTheBase:
     @pytest.mark.asyncio
     async def test_a_pull_records_the_base_on_a_link_without_one(
@@ -246,6 +256,44 @@ class TestPullKeepsTheBase:
         reference = json.loads((await _link(async_connection)).reference_data)
         assert reference["pending_import"] is False
 
+    @pytest.mark.asyncio
+    async def test_a_pull_that_read_the_asset_before_a_push_changes_nothing(
+        self,
+        snipeit_sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: SessionFactory,
+    ) -> None:
+        gear_id = await _renamed_gear(async_connection, mock_transport)
+        answer = mock_transport.handle_async_request
+        pushed = _asset(name="Big Tent")
+
+        async def push_commits_after_the_get(request: httpx.Request) -> httpx.Response:
+            response = await answer(request)
+            await async_connection.execute(
+                text("""
+                    UPDATE sync_metadata
+                    SET version_hash = :version_hash, reference_data = :reference_data
+                    WHERE integration_source = 'snipeit'
+                """),
+                {
+                    "version_hash": _version(pushed),
+                    "reference_data": json.dumps(
+                        {"synced_entries": _serialised_base(pushed)}
+                    ),
+                },
+            )
+            return response
+
+        mock_transport.handle_async_request = push_commits_after_the_get
+
+        result = await snipeit_sync_service.sync_asset_batch(
+            asset_ids=[ASSET_ID], session_factory=session_factory
+        )
+
+        assert result["synced"] == 0
+        assert (await _gear(async_connection, gear_id)).name == "Big Tent"
+
 
 class TestPushRecordsTheBase:
     @pytest.mark.asyncio
@@ -256,13 +304,8 @@ class TestPushRecordsTheBase:
         async_connection: AsyncConnection,
         session_factory: SessionFactory,
     ) -> None:
-        gear_id = await _linked_gear(
-            async_connection, name="Big Tent", reference_data=_synced_reference()
-        )
+        gear_id = await _renamed_gear(async_connection, mock_transport)
         pushed = _asset(name="Big Tent")
-        mock_transport.add_response(
-            f"/hardware/{ASSET_ID}", json_data=_asset(), method="GET"
-        )
         mock_transport.add_response(
             f"/hardware/{ASSET_ID}",
             json_data={"status": "success", "messages": "ok", "payload": pushed},

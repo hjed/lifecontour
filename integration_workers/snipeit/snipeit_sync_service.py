@@ -495,6 +495,17 @@ class MaintenanceClaim:
         return cls(asset_id=asset_id, title=title, start_date=start_date)
 
 
+def _synced_since(row: Any, read_before: tuple[str, str | None] | None) -> bool:
+    """Whether a push synced the record after a pull read its row (#1898).
+
+    The pull's fetched copy may then predate the push: merging it against the
+    push's base would read the push's own edit as one Snipe-IT reverted. The
+    pull leaves the record for the next pull, which fetches it again.
+    """
+    state = None if row is None else (row.version_hash, row.reference_data)
+    return state != read_before
+
+
 def _payload_version_hash(payload: dict[str, Any]) -> str:
     """The ``version_hash`` a push row records for the maintenance values ``payload``."""
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -952,6 +963,9 @@ class SnipeItSyncService:
 
         for attempt in range(1, _MAX_ASSET_RETRIES + 1):
             try:
+                read_before = await self._sync_row_state(
+                    session_factory, "snipeit", external_id
+                )
                 # Get the asset from API outside transaction
                 asset = await self._api_client.get_asset(asset_id)
                 transformed = self._transformer.transform(
@@ -973,6 +987,12 @@ class SnipeItSyncService:
                             {"user_id": self._user_id, "external_id": external_id},
                         )
                         existing_meta = result.fetchone()
+                        if _synced_since(existing_meta, read_before):
+                            logger.info(
+                                "Skipping Snipe-IT asset synced while it was fetched",
+                                asset_id=asset_id,
+                            )
+                            raise _AssetSkipped
 
                         # A push that left Snipe-IT holding what local does not
                         # records its own version, so it is applied regardless.
@@ -1118,6 +1138,28 @@ class SnipeItSyncService:
             error=str(last_exc),
         )
         raise _AssetFailed from last_exc
+
+    async def _sync_row_state(
+        self, session_factory: Any, integration_source: str, external_id: str
+    ) -> tuple[str, str | None] | None:
+        """A record's sync row as a pull reads it before fetching the record."""
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT version_hash, reference_data
+                    FROM sync_metadata
+                    WHERE user_id = :user_id
+                      AND integration_source = :integration_source
+                      AND external_id = :external_id
+                """),
+                {
+                    "user_id": self._user_id,
+                    "integration_source": integration_source,
+                    "external_id": external_id,
+                },
+            )
+            row = result.fetchone()
+        return None if row is None else (row.version_hash, row.reference_data)
 
     async def _pulled_gear_values(
         self, session: Any, existing_meta: Any, gear_id: Any, remote: AssetValues
