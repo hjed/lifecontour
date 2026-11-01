@@ -6,8 +6,9 @@ record's sync row records (``reference_data.synced_entries``).
 
 Fields are compared in the shape a push sends them (``reverse_transform``, and
 ``_snipeit_record_payload`` for a fetched record): text as typed, Snipe-IT's
-maintenance type, dates as local ``YYYY-MM-DD``. A field the shape leaves out
-is ``None``. Nothing here does I/O.
+maintenance type, dates as local ``YYYY-MM-DD``. Each is keyed as a journal
+imported from it holds it (``SnipeItMaintenanceTransformer.as_imported``), so
+what an import fills in never reads as an edit. Nothing here does I/O.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any, Final, Literal
 from core_shared.sync_base import SyncedEntries, entry_key
 
 from field_merge import FieldMerge, base_after_push, complete_base, reconcile
+from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
 
 type MaintenanceField = Literal[
     "name", "notes", "asset_maintenance_type", "start_date", "completion_date"
@@ -37,9 +39,29 @@ type Base = dict[MaintenanceField, frozenset[str]]
 
 def base_of(payload: Payload) -> Base:
     """The base a payload makes: one key per field; ``None`` is a value too."""
+    imported = SnipeItMaintenanceTransformer.as_imported(payload)
     return {
-        field: frozenset({entry_key(payload.get(field))})
+        field: frozenset({entry_key(imported.get(field))})
         for field in MAINTENANCE_FIELDS
+    }
+
+
+def effective_base(
+    synced: Base, queued: SyncedEntries | None, *, local: Payload
+) -> Base:
+    """The base a merge uses while a pull's event may still be queued.
+
+    A pull hands its changes to the journal through the outbox, so the journal
+    takes them some time after the pull. A field the pull queued is agreed once
+    the journal holds the queued value; until then the recorded base stands.
+    """
+    held = base_of(local)
+    queued = queued or {}
+    return {
+        field: queued[field]
+        if field in queued and queued[field] == held[field]
+        else keys
+        for field, keys in synced.items()
     }
 
 
@@ -65,8 +87,24 @@ def pull_base(recorded: SyncedEntries | None, *, local: Payload) -> Base:
 def merge(
     base: Base, *, local: Payload, remote: Payload
 ) -> FieldMerge[MaintenanceField]:
-    """Reconcile every field of a journal with its record, against ``base``."""
-    return reconcile(base, local=base_of(local), remote=base_of(remote))
+    """Reconcile every field of a journal with its record, against ``base``.
+
+    The dates are one range: when taking one from each side would put the
+    start after the end, both take local's (local wins, as in a conflict).
+    """
+    merged = reconcile(base, local=base_of(local), remote=base_of(remote))
+    dates: frozenset[MaintenanceField] = frozenset({"start_date", "completion_date"})
+    if len(dates & merged.local_fields) != 1:
+        return merged
+    imported_local = SnipeItMaintenanceTransformer.as_imported(local)
+    imported_remote = SnipeItMaintenanceTransformer.as_imported(remote)
+    start, end = (
+        (imported_local if field in merged.local_fields else imported_remote).get(field)
+        for field in ("start_date", "completion_date")
+    )
+    if not (start and end and start > end):
+        return merged
+    return FieldMerge(merged.local_fields | dates, merged.remote_fields - dates)
 
 
 def base_after(base: Base, *, local: Payload, after: Payload) -> Base:

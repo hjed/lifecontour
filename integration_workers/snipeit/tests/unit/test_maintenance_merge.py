@@ -5,6 +5,7 @@ from typing import Any
 from maintenance_merge import (
     base_after,
     base_of,
+    effective_base,
     merge,
     payload_for,
     pull_base,
@@ -42,6 +43,29 @@ class TestBaseOf:
         assert base_of(_with(asset_id=7)) == base_of(SYNCED)
 
 
+class TestKeyedAsTheJournalHoldsIt:
+    def test_a_missing_completion_is_the_start(self) -> None:
+        missing = {k: v for k, v in SYNCED.items() if k != "completion_date"}
+        assert base_of(missing) == base_of(_with(completion_date="2024-01-15"))
+
+    def test_an_unknown_type_is_the_type_it_imports_as(self) -> None:
+        assert base_of(_with(asset_maintenance_type="Cleaning")) == base_of(SYNCED)
+        assert base_of(_with(asset_maintenance_type=None)) == base_of(SYNCED)
+
+    def test_an_empty_name_is_the_fallback_title(self) -> None:
+        assert base_of(_with(name="")) == base_of(
+            _with(name="Gear maintenance: routine maintenance")
+        )
+
+    def test_an_untouched_import_of_a_record_without_a_completion_is_not_local(
+        self,
+    ) -> None:
+        remote = {k: v for k, v in SYNCED.items() if k != "completion_date"}
+        journal = _with(completion_date="2024-01-15")
+        merged = merge(base_of(remote), local=journal, remote=remote)
+        assert merged.local_fields == set()
+
+
 class TestMerge:
     def test_a_local_only_change_is_local(self) -> None:
         merged = merge(base_of(SYNCED), local=_with(name="Waxed"), remote=SYNCED)
@@ -74,6 +98,44 @@ class TestMerge:
             base_of(SYNCED), local=_with(name="Local"), remote=_with(name="Remote")
         )
         assert merged.local_fields == {"name"}
+
+
+class TestDatesStayAPair:
+    def test_a_split_that_inverts_the_range_takes_both_dates_from_local(
+        self,
+    ) -> None:
+        base = base_of(_with(start_date="2024-01-11", completion_date="2024-01-20"))
+        merged = merge(
+            base,
+            local=_with(start_date="2024-01-15", completion_date="2024-01-20"),
+            remote=_with(start_date="2024-01-11", completion_date="2024-01-12"),
+        )
+        assert merged.local_fields == {"start_date", "completion_date"}
+        assert not merged.remote_won
+
+    def test_a_split_that_keeps_the_range_stays_split(self) -> None:
+        base = base_of(_with(start_date="2024-01-11", completion_date="2024-01-20"))
+        merged = merge(
+            base,
+            local=_with(start_date="2024-01-12", completion_date="2024-01-20"),
+            remote=_with(start_date="2024-01-11", completion_date="2024-01-25"),
+        )
+        assert merged.local_fields == {"start_date"}
+        assert merged.remote_fields == {"completion_date"}
+
+
+class TestEffectiveBase:
+    def test_a_queued_value_the_journal_holds_is_the_base(self) -> None:
+        queued = {"notes": base_of(_with(notes="Edited remotely"))["notes"]}
+        local = _with(notes="Edited remotely")
+        assert effective_base(base_of(SYNCED), queued, local=local) == base_of(local)
+
+    def test_a_queued_value_the_journal_does_not_hold_yet_is_not(self) -> None:
+        queued = {"notes": base_of(_with(notes="Edited remotely"))["notes"]}
+        assert effective_base(base_of(SYNCED), queued, local=SYNCED) == base_of(SYNCED)
+
+    def test_nothing_queued_is_the_recorded_base(self) -> None:
+        assert effective_base(base_of(SYNCED), None, local=SYNCED) == base_of(SYNCED)
 
 
 class TestPushBase:

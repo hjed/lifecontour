@@ -26,11 +26,17 @@ class FieldMerge[F: str]:
 
     * ``local_fields`` — the fields local owns: a push sends them, and a pull
       keeps local's value.
-    * ``remote_won`` — a field only the remote changed, for the pull to import.
+    * ``remote_fields`` — the fields only the remote changed, for the pull to
+      import.
     """
 
     local_fields: frozenset[F]
-    remote_won: bool
+    remote_fields: frozenset[F]
+
+    @property
+    def remote_won(self) -> bool:
+        """Whether the remote changed any field local did not."""
+        return bool(self.remote_fields)
 
 
 def complete_base[F: str](
@@ -46,7 +52,7 @@ def reconcile[F: str](
 ) -> FieldMerge[F]:
     """Reconcile every field of ``base`` between local and the remote."""
     local_fields: set[F] = set()
-    remote_won = False
+    remote_fields: set[F] = set()
     for field, base_keys in base.items():
         winner = three_way_value(
             base=base_keys, local=local[field], remote=remote[field]
@@ -55,12 +61,12 @@ def reconcile[F: str](
             case Winner.LOCAL | Winner.CONFLICT:
                 local_fields.add(field)
             case Winner.REMOTE:
-                remote_won = True
+                remote_fields.add(field)
             case Winner.SAME:
                 pass
             case _:
                 assert_never(winner)
-    return FieldMerge(frozenset(local_fields), remote_won)
+    return FieldMerge(frozenset(local_fields), frozenset(remote_fields))
 
 
 def base_after_push[F: str](
