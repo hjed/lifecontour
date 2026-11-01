@@ -824,14 +824,43 @@ integration the missing piece, the **base**: per field, opaque keys
   the base is empty and the push keeps everything.
 
 Google contacts uses it for emails, phones, addresses and birthdays
-(`integration_workers/google/synced_entries.py`, `person_merge.py`). Adopting
-it elsewhere:
+(`integration_workers/google/synced_entries.py`, `person_merge.py`).
+
+Immich people use it for `name` and `birthDate` (#1900,
+`integration_workers/immich/person_base.py`), each merged with
+`three_way_value`:
+
+- A field changed only in Immich is not sent. A conflict is won by local: the
+  push follows a local edit, and the pull never imports a linked contact's
+  name, so only local-wins lets a name converge.
+- The pull imports a linked contact's birthday but never its name, so it
+  records Immich's birthday and carries the recorded `name` base forward
+  rather than recording Immich's name. A pull creating the contact records
+  both.
+- What the push leaves is read from Immich's PUT response, not the person it
+  fetched first: a field takes its base from the response only when the
+  response holds local's value, so one Immich changed mid-push keeps its old
+  base. `pending_import` is set only for a birthday the response holds
+  differently from both local and the base.
+- The Immich pull skips an unchanged person itself, before the backend sees
+  it, so it honours `pending_import` too — but not while the contact holds an
+  unpushed edit (`contacts.updated_at > last_synced_at`), since the backend
+  would skip that event anyway.
+- The name-match auto-link emits its event with `force_apply` (the link
+  already carries the person's version) and leaves the contact's birthday alone
+  when Immich has none.
+- Known limits: a link from before bases records no name, so an Immich rename
+  before its first push after a birthday-only pull is a conflict local wins;
+  the auto-link's echo push renames a fuzzy-matched person to the local name;
+  and an `updated_at` bump that pushes nothing (a tag merge) holds a
+  `pending_import` until the next push.
+
+Adopting it elsewhere:
 
 | Push | Base keys | Helper |
 |---|---|---|
 | Snipe-IT asset (`push_asset_update`) | each pushed column's last synced value | `three_way_value` per column, replacing the whole-push skip on any remote change |
 | Google calendar journal (`_process_journal_upsert_event`) | each PATCHed field | `three_way_value`, with the event etag in `external_version` |
-| Immich person | `name`, `birthDate` | `three_way_value` |
 
 **Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
 than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy

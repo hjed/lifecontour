@@ -41,6 +41,7 @@ from core_shared.repositories.merged_alias_repository import MergedAliasReposito
 from core_shared.sync_base import (
     PENDING_IMPORT_KEY,
     SYNCED_ENTRIES_KEY,
+    pending_import,
     recorded_synced_entries,
     serialise_synced_entries,
 )
@@ -49,7 +50,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from immich_api_client import ImmichApiClient
 from immich_models import ImmichAlbum, ImmichAsset, ImmichPerson, ImmichSharedLink
-from person_base import parse_birth_date, plan_push, resolve_base
+from person_base import (
+    PersonBase,
+    PullKind,
+    parse_birth_date,
+    plan_push,
+    pulled_base,
+    resolve_base,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -668,11 +676,16 @@ class ImmichSyncService:
         if existing_ref:
             # Person is already linked — check if update needed
             existing_meta = await self._find_sync_metadata(person.id)
-            if existing_meta and existing_meta.version_hash == version_hash:
+            if (
+                existing_meta
+                and existing_meta.version_hash == version_hash
+                and not self._import_owed(existing_meta)
+            ):
                 result.unchanged += 1
                 return
 
-            # Version changed — emit contact.updated outbox event
+            # Version changed, or a push left Immich's copy for this pull to
+            # import — emit contact.updated outbox event
             contact_data = self._build_contact_data(
                 person, existing_ref.internal_entity_id
             )
@@ -681,6 +694,13 @@ class ImmichSyncService:
                 external_id=person.id,
                 contact_data=contact_data,
                 version_hash=version_hash,
+                synced_entries=pulled_base(
+                    person,
+                    recorded=recorded_synced_entries(
+                        existing_meta.reference_data if existing_meta else None
+                    ),
+                    kind=PullKind.LINKED,
+                ),
             )
             result.updated += 1
             return
@@ -705,13 +725,21 @@ class ImmichSyncService:
                 version_hash=version_hash,
             )
             # Emit contact.updated so the processor updates the contact
-            # (adds photo_url, birthday, etc.) through ContactService
-            contact_data = self._build_contact_data(person, contact.id)
+            # (adds photo_url, birthday, etc.) through ContactService. The link
+            # already carries this version, so the event must force the apply.
+            # An Immich person without a birthday leaves the contact's own.
+            contact_data = self._build_contact_data(
+                person, contact.id, keep_missing_birthday=True
+            )
             await self._emit_outbox_event(
                 sync_type="updated",
                 external_id=person.id,
                 contact_data=contact_data,
                 version_hash=version_hash,
+                synced_entries=pulled_base(
+                    person, recorded=None, kind=PullKind.AUTO_LINKED
+                ),
+                force_apply=True,
             )
             result.linked += 1
             return
@@ -734,11 +762,28 @@ class ImmichSyncService:
             external_id=person.id,
             contact_data=contact_data,
             version_hash=version_hash,
+            synced_entries=pulled_base(person, recorded=None, kind=PullKind.CREATED),
         )
         result.created += 1
 
+    @staticmethod
+    def _import_owed(sync_meta: Any) -> bool:
+        """Whether a push left Immich's copy for the next pull to import.
+
+        Not while the contact holds a local edit still to push: the backend
+        would skip the event, so emitting it every sync would be pointless.
+        """
+        return pending_import(sync_meta.reference_data) and (
+            sync_meta.contact_updated_at is None
+            or sync_meta.contact_updated_at <= sync_meta.last_synced_at
+        )
+
     def _build_contact_data(
-        self, person: ImmichPerson, contact_id: int | None
+        self,
+        person: ImmichPerson,
+        contact_id: int | None,
+        *,
+        keep_missing_birthday: bool = False,
     ) -> dict[str, Any]:
         """Build a serialized contact dict from an Immich person.
 
@@ -750,6 +795,8 @@ class ImmichSyncService:
             contact_id: Existing contact ID (for photo_url), or ``None``
                 for new contacts (photo_url will be set later by the
                 processor when the contact ID is assigned).
+            keep_missing_birthday: Leave the contact's birthday alone when
+                Immich has none, rather than clearing it.
 
         Returns:
             Serialized contact dict suitable for outbox event payload.
@@ -758,7 +805,9 @@ class ImmichSyncService:
 
         # Build important_dates from birthday: no birthday in Immich clears the
         # one it owns; one it holds but that cannot be read (None) is left alone.
-        important_dates: list[ImportantDate] | None = None if person.birth_date else []
+        important_dates: list[ImportantDate] | None = (
+            None if person.birth_date or keep_missing_birthday else []
+        )
         parsed_birthday = self.parse_birth_date(person.birth_date)
         if parsed_birthday:
             year, month, day = parsed_birthday
@@ -794,6 +843,9 @@ class ImmichSyncService:
         external_id: str,
         contact_data: dict[str, Any],
         version_hash: str,
+        *,
+        synced_entries: PersonBase,
+        force_apply: bool = False,
     ) -> None:
         """Insert a contact sync outbox event via the shared OutboxEvent model.
 
@@ -805,6 +857,8 @@ class ImmichSyncService:
             external_id: Immich person ID.
             contact_data: Serialized contact dict.
             version_hash: The calculated Immich person version hash.
+            synced_entries: The base the event's apply leaves (``person_base``).
+            force_apply: Apply even though ``version_hash`` is unchanged.
         """
         event = OutboxEvent.create_contact_sync_event(
             contact_data=contact_data,
@@ -814,6 +868,8 @@ class ImmichSyncService:
             etag=version_hash,
             user_id=self._user_id,
             sync_scope=IMMICH_CONTACT_SYNC_SCOPE,
+            force_apply=force_apply,
+            synced_entries=serialise_synced_entries(synced_entries),
         )
         event_id = await self._insert_outbox_event(event)
         logger.debug(
@@ -884,13 +940,19 @@ class ImmichSyncService:
         return result.fetchone()
 
     async def _find_sync_metadata(self, external_id: str) -> Any | None:
-        """Look up the syncing user's SyncMetadata by external ID."""
+        """Look up the syncing user's SyncMetadata by external ID.
+
+        Alongside the link's own state, ``contact_updated_at`` is the linked
+        contact's version, telling whether a local edit is still to push.
+        """
         query = text("""
-            SELECT id, version_hash, sync_status
-            FROM sync_metadata
-            WHERE user_id = :user_id
-              AND integration_source = :integration_source
-              AND external_id = :external_id
+            SELECT sm.id, sm.version_hash, sm.sync_status, sm.reference_data,
+                   sm.last_synced_at, c.updated_at AS contact_updated_at
+            FROM sync_metadata sm
+            LEFT JOIN contacts c ON c.id = sm.internal_id
+            WHERE sm.user_id = :user_id
+              AND sm.integration_source = :integration_source
+              AND sm.external_id = :external_id
         """)
         result = await self._conn.execute(
             query,
