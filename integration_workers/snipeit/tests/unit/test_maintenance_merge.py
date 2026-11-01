@@ -1,5 +1,6 @@
 """Tests for the per-field three-way merge of a Snipe-IT maintenance (#1898)."""
 
+import json
 from typing import Any
 
 from maintenance_merge import (
@@ -10,6 +11,8 @@ from maintenance_merge import (
     payload_for,
     pull_base,
     push_base,
+    queued_by,
+    recorded_queued_entries,
 )
 
 SYNCED: dict[str, Any] = {
@@ -162,8 +165,30 @@ class TestPushBase:
 class TestPullBase:
     def test_without_a_base_the_remote_wins(self) -> None:
         local = _with(name="Waxed")
-        merged = merge(pull_base(None, local=local), local=local, remote=SYNCED)
+        merged = merge(pull_base(None, {}, local=local), local=local, remote=SYNCED)
         assert merged.local_fields == set()
+
+    def test_a_queued_value_the_journal_holds_is_agreed(self) -> None:
+        local = _with(notes="Edited remotely")
+        queued = {"notes": base_of(local)["notes"]}
+        assert pull_base(base_of(SYNCED), queued, local=local) == base_of(local)
+
+
+class TestQueuedBy:
+    def test_only_fields_the_journal_does_not_hold_or_keep_are_queued(
+        self,
+    ) -> None:
+        remote = _with(name="Remote", notes="Edited remotely")
+        queued = queued_by(
+            local=_with(name="Local"), remote=remote, kept=frozenset({"name"})
+        )
+        assert queued == {"notes": base_of(remote)["notes"]}
+
+    def test_queued_entries_are_read_back(self) -> None:
+        queued = {"notes": base_of(_with(notes="Edited remotely"))["notes"]}
+        reference = json.dumps({"queued_entries": {"notes": sorted(queued["notes"])}})
+        assert recorded_queued_entries(reference) == queued
+        assert recorded_queued_entries(None) == {}
 
 
 class TestBaseAfterPush:

@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Final, Literal
 
-from core_shared.sync_base import SyncedEntries, entry_key
+from core_shared.sync_base import SyncedEntries, entry_key, parse_reference_data
 
 from field_merge import FieldMerge, base_after_push, complete_base, reconcile
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
@@ -32,6 +32,9 @@ MAINTENANCE_FIELDS: Final[tuple[MaintenanceField, ...]] = (
     "start_date",
     "completion_date",
 )
+
+# ``reference_data`` key of the values a pull's queued event brings in.
+QUEUED_ENTRIES_KEY: Final = "queued_entries"
 
 type Payload = Mapping[str, Any]
 type Base = dict[MaintenanceField, frozenset[str]]
@@ -75,13 +78,40 @@ def push_base(recorded: SyncedEntries | None, *, remote: Payload) -> Base:
     return complete_base(recorded, base_of(remote))
 
 
-def pull_base(recorded: SyncedEntries | None, *, local: Payload) -> Base:
-    """The base a pull merges against.
+def pull_base(
+    recorded: SyncedEntries | None, queued: SyncedEntries, *, local: Payload
+) -> Base:
+    """The base a pull merges against: the effective base (``effective_base``).
 
     A field the row does not record takes local as its base, so the remote
     wins it, as every field did before bases existed.
     """
-    return complete_base(recorded, base_of(local))
+    return effective_base(complete_base(recorded, base_of(local)), queued, local=local)
+
+
+def recorded_queued_entries(reference_data: str | None) -> SyncedEntries:
+    """The values a sync row records a pull as having queued; none if unreadable."""
+    queued = parse_reference_data(reference_data).get(QUEUED_ENTRIES_KEY)
+    if not isinstance(queued, dict):
+        return {}
+    return {
+        field: frozenset(keys)
+        for field, keys in queued.items()
+        if isinstance(keys, list) and all(isinstance(key, str) for key in keys)
+    }
+
+
+def queued_by(
+    *, local: Payload, remote: Payload, kept: frozenset[MaintenanceField]
+) -> Base:
+    """The values a pull's event changes the journal to: the remote's, for
+    each field the journal does not keep and does not already hold."""
+    held, remote_keys = base_of(local), base_of(remote)
+    return {
+        field: remote_keys[field]
+        for field in MAINTENANCE_FIELDS
+        if field not in kept and remote_keys[field] != held[field]
+    }
 
 
 def merge(
