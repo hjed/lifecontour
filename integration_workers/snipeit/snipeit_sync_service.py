@@ -1285,6 +1285,22 @@ class SnipeItSyncService:
                 gear_item_id=gear_item_id,
                 remote_changed=merged.remote_won,
             )
+            # A redelivered push whose PATCH landed before its base was recorded
+            # finds the two sides agreeing: that agreement is the base.
+            settled = base_after_push(
+                base, local=local, after=AssetValues.of(remote.gear_item)
+            )
+            if settled != recorded_synced_entries(link.reference_data):
+                async with session_factory() as session:
+                    async with session.begin():
+                        await IntegrationLinkRepository(
+                            await session.connection()
+                        ).patch_reference_data(
+                            "snipeit",
+                            external_id,
+                            {SYNCED_ENTRIES_KEY: serialise_synced_entries(settled)},
+                            user_id=self._user_id,
+                        )
             return
 
         await self._api_client.update_asset(int(external_id), payload_for(merged.send))

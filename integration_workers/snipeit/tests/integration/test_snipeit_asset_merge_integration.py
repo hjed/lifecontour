@@ -475,3 +475,40 @@ class TestPushRecordsTheBase:
         )
 
         assert (await _gear(async_connection, gear_id)).name == "Remote Tent"
+
+    @pytest.mark.asyncio
+    async def test_a_retry_after_the_patch_landed_settles_the_base(
+        self,
+        snipeit_sync_service: SnipeItSyncService,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+        session_factory: SessionFactory,
+    ) -> None:
+        # The PATCH reached Snipe-IT, but the read-back failed before the base
+        # was recorded, so the event is redelivered with nothing left to send.
+        gear_id = await _linked_gear(
+            async_connection, name="Big Tent", reference_data=_synced_reference()
+        )
+        pushed = _asset(name="Big Tent")
+        mock_transport.add_response(
+            f"/hardware/{ASSET_ID}", json_data=pushed, method="GET"
+        )
+
+        await snipeit_sync_service.push_asset_update(
+            gear_id, {"name": ["Tent", "Big Tent"]}, session_factory
+        )
+
+        assert _patch_bodies(mock_transport) == []
+        reference = json.loads((await _link(async_connection)).reference_data)
+        assert reference["synced_entries"] == _serialised_base(pushed)
+
+        mock_transport.add_response(
+            f"/hardware/{ASSET_ID}",
+            json_data=_asset(name="Remote Tent"),
+            method="GET",
+        )
+        await snipeit_sync_service.sync_asset_batch(
+            asset_ids=[ASSET_ID], session_factory=session_factory
+        )
+
+        assert (await _gear(async_connection, gear_id)).name == "Remote Tent"
