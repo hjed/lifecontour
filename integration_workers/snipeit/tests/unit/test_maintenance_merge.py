@@ -144,10 +144,13 @@ class TestEffectiveBase:
 class TestPushBase:
     def test_a_recorded_base_is_used(self) -> None:
         recorded = base_of(SYNCED)
-        assert push_base(recorded, remote=_with(name="Remote")) == recorded
+        assert (
+            push_base(recorded, {}, local=SYNCED, remote=_with(name="Remote"))
+            == recorded
+        )
 
     def test_without_a_base_every_differing_local_field_is_sent(self) -> None:
-        base = push_base(None, remote=_with(notes="Edited remotely"))
+        base = push_base(None, {}, local=SYNCED, remote=_with(notes="Edited remotely"))
         merged = merge(
             base, local=_with(name="Waxed"), remote=_with(notes="Edited remotely")
         )
@@ -156,7 +159,7 @@ class TestPushBase:
     def test_a_field_missing_from_the_recorded_base_falls_back(self) -> None:
         recorded = {"name": base_of(SYNCED)["name"]}
         remote = _with(notes="Edited remotely")
-        assert push_base(recorded, remote=remote) == {
+        assert push_base(recorded, {}, local=SYNCED, remote=remote) == {
             **base_of(remote),
             "name": base_of(SYNCED)["name"],
         }

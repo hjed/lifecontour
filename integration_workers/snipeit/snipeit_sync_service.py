@@ -2909,25 +2909,46 @@ class SnipeItSyncService:
             recorded = await _maintenance_sync_reference(
                 session, external_id, user_id=self._user_id
             )
+        remote_payload = _snipeit_record_payload(remote)
         base = maintenance_merge.push_base(
             recorded_synced_entries(recorded),
-            remote=_snipeit_record_payload(remote),
+            maintenance_merge.recorded_queued_entries(recorded),
+            local=local,
+            remote=remote_payload,
         )
-        merged = maintenance_merge.merge(
-            base, local=local, remote=_snipeit_record_payload(remote)
-        )
-        if not merged.local_fields:
+        send = maintenance_merge.merge(base, local=local, remote=remote_payload)
+        fields = send.local_fields
+        if _zone_window(recorded, _snipeit_zone(context.journal)):
+            # The journal's dates read a day out until the pull re-anchors them.
+            fields -= maintenance_merge.DATE_FIELDS
+        if not fields:
             logger.debug(
                 "No journal change for Snipe-IT maintenance export",
                 journal_id=journal_id,
-                remote_changed=merged.remote_won,
+                remote_changed=send.remote_won,
             )
+            # A redelivered push whose PATCH landed before its base was
+            # recorded finds the two sides agreeing: that agreement is the base.
+            settled = maintenance_merge.base_after(
+                base, local=local, after=remote_payload
+            )
+            if settled != recorded_synced_entries(recorded):
+                async with session_factory() as session:
+                    async with session.begin():
+                        await IntegrationLinkRepository(
+                            await session.connection()
+                        ).patch_reference_data(
+                            "snipeit_maintenance",
+                            external_id,
+                            {SYNCED_ENTRIES_KEY: serialise_synced_entries(settled)},
+                            user_id=self._user_id,
+                        )
             return
 
         try:
             await self._api_client.update_maintenance(
                 snipeit_maintenance_id,
-                maintenance_merge.payload_for(merged.local_fields, local),
+                maintenance_merge.payload_for(fields, local),
             )
         except SnipeItAPIError as exc:
             if exc.status_code in (403, 404):
@@ -2946,14 +2967,19 @@ class SnipeItSyncService:
         reference: dict[str, Any] = {
             SYNCED_ENTRIES_KEY: serialise_synced_entries(
                 maintenance_merge.base_after(base, local=local, after=after_payload)
-            )
+            ),
+            # This push's version supersedes any event a pull queued.
+            maintenance_merge.QUEUED_ENTRIES_KEY: {},
         }
         if imported:
             # Only an import is pulled, so only an import can be left a field
-            # to import; a record pushed from a journal is the journal's.
+            # to import; a record pushed from a journal is the journal's. A
+            # record Snipe-IT moved to another asset is left to the pull too.
             reference[PENDING_IMPORT_KEY] = maintenance_merge.base_of(
                 after_payload
-            ) != maintenance_merge.base_of(local)
+            ) != maintenance_merge.base_of(local) or str(after.asset_id) != str(
+                context.asset_meta.external_id
+            )
         async with session_factory() as session:
             async with session.begin():
                 await session.execute(

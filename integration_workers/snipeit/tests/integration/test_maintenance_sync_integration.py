@@ -3713,3 +3713,106 @@ class TestMaintenancePullKeepsUnpushedEdits:
 
         assert await _journal_events(async_connection) == ["journal_event.updated"]
         assert (await _record_17_reference(async_connection))["synced_zone"] == "UTC"
+
+
+async def _push_17(service: Any, async_connection: AsyncConnection) -> None:
+    await service.push_maintenance_update(
+        journal_id=await _journal_titled(async_connection, "Waxed"),
+        session_factory=_joined_session_factory(async_connection),
+    )
+
+
+class TestMaintenancePushSettlesTheBase:
+    """What a push records when the journal and the record already agree, or
+    are still being reconciled (#1898)."""
+
+    @pytest.mark.asyncio
+    async def test_a_retry_after_the_patch_landed_settles_the_base(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection, title="Waxed", version_hash="v", pending=False
+        )
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_record_17(title="Waxed"), method="GET"
+        )
+
+        await _push_17(snipeit_sync_service, async_connection)
+
+        assert _patch_bodies(mock_transport) == []
+        reference = await _record_17_reference(async_connection)
+        assert reference["synced_entries"] == _record_17_keys(title="Waxed")
+
+    @pytest.mark.asyncio
+    async def test_a_push_while_a_pull_is_queued_sends_only_the_journal_edit(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection, title="Rewaxed", version_hash="v", pending=False
+        )
+        sharpened = _record_17(notes="Edges sharpened")
+        await _pull_17(
+            snipeit_sync_service, mock_transport, async_connection, sharpened
+        )
+        # The title is edited before the backend applies the pulled notes.
+        await async_connection.execute(text("UPDATE journals SET title = 'Waxed'"))
+        _queue_maintenance_push(
+            mock_transport, 17, before=sharpened, after={**sharpened, "title": "Waxed"}
+        )
+
+        await _push_17(snipeit_sync_service, async_connection)
+
+        assert _patch_bodies(mock_transport) == [{"name": "Waxed"}]
+        reference = await _record_17_reference(async_connection)
+        assert reference["queued_entries"] == {}
+        assert reference["pending_import"] is True
+
+    @pytest.mark.asyncio
+    async def test_dates_are_not_pushed_while_a_zone_change_settles(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection, title="Waxed", version_hash="v", pending=False
+        )
+        await _update_record_17_reference(
+            async_connection, synced_zone="Australia/Sydney"
+        )
+        sydney_midnight = "2026-09-10T14:00:00+00:00"
+        await _set_journal_dates(async_connection, sydney_midnight, sydney_midnight)
+        _queue_maintenance_push(
+            mock_transport, 17, before=_record_17(), after=_record_17(title="Waxed")
+        )
+
+        await _push_17(snipeit_sync_service, async_connection)
+
+        assert _patch_bodies(mock_transport) == [{"name": "Waxed"}]
+        assert (await _record_17_reference(async_connection))["pending_import"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_record_moved_to_another_asset_is_left_for_the_pull(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection, title="Waxed", version_hash="v", pending=False
+        )
+        moved = _record_17(asset={"id": 52, "name": "Canyoneroo 30m"})
+        _queue_maintenance_push(
+            mock_transport, 17, before=moved, after={**moved, "title": "Waxed"}
+        )
+
+        await _push_17(snipeit_sync_service, async_connection)
+
+        assert _patch_bodies(mock_transport) == [{"name": "Waxed"}]
+        assert (await _record_17_reference(async_connection))["pending_import"] is True

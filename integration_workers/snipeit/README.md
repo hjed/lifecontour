@@ -154,6 +154,12 @@ a pull keeps a journal edit still to push. A record the app created is never
 pulled, so a field changed in Snipe-IT stays there until the journal changes
 that field. A row recorded before bases existed sends every field that differs.
 
+The journal takes a pull's changes through the outbox, a little after the pull,
+so the sync row remembers what the pull queued (`queued_entries`) and counts it
+as agreed once the journal holds it. After the owner's timezone changes, the
+dates of an imported journal are re-anchored to the new zone by the next pull,
+and a date edited before that has happened follows Snipe-IT.
+
 ### Periodic Sync Configuration
 
 Periodic sync is **disabled by default**. The worker inherits
