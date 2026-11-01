@@ -3722,6 +3722,24 @@ async def _push_17(service: Any, async_connection: AsyncConnection) -> None:
     )
 
 
+async def _push_title_while_sharpened_notes_are_queued(
+    service: Any, transport: Any, async_connection: AsyncConnection
+) -> dict[str, Any]:
+    """Push maintenance 17's journal, retitled ``Waxed`` after a pull queued
+    Snipe-IT's new notes; returns the record after the push."""
+    await _seed_record_17_import(
+        async_connection, title="Rewaxed", version_hash="v", pending=False
+    )
+    sharpened = _record_17(notes="Edges sharpened")
+    await _pull_17(service, transport, async_connection, sharpened)
+    # The title is edited before the backend applies the pulled notes.
+    await async_connection.execute(text("UPDATE journals SET title = 'Waxed'"))
+    after = {**sharpened, "title": "Waxed"}
+    _queue_maintenance_push(transport, 17, before=sharpened, after=after)
+    await _push_17(service, async_connection)
+    return after
+
+
 class TestMaintenancePushSettlesTheBase:
     """What a push records when the journal and the record already agree, or
     are still being reconciled (#1898)."""
@@ -3753,25 +3771,52 @@ class TestMaintenancePushSettlesTheBase:
         mock_transport: Any,
         async_connection: AsyncConnection,
     ) -> None:
-        await _seed_record_17_import(
-            async_connection, title="Rewaxed", version_hash="v", pending=False
+        await _push_title_while_sharpened_notes_are_queued(
+            snipeit_sync_service, mock_transport, async_connection
         )
-        sharpened = _record_17(notes="Edges sharpened")
-        await _pull_17(
-            snipeit_sync_service, mock_transport, async_connection, sharpened
-        )
-        # The title is edited before the backend applies the pulled notes.
-        await async_connection.execute(text("UPDATE journals SET title = 'Waxed'"))
-        _queue_maintenance_push(
-            mock_transport, 17, before=sharpened, after={**sharpened, "title": "Waxed"}
-        )
-
-        await _push_17(snipeit_sync_service, async_connection)
 
         assert _patch_bodies(mock_transport) == [{"name": "Waxed"}]
         reference = await _record_17_reference(async_connection)
         assert reference["queued_entries"] == {}
         assert reference["pending_import"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_queued_pull_applied_while_a_push_commits_loses_no_edit(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        answer = mock_transport.handle_async_request
+
+        async def backend_applies_the_pull_after_the_patch(
+            request: httpx.Request,
+        ) -> httpx.Response:
+            response = await answer(request)
+            if request.method == "PATCH":
+                await async_connection.execute(
+                    text("UPDATE journals SET content = 'Edges sharpened'")
+                )
+            return response
+
+        mock_transport.handle_async_request = backend_applies_the_pull_after_the_patch
+
+        after = await _push_title_while_sharpened_notes_are_queued(
+            snipeit_sync_service, mock_transport, async_connection
+        )
+        await _pull_17(snipeit_sync_service, mock_transport, async_connection, after)
+
+        journal_data = await _last_journal_data(async_connection)
+        assert (journal_data["title"], journal_data["content"]) == (
+            "Waxed",
+            "Edges sharpened",
+        )
+        reference = await _record_17_reference(async_connection)
+        assert reference["synced_entries"] == _record_17_keys(
+            title="Waxed", notes="Edges sharpened"
+        )
+        assert reference["queued_entries"] == {}
+        assert reference["pending_import"] is False
 
     @pytest.mark.asyncio
     async def test_dates_are_not_pushed_while_a_zone_change_settles(
