@@ -3066,8 +3066,10 @@ async def _seed_record_17_import(
     title: str,
     version_hash: str,
     pending: bool,
+    queued: dict[str, list[str]] | None = None,
 ) -> str:
-    """An imported maintenance 17 and its journal, last synced as ``_record_17()``."""
+    """An imported maintenance 17 and its journal, last synced as ``_record_17()``,
+    with the ``queued`` entries an earlier pull left."""
     gear_item_id = await _seed_synced_asset(async_connection, 51)
     await _seed_maintenance_journal(
         async_connection, gear_item_id=gear_item_id, title=title, imported_from=17
@@ -3087,6 +3089,7 @@ async def _seed_record_17_import(
                 {
                     "synced_entries": serialise_synced_entries(base),
                     "pending_import": pending,
+                    "queued_entries": queued or {},
                 }
             )
         },
@@ -3174,6 +3177,36 @@ class TestMaintenancePullRecordsTheBase:
         # The journal holds the new date only once the event applies, so the
         # date is queued rather than agreed.
         assert reference["synced_entries"] == _record_17_keys(title="Waxed")
+        queued = _record_17_keys(completion_date=completion)["completion_date"]
+        assert reference["queued_entries"] == {"completion_date": queued}
+
+    @pytest.mark.asyncio
+    async def test_a_pull_replaces_what_an_earlier_pull_queued(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # An earlier pull queued a title Snipe-IT has since changed back, and
+        # its event never reached the journal.
+        await _seed_record_17_import(
+            async_connection,
+            title="Rewaxed",
+            version_hash="an-older-version",
+            pending=False,
+            queued={"name": _record_17_keys(title="Waxed remotely")["name"]},
+        )
+        completion = {"date": "2026-09-20", "formatted": "2026-09-20"}
+        mock_transport.add_response(
+            "/maintenances/17", json_data=_record_17(completion_date=completion)
+        )
+
+        await snipeit_sync_service.sync_maintenance_batch(
+            maintenance_ids=[17],
+            session_factory=_joined_session_factory(async_connection),
+        )
+
+        reference = await _record_17_reference(async_connection)
         queued = _record_17_keys(completion_date=completion)["completion_date"]
         assert reference["queued_entries"] == {"completion_date": queued}
 
