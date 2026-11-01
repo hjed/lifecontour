@@ -11,6 +11,7 @@ cannot share the savepoint fixture) and deleted afterwards, events included:
 the services run on real connections, so what they publish is committed too.
 """
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -19,6 +20,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from core_shared.calendar_sync_base import (
+    CalendarSyncField,
+    description_key,
+    location_key,
+    summary_key,
+    when_key,
+)
 from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.outbox import OutboxEvent
 from sqlalchemy import text
@@ -212,3 +220,155 @@ class TestInboundJournalSyncOverlappingAMerge:
             assert result["journal_id"] == synced.other_journal_id
             survivor = await _stored(async_engine, synced.other_journal_id)
             assert survivor.event_date_range.start == START
+
+
+GOOGLE_NOTES = "Synced from Google Calendar"
+
+
+def _synced_update(synced: Synced, *, title: str, etag: str) -> OutboxEvent:
+    """An update as the worker sends it: no description, and Google's base."""
+    event = sync_event(
+        "journal_event.updated",
+        calendar_id=synced.calendar_id,
+        external_event_id=EXTERNAL_EVENT_ID,
+        user_id=synced.user_id,
+        title=title,
+        start=START,
+        etag=etag,
+        existing_journal_id=synced.journal_id,
+    )
+    del event.event_data["journal_data"]["content"]
+    event.event_data["synced_entries"] = {
+        CalendarSyncField.SUMMARY: [summary_key(title)],
+        CalendarSyncField.DESCRIPTION: [description_key(GOOGLE_NOTES)],
+        CalendarSyncField.LOCATION: [location_key(None)],
+        CalendarSyncField.WHEN: [
+            when_key(
+                {"dateTime": START.isoformat()},
+                {"dateTime": (START + timedelta(hours=1)).isoformat()},
+            )
+        ],
+    }
+    return event
+
+
+async def _synced_entries(async_engine: AsyncEngine, journal_id: int) -> Any:
+    async with async_engine.connect() as check:
+        raw = (
+            await check.execute(
+                text(
+                    "SELECT reference_data FROM journal_external_event_links"
+                    " WHERE journal_id = :id"
+                ),
+                {"id": journal_id},
+            )
+        ).scalar_one()
+    return json.loads(raw)["synced_entries"]
+
+
+@pytest.mark.integration
+class TestAppliedPullOverlappingAPush:
+    async def test_a_key_the_push_records_meanwhile_is_kept(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """#1899: an applied pull writes only the base fields it agreed on.
+
+        The pull reads the base before the push's link write commits. Were it
+        to write back the whole base from that read, the description key the
+        push just recorded would be lost, and the next push would send the
+        description again over whatever Google holds by then.
+        """
+        pushed_notes = "Notes written locally"
+        async with synced_journals(async_engine) as synced:
+            async with async_engine.connect() as connection:
+                await _process(
+                    connection,
+                    _synced_update(synced, title="Physio appointment", etag='"b-1"'),
+                )
+                await connection.execute(
+                    text("UPDATE journals SET content = :c WHERE id = :id"),
+                    {"c": pushed_notes, "id": synced.journal_id},
+                )
+                await connection.commit()
+
+            async def push(connection: AsyncConnection) -> None:
+                await connection.execute(
+                    text("""
+                        UPDATE journal_external_event_links
+                        SET reference_data = jsonb_set(
+                            reference_data::jsonb,
+                            '{synced_entries,description}',
+                            CAST(:keys AS jsonb)
+                        )::text
+                        WHERE journal_id = :id
+                    """),
+                    {
+                        "keys": json.dumps([description_key(pushed_notes)]),
+                        "id": synced.journal_id,
+                    },
+                )
+
+            async def inbound(connection: AsyncConnection) -> None:
+                await _process(
+                    connection,
+                    _synced_update(synced, title="Physio (Google)", etag='"b-2"'),
+                )
+
+            await overlap(async_engine, push, inbound)
+
+            entries = await _synced_entries(async_engine, synced.journal_id)
+            assert entries[CalendarSyncField.DESCRIPTION] == [
+                description_key(pushed_notes)
+            ]
+            assert entries[CalendarSyncField.SUMMARY] == [
+                summary_key("Physio (Google)")
+            ]
+
+    async def test_a_no_op_pull_keeps_the_key_of_a_title_pushed_meanwhile(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """#1899: the base is agreed against the journal as it now stands.
+
+        The pull reads the journal before a local rename commits, and finds
+        nothing to change. Were it to agree the base from that read, it would
+        write the old title's key over the one the rename's push recorded,
+        and the next push would treat the pushed title as a local edit.
+        """
+        async with synced_journals(async_engine) as synced:
+            async with async_engine.connect() as connection:
+                await _process(
+                    connection,
+                    _synced_update(synced, title="Physio appointment", etag='"b-1"'),
+                )
+
+            async def rename_and_push(connection: AsyncConnection) -> None:
+                await connection.execute(
+                    text("UPDATE journals SET title = 'Local title' WHERE id = :id"),
+                    {"id": synced.journal_id},
+                )
+                await connection.execute(
+                    text("""
+                        UPDATE journal_external_event_links
+                        SET reference_data = jsonb_set(
+                            reference_data::jsonb,
+                            '{synced_entries,summary}',
+                            CAST(:keys AS jsonb)
+                        )::text
+                        WHERE journal_id = :id
+                    """),
+                    {
+                        "keys": json.dumps([summary_key("Local title")]),
+                        "id": synced.journal_id,
+                    },
+                )
+
+            async def inbound(connection: AsyncConnection) -> None:
+                await _process(
+                    connection,
+                    _synced_update(synced, title="Physio appointment", etag='"b-2"'),
+                )
+
+            await overlap(async_engine, rename_and_push, inbound)
+
+            entries = await _synced_entries(async_engine, synced.journal_id)
+            assert entries[CalendarSyncField.SUMMARY] == [summary_key("Local title")]
