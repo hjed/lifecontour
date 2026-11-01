@@ -3455,6 +3455,33 @@ class TestMaintenancePullKeepsUnpushedEdits:
         assert journal_data["event_date_range_end"].startswith("2026-09-20")
 
     @pytest.mark.asyncio
+    async def test_a_record_with_no_completion_moves_its_journal_s_end(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # The import of a record with no completion ended its journal on the
+        # start day, which is no edit of the journal's.
+        await _seed_untouched_17(async_connection)
+        await _update_record_17_reference(
+            async_connection, synced_entries=_record_17_keys(completion_date=None)
+        )
+
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(start_date=_on("2026-09-14"), completion_date=None),
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert journal_data["event_date_range_start"].startswith("2026-09-14")
+        assert journal_data["event_date_range_end"].startswith("2026-09-14")
+        reference = await _record_17_reference(async_connection)
+        assert "completion_date" in reference["queued_entries"]
+
+    @pytest.mark.asyncio
     async def test_a_change_of_zone_re_anchors_the_dates(
         self,
         snipeit_sync_service: Any,
