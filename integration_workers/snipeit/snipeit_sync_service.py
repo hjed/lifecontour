@@ -22,9 +22,20 @@ import httpx
 import structlog
 from core_shared.integration_constants import SyntheticCalendar, synthetic_calendar_id
 from core_shared.models.journals.calendar_info import event_date_in_timezone
+from core_shared.repositories.integration_link_repository import (
+    IntegrationLinkRepository,
+)
 from core_shared.repositories.merged_alias_repository import MergedAliasRepository
+from core_shared.sync_base import (
+    PENDING_IMPORT_KEY,
+    SYNCED_ENTRIES_KEY,
+    pending_import,
+    recorded_synced_entries,
+    serialise_synced_entries,
+)
 from sqlalchemy import text
 
+from asset_merge import AssetValues, base_of, merge_pull, pull_base
 from snipeit_api_client import SnipeItAPIClient, SnipeItAPIError
 from snipeit_data_transformer import SnipeItDataTransformer
 from snipeit_maintenance_transformer import SnipeItMaintenanceTransformer
@@ -484,6 +495,17 @@ class MaintenanceClaim:
         return cls(asset_id=asset_id, title=title, start_date=start_date)
 
 
+def _synced_since(row: Any, read_before: tuple[str, str | None] | None) -> bool:
+    """Whether a push synced the record after a pull read its row (#1898).
+
+    The pull's fetched copy may then predate the push: merging it against the
+    push's base would read the push's own edit as one Snipe-IT reverted. The
+    pull leaves the record for the next pull, which fetches it again.
+    """
+    state = None if row is None else (row.version_hash, row.reference_data)
+    return state != read_before
+
+
 def _payload_version_hash(payload: dict[str, Any]) -> str:
     """The ``version_hash`` a push row records for the maintenance values ``payload``."""
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -941,6 +963,9 @@ class SnipeItSyncService:
 
         for attempt in range(1, _MAX_ASSET_RETRIES + 1):
             try:
+                read_before = await self._sync_row_state(
+                    session_factory, "snipeit", external_id
+                )
                 # Get the asset from API outside transaction
                 asset = await self._api_client.get_asset(asset_id)
                 transformed = self._transformer.transform(
@@ -952,7 +977,7 @@ class SnipeItSyncService:
                         # Check existing metadata
                         result = await session.execute(
                             text("""
-                                SELECT version_hash, internal_uuid
+                                SELECT version_hash, internal_uuid, reference_data
                                 FROM sync_metadata
                                 WHERE user_id = :user_id
                                   AND integration_source = 'snipeit'
@@ -962,10 +987,19 @@ class SnipeItSyncService:
                             {"user_id": self._user_id, "external_id": external_id},
                         )
                         existing_meta = result.fetchone()
+                        if _synced_since(existing_meta, read_before):
+                            logger.info(
+                                "Skipping Snipe-IT asset synced while it was fetched",
+                                asset_id=asset_id,
+                            )
+                            raise _AssetSkipped
 
+                        # A push that left Snipe-IT holding what local does not
+                        # records its own version, so it is applied regardless.
                         if (
                             existing_meta
                             and existing_meta.version_hash == transformed.version_hash
+                            and not pending_import(existing_meta.reference_data)
                         ):
                             logger.debug(
                                 "Skipping unchanged Snipe-IT asset",
@@ -978,6 +1012,10 @@ class SnipeItSyncService:
                             existing_meta.internal_uuid
                             if existing_meta and existing_meta.internal_uuid
                             else transformed.gear_item.id
+                        )
+                        remote = AssetValues.of(transformed.gear_item)
+                        values = await self._pulled_gear_values(
+                            session, existing_meta, gear_id, remote
                         )
 
                         await session.execute(
@@ -1001,11 +1039,11 @@ class SnipeItSyncService:
                             {
                                 "id": gear_id,
                                 "user_id": self._user_id,
-                                "name": transformed.gear_item.name,
-                                "model": transformed.gear_item.model,
-                                "serial_number": transformed.gear_item.serial_number,
-                                "purchase_date": transformed.gear_item.purchase_date,
-                                "manufacturer": transformed.gear_item.manufacturer,
+                                "name": values.name,
+                                "model": values.model,
+                                "serial_number": values.serial_number,
+                                "purchase_date": values.purchase_date,
+                                "manufacturer": values.manufacturer,
                             },
                         )
 
@@ -1036,6 +1074,7 @@ class SnipeItSyncService:
                                 "internal_uuid": gear_id,
                             },
                         )
+                        await self._record_synced_base(session, external_id, remote)
                 return not (existing_meta and existing_meta.internal_uuid)
 
             except _AssetSkipped:
@@ -1099,6 +1138,72 @@ class SnipeItSyncService:
             error=str(last_exc),
         )
         raise _AssetFailed from last_exc
+
+    async def _sync_row_state(
+        self, session_factory: Any, integration_source: str, external_id: str
+    ) -> tuple[str, str | None] | None:
+        """A record's sync row as a pull reads it before fetching the record."""
+        async with session_factory() as session:
+            result = await session.execute(
+                text("""
+                    SELECT version_hash, reference_data
+                    FROM sync_metadata
+                    WHERE user_id = :user_id
+                      AND integration_source = :integration_source
+                      AND external_id = :external_id
+                """),
+                {
+                    "user_id": self._user_id,
+                    "integration_source": integration_source,
+                    "external_id": external_id,
+                },
+            )
+            row = result.fetchone()
+        return None if row is None else (row.version_hash, row.reference_data)
+
+    async def _pulled_gear_values(
+        self, session: Any, existing_meta: Any, gear_id: Any, remote: AssetValues
+    ) -> AssetValues:
+        """The values a pull stores: Snipe-IT's, less local edits still to push.
+
+        The gear row is locked ``FOR NO KEY UPDATE``, which does not block the
+        key-share locks gear usage writes take on it.
+        """
+        if not (existing_meta and existing_meta.internal_uuid):
+            return remote
+        result = await session.execute(
+            text("""
+                SELECT name, serial_number, purchase_date, model, manufacturer
+                FROM gear_items
+                WHERE id = :id AND user_id = :user_id
+                FOR NO KEY UPDATE
+            """),
+            {"id": gear_id, "user_id": self._user_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return remote
+        local = AssetValues.of(row)
+        base = pull_base(
+            recorded_synced_entries(existing_meta.reference_data), local=local
+        )
+        return merge_pull(base, local, remote)
+
+    async def _record_synced_base(
+        self, session: Any, external_id: str, remote: AssetValues
+    ) -> None:
+        """Record the asset as synced: its values are the base, nothing is pending."""
+        await IntegrationLinkRepository(
+            await session.connection()
+        ).patch_reference_data(
+            "snipeit",
+            external_id,
+            {
+                SYNCED_ENTRIES_KEY: serialise_synced_entries(base_of(remote)),
+                PENDING_IMPORT_KEY: False,
+            },
+            user_id=self._user_id,
+        )
 
     async def push_asset_update(
         self,
@@ -1203,6 +1308,13 @@ class SnipeItSyncService:
                         "version_hash": updated_transformed.version_hash,
                         "external_id": external_id,
                     },
+                )
+                # The asset was unchanged since it was synced, so after the PATCH
+                # it holds what both sides agree on: that is the pull's new base.
+                await self._record_synced_base(
+                    session,
+                    external_id,
+                    AssetValues.of(updated_transformed.gear_item),
                 )
 
         logger.info(

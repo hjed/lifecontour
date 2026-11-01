@@ -67,8 +67,14 @@ class TestSnipeItSyncIntegration:
 
         @asynccontextmanager
         async def mock_session_factory():
-            # Use the provided db_session which already has savepoints configured
-            yield db_session
+            # A new session per call, as the real factory gives, joined to the
+            # test's transaction through a savepoint
+            async with AsyncSession(
+                db_session.bind,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
 
         # Run sync batch
         result = await sync_service.sync_asset_batch(
