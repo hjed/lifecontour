@@ -62,6 +62,10 @@ test.describe('Journal write conflicts', () => {
     await expect(page.getByTestId('journal-title-field')).toContainText(
       'My title'
     );
-    await expect(page.getByText('Changed elsewhere')).toBeVisible();
+    // Scoped to the content editor: the Activity panel's history entry also
+    // quotes the new content once it loads.
+    await expect(page.getByTestId('journal-content')).toContainText(
+      'Changed elsewhere'
+    );
   });
 });
