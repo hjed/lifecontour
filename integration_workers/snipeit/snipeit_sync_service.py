@@ -15,7 +15,7 @@ import json
 from collections.abc import AsyncIterator, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, assert_never
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -29,6 +29,7 @@ from core_shared.repositories.merged_alias_repository import MergedAliasReposito
 from core_shared.sync_base import (
     PENDING_IMPORT_KEY,
     SYNCED_ENTRIES_KEY,
+    parse_reference_data,
     pending_import,
     recorded_synced_entries,
     remote_unchanged_since_sync,
@@ -516,6 +517,64 @@ def _synced_since(row: Any, read_before: tuple[str, str | None] | None) -> bool:
     """
     state = None if row is None else (row.version_hash, row.reference_data)
     return state != read_before
+
+
+# ``reference_data`` key of the zone a maintenance's dates were last agreed in.
+_SYNCED_ZONE = "synced_zone"
+
+
+def _zone_name(zone: str | None) -> str:
+    return zone or "UTC"
+
+
+def _synced_zone(reference_data: str | None) -> str | None:
+    zone = parse_reference_data(reference_data).get(_SYNCED_ZONE)
+    return zone if isinstance(zone, str) else None
+
+
+def _zone_window(reference_data: str | None, zone: str | None) -> bool:
+    """Whether a maintenance's dates were agreed in a zone other than ``zone``.
+
+    A row that records no zone was synced before zones were recorded; the
+    pull re-anchored every import whenever the zone changed, so its dates are
+    in the current one.
+    """
+    synced = _synced_zone(reference_data)
+    return synced is not None and synced != _zone_name(zone)
+
+
+def _keep_journal_values(
+    context: MaintenancePushContext,
+    kept: frozenset[maintenance_merge.MaintenanceField],
+    journal_data: dict[str, Any],
+    gear_maintenance_data: dict[str, Any],
+) -> None:
+    """Put the journal's own value of each ``kept`` field into what a pull applies."""
+    journal = context.journal
+    for field in kept:
+        match field:
+            case "name":
+                journal_data["title"] = journal.title or ""
+            case "notes":
+                journal_data["content"] = journal.content or ""
+            case "asset_maintenance_type":
+                gear_maintenance_data["maintenance_type"] = (
+                    context.maintenance.maintenance_type
+                )
+            # A journal without the date keeps the record's: the import
+            # always gives it one.
+            case "start_date" if journal.event_date_range_start:
+                journal_data["event_date_range_start"] = (
+                    journal.event_date_range_start.isoformat()
+                )
+            case "completion_date" if journal.event_date_range_end:
+                journal_data["event_date_range_end"] = (
+                    journal.event_date_range_end.isoformat()
+                )
+            case "start_date" | "completion_date":
+                pass
+            case _:
+                assert_never(field)
 
 
 def _payload_version_hash(payload: dict[str, Any]) -> str:
@@ -1758,6 +1817,7 @@ class SnipeItSyncService:
                     text("SELECT timezone FROM user_settings WHERE user_id = :user_id"),
                     {"user_id": self._user_id},
                 )
+                zone = _resolve_zone(zone_result.scalar_one_or_none())
 
                 # Transform
                 transformer = SnipeItMaintenanceTransformer()
@@ -1765,7 +1825,7 @@ class SnipeItSyncService:
                     maintenance,
                     user_id=self._user_id,
                     gear_item_id=gear_item_id,
-                    zone=_resolve_zone(zone_result.scalar_one_or_none()),
+                    zone=zone,
                 )
 
                 # Check existing metadata for dedup
@@ -1835,13 +1895,16 @@ class SnipeItSyncService:
                     raise _MaintenanceSkipped
 
                 # A push that left Snipe-IT holding what the journal does not
-                # records the version it read, so it is applied regardless.
-                if (
-                    existing_meta
-                    and existing_journal_id is not None
+                # records the version it read, so it is applied regardless; so
+                # is one whose dates are still being re-anchored to a new zone.
+                reference_data = existing_meta.reference_data if existing_meta else None
+                zone_window = _zone_window(reference_data, zone)
+                unchanged = (
+                    existing_meta is not None
                     and existing_meta.version_hash == transformed.version_hash
-                    and not pending_import(existing_meta.reference_data)
-                ):
+                    and not pending_import(reference_data)
+                )
+                if unchanged and existing_journal_id is not None and not zone_window:
                     logger.debug(
                         "Skipping unchanged Snipe-IT maintenance",
                         maintenance_id=maintenance_id,
@@ -1941,9 +2004,24 @@ class SnipeItSyncService:
                 pulled = await self._pulled_reference(
                     session,
                     existing_journal_id,
-                    existing_meta.reference_data if existing_meta else None,
+                    reference_data,
                     _snipeit_record_payload(maintenance),
+                    zone=zone,
+                    keep_into=(journal_data, gear_maintenance_data),
                 )
+                if unchanged and existing_journal_id is not None:
+                    # Only a zone window gets here: the event re-anchoring the
+                    # dates is already queued, so this only notes whether the
+                    # journal has taken it, committing without another event.
+                    await IntegrationLinkRepository(
+                        await session.connection()
+                    ).patch_reference_data(
+                        "snipeit_maintenance",
+                        external_id,
+                        pulled,
+                        user_id=self._user_id,
+                    )
+                    return
                 journal_data["gear_maintenance_data"] = gear_maintenance_data
                 journal_data["journal_types"] = ["GEAR_MAINTENANCE"]
                 journal_data["version_hash"] = transformed.version_hash
@@ -2018,13 +2096,26 @@ class SnipeItSyncService:
         journal_id: int | None,
         reference_data: str | None,
         remote: dict[str, Any],
+        *,
+        zone: str | None,
+        keep_into: tuple[dict[str, Any], dict[str, Any]],
     ) -> dict[str, Any]:
-        """What a pull records: the base agreed so far, and what its event queues.
+        """Keep the journal's unpushed edits in what a pull applies, and say what
+        the pull records: the base agreed so far, and what its event queues.
+
+        A field the journal changed since the last sync, and Snipe-IT did not,
+        keeps the journal's value in ``keep_into`` (the event's journal and
+        maintenance data); so does one both changed (local wins).
 
         The journal takes the event through the outbox, some time after the
         pull. Until it does, a field the event changes is not agreed: it keeps
         its base, and the value it is changing to is queued, so a merge counts
         it as agreed once the journal holds it (#1898).
+
+        While the owner's zone differs from the one the dates were last agreed
+        in, the journal's dates read a day out: they are re-anchored rather
+        than kept, and the zone is agreed once the journal holds the record's
+        dates in the new one.
         """
         context = (
             None
@@ -2037,6 +2128,7 @@ class SnipeItSyncService:
                     maintenance_merge.base_of(remote)
                 ),
                 maintenance_merge.QUEUED_ENTRIES_KEY: {},
+                _SYNCED_ZONE: _zone_name(zone),
             }
         local = context.snipeit_payload()
         base = maintenance_merge.pull_base(
@@ -2044,15 +2136,28 @@ class SnipeItSyncService:
             maintenance_merge.recorded_queued_entries(reference_data),
             local=local,
         )
+        kept = maintenance_merge.merge(base, local=local, remote=remote).local_fields
+        held, record = (
+            maintenance_merge.base_of(local),
+            maintenance_merge.base_of(remote),
+        )
+        dates_held = all(
+            held[field] == record[field] for field in maintenance_merge.DATE_FIELDS
+        )
+        zone_window = _zone_window(reference_data, zone)
+        if zone_window:
+            kept -= maintenance_merge.DATE_FIELDS
+        _keep_journal_values(context, kept, *keep_into)
         return {
             SYNCED_ENTRIES_KEY: serialise_synced_entries(
                 maintenance_merge.base_after(base, local=local, after=remote)
             ),
             maintenance_merge.QUEUED_ENTRIES_KEY: serialise_synced_entries(
-                maintenance_merge.queued_by(
-                    local=local, remote=remote, kept=frozenset()
-                )
+                maintenance_merge.queued_by(local=local, remote=remote, kept=kept)
             ),
+            _SYNCED_ZONE: _synced_zone(reference_data)
+            if zone_window and not dates_held
+            else _zone_name(zone),
         }
 
     # -- Outbound Maintenance Sync Methods ----------------------------------

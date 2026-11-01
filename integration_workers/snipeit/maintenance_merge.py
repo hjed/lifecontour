@@ -33,6 +33,10 @@ MAINTENANCE_FIELDS: Final[tuple[MaintenanceField, ...]] = (
     "completion_date",
 )
 
+DATE_FIELDS: Final[frozenset[MaintenanceField]] = frozenset(
+    {"start_date", "completion_date"}
+)
+
 # ``reference_data`` key of the values a pull's queued event brings in.
 QUEUED_ENTRIES_KEY: Final = "queued_entries"
 
@@ -123,7 +127,7 @@ def merge(
     start after the end, both take local's (local wins, as in a conflict).
     """
     merged = reconcile(base, local=base_of(local), remote=base_of(remote))
-    dates: frozenset[MaintenanceField] = frozenset({"start_date", "completion_date"})
+    dates = DATE_FIELDS
     if len(dates & merged.local_fields) != 1:
         return merged
     imported_local = SnipeItMaintenanceTransformer.as_imported(local)
