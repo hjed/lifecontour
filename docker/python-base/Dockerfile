@@ -7,7 +7,7 @@
 # Build with:
 #   docker build -f docker/python-base/Dockerfile -t pms-python-base .
 
-FROM python:3.14.8-slim
+FROM python:3.14.9-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
