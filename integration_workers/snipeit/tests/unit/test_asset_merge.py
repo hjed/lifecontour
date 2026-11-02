@@ -7,7 +7,7 @@ from core_shared.sync_base import entry_key
 
 from asset_merge import (
     AssetValues,
-    base_after_push,
+    base_after,
     base_of,
     holds_other_values,
     merge_pull,
@@ -184,13 +184,13 @@ class TestMergePull:
 class TestBaseAfterPush:
     def test_a_column_both_now_hold_takes_the_new_value(self) -> None:
         local = replace(SYNCED, name="Big Tent")
-        base = base_after_push(base_of(SYNCED), local=local, after=local)
+        base = base_after(base_of(SYNCED), local=local, after=local)
         assert base == base_of(local)
 
     def test_a_column_left_for_the_pull_keeps_its_base(self) -> None:
         local = replace(SYNCED, name="Big Tent")
         after = replace(local, serial_number="SN-2")
-        base = base_after_push(base_of(SYNCED), local=local, after=after)
+        base = base_after(base_of(SYNCED), local=local, after=after)
         assert base == base_of(local)
         assert merge_pull(base, local, after) == after
         assert merge_push(base, local=local, remote=after).send == {}

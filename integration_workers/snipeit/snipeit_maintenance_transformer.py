@@ -215,6 +215,27 @@ class SnipeItMaintenanceTransformer:
         return payload
 
     @staticmethod
+    def as_imported(payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``payload`` as a journal imported from it would push it back.
+
+        An import fills in what Snipe-IT leaves out: an unknown or missing type
+        becomes the default, an empty title the fallback title, and a missing
+        completion date the start date. Comparing payloads in this form keeps
+        a journal that holds such a record untouched from reading as edited.
+        """
+        app_type = _MAINTENANCE_TYPE_MAP.get(
+            payload.get("asset_maintenance_type") or "", _DEFAULT_MAINTENANCE_TYPE
+        )
+        imported = {
+            **payload,
+            "name": payload.get("name") or _generate_fallback_title(app_type.value),
+            "asset_maintenance_type": _REVERSE_MAINTENANCE_TYPE_MAP[app_type],
+        }
+        if payload.get("start_date") and not payload.get("completion_date"):
+            imported["completion_date"] = payload["start_date"]
+        return imported
+
+    @staticmethod
     def resolve_inbound_maintenance_type(
         snipeit_type: str | None, *, existing_type: str | None
     ) -> str:
