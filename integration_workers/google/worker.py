@@ -22,7 +22,14 @@ from core_shared import (
     generate_interval_cron,
     redis_settings_from_url,
 )
-from core_shared.calendar_sync_base import google_event_keys, google_event_times
+from core_shared.calendar_sync_base import (
+    MERGED_REFERENCE_DATA_SQL,
+    CalendarSyncField,
+    google_event_keys,
+    local_when,
+    merged_reference_data_params,
+    recorded_calendar_base,
+)
 
 # Import integration exceptions from core_shared
 from core_shared.exceptions import JobCancelledException
@@ -79,6 +86,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_models import GooglePerson, ListConnectionsResponse
 
 # Import worker-specific services
+from calendar_push_merge import (
+    EventPushPlan,
+    plan_event_push,
+    record_event_push,
+    unconfirmed_push,
+)
 from google_auth_service import (
     GoogleAuthService,
     GoogleAuthTokensNotFoundError,
@@ -2913,6 +2926,62 @@ async def _process_journal_deleted_event(
         }
 
 
+def _reference_data_column(ready: bool, table: str) -> str:
+    """The link's ``reference_data`` to select, or NULL before migration 0143."""
+    return f"{table}.reference_data" if ready else "NULL AS reference_data"
+
+
+async def _merge_link_base(
+    session: Any,
+    journal_id: int,
+    calendar_id: Any,
+    *,
+    agreed: dict[CalendarSyncField, frozenset[str]],
+    seeded: dict[CalendarSyncField, frozenset[str]] | None = None,
+    pending_import: bool | None,
+) -> None:
+    """Merge what the push decided into the link's base, field by field.
+
+    One statement, in the push's transaction, writing only the fields the
+    push sent or seeded: a pull may have recorded another since the push read
+    the base, and its key must survive.
+    """
+    await session.execute(
+        text(f"""
+            UPDATE journal_external_event_links
+            SET reference_data = {MERGED_REFERENCE_DATA_SQL}
+            WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+        """),  # noqa: S608 - a constant fragment, every value is bound
+        {
+            **merged_reference_data_params(
+                agreed=agreed, seeded=seeded, pending_import=pending_import
+            ),
+            "journal_id": journal_id,
+            "calendar_id": calendar_id,
+        },
+    )
+
+
+async def _mark_link_synced(session: Any, journal_id: int, calendar_id: Any) -> None:
+    """Record that Google already holds what this journal would push.
+
+    Releases an earlier push's ``errored``: nothing is owed any more.
+    """
+    await session.execute(
+        text("""
+            UPDATE journal_external_event_links
+            SET sync_status = :status
+            WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+        """),
+        {
+            "journal_id": journal_id,
+            "calendar_id": calendar_id,
+            "status": ExternalEventLinkSyncStatus.SYNCED.value,
+        },
+    )
+    await session.commit()
+
+
 async def _mark_link_errored(session: Any, journal_id: int, calendar_id: Any) -> None:
     """Record that this journal's event did not reach the calendar.
 
@@ -2965,7 +3034,9 @@ async def _process_journal_upsert_event(
         return {"status": "ignored", "reason": "inbound_sync_echo"}
 
     async with session_factory() as session:
-        stmt = text("""
+        base_ready = await link_reference_data_ready(session)
+        stmt = text(
+            """
             SELECT
                 j.id as journal_id,
                 j.title,
@@ -2985,7 +3056,9 @@ async def _process_journal_upsert_event(
                 c.google_calendar_id,
                 c.access_role,
                 jeel.external_event_id,
-                jeel.sync_status
+                jeel.sync_status,
+                jeel.sync_capability,
+                {reference_data}
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
             LEFT JOIN user_settings us ON us.user_id = j.user_id
@@ -2993,7 +3066,8 @@ async def _process_journal_upsert_event(
             LEFT JOIN journal_external_event_links jeel ON
                 j.id = jeel.journal_id AND jci.calendar_id = jeel.calendar_id
             WHERE j.id = :journal_id
-        """)
+        """.format(reference_data=_reference_data_column(base_ready, "jeel"))
+        )
         result = await session.execute(stmt, {"journal_id": journal_id})
         row = result.fetchone()
 
@@ -3081,28 +3155,20 @@ async def _process_journal_upsert_event(
         if row.location:
             event_payload["location"] = row.location
 
-        # The stored bounds are UTC instants of local midnight, so the date an
-        # all-day event falls on is read in the event's own zone, else the
-        # user's configured one, else UTC. A timed event's clock times are
-        # only anchored in the zone the row itself records: an imported
-        # event's times are local to the Google event's zone, which older
-        # rows never stored, and re-anchoring them in the user's zone would
-        # move the event. Without a zone the stored instants are pushed as
-        # they are.
-        timezone = row.timezone
-        if row.is_all_day and not timezone:
-            timezone = row.user_timezone
         calendar_info = CalendarInfo(
             calendar_id=row.calendar_id,
             journal_id=row.journal_id,
             start_time=row.start_time,
             end_time=row.end_time,
             is_all_day=bool(row.is_all_day),
-            timezone=timezone,
+            timezone=row.timezone,
             validate=False,
         )
-        event_payload["start"], event_payload["end"] = google_event_times(
-            row.event_date_range_start, row.event_date_range_end, calendar_info
+        event_payload["start"], event_payload["end"] = local_when(
+            row.event_date_range_start,
+            row.event_date_range_end,
+            calendar_info,
+            user_timezone=row.user_timezone,
         )
 
         # Fetch and prune any orphaned links from other calendars (e.g. if the
@@ -3224,6 +3290,8 @@ async def _process_journal_upsert_event(
         await session.commit()
 
         external_event_id = row.external_event_id
+        sync_capability = row.sync_capability
+        reference_data = row.reference_data
         target_calendar_id = row.google_calendar_id or "primary"
 
         if not external_event_id:
@@ -3246,10 +3314,13 @@ async def _process_journal_upsert_event(
                 await session.commit()
                 action = "create"
             else:
-                check_stmt = text("""
-                    SELECT external_event_id FROM journal_external_event_links
+                check_stmt = text(
+                    """
+                    SELECT external_event_id, sync_capability, {reference_data}
+                    FROM journal_external_event_links jeel
                     WHERE journal_id = :journal_id AND calendar_id = :calendar_id
-                """)
+                """.format(reference_data=_reference_data_column(base_ready, "jeel"))
+                )
                 check_result = await session.execute(
                     check_stmt,
                     {"journal_id": journal_id, "calendar_id": row.calendar_id},
@@ -3257,6 +3328,8 @@ async def _process_journal_upsert_event(
                 check_row = check_result.fetchone()
                 if check_row and check_row.external_event_id:
                     external_event_id = check_row.external_event_id
+                    sync_capability = check_row.sync_capability
+                    reference_data = check_row.reference_data
                     action = "update"
                 else:
                     logger.info(
@@ -3268,6 +3341,26 @@ async def _process_journal_upsert_event(
             action = "update"
         api_result = None
 
+        # A link the pull also applies merges against the synced base, so an
+        # edit made in Google since is left alone (#1899). An outbound-only
+        # link is never pulled: Google's edits would have nowhere to go, so
+        # local stays authoritative and every field is pushed.
+        base = recorded_calendar_base(reference_data)
+        plan: EventPushPlan | None = None
+        if (
+            base_ready
+            and action == "update"
+            and sync_capability == ExternalEventLinkSyncCapability.BIDIRECTIONAL.value
+        ):
+            plan = plan_event_push(event_payload, location=row.location, base=base)
+            if not plan.sent:
+                await _mark_link_synced(session, journal_id, row.calendar_id)
+                logger.info(
+                    "Skipping outbound push: nothing changed locally since the base",
+                    journal_id=journal_id,
+                )
+                return {"status": "ignored", "reason": "no_local_change"}
+
         try:
             if action == "create":
                 api_result = await client.create_event(
@@ -3276,8 +3369,15 @@ async def _process_journal_upsert_event(
                 external_event_id = api_result.get("id")
             elif action == "update":
                 api_result = await client.update_event(
-                    external_event_id, event_payload, calendar_id=target_calendar_id
+                    external_event_id,
+                    plan.payload if plan is not None else event_payload,
+                    calendar_id=target_calendar_id,
                 )
+            record = (
+                record_event_push(plan, base=base, response=api_result)
+                if plan is not None and api_result is not None
+                else None
+            )
             link_stmt = text("""
                 INSERT INTO journal_external_event_links (
                     journal_id, calendar_id, external_event_id, external_version,
@@ -3301,6 +3401,15 @@ async def _process_journal_upsert_event(
                     "external_version": api_result.get("etag") if api_result else None,
                 },
             )
+            if record is not None:
+                await _merge_link_base(
+                    session,
+                    journal_id,
+                    row.calendar_id,
+                    agreed=record.agreed,
+                    seeded=record.seeded,
+                    pending_import=record.pending_import,
+                )
             await session.commit()
 
             duration = (datetime.now(UTC) - started_at).total_seconds()
@@ -3318,6 +3427,15 @@ async def _process_journal_upsert_event(
             }
 
         except HttpError as e:
+            if plan is not None:
+                # Google may have applied the PATCH (see ``unconfirmed_push``).
+                await _merge_link_base(
+                    session,
+                    journal_id,
+                    row.calendar_id,
+                    agreed=unconfirmed_push(plan),
+                    pending_import=None,
+                )
             await _mark_link_errored(session, journal_id, row.calendar_id)
 
             if is_event_type_restriction(e):
@@ -3368,6 +3486,14 @@ async def _process_journal_upsert_event(
             raise
 
         except Exception:
+            if plan is not None:
+                await _merge_link_base(
+                    session,
+                    journal_id,
+                    row.calendar_id,
+                    agreed=unconfirmed_push(plan),
+                    pending_import=None,
+                )
             await _mark_link_errored(session, journal_id, row.calendar_id)
             raise
 
