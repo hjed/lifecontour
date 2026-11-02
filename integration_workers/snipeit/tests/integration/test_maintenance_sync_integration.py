@@ -3287,3 +3287,234 @@ class TestMaintenancePushRecordsTheBase:
 
         journal_data = await _updated_event_journal_data(async_connection)
         assert journal_data["title"] == "Waxed remotely"
+
+
+def _on(day: str) -> dict[str, str]:
+    """A Snipe-IT date field for ``day``."""
+    return {"date": day, "formatted": day}
+
+
+async def _pull_17(
+    service: Any,
+    transport: Any,
+    async_connection: AsyncConnection,
+    record: dict[str, Any],
+) -> None:
+    transport.add_response("/maintenances/17", json_data=record)
+    await service.sync_maintenance_batch(
+        maintenance_ids=[17],
+        session_factory=_joined_session_factory(async_connection),
+    )
+
+
+async def _last_journal_data(async_connection: AsyncConnection) -> Any:
+    """The journal data of the latest ``journal_event.updated``."""
+    row = (
+        await async_connection.execute(
+            text("""
+                SELECT event_data FROM outbox_events
+                WHERE event_type = 'journal_event.updated'
+                ORDER BY id DESC LIMIT 1
+            """)
+        )
+    ).one()
+    event_data = row.event_data
+    if isinstance(event_data, str):
+        event_data = json.loads(event_data)
+    return event_data["journal_data"]
+
+
+async def _set_journal_dates(
+    async_connection: AsyncConnection, start: str, end: str
+) -> None:
+    """The journal's dates, as the backend applying an event stores them."""
+    await async_connection.execute(
+        text("""
+            UPDATE journals
+            SET event_date_range_start = :start, event_date_range_end = :end
+        """),
+        {"start": datetime.fromisoformat(start), "end": datetime.fromisoformat(end)},
+    )
+
+
+async def _update_record_17_reference(
+    async_connection: AsyncConnection, **changes: Any
+) -> None:
+    reference = {**await _record_17_reference(async_connection), **changes}
+    await async_connection.execute(
+        text("""
+            UPDATE sync_metadata SET reference_data = :reference_data
+            WHERE external_id = 'snipeit_maint:17'
+        """),
+        {"reference_data": json.dumps(reference)},
+    )
+
+
+async def _seed_untouched_17(async_connection: AsyncConnection) -> None:
+    """Imported maintenance 17, its journal untouched since, at an older version."""
+    await _seed_record_17_import(
+        async_connection,
+        title="Rewaxed",
+        version_hash="an-older-version",
+        pending=False,
+    )
+
+
+class TestMaintenancePullKeepsUnpushedEdits:
+    """A pull of an imported record keeps the journal's edits still to push (#1898)."""
+
+    @pytest.mark.asyncio
+    async def test_a_pull_keeps_a_title_edit_still_to_push(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_record_17_import(
+            async_connection,
+            title="Waxed again",
+            version_hash="an-older-version",
+            pending=False,
+        )
+
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(notes="Edges sharpened"),
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert (journal_data["title"], journal_data["content"]) == (
+            "Waxed again",
+            "Edges sharpened",
+        )
+        reference = await _record_17_reference(async_connection)
+        # The kept title keeps its base, so the next push still sends it.
+        assert reference["synced_entries"]["name"] == _record_17_keys()["name"]
+        assert set(reference["queued_entries"]) == {"notes"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("first_event_applied", [False, True])
+    async def test_a_second_remote_date_is_imported(
+        self,
+        first_event_applied: bool,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_untouched_17(async_connection)
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(completion_date=_on("2026-09-20")),
+        )
+        if first_event_applied:
+            await _set_journal_dates(
+                async_connection,
+                "2026-09-11T00:00:00+00:00",
+                "2026-09-20T00:00:00+00:00",
+            )
+
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(completion_date=_on("2026-09-25")),
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert journal_data["event_date_range_end"].startswith("2026-09-25")
+
+    @pytest.mark.asyncio
+    async def test_dates_split_into_an_inverted_range_keep_the_journal_s(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        await _seed_untouched_17(async_connection)
+        await _update_record_17_reference(
+            async_connection,
+            synced_entries=_record_17_keys(completion_date=_on("2026-09-20")),
+        )
+        await _set_journal_dates(
+            async_connection, "2026-09-15T00:00:00+00:00", "2026-09-20T00:00:00+00:00"
+        )
+
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(completion_date=_on("2026-09-12")),
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert journal_data["event_date_range_start"].startswith("2026-09-15")
+        assert journal_data["event_date_range_end"].startswith("2026-09-20")
+
+    @pytest.mark.asyncio
+    async def test_a_record_with_no_completion_moves_its_journal_s_end(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # The import of a record with no completion ended its journal on the
+        # start day, which is no edit of the journal's.
+        await _seed_untouched_17(async_connection)
+        await _update_record_17_reference(
+            async_connection, synced_entries=_record_17_keys(completion_date=None)
+        )
+
+        await _pull_17(
+            snipeit_sync_service,
+            mock_transport,
+            async_connection,
+            _record_17(start_date=_on("2026-09-14"), completion_date=None),
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert journal_data["event_date_range_start"].startswith("2026-09-14")
+        assert journal_data["event_date_range_end"].startswith("2026-09-14")
+        reference = await _record_17_reference(async_connection)
+        assert "completion_date" in reference["queued_entries"]
+
+    @pytest.mark.asyncio
+    async def test_a_change_of_zone_re_anchors_the_dates(
+        self,
+        snipeit_sync_service: Any,
+        mock_transport: Any,
+        async_connection: AsyncConnection,
+    ) -> None:
+        # Imported while the owner was in Sydney; the owner has since cleared
+        # their zone, so dates are read in UTC.
+        await _seed_untouched_17(async_connection)
+        await _update_record_17_reference(
+            async_connection, synced_zone="Australia/Sydney"
+        )
+        sydney_midnight = "2026-09-10T14:00:00+00:00"
+        await _set_journal_dates(async_connection, sydney_midnight, sydney_midnight)
+
+        await _pull_17(
+            snipeit_sync_service, mock_transport, async_connection, _record_17()
+        )
+
+        journal_data = await _last_journal_data(async_connection)
+        assert journal_data["event_date_range_start"] == "2026-09-11T00:00:00+00:00"
+        assert journal_data["event_date_range_end"] == "2026-09-11T00:00:00+00:00"
+        assert (await _record_17_reference(async_connection))[
+            "synced_zone"
+        ] == "Australia/Sydney"
+
+        # The backend applies the event; the next pull settles the zone and
+        # sends nothing more.
+        utc_midnight = "2026-09-11T00:00:00+00:00"
+        await _set_journal_dates(async_connection, utc_midnight, utc_midnight)
+        await _pull_17(
+            snipeit_sync_service, mock_transport, async_connection, _record_17()
+        )
+
+        assert await _journal_events(async_connection) == ["journal_event.updated"]
+        assert (await _record_17_reference(async_connection))["synced_zone"] == "UTC"
