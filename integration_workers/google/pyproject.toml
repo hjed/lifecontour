@@ -41,7 +41,7 @@ dependencies = [
 
     # Phone number parsing and ISO 3166-1 countries (address country
     # inference, #1820)
-    "phonenumbers==9.0.41",
+    "phonenumbers==9.0.42",
     "pycountry==26.2.16",
 ]
 
