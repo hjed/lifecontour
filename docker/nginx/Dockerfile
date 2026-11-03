@@ -1,5 +1,5 @@
 # Nginx Dockerfile
-FROM nginx:1.31.6-alpine
+FROM nginx:1.31.7-alpine
 
 # Copy nginx configuration
 COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
