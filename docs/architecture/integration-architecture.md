@@ -867,8 +867,29 @@ Snipe-IT gear uses `three_way_value` per pushed column (`name`, `serial_number`,
   the same way: it keeps a local edit still to push rather than overwriting it.
 - `model` and `manufacturer` are pull-only: Snipe-IT holds them as references
   to other records, so its value always wins.
-- The maintenance push (`push_maintenance_update`) still PATCHes every field;
-  it follows in a stacked PR under #1898.
+- Maintenance journals merge the same way, per pushed field (`name`, `notes`,
+  `asset_maintenance_type`, `start_date`, `completion_date`, compared in the
+  shape a push sends them; `maintenance_merge.py`), with the base on the
+  record's `snipeit_maintenance` sync row. Only a record imported from Snipe-IT
+  is pulled, so only an import is marked `pending_import`. A record the app
+  created is never pulled: the push leaves a field changed in Snipe-IT alone,
+  but the journal does not import it.
+- Maintenance fields are keyed as an import holds them, so what an import fills
+  in (a missing completion date, an unknown type, an empty title) never reads as
+  an edit. A merge that would invert the date range takes both dates from the
+  journal.
+- The maintenance pull reaches the journal through the outbox, so the journal
+  lags it. A field the pull changes is recorded as `queued_entries`, not as
+  agreed: a merge treats the queued value as the base once the journal holds it,
+  and the recorded base until then. A push clears it, because its version
+  supersedes the queued event.
+- While the owner's zone differs from the one the dates were agreed in
+  (`synced_zone`), maintenance dates are re-anchored, not kept or pushed.
+- A pull that fetched a record before a push synced it (the row moved in
+  between) leaves it for the next pull. A push with nothing to send still
+  records the values both sides now hold as the base, which covers a retry
+  after a PATCH whose read-back failed.
+- The per-field reconciliation both share is `field_merge.py`.
 
 **Google calendar journals (#1899)** keep the base on the link itself
 (`journal_external_event_links.reference_data`), for the four fields the push

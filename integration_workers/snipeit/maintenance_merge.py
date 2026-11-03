@@ -72,14 +72,20 @@ def effective_base(
     }
 
 
-def push_base(recorded: SyncedEntries | None, *, remote: Payload) -> Base:
-    """The base a push merges against.
+def push_base(
+    recorded: SyncedEntries | None,
+    queued: SyncedEntries,
+    *,
+    local: Payload,
+    remote: Payload,
+) -> Base:
+    """The base a push merges against: the effective base (``effective_base``).
 
     A field the row does not record (one synced before bases existed) takes
     the remote as its base, so local's value is sent wherever it differs, as
     every field was before. The events carry no old values to do better with.
     """
-    return complete_base(recorded, base_of(remote))
+    return effective_base(complete_base(recorded, base_of(remote)), queued, local=local)
 
 
 def pull_base(
