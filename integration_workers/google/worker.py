@@ -108,7 +108,6 @@ from google_settings import GoogleSettings
 from group_mapping import _build_contact_group_mapping, _fetch_contact_group_mapping
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
-from link_schema import link_reference_data_ready
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
 from synced_entries import empty_at_source, raw_synced_entries, synced_entries_of
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
@@ -2926,11 +2925,6 @@ async def _process_journal_deleted_event(
         }
 
 
-def _reference_data_column(ready: bool, table: str) -> str:
-    """The link's ``reference_data`` to select, or NULL before migration 0143."""
-    return f"{table}.reference_data" if ready else "NULL AS reference_data"
-
-
 async def _merge_link_base(
     session: Any,
     journal_id: int,
@@ -3034,7 +3028,6 @@ async def _process_journal_upsert_event(
         return {"status": "ignored", "reason": "inbound_sync_echo"}
 
     async with session_factory() as session:
-        base_ready = await link_reference_data_ready(session)
         stmt = text(
             """
             SELECT
@@ -3058,7 +3051,7 @@ async def _process_journal_upsert_event(
                 jeel.external_event_id,
                 jeel.sync_status,
                 jeel.sync_capability,
-                {reference_data}
+                jeel.reference_data
             FROM journals j
             LEFT JOIN journal_calendar_info jci ON j.id = jci.journal_id
             LEFT JOIN user_settings us ON us.user_id = j.user_id
@@ -3066,7 +3059,7 @@ async def _process_journal_upsert_event(
             LEFT JOIN journal_external_event_links jeel ON
                 j.id = jeel.journal_id AND jci.calendar_id = jeel.calendar_id
             WHERE j.id = :journal_id
-        """.format(reference_data=_reference_data_column(base_ready, "jeel"))
+        """
         )
         result = await session.execute(stmt, {"journal_id": journal_id})
         row = result.fetchone()
@@ -3316,10 +3309,10 @@ async def _process_journal_upsert_event(
             else:
                 check_stmt = text(
                     """
-                    SELECT external_event_id, sync_capability, {reference_data}
+                    SELECT external_event_id, sync_capability, reference_data
                     FROM journal_external_event_links jeel
                     WHERE journal_id = :journal_id AND calendar_id = :calendar_id
-                """.format(reference_data=_reference_data_column(base_ready, "jeel"))
+                """
                 )
                 check_result = await session.execute(
                     check_stmt,
@@ -3348,8 +3341,7 @@ async def _process_journal_upsert_event(
         base = recorded_calendar_base(reference_data)
         plan: EventPushPlan | None = None
         if (
-            base_ready
-            and action == "update"
+            action == "update"
             and sync_capability == ExternalEventLinkSyncCapability.BIDIRECTIONAL.value
         ):
             plan = plan_event_push(event_payload, location=row.location, base=base)
@@ -4740,20 +4732,13 @@ def _is_account_level_failure(error: Exception) -> bool:
     return isinstance(error, HttpError) and error.resp.status == 401
 
 
-_INBOUND_LINK_COLUMNS = """
+_INBOUND_LINK_SELECT = text("""
     SELECT journal_id, external_event_id, external_version, sync_capability,
-           sync_status, recurring_event_id, external_identity, {reference_data}
+           sync_status, recurring_event_id, external_identity, reference_data
     FROM journal_external_event_links
     WHERE calendar_id = :calendar_id
       AND external_event_id = :external_event_id
-"""
-_INBOUND_LINK_SELECT = text(
-    _INBOUND_LINK_COLUMNS.format(reference_data="reference_data")
-)
-# Before migration 0143 (see ``link_schema``).
-_INBOUND_LINK_SELECT_UNMIGRATED = text(
-    _INBOUND_LINK_COLUMNS.format(reference_data="NULL AS reference_data")
-)
+""")
 
 
 async def _sync_calendar_inbound(
@@ -4869,14 +4854,6 @@ async def _sync_calendar_inbound(
             all_raw_events, key=lambda e: e.get("status") == "cancelled"
         )
 
-    # Read once per calendar: until the backend has migrated, the link has no
-    # base to read, and a push marks none pending.
-    link_select = (
-        _INBOUND_LINK_SELECT
-        if await link_reference_data_ready(session)
-        else _INBOUND_LINK_SELECT_UNMIGRATED
-    )
-
     # Process each event
     calendar_errors = 0
     for raw_event in all_raw_events:
@@ -4891,7 +4868,7 @@ async def _sync_calendar_inbound(
 
             # Lookup existing link
             link_result = await session.execute(
-                link_select,
+                _INBOUND_LINK_SELECT,
                 {
                     "calendar_id": calendar_id,
                     "external_event_id": google_event.id,

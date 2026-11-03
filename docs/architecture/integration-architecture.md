@@ -912,10 +912,7 @@ overwritten by the next pull.
 
 **Deploy order:** `ContactSyncEventData` ignores unknown keys, so a backend older
 than its workers drops `sync_scope` and falls back to the whole overwrite. Deploy
-the backend no later than the workers. For calendar journals the Google worker checks
-for the `reference_data` column migration `0143` adds (`link_schema.py`) and,
-until the backend has run it, reads and records no base and pushes every
-field as before.
+the backend no later than the workers.
 
 ### 2. External Data References (Immich)
 

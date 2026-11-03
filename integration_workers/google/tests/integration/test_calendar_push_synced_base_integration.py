@@ -444,15 +444,3 @@ class TestPushWithoutAMergeableBase:
 
         assert google.patches[0]["summary"] == "Physio"
         assert (await _link(db_session, journal_id)).reference_data == (_agreed_base())
-
-    async def test_before_the_migration_every_field_is_pushed_and_nothing_recorded(
-        self, db_session: AsyncSession
-    ) -> None:
-        journal_id = await _seed(db_session, reference_data=_agreed_base())
-        google = _FakeGoogle(_google_event(summary="Physio (moved in Google)"))
-
-        with patch("worker.link_reference_data_ready", AsyncMock(return_value=False)):
-            await _push(db_session, journal_id, google)
-
-        assert google.patches[0]["summary"] == "Physio"
-        assert (await _link(db_session, journal_id)).reference_data == (_agreed_base())
