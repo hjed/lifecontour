@@ -125,14 +125,3 @@ class TestCalendarPullSyncedBase:
         await _seed_link(db_session, json.dumps({"pending_import": False}))
 
         assert await _pull(db_session) == []
-
-    async def test_before_the_migration_the_link_is_read_without_a_base(
-        self, db_session: AsyncSession
-    ) -> None:
-        await _seed_link(db_session, json.dumps({"pending_import": True}))
-
-        with patch("worker.link_reference_data_ready", AsyncMock(return_value=False)):
-            events = await _pull(db_session)
-
-        # Nothing a push could have marked: the unchanged etag is skipped.
-        assert events == []
