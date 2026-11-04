@@ -127,6 +127,10 @@ _ASSET_DATES_BEFORE = "asset_dates_before"
 # before its log entry was claimed.
 _POSTING = "posting"
 
+# ``reference_data`` key of a check-in's asset-date restore that failed on a
+# transient error, kept for the pair's next reconcile to retry.
+_PENDING_ASSET_DATES = "pending_asset_dates"
+
 
 def _snipeit_zone(row: Any) -> str | None:
     """Return the zone every date and time sent to Snipe-IT is read in.
@@ -390,6 +394,15 @@ def _is_transient_error(exc: Exception) -> bool:
     if isinstance(exc, SnipeItAPIError) and exc.status_code >= 500:
         return True
     return False
+
+
+def _is_restore_retryable(exc: Exception) -> bool:
+    """Whether a failed asset-date restore may succeed if sent again later.
+
+    A rate limit that outlasted the client's own retries counts, as does any
+    transient error; a PATCH Snipe-IT rejected would only be rejected again.
+    """
+    return isinstance(exc, SnipeItRateLimitError) or _is_transient_error(exc)
 
 
 _MAX_ASSET_RETRIES = 3
@@ -4013,11 +4026,11 @@ class SnipeItSyncService:
                 is not None
             )
             await self._restore_asset_dates(
-                snipeit_asset_id,
+                pair,
                 restore_baseline.latest(usage_dates).payload(
                     include_checkout=worker_checkout
                 ),
-                journal_id=journal_id,
+                session_factory,
             )
         return True
 
@@ -4047,25 +4060,156 @@ class SnipeItSyncService:
         return AssetUsageDates.from_asset(asset)
 
     async def _restore_asset_dates(
-        self, asset_id: int, payload: dict[str, str], *, journal_id: int
+        self, pair: GearUsagePair, payload: dict[str, str], session_factory: Any
     ) -> None:
         """PATCH an asset's last checkout/check-in after a posted check-in.
 
-        Best-effort: the check-in is already recorded, and a failure only leaves
-        these display dates wrong, whereas raising would retry, and so re-post,
-        a check-in Snipe-IT already has.
+        Never raises: the check-in is already recorded, and raising would retry,
+        and so re-post, a check-in Snipe-IT already has. A transient failure
+        (see :func:`_is_restore_retryable`) is kept on the check-in row instead,
+        for the pair's next reconcile to retry (:meth:`_retry_pending_restore`);
+        a PATCH Snipe-IT rejected is only logged. A worker dying before the
+        failure is kept loses the restore, leaving the dates as Snipe-IT set
+        them.
         """
         if not payload:
             return
         try:
-            await self._api_client.update_asset(asset_id, payload)
-        except Exception:  # noqa: BLE001
+            await self._api_client.update_asset(pair.asset_id, payload)
+        except Exception as exc:  # noqa: BLE001
+            if not _is_restore_retryable(exc):
+                logger.warning(
+                    "Snipe-IT rejected the asset dates restored after check-in",
+                    journal_id=pair.journal_id,
+                    snipeit_asset_id=pair.asset_id,
+                    exc_info=True,
+                )
+                return
             logger.warning(
-                "Failed to restore Snipe-IT asset dates after check-in",
-                journal_id=journal_id,
-                snipeit_asset_id=asset_id,
+                "Failed to restore Snipe-IT asset dates after check-in; "
+                "keeping them for the next sync",
+                journal_id=pair.journal_id,
+                snipeit_asset_id=pair.asset_id,
                 exc_info=True,
             )
+            await self._save_pending_restore(
+                pair,
+                PendingRestore(payload=payload, failed_at=datetime.now(tz=UTC)),
+                session_factory,
+            )
+
+    async def _save_pending_restore(
+        self, pair: GearUsagePair, pending: PendingRestore, session_factory: Any
+    ) -> None:
+        """Keep a failed restore on the pair's check-in row; never raises."""
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    await session.execute(
+                        text("""
+                            UPDATE sync_metadata
+                            SET reference_data = (
+                                    COALESCE(reference_data::jsonb, '{}'::jsonb)
+                                    || jsonb_build_object(
+                                        CAST(:key AS text), CAST(:pending AS jsonb))
+                                )::text,
+                                updated_at = now()
+                            WHERE user_id = :user_id
+                              AND integration_source = 'snipeit_checkin'
+                              AND external_id = :external_id
+                        """),
+                        {
+                            "user_id": self._user_id,
+                            "external_id": pair.checkin_external_id,
+                            "key": _PENDING_ASSET_DATES,
+                            "pending": json.dumps(pending.to_reference()),
+                        },
+                    )
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Failed to keep a failed Snipe-IT asset date restore; "
+                "it will not be retried",
+                journal_id=pair.journal_id,
+                snipeit_asset_id=pair.asset_id,
+                exc_info=True,
+            )
+
+    async def _retry_pending_restore(
+        self,
+        pair: GearUsagePair,
+        checkin_reference: object,
+        zone: str | None,
+        session_factory: Any,
+    ) -> bool:
+        """Send a check-in's kept asset-date restore again.
+
+        The asset is read first, and a date Snipe-IT shows as later than the
+        failure (read in ``zone``, see :func:`_snipeit_zone`) is left alone: it
+        was set by a checkout or check-in since, which the kept, older date
+        must not undo. The restore is forgotten once sent, or once Snipe-IT
+        rejects it, and kept while it still fails transiently.
+
+        Returns:
+            ``False`` while the restore is still pending, so the caller holds
+            the pair: another checkout of it would read the wrong dates as the
+            ones to restore. ``True`` otherwise, including when none was kept.
+
+        Raises:
+            SnipeItRateLimitError: Snipe-IT is still rate limiting; the restore
+                is kept for a later sync.
+        """
+        pending = PendingRestore.from_reference(checkin_reference)
+        if pending is None:
+            return True
+        try:
+            asset = await self._api_client.get_asset(pair.asset_id)
+            payload = pending.still_due(AssetUsageDates.from_asset(asset), zone)
+            if payload:
+                await self._api_client.update_asset(pair.asset_id, payload)
+        except SnipeItRateLimitError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if _is_restore_retryable(exc):
+                logger.warning(
+                    "Retried Snipe-IT asset date restore failed; keeping it",
+                    journal_id=pair.journal_id,
+                    snipeit_asset_id=pair.asset_id,
+                    exc_info=True,
+                )
+                return False
+            logger.warning(
+                "Snipe-IT rejected a retried asset date restore; dropping it",
+                journal_id=pair.journal_id,
+                snipeit_asset_id=pair.asset_id,
+                exc_info=True,
+            )
+        await self._clear_pending_restore(pair, pending, session_factory)
+        return True
+
+    async def _clear_pending_restore(
+        self, pair: GearUsagePair, pending: PendingRestore, session_factory: Any
+    ) -> None:
+        """Forget a kept restore, unless a newer one has replaced it since."""
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE sync_metadata
+                        SET reference_data = (reference_data::jsonb - :key)::text,
+                            updated_at = now()
+                        WHERE user_id = :user_id
+                          AND integration_source = 'snipeit_checkin'
+                          AND external_id = :external_id
+                          AND reference_data::jsonb -> :key
+                              = CAST(:pending AS jsonb)
+                    """),
+                    {
+                        "user_id": self._user_id,
+                        "external_id": pair.checkin_external_id,
+                        "key": _PENDING_ASSET_DATES,
+                        "pending": json.dumps(pending.to_reference()),
+                    },
+                )
 
     async def _finalize_checkin(
         self,
@@ -4180,6 +4324,7 @@ class SnipeItSyncService:
                     GearUsagePair(journal_id, recorded_asset_id),
                     checkout_row,
                     session_factory,
+                    zone=_snipeit_zone(journal_row),
                 )
 
         for usage in usages:
@@ -4205,7 +4350,8 @@ class SnipeItSyncService:
                     SELECT co.sync_status, co.external_id, co.reference_data,
                            extract(epoch from (now() - co.updated_at)) AS age_seconds,
                            ci.sync_status AS checkin_status,
-                           ci.error_message AS checkin_error
+                           ci.error_message AS checkin_error,
+                           ci.reference_data AS checkin_reference
                     FROM sync_metadata co
                     LEFT JOIN sync_metadata ci ON {_CHECKIN_OF_CHECKOUT}
                     WHERE co.user_id = :user_id
@@ -4252,6 +4398,11 @@ class SnipeItSyncService:
         A checkout recorded before its dates were stored, or one whose check-in
         ended in a terminal 403/404 (the asset may still be out), is never
         superseded.
+
+        Before any of that, a checked-in pair's restore of the asset's dates
+        that failed is sent again (:meth:`_retry_pending_restore`), and the
+        pair is left alone while it still fails: superseding it would check the
+        asset out again with the wrong dates read as the ones to restore.
         """
         journal_id = pair.journal_id
         if not checkout_row or checkout_row.sync_status != "success":
@@ -4263,6 +4414,13 @@ class SnipeItSyncService:
             return
 
         zone = _snipeit_zone(journal_row)
+        if (
+            checkout_row.checkin_status == "success"
+            and not await self._retry_pending_restore(
+                pair, checkout_row.checkin_reference, zone, session_factory
+            )
+        ):
+            return
         checkout_date = usage.checkout_date or journal_row.event_date_range_start
         checkin_date = usage.checkin_date or journal_row.event_date_range_end
 
@@ -4336,14 +4494,20 @@ class SnipeItSyncService:
                 )
 
     async def _release_removed_pair(
-        self, pair: GearUsagePair, checkout_row: Any, session_factory: Any
+        self,
+        pair: GearUsagePair,
+        checkout_row: Any,
+        session_factory: Any,
+        *,
+        zone: str | None,
     ) -> None:
         """Undo what Snipe-IT holds for a gear item the journal no longer lists.
 
         A pair whose checkout and check-in are both recorded is history, and
         Snipe-IT's log cannot be edited, so it is kept. A pair still checked out
         is checked in now and then forgotten, so adding the item back records a
-        new pair. A failed attempt may still have checked the asset out, so it
+        new pair. A kept pair whose restore of the asset's dates failed has it
+        sent again (in ``zone``, see :meth:`_retry_pending_restore`). A failed attempt may still have checked the asset out, so it
         is returned if nothing else may hold it, then forgotten; while something
         else may hold it, the pair is kept for a later sync to retry.
 
@@ -4353,6 +4517,9 @@ class SnipeItSyncService:
         """
         if checkout_row.sync_status == "success":
             if checkout_row.checkin_status == "success":
+                await self._retry_pending_restore(
+                    pair, checkout_row.checkin_reference, zone, session_factory
+                )
                 return
             if await self.push_checkin_create(
                 pair,
@@ -4664,6 +4831,64 @@ class AssetUsageDates:
 
 
 @dataclass(frozen=True)
+class PendingRestore:
+    """An asset-date restore that failed after its check-in, kept to retry.
+
+    ``payload`` is the ``PATCH /hardware/{id}`` body the check-in computed; it
+    cannot be computed again later, as the asset's dates are by then the wrong
+    ones it was meant to replace. ``failed_at`` is when it failed, so a retry
+    can tell a date set since then from the one Snipe-IT stamped on the
+    check-in.
+    """
+
+    payload: dict[str, str]
+    failed_at: datetime
+
+    @classmethod
+    def from_reference(cls, reference_data: object) -> PendingRestore | None:
+        """Return the restore a check-in sync row kept, or ``None``."""
+        kept = SnipeItSyncService._recorded_reference(reference_data).get(
+            _PENDING_ASSET_DATES
+        )
+        if not isinstance(kept, dict):
+            return None
+        payload = kept.get("payload")
+        try:
+            failed_at = datetime.fromisoformat(str(kept.get("failed_at")))
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return cls(
+            payload={str(name): str(value) for name, value in payload.items()},
+            failed_at=failed_at,
+        )
+
+    def to_reference(self) -> dict[str, Any]:
+        """The restore as kept on a check-in sync row's ``reference_data``."""
+        return {"payload": self.payload, "failed_at": self.failed_at.isoformat()}
+
+    def still_due(self, current: AssetUsageDates, zone: str | None) -> dict[str, str]:
+        """The fields to send, leaving out each date set after the failure.
+
+        ``current`` is the asset as Snipe-IT shows it now, in its naive wall
+        clock, so the failure time is read in the same ``zone``.
+        """
+        failed_at = _snipeit_wall_clock(self.failed_at, zone)
+        now_shown = {
+            "last_checkout": current.last_checkout,
+            "last_checkin": current.last_checkin,
+        }
+        return {
+            name: value
+            for name, value in self.payload.items()
+            if (shown := now_shown.get(name)) is None
+            or failed_at is None
+            or shown <= failed_at
+        }
+
+
+@dataclass(frozen=True)
 class UnsyncedGearUsage:
     """A (journal, asset) pair whose Snipe-IT checkout or check-in is unfinished.
 
@@ -4692,7 +4917,9 @@ async def fetch_unsynced_gear_usage(
       edit still retries those, but a sweep would only fail them again;
     - is pending past ``IN_FLIGHT_LOCK_SECONDS``, so its worker died;
     - succeeded with no check-in, once the usage period has ended, or at once
-      when the journal no longer lists the item (it was removed while out).
+      when the journal no longer lists the item (it was removed while out);
+    - succeeded and was checked in, but the restore of the asset's dates after
+      that check-in failed and is kept for a retry.
 
     Only pairs a push was attempted for are selected — every processed event
     writes the checkout row before calling Snipe-IT — so journals written
@@ -4735,12 +4962,16 @@ async def fetch_unsynced_gear_usage(
                           AND (u.gear_item_id IS NULL
                                OR COALESCE(u.checkin_date, j.event_date_range_end)
                                   < now()))
+                      OR (co.sync_status = 'success'
+                          AND ci.id IS NOT NULL
+                          AND ci.reference_data::jsonb ? :pending_restore)
                   )
             """),
             {
                 "user_id": user_id,
                 "terminal": f"{TERMINAL_ERROR_PREFIX}%",
                 "in_flight": IN_FLIGHT_LOCK_SECONDS,
+                "pending_restore": _PENDING_ASSET_DATES,
             },
         )
         rows = result.fetchall()

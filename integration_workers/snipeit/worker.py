@@ -627,7 +627,8 @@ async def periodic_checkin_all_snipeit_accounts(
 
     For every user with Snipe-IT configured, reconciles each (journal, asset)
     pair ``fetch_unsynced_gear_usage`` selects: a checkout that failed or was
-    abandoned, and a check-in that is due. That is what repairs the pushes an
+    abandoned, a check-in that is due, and a restore of an asset's dates that
+    failed after its check-in. That is what repairs the pushes an
     event gave up on (e.g. when Snipe-IT kept rate limiting it), and it catches
     usage windows that only end with the passage of time.
 
