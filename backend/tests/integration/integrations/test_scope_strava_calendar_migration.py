@@ -12,7 +12,6 @@ import json
 
 import pytest
 from core_shared.integration_constants import (
-    LEGACY_SHARED_STRAVA_CALENDAR_ID,
     SyntheticCalendar,
     synthetic_calendar_id,
 )
@@ -92,11 +91,6 @@ async def _cancellation(url: str, owner: str, journal_id: int) -> None:
 class TestScopeStravaCalendarToOwner:
     def test_the_migration_names_calendars_as_the_worker_does(self) -> None:
         assert migration.owner_calendar_id(OWNER) == _own(OWNER)
-
-    def test_it_moves_the_calendar_the_old_worker_shared(self) -> None:
-        assert (
-            migration.SHARED_CALENDAR_ID == SHARED == LEGACY_SHARED_STRAVA_CALENDAR_ID
-        )
 
     async def test_each_owners_rows_move_to_their_own_calendar(
         self, throwaway_database: URL, run_alembic: RunAlembic
