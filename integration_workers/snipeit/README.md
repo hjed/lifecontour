@@ -194,7 +194,9 @@ their Snipe-IT traffic does not compete for the rate limit:
   unfinished. `fetch_unsynced_gear_usage` selects each (journal, asset) pair
   whose checkout failed (unless terminal, `error_message` starting `Terminal:`),
   is pending past the five-minute in-flight lock, or succeeded with no check-in
-  once the usage period has ended (or the journal no longer lists the item).
+  once the usage period has ended (or the journal no longer lists the item),
+  or was checked in but the restore of the asset's dates after it failed
+  transiently (kept as `pending_asset_dates` on the check-in row).
   Only pairs a push was attempted for are selected, so old journals are not
   backfilled. Each pair is reconciled on its own (`reconcile_gear_usage` with
   `asset_id`, which releases the pair when the journal no longer lists its
