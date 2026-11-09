@@ -144,7 +144,7 @@ Each profile uses environment variables from `.env` files:
 ## Service Profiles
 
 ### Core Services (All Profiles)
-- **database**: PostgreSQL 15
+- **database**: PostgreSQL 18
 - **redis**: Redis 7
 - **meilisearch**: MeiliSearch v1.2
 
