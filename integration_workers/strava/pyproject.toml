@@ -41,7 +41,7 @@ core_shared = { path = "../../core_shared", editable = true }
 [dependency-groups]
 dev = [
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1",
+    "pytest-asyncio==1.4.1.post1",
     "ruff>=0.16.1",
     "mypy>=2.3.0",
 ]
