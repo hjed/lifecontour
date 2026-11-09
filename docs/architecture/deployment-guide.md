@@ -706,11 +706,11 @@ The image for PostgreSQL 18 and later keeps its data in `/var/lib/postgresql/<ma
 
 The restore goes into a standalone container first. Updating a Compose or Portainer stack starts every service at once, and the backend would otherwise run its migrations against an empty database.
 
-Set these first. `DB` is the current database container and `VOLUME` is the name of its data volume:
+Set these first. Name the database container explicitly, as other containers, such as a backup service, can mount the same volume:
 
 ```bash
+DB=<current-database-container>
 VOLUME=<current-data-volume>
-DB=$(docker ps --filter volume=$VOLUME --format '{{.Names}}')
 NEW_VOLUME=${VOLUME}_18
 DB_NAME=<application-database>   # see psql -c '\l+'; not the small "postgres" database
 DB_USER=postgres
