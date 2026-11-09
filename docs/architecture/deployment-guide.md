@@ -110,7 +110,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - postgres_dev_data:/var/lib/postgresql
 
   meilisearch:
     image: getmeili/meilisearch:v1.38
@@ -183,7 +183,7 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - postgres_prod_data:/var/lib/postgresql/data
+      - postgres_prod_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d personal_crm_prod"]
       interval: 30s
@@ -259,7 +259,7 @@ services:
   backup:
     image: postgres:18-alpine
     volumes:
-      - postgres_prod_data:/var/lib/postgresql/data
+      - postgres_prod_data:/var/lib/postgresql
       - backup-storage:/backup
     environment:
       - PGPASSWORD=${DB_PASSWORD}
@@ -700,45 +700,82 @@ jobs:
 
 ### Upgrading PostgreSQL Major Versions (Docker Deployments)
 
-When upgrading between major PostgreSQL versions (e.g., from 15 to 18), the data directory format changes and existing volumes cannot be reused directly. You will encounter a "database files are incompatible with server" error if you attempt to start a new major version container using the old volume.
+A major version can't start on an older version's data directory, so upgrade by dump and restore into a new volume. Leave the old volume in place as the rollback.
 
-To perform a safe upgrade:
+The image for PostgreSQL 18 and later keeps its data in `/var/lib/postgresql/<major>/docker`, so mount the volume at `/var/lib/postgresql`. Mounting it at `/var/lib/postgresql/data` fails at container start.
 
-1. **Backup Existing Data**:
-   Ensure the current container is running, and perform a full database dump to a safe location.
+The restore goes into a standalone container first. Updating a Compose or Portainer stack starts every service at once, and the backend would otherwise run its migrations against an empty database.
+
+Set these first. Name the database container explicitly, as other containers, such as a backup service, can mount the same volume:
+
+```bash
+DB=<current-database-container>
+VOLUME=<current-data-volume>
+NEW_VOLUME=${VOLUME}_18
+DB_NAME=<application-database>   # see psql -c '\l+'; not the small "postgres" database
+DB_USER=postgres
+```
+
+1. **Check there is room.** The host needs space for the old volume, the dump and a new copy of the database.
    ```bash
-   # Export all data to a SQL file
-   docker compose exec postgres pg_dumpall -U postgres > upgrade_backup.sql
+   docker exec $DB psql -U $DB_USER -d postgres -c '\l+'
+   df -h /var/lib/docker
    ```
 
-2. **Stop and Remove Old Database**:
+2. **Stop every service that writes**, leaving the database and Redis running. Then confirm nothing is connected, which should return no rows, and record the counts.
    ```bash
-   docker compose down
-   # Remove the old volume to prevent incompatibility errors
-   # Replace the volume name with your actual project volume (e.g., personal-crm_postgres_prod_data)
-   docker volume rm personal-crm_postgres_prod_data
+   docker exec $DB psql -U $DB_USER -d $DB_NAME \
+     -c "SELECT application_name, client_addr, state FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid();" \
+     -c 'SELECT (SELECT count(*) FROM contacts) AS contacts, (SELECT count(*) FROM journals) AS journals, (SELECT count(*) FROM sync_metadata) AS links;'
    ```
 
-3. **Update Docker Compose Image**:
-   Update your `docker-compose.yml` (and/or `docker-compose.prod.yml`) to use the new PostgreSQL image tag (e.g., `postgres:18-alpine`).
-
-4. **Start New Database Container**:
+3. **Dump with the new version's client**, and keep a copy off the host.
    ```bash
-   docker compose up -d postgres
-   ```
-   Wait a few moments for the new database container to initialize its fresh volume.
-
-5. **Restore Data**:
-   ```bash
-   # Import the exported SQL file into the new database
-   cat upgrade_backup.sql | docker compose exec -T postgres psql -U postgres
+   mkdir -p pg-upgrade
+   docker run --rm --network container:$DB -v "$PWD/pg-upgrade:/backup" postgres:18-alpine \
+     pg_dump -h 127.0.0.1 -U $DB_USER -d $DB_NAME -Fc -f /backup/upgrade.dump
+   echo "dump exit: $?"
    ```
 
-6. **Restart All Services**:
+4. **Restore into a standalone container on a new volume.** The password must be the one the stack uses. Stopping the old database doesn't change its volume.
    ```bash
-   docker compose up -d
+   docker stop $DB
+   docker volume create $NEW_VOLUME
+   read -rsp 'Database password: ' PGPW; echo
+   docker run -d --name pg-restore -e POSTGRES_DB=$DB_NAME -e POSTGRES_USER=$DB_USER \
+     -e POSTGRES_PASSWORD="$PGPW" -v $NEW_VOLUME:/var/lib/postgresql postgres:18-alpine
+   unset PGPW
+   until docker exec pg-restore psql -h 127.0.0.1 -U $DB_USER -d $DB_NAME -tAc 'select 1' >/dev/null 2>&1; do sleep 1; done
+   docker run --rm --network container:pg-restore -v "$PWD/pg-upgrade:/backup" postgres:18-alpine \
+     pg_restore -h 127.0.0.1 -U $DB_USER -d $DB_NAME --clean --if-exists --no-owner --no-privileges \
+     --single-transaction --exit-on-error /backup/upgrade.dump
+   echo "restore exit: $?"
    ```
-   Verify that your data is intact and the application functions correctly.
+
+5. **Verify.** The counts must match step 2, and `version_num` must match the old database.
+   ```bash
+   docker exec pg-restore psql -U $DB_USER -d $DB_NAME -c 'ANALYZE;' -c 'SELECT version();' \
+     -c 'SELECT (SELECT count(*) FROM contacts) AS contacts, (SELECT count(*) FROM journals) AS journals, (SELECT count(*) FROM sync_metadata) AS links;' \
+     -c 'SELECT version_num FROM alembic_version;'
+   docker stop pg-restore && docker rm pg-restore
+   ```
+
+6. **Point the stack at the new volume and deploy it**, without pulling new application images, so that only the database changes.
+   ```yaml
+   services:
+     database:
+       image: postgres:18-alpine
+       volumes:
+         - postgres_data_new:/var/lib/postgresql
+
+   volumes:
+     postgres_data_new:
+       external: true
+       name: <NEW_VOLUME>
+   ```
+   The database log should say `Skipping initialization`, which means it found the restored data.
+
+**Rollback:** stop the stack, restore its previous `image` and `volumes` lines, and deploy it again. Anything written since the upgrade is lost. Once you're satisfied with the upgrade, remove the old volume and the dump.
 
 ### PostgreSQL Backup Strategy
 ```bash

@@ -803,6 +803,10 @@ integration the missing piece, the **base**: per field, opaque keys
   *response*, since providers reformat values — merged into `reference_data`
   in one statement (`IntegrationLinkRepository.patch_reference_data`), so it
   never races the backend's own keys.
+- Creating a remote person and recording its link can't share a transaction, so
+  a push that created the person deletes it again if the link can't be
+  recorded. Left behind, the next pull would import it as a new contact and the
+  original would be pushed as new again, a duplicate on every sync.
 - The push merges three ways: `three_way_keys` for a list field (kept, dropped,
   suppressed), `three_way_entries` when an entry can be written several ways
   and carries a key per spelling (a phone in E.164 or as typed), and
@@ -1291,7 +1295,7 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
 volumes:
   redis_data:

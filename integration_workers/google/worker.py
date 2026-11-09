@@ -1115,6 +1115,7 @@ async def _create_contact_in_google(
 
     await _record_push_link(
         session,
+        client,
         contact["id"],
         _created_outcome(result),
         user_id=user_id,
@@ -1218,13 +1219,15 @@ class PushOutcome:
 
     ``synced_base`` is what both sides hold after the push, and
     ``pending_import`` whether Google holds anything local does not, for the
-    next pull to import.
+    next pull to import. ``new_person`` is whether this push created the person,
+    so it must not be left in Google if its link can't be recorded.
     """
 
     person: dict[str, Any]
     recreated: bool
     synced_base: SyncedEntries
     pending_import: bool = False
+    new_person: bool = False
 
 
 def _created_outcome(person: dict[str, Any], *, recreated: bool = False) -> PushOutcome:
@@ -1233,7 +1236,9 @@ def _created_outcome(person: dict[str, Any], *, recreated: bool = False) -> Push
     The base is read from Google's copy (``createContact`` returns every field
     by default), so values Google reformats are keyed as it holds them.
     """
-    return PushOutcome(person, recreated, raw_synced_entries(person, None))
+    return PushOutcome(
+        person, recreated, raw_synced_entries(person, None), new_person=True
+    )
 
 
 def _base_after_update(
@@ -1263,8 +1268,36 @@ def _base_after_update(
     }
 
 
+async def _remove_unlinked_person(
+    client: GoogleAPIClient, contact_id: int, resource_name: str
+) -> None:
+    """Delete a person this push created but could not link.
+
+    Left in Google, the next pull would import it as a new contact while the
+    original stays unlinked and is pushed as new again: a duplicate every sync.
+    Best effort, called while the link failure propagates, so a failure here is
+    logged and never replaces it.
+    """
+    try:
+        await client.delete_contact(resource_name)
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "Could not remove Google person after failing to link it",
+            contact_id=contact_id,
+            resource_name=resource_name,
+            error=str(e),
+        )
+    else:
+        logger.warning(
+            "Removed Google person after failing to link it",
+            contact_id=contact_id,
+            resource_name=resource_name,
+        )
+
+
 async def _record_push_link(
     session: AsyncSession,
+    client: GoogleAPIClient,
     contact_id: int,
     outcome: PushOutcome,
     *,
@@ -1277,26 +1310,32 @@ async def _record_push_link(
     next pull skipping the contact. A push that left Google holding what local
     does not marks the link ``pending_import`` instead, which only the backend
     clears, when a pull is applied. The keys are merged into
-    ``reference_data`` in one statement beside the backend's own.
+    ``reference_data`` in one statement beside the backend's own. A person this
+    push created is removed again if the link can't be recorded.
     """
     resource_name = outcome.person["resourceName"]
-    await _upsert_sync_metadata(
-        session=session,
-        internal_id=contact_id,
-        external_id=resource_name,
-        etag=outcome.person.get("etag"),
-        integration_source="google",
-        user_id=user_id,
-        synced_at=synced_at,
-    )
     patch: dict[str, Any] = {
         SYNCED_ENTRIES_KEY: serialise_synced_entries(outcome.synced_base)
     }
     if outcome.pending_import:
         patch[PENDING_IMPORT_KEY] = True
-    await IntegrationLinkRepository(await session.connection()).patch_reference_data(
-        "google", resource_name, patch, user_id=user_id
-    )
+    try:
+        await _upsert_sync_metadata(
+            session=session,
+            internal_id=contact_id,
+            external_id=resource_name,
+            etag=outcome.person.get("etag"),
+            integration_source="google",
+            user_id=user_id,
+            synced_at=synced_at,
+        )
+        await IntegrationLinkRepository(
+            await session.connection()
+        ).patch_reference_data("google", resource_name, patch, user_id=user_id)
+    except Exception:
+        if outcome.new_person:
+            await _remove_unlinked_person(client, contact_id, resource_name)
+        raise
 
 
 async def _update_or_recreate_contact_in_google(
@@ -1379,9 +1418,13 @@ async def _update_or_recreate_contact_in_google(
         if key not in _PERSON_IDENTITY_FIELDS
     }
     result = await client.create_contact(create_data)
-    await _repoint_sync_link(
-        session, external_id, result["resourceName"], user_id=user_id
-    )
+    try:
+        await _repoint_sync_link(
+            session, external_id, result["resourceName"], user_id=user_id
+        )
+    except Exception:
+        await _remove_unlinked_person(client, contact_id, result["resourceName"])
+        raise
     return _created_outcome(result, recreated=True)
 
 
@@ -1416,6 +1459,7 @@ async def _update_contact_in_google(
     )
     await _record_push_link(
         session,
+        client,
         contact["id"],
         outcome,
         user_id=user_id,
@@ -3752,6 +3796,7 @@ async def _push_contact_to_google_for_event(
         result = await client.create_contact(person_data)
         await _record_push_link(
             session,
+            client,
             contact_id,
             _created_outcome(result),
             user_id=user_id,
@@ -3776,6 +3821,7 @@ async def _push_contact_to_google_for_event(
         )
         await _record_push_link(
             session,
+            client,
             contact_id,
             outcome,
             user_id=user_id,

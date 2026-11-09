@@ -18,7 +18,7 @@ This document outlines the technology choices optimized for AI assistant underst
 - **Middleware**: FastAPI built-in CORS, custom rate limiting
 
 ### Database and Queries
-- **Database**: PostgreSQL 15+ (production-ready, Docker-friendly)
+- **Database**: PostgreSQL 18 (production-ready, Docker-friendly; the SQL needs 16 or later)
 - **Query Layer**: SQLAlchemy Core (explicit SQL, no ORM magic)
 - **Migrations**: Alembic for clear, readable SQL migration files
 - **Database Driver**: psycopg2-binary (simple, reliable)
@@ -152,7 +152,7 @@ lifecontour/
 ### Container Architecture
 - **Backend Container**: Python FastAPI with UV
 - **Frontend Container**: Next.js with pnpm
-- **Database Container**: PostgreSQL 15+
+- **Database Container**: PostgreSQL 18
 - **Search Container**: MeiliSearch 1.38+
 - **Queue Container**: Redis 7+ for ARQ task queue
 - **Worker Containers**: Separate containers per integration (optional)
@@ -192,7 +192,7 @@ For detailed testing patterns, implementation guidelines, and examples, see [Tes
 ### Multi-Container Docker Setup
 - **Backend**: Python FastAPI with UV dependencies
 - **Frontend**: Next.js with pnpm dependencies
-- **Database**: PostgreSQL 15+ with persistent volumes
+- **Database**: PostgreSQL 18 with persistent volumes
 - **Search**: MeiliSearch 1.38+ with persistent volumes
 - **Queue**: Redis 7+ for task queue
 - **Workers**: Integration worker processes (optional separate containers)
