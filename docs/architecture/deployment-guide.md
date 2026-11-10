@@ -814,16 +814,21 @@ MeiliSearch is a projection of PostgreSQL, so it can always be rebuilt from the
 database. Rebuild it after restoring a backup, after a MeiliSearch upgrade that
 loses its data, or when a release adds a field that every search filters on.
 
-1. Set `ENABLE_REINDEX_ENDPOINT=true` on the backend and restart it. The endpoint is
-   disabled by default.
+To restore journals missing from search without clearing the index, call
+`POST /api/search/backfill/journals` instead, through the same steps. It only
+writes journals with no search document, or a document with no owner, deletes
+nothing, and is safe on a live system.
+
+1. Set `ENABLE_REINDEX_ENDPOINT=true` on the backend and restart it. Both endpoints
+   are disabled by default.
 2. As a session user, or with a token that carries `pms_admin`, call
    `POST /api/search/reindex`. Add `?entity_type=contacts` or `?entity_type=journals`
    to rebuild one index only.
 3. Unset `ENABLE_REINDEX_ENDPOINT` again.
 
-The rebuild clears each index first. It returns `503` if anything could not be
-indexed, naming the ids where it can. Everything else has still been indexed, so
-it is safe to run again.
+The rebuild clears each index first. Both endpoints return `503` if anything
+could not be indexed, naming the ids where they can. Everything else has still
+been indexed, so they are safe to run again.
 
 At startup the backend checks that the contacts and journals indexes allow
 filtering on every attribute searches depend on, and reapplies the settings if

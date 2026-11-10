@@ -19,6 +19,7 @@ from app.api.common.schemas import (
 )
 from app.api.contacts.schemas import ContactResource
 from app.api.search.schemas import (
+    BackfillResponse,
     ContactSearchMeta,
     ContactSearchResponse,
     GlobalSearchMeta,
@@ -40,6 +41,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.di.auth import AdminAccess
 from app.infrastructure.search.indexed_entities import ReindexIncompleteError
 from app.infrastructure.search.reindex_service import ReindexService
+from app.infrastructure.search.search_backfill_service import SearchBackfillService
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
@@ -359,6 +361,47 @@ async def reindex_search(
     except ReindexIncompleteError as e:
         logger.error("Re-index incomplete", failed_ids=e.failed_ids)
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@authenticated_router.post("/backfill/journals", responses=_MAINTENANCE_RESPONSES)
+@inject
+async def backfill_journals(
+    backfill_service: FromDishka[SearchBackfillService],
+    settings: FromDishka[Settings],
+    _admin: FromDishka[AdminAccess],
+) -> BackfillResponse:
+    """
+    Restore journals missing from the search index or lacking an owner.
+
+    Unlike a re-index this only upserts what is missing and deletes nothing, so
+    it is safe to run on a live system and to repeat.
+
+    Gated behind the same ENABLE_REINDEX_ENDPOINT environment variable as the
+    re-index (disabled by default for safety).
+    """
+    if not settings.enable_reindex_endpoint:
+        raise HTTPException(
+            status_code=404,
+            detail="Backfill endpoint is disabled. "
+            "Set ENABLE_REINDEX_ENDPOINT=true to enable.",
+        )
+
+    try:
+        result = await backfill_service.backfill_journals()
+    except MeilisearchError as e:
+        logger.error("MeiliSearch error during journal backfill", error=str(e))
+        raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+
+    if result.failed_ids:
+        incomplete = ReindexIncompleteError({"journals": result.failed_ids})
+        logger.error("Journal backfill incomplete", failed_ids=result.failed_ids)
+        raise HTTPException(status_code=503, detail=str(incomplete))
+
+    return BackfillResponse(
+        status="completed",
+        examined=result.examined,
+        documents_written=result.documents_written,
+    )
 
 
 @public_router.get("/health")
