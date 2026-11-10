@@ -463,11 +463,14 @@ class SearchIndexer:
         # so that both surfaces rank a contact by the same numbers. The
         # indexer acts for no user, so it reads as the contact's owner.
         importance_repository = SqlContactImportanceRepository(self.db_connection)
-        importance = (
-            await importance_repository.for_contacts(
-                [contact_id], user_id=contact_row.user_id
-            )
-        )[contact_id]
+        signals = await importance_repository.for_contacts(
+            [contact_id], user_id=contact_row.user_id
+        )
+        importance = signals.get(contact_id)
+        if importance is None:
+            # Each statement reads afresh, so a contact deleted after the first
+            # read is absent here: it no longer exists, which is not an error.
+            return None
         last_activity_date = importance.last_activity_at
 
         return {

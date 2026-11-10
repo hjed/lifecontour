@@ -6,6 +6,8 @@ and mocked MeiliSearch client to verify that all contacts and journals
 are read from PostgreSQL and pushed to the search index.
 """
 
+from collections.abc import Sequence
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +16,9 @@ from meilisearch.errors import MeilisearchTimeoutError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.contacts.adapters.sql.contact_importance_repository import (
+    SqlContactImportanceRepository,
+)
 from app.infrastructure.search.search_indexer import SearchIndexer
 from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
@@ -344,14 +349,19 @@ class TestReindexEndpoint:
         authenticated_client,
         async_connection: AsyncConnection,
     ) -> None:
-        """A failed build is reported by id, after the others are indexed."""
+        """A failed build is reported by id, after the others are indexed.
+
+        It fails in SQL, which aborts the transaction: unless each build is
+        isolated, every build and page read after it would fail too.
+        """
         bad_id = await seed_contact(async_connection, first_name="Bad")
         good_id = await seed_contact(async_connection, first_name="Good")
         original = SearchIndexer.build_contact_document
 
-        async def fail_for_bad_id(self: SearchIndexer, contact_id: int):
+        async def fail_in_sql(self: SearchIndexer, contact_id: int):
             if contact_id == bad_id:
-                raise ValueError("unbuildable")
+                assert self.db_connection is not None
+                await self.db_connection.execute(text("SELECT 1 / 0"))
             return await original(self, contact_id)
 
         mock_client = _make_mock_meilisearch_client()
@@ -360,7 +370,7 @@ class TestReindexEndpoint:
                 "app.infrastructure.search.reindex_service.get_meilisearch_client",
                 return_value=mock_client,
             ),
-            patch.object(SearchIndexer, "build_contact_document", fail_for_bad_id),
+            patch.object(SearchIndexer, "build_contact_document", fail_in_sql),
         ):
             response = await authenticated_client.post(
                 "/api/search/reindex?entity_type=contacts"
@@ -370,6 +380,44 @@ class TestReindexEndpoint:
         assert str(bad_id) in response.text
         written = mock_client.index.return_value.add_documents.call_args[0][0]
         assert [document["id"] for document in written] == [good_id]
+
+    @pytest.mark.asyncio
+    async def test_reindex_skips_a_contact_deleted_while_it_is_built(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A contact deleted between the builder's reads is gone, not a failure."""
+        gone_id = await seed_contact(async_connection, first_name="Gone")
+        kept_id = await seed_contact(async_connection, first_name="Kept")
+        original = SqlContactImportanceRepository.for_contacts
+
+        async def delete_first(
+            self: SqlContactImportanceRepository,
+            contact_ids: Sequence[int],
+            **kwargs: Any,
+        ) -> dict[int, Any]:
+            if gone_id in contact_ids:
+                await async_connection.execute(
+                    text("DELETE FROM contacts WHERE id = :id"), {"id": gone_id}
+                )
+            return await original(self, contact_ids, **kwargs)
+
+        mock_client = _make_mock_meilisearch_client()
+        with (
+            patch(
+                "app.infrastructure.search.reindex_service.get_meilisearch_client",
+                return_value=mock_client,
+            ),
+            patch.object(SqlContactImportanceRepository, "for_contacts", delete_first),
+        ):
+            response = await authenticated_client.post(
+                "/api/search/reindex?entity_type=contacts"
+            )
+
+        assert response.status_code == 200
+        written = mock_client.index.return_value.add_documents.call_args[0][0]
+        assert [document["id"] for document in written] == [kept_id]
 
     @pytest.mark.asyncio
     async def test_reindex_requires_authentication(
