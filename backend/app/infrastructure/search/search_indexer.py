@@ -5,6 +5,7 @@ Processes domain events from the outbox and updates MeiliSearch indices
 to keep search data synchronized with the database.
 """
 
+import calendar
 from collections.abc import Sequence
 from typing import Any
 
@@ -75,6 +76,25 @@ def format_relationship(
     if other_name is None:
         return None
     return f"{label}: {other_name}"
+
+
+def format_important_date(row: Any) -> str | None:
+    """Render an important date row as "<name> (<date>)", or None without a date."""
+    if row.date_type == "custom" and row.custom_name:
+        name = row.custom_name
+    else:
+        name = row.date_type.replace("_", " ").title()
+
+    month_name = calendar.month_name[row.month] if row.month else ""
+    if row.precision == "full":
+        date_str = f"{month_name} {row.day}, {row.year}"
+    elif row.precision == "day_month":
+        date_str = f"{month_name} {row.day}"
+    elif row.precision == "year":
+        date_str = str(row.year)
+    else:
+        return None
+    return f"{name} ({date_str})"
 
 
 # Contact-scoped events whose type does not start with "Contact". Kept as a
@@ -244,247 +264,19 @@ class SearchIndexer:
     async def _fetch_complete_contact_data(
         self, contact_id: int
     ) -> dict[str, Any] | None:
-        """
-        Fetch complete contact data from the database for search indexing.
+        """Build the search document for the event path, which has a fallback.
 
-        Args:
-            contact_id: ID of the contact to fetch
-
-        Returns:
-            Complete contact data dictionary or None if not found
+        A failure is logged and reported as ``None``, the same answer as a
+        missing contact, so the caller can index the event's own data instead.
+        Bulk callers need to tell the two apart and use
+        :meth:`build_contact_document`.
         """
         if not self.db_connection:
             logger.warning("No database connection available for fetching contact data")
             return None
 
         try:
-            # Fetch basic contact info. The importance signals — favourite, the
-            # two recent counts and the last-activity instant — come from the
-            # shared read below rather than from here, so that the home
-            # dashboard ranks contacts by exactly what the index ranks them by.
-            contact_query = text("""
-                SELECT id, user_id, first_name, last_name, middle_name, nick_name,
-                       company, job_title, created_at, updated_at
-                FROM contacts
-                WHERE id = :contact_id
-            """)
-            contact_result = await self.db_connection.execute(
-                contact_query, {"contact_id": contact_id}
-            )
-            contact_row = contact_result.fetchone()
-
-            if not contact_row:
-                return None
-
-            # Fetch contact methods (email, phone)
-            methods_query = text("""
-                SELECT method_type, value, label, is_primary, is_archived
-                FROM contact_methods
-                WHERE contact_id = :contact_id
-                ORDER BY is_primary DESC, created_at ASC
-            """)
-            methods_result = await self.db_connection.execute(
-                methods_query, {"contact_id": contact_id}
-            )
-            methods_rows = methods_result.fetchall()
-
-            # Fetch contact notes
-            notes_query = text("""
-                SELECT content
-                FROM contact_notes
-                WHERE contact_id = :contact_id
-                ORDER BY created_at DESC
-            """)
-            notes_result = await self.db_connection.execute(
-                notes_query, {"contact_id": contact_id}
-            )
-            notes_rows = notes_result.fetchall()
-
-            # Fetch contact tags
-            tags_query = text("""
-                SELECT t.name
-                FROM tags t
-                JOIN contact_tags ct ON t.id = ct.tag_id
-                WHERE ct.contact_id = :contact_id
-                ORDER BY t.name
-            """)
-            tags_result = await self.db_connection.execute(
-                tags_query, {"contact_id": contact_id}
-            )
-            tags_rows = tags_result.fetchall()
-
-            # Build comprehensive contact document
-            emails = [row.value for row in methods_rows if row.method_type == "email"]
-            phones = [row.value for row in methods_rows if row.method_type == "phone"]
-            primary_email = primary_or_first_in_use(methods_rows, "email")
-            primary_phone = primary_or_first_in_use(methods_rows, "phone")
-
-            notes_content = " ".join([row.content for row in notes_rows])
-            tags = [row.name for row in tags_rows]
-
-            full_name = (
-                f"{contact_row.first_name} {contact_row.last_name or ''}".strip()
-            )
-
-            # Fetch contact relationships (both outgoing and incoming)
-            relationships_query = text("""
-                SELECT
-                    cr.relationship_type,
-                    cr.to_user,
-                    c.first_name,
-                    c.last_name,
-                    'outgoing' as direction
-                FROM contact_relationships cr
-                LEFT JOIN contacts c ON cr.to_contact_id = c.id
-                WHERE cr.from_contact_id = :contact_id
-                UNION ALL
-                SELECT
-                    cr.relationship_type,
-                    cr.to_user,
-                    c.first_name,
-                    c.last_name,
-                    'incoming' as direction
-                FROM contact_relationships cr
-                LEFT JOIN contacts c ON cr.from_contact_id = c.id
-                WHERE cr.to_contact_id = :contact_id
-            """)
-            relationships_result = await self.db_connection.execute(
-                relationships_query, {"contact_id": contact_id}
-            )
-            relationships_rows = relationships_result.fetchall()
-
-            relationships_list = []
-            for row in relationships_rows:
-                name = (
-                    f"{row.first_name} {row.last_name or ''}".strip()
-                    if row.first_name
-                    else None
-                )
-                formatted = format_relationship(
-                    row.relationship_type,
-                    to_user=row.to_user,
-                    other_name=name,
-                    incoming=row.direction == "incoming",
-                )
-                if formatted is not None:
-                    relationships_list.append(formatted)
-
-            # Fetch contact summaries
-            summary_query = text("""
-                SELECT summary_text, is_disabled
-                FROM contact_summaries
-                WHERE contact_id = :contact_id
-            """)
-            summary_result = await self.db_connection.execute(
-                summary_query, {"contact_id": contact_id}
-            )
-            summary_row = summary_result.fetchone()
-            summary_text = None
-            has_summary = False
-            if summary_row and not summary_row.is_disabled:
-                summary_text = summary_row.summary_text
-                has_summary = bool(summary_text)
-
-            # Fetch important dates
-            dates_query = text("""
-                SELECT cid.date_type, cid.precision, cid.year, cid.month, cid.day, cdt.name as custom_name
-                FROM contact_important_dates cid
-                LEFT JOIN custom_date_types cdt ON cid.custom_date_type_id = cdt.id
-                WHERE cid.contact_id = :contact_id
-            """)
-            dates_result = await self.db_connection.execute(
-                dates_query, {"contact_id": contact_id}
-            )
-            dates_rows = dates_result.fetchall()
-            important_dates_list = []
-
-            import calendar
-
-            for row in dates_rows:
-                parts = []
-                # Name part
-                if row.date_type == "custom" and row.custom_name:
-                    parts.append(row.custom_name)
-                else:
-                    parts.append(row.date_type.replace("_", " ").title())
-
-                # Date part
-                date_str = ""
-                if row.precision == "full":
-                    month_name = calendar.month_name[row.month] if row.month else ""
-                    date_str = f"{month_name} {row.day}, {row.year}"
-                elif row.precision == "day_month":
-                    month_name = calendar.month_name[row.month] if row.month else ""
-                    date_str = f"{month_name} {row.day}"
-                elif row.precision == "year":
-                    date_str = str(row.year)
-
-                if date_str:
-                    important_dates_list.append(f"{parts[0]} ({date_str})")
-
-            # Fetch journal mentions. Titles are search *text*; the count of
-            # recent journals is an importance signal and belongs to the shared
-            # read, which is why this query no longer asks for dates.
-            journals_query = text("""
-                SELECT j.title
-                FROM journals j
-                JOIN journal_contact_relationships jc ON j.id = jc.journal_id
-                WHERE jc.contact_id = :contact_id
-            """)
-            journals_result = await self.db_connection.execute(
-                journals_query, {"contact_id": contact_id}
-            )
-            journal_mentions = [
-                row.title for row in journals_result.fetchall() if row.title
-            ]
-
-            # The importance signals, from the read the home dashboard also uses
-            # so that both surfaces rank a contact by the same numbers. The
-            # indexer acts for no user, so it reads as the contact's owner.
-            importance_repository = SqlContactImportanceRepository(self.db_connection)
-            importance = (
-                await importance_repository.for_contacts(
-                    [contact_id], user_id=contact_row.user_id
-                )
-            )[contact_id]
-            last_activity_date = importance.last_activity_at
-
-            return {
-                "id": contact_row.id,
-                "user_id": contact_row.user_id,
-                "first_name": contact_row.first_name,
-                "last_name": contact_row.last_name or "",
-                "middle_name": contact_row.middle_name or "",
-                "nick_name": contact_row.nick_name or "",
-                "company": contact_row.company,
-                "job_title": contact_row.job_title,
-                "full_name": full_name,
-                "email": primary_email,
-                "emails": emails,
-                "phone": primary_phone,
-                "phones": phones,
-                "notes_content": notes_content,
-                "tags": tags,
-                "relationships": relationships_list,
-                "entity_type": "contact",
-                "is_favourite": importance.is_favourite,
-                "created_at": contact_row.created_at.isoformat()
-                if contact_row.created_at
-                else None,
-                "updated_at": contact_row.updated_at.isoformat()
-                if contact_row.updated_at
-                else None,
-                "summary_text": summary_text,
-                "important_dates": important_dates_list,
-                "journal_mentions": journal_mentions,
-                "has_summary": has_summary,
-                "last_activity_date": last_activity_date.isoformat()
-                if last_activity_date
-                else None,
-                "journal_count_30d": importance.journal_count_30d,
-                "activity_count_30d": importance.activity_count_30d,
-            }
-
+            return await self.build_contact_document(contact_id)
         except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch complete contact data",
@@ -492,6 +284,230 @@ class SearchIndexer:
                 error=str(e),
             )
             return None
+
+    async def build_contact_document(self, contact_id: int) -> dict[str, Any] | None:
+        """Build the complete search document for a contact from the database.
+
+        Args:
+            contact_id: ID of the contact to read
+
+        Returns:
+            The document, or None if the contact does not exist
+
+        Raises:
+            Exception: Whatever went wrong reading or formatting the contact.
+        """
+        if not self.db_connection:
+            raise RuntimeError("Building a search document needs a database connection")
+
+        # Fetch basic contact info. The importance signals — favourite, the
+        # two recent counts and the last-activity instant — come from the
+        # shared read below rather than from here, so that the home
+        # dashboard ranks contacts by exactly what the index ranks them by.
+        contact_query = text("""
+            SELECT id, user_id, first_name, last_name, middle_name, nick_name,
+                   company, job_title, created_at, updated_at
+            FROM contacts
+            WHERE id = :contact_id
+        """)
+        contact_result = await self.db_connection.execute(
+            contact_query, {"contact_id": contact_id}
+        )
+        contact_row = contact_result.fetchone()
+
+        if not contact_row:
+            return None
+
+        # Fetch contact methods (email, phone)
+        methods_query = text("""
+            SELECT method_type, value, label, is_primary, is_archived
+            FROM contact_methods
+            WHERE contact_id = :contact_id
+            ORDER BY is_primary DESC, created_at ASC
+        """)
+        methods_result = await self.db_connection.execute(
+            methods_query, {"contact_id": contact_id}
+        )
+        methods_rows = methods_result.fetchall()
+
+        # Fetch contact notes
+        notes_query = text("""
+            SELECT content
+            FROM contact_notes
+            WHERE contact_id = :contact_id
+            ORDER BY created_at DESC
+        """)
+        notes_result = await self.db_connection.execute(
+            notes_query, {"contact_id": contact_id}
+        )
+        notes_rows = notes_result.fetchall()
+
+        # Fetch contact tags
+        tags_query = text("""
+            SELECT t.name
+            FROM tags t
+            JOIN contact_tags ct ON t.id = ct.tag_id
+            WHERE ct.contact_id = :contact_id
+            ORDER BY t.name
+        """)
+        tags_result = await self.db_connection.execute(
+            tags_query, {"contact_id": contact_id}
+        )
+        tags_rows = tags_result.fetchall()
+
+        # Build comprehensive contact document
+        emails = [row.value for row in methods_rows if row.method_type == "email"]
+        phones = [row.value for row in methods_rows if row.method_type == "phone"]
+        primary_email = primary_or_first_in_use(methods_rows, "email")
+        primary_phone = primary_or_first_in_use(methods_rows, "phone")
+
+        notes_content = " ".join([row.content for row in notes_rows])
+        tags = [row.name for row in tags_rows]
+
+        full_name = f"{contact_row.first_name} {contact_row.last_name or ''}".strip()
+
+        # Fetch contact relationships (both outgoing and incoming)
+        relationships_query = text("""
+            SELECT
+                cr.relationship_type,
+                cr.to_user,
+                c.first_name,
+                c.last_name,
+                'outgoing' as direction
+            FROM contact_relationships cr
+            LEFT JOIN contacts c ON cr.to_contact_id = c.id
+            WHERE cr.from_contact_id = :contact_id
+            UNION ALL
+            SELECT
+                cr.relationship_type,
+                cr.to_user,
+                c.first_name,
+                c.last_name,
+                'incoming' as direction
+            FROM contact_relationships cr
+            LEFT JOIN contacts c ON cr.from_contact_id = c.id
+            WHERE cr.to_contact_id = :contact_id
+        """)
+        relationships_result = await self.db_connection.execute(
+            relationships_query, {"contact_id": contact_id}
+        )
+        relationships_rows = relationships_result.fetchall()
+
+        relationships_list = []
+        for row in relationships_rows:
+            name = (
+                f"{row.first_name} {row.last_name or ''}".strip()
+                if row.first_name
+                else None
+            )
+            formatted = format_relationship(
+                row.relationship_type,
+                to_user=row.to_user,
+                other_name=name,
+                incoming=row.direction == "incoming",
+            )
+            if formatted is not None:
+                relationships_list.append(formatted)
+
+        # Fetch contact summaries
+        summary_query = text("""
+            SELECT summary_text, is_disabled
+            FROM contact_summaries
+            WHERE contact_id = :contact_id
+        """)
+        summary_result = await self.db_connection.execute(
+            summary_query, {"contact_id": contact_id}
+        )
+        summary_row = summary_result.fetchone()
+        summary_text = None
+        has_summary = False
+        if summary_row and not summary_row.is_disabled:
+            summary_text = summary_row.summary_text
+            has_summary = bool(summary_text)
+
+        # Fetch important dates
+        dates_query = text("""
+            SELECT cid.date_type, cid.precision, cid.year, cid.month, cid.day, cdt.name as custom_name
+            FROM contact_important_dates cid
+            LEFT JOIN custom_date_types cdt ON cid.custom_date_type_id = cdt.id
+            WHERE cid.contact_id = :contact_id
+        """)
+        dates_result = await self.db_connection.execute(
+            dates_query, {"contact_id": contact_id}
+        )
+        dates_rows = dates_result.fetchall()
+        important_dates_list = []
+
+        for row in dates_rows:
+            formatted_date = format_important_date(row)
+            if formatted_date is not None:
+                important_dates_list.append(formatted_date)
+
+        # Fetch journal mentions. Titles are search *text*; the count of
+        # recent journals is an importance signal and belongs to the shared
+        # read, which is why this query no longer asks for dates.
+        journals_query = text("""
+            SELECT j.title
+            FROM journals j
+            JOIN journal_contact_relationships jc ON j.id = jc.journal_id
+            WHERE jc.contact_id = :contact_id
+        """)
+        journals_result = await self.db_connection.execute(
+            journals_query, {"contact_id": contact_id}
+        )
+        journal_mentions = [
+            row.title for row in journals_result.fetchall() if row.title
+        ]
+
+        # The importance signals, from the read the home dashboard also uses
+        # so that both surfaces rank a contact by the same numbers. The
+        # indexer acts for no user, so it reads as the contact's owner.
+        importance_repository = SqlContactImportanceRepository(self.db_connection)
+        signals = await importance_repository.for_contacts(
+            [contact_id], user_id=contact_row.user_id
+        )
+        importance = signals.get(contact_id)
+        if importance is None:
+            # Each statement reads afresh, so a contact deleted after the first
+            # read is absent here: it no longer exists, which is not an error.
+            return None
+        last_activity_date = importance.last_activity_at
+
+        return {
+            "id": contact_row.id,
+            "user_id": contact_row.user_id,
+            "first_name": contact_row.first_name,
+            "last_name": contact_row.last_name or "",
+            "middle_name": contact_row.middle_name or "",
+            "nick_name": contact_row.nick_name or "",
+            "company": contact_row.company,
+            "job_title": contact_row.job_title,
+            "full_name": full_name,
+            "email": primary_email,
+            "emails": emails,
+            "phone": primary_phone,
+            "phones": phones,
+            "notes_content": notes_content,
+            "tags": tags,
+            "relationships": relationships_list,
+            "entity_type": "contact",
+            "is_favourite": importance.is_favourite,
+            "created_at": contact_row.created_at.isoformat()
+            if contact_row.created_at
+            else None,
+            "updated_at": contact_row.updated_at.isoformat()
+            if contact_row.updated_at
+            else None,
+            "summary_text": summary_text,
+            "important_dates": important_dates_list,
+            "journal_mentions": journal_mentions,
+            "has_summary": has_summary,
+            "last_activity_date": last_activity_date.isoformat()
+            if last_activity_date
+            else None,
+            "journal_count_30d": importance.journal_count_30d,
+            "activity_count_30d": importance.activity_count_30d,
+        }
 
     async def _index_contact_created(self, index_name: str, event: OutboxEvent) -> None:
         """

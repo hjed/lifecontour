@@ -8,30 +8,30 @@ to be rebuilt from scratch.
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 import structlog
 from meilisearch.errors import MeilisearchError
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.infrastructure.search.indexed_entities import (
+    CONTACTS,
+    JOURNALS,
+    IndexedEntity,
+    ReindexIncompleteError,
+    build_documents,
+    iter_id_pages,
+)
 from app.infrastructure.search.meilisearch_client import (
-    CONTACTS_INDEX_SETTINGS,
-    JOURNAL_INDEX_SETTINGS,
+    add_documents_reporting_rejected,
     get_index_name,
     get_meilisearch_client,
+    wait_for_task_success,
 )
-from app.infrastructure.search.search_indexer import primary_or_first_in_use
 
 logger = structlog.get_logger()
-
-# Number of IDs to fetch from DB per page for document building
-DB_BATCH_SIZE = 100
-
-# Maximum number of documents to push in a single MeiliSearch batch
-MEILI_BATCH_SIZE = 100
 
 
 @dataclass
@@ -83,129 +83,103 @@ class ReindexService:
             ReindexResult with counts and duration.
         """
         start = time.monotonic()
+        failed_ids: dict[str, list[int]] = {}
 
-        contacts_result = await self.reindex_contacts()
-        journals_result = await self.reindex_journals()
+        contacts_indexed = await self._count_collecting_failures(
+            self.reindex_contacts, failed_ids
+        )
+        journals_indexed = await self._count_collecting_failures(
+            self.reindex_journals, failed_ids
+        )
+
+        if failed_ids:
+            raise ReindexIncompleteError(failed_ids)
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
         logger.info(
             "Full re-index completed",
-            contacts_indexed=contacts_result.count,
-            journals_indexed=journals_result.count,
+            contacts_indexed=contacts_indexed,
+            journals_indexed=journals_indexed,
             duration_ms=duration_ms,
         )
 
         return ReindexResult(
-            contacts_indexed=contacts_result.count,
-            journals_indexed=journals_result.count,
+            contacts_indexed=contacts_indexed,
+            journals_indexed=journals_indexed,
             duration_ms=duration_ms,
         )
 
-    async def reindex_contacts(self) -> SingleReindexResult:
-        """Re-index all contacts from PostgreSQL.
+    @staticmethod
+    async def _count_collecting_failures(
+        reindex: Callable[[], Awaitable[SingleReindexResult]],
+        failed_ids: dict[str, list[int]],
+    ) -> int:
+        """Run one entity's re-index so that the next still runs if it is incomplete."""
+        try:
+            return (await reindex()).count
+        except ReindexIncompleteError as incomplete:
+            failed_ids.update(incomplete.failed_ids)
+            return 0
 
-        Ensures the contacts index exists with correct settings, clears
-        existing documents, then fetches and indexes contacts using
-        keyset pagination to avoid loading all IDs into memory at once.
+    async def reindex_contacts(self) -> SingleReindexResult:
+        """Rebuild the contacts index from PostgreSQL.
 
         Returns:
             SingleReindexResult with count and duration.
+
+        Raises:
+            ReindexIncompleteError: Some contacts could not be indexed. The
+                rest were, so re-running is safe.
         """
-        start = time.monotonic()
-        index_name = get_index_name("contacts")
-
-        await self._ensure_index_exists(index_name, CONTACTS_INDEX_SETTINGS)
-
-        # Clear existing documents
-        await self._run_sync(lambda: self._delete_all_documents(index_name))
-
-        # Fetch and index using keyset pagination
-        total_indexed = 0
-        last_id = 0
-
-        while True:
-            result = await self.db_connection.execute(
-                text(
-                    "SELECT id FROM contacts WHERE id > :last_id "
-                    "ORDER BY id LIMIT :batch_size"
-                ),
-                {"last_id": last_id, "batch_size": DB_BATCH_SIZE},
-            )
-            batch_ids = [row.id for row in result.fetchall()]
-
-            if not batch_ids:
-                break
-
-            last_id = batch_ids[-1]
-            documents: list[dict[str, Any]] = []
-
-            for contact_id in batch_ids:
-                doc = await self._fetch_contact_document(contact_id)
-                if doc:
-                    documents.append(doc)
-
-            if documents:
-                await self._run_sync(
-                    lambda docs=documents: self._batch_add_documents(index_name, docs)
-                )
-                total_indexed += len(documents)
-
-        duration_ms = int((time.monotonic() - start) * 1000)
-        logger.info("Contacts re-indexed", count=total_indexed, duration_ms=duration_ms)
-        return SingleReindexResult(count=total_indexed, duration_ms=duration_ms)
+        return await self._reindex(CONTACTS)
 
     async def reindex_journals(self) -> SingleReindexResult:
-        """Re-index all journals from PostgreSQL.
-
-        Ensures the journals index exists with correct settings, clears
-        existing documents, then fetches and indexes journals using
-        keyset pagination to avoid loading all IDs into memory at once.
+        """Rebuild the journals index from PostgreSQL.
 
         Returns:
             SingleReindexResult with count and duration.
+
+        Raises:
+            ReindexIncompleteError: Some journals could not be indexed. The
+                rest were, so re-running is safe.
         """
+        return await self._reindex(JOURNALS)
+
+    async def _reindex(self, entity: IndexedEntity) -> SingleReindexResult:
+        """Clear one index and refill it from its table."""
         start = time.monotonic()
-        index_name = get_index_name("journals")
+        index_name = get_index_name(entity.entity_type)
 
-        await self._ensure_index_exists(index_name, JOURNAL_INDEX_SETTINGS)
-
-        # Clear existing documents
+        await self._ensure_index_exists(index_name, dict(entity.settings))
         await self._run_sync(lambda: self._delete_all_documents(index_name))
 
-        # Fetch and index using keyset pagination
         total_indexed = 0
-        last_id = 0
+        failed: list[int] = []
 
-        while True:
-            result = await self.db_connection.execute(
-                text(
-                    "SELECT id FROM journals WHERE id > :last_id "
-                    "ORDER BY id LIMIT :batch_size"
-                ),
-                {"last_id": last_id, "batch_size": DB_BATCH_SIZE},
-            )
-            batch_ids = [row.id for row in result.fetchall()]
-
-            if not batch_ids:
-                break
-
-            last_id = batch_ids[-1]
-            documents: list[dict[str, Any]] = []
-
-            for journal_id in batch_ids:
-                doc = await self._fetch_journal_document(journal_id)
-                if doc:
-                    documents.append(doc)
-
-            if documents:
-                await self._run_sync(
-                    lambda docs=documents: self._batch_add_documents(index_name, docs)
+        async for ids in iter_id_pages(self.db_connection, entity):
+            documents, unbuilt = await build_documents(self.db_connection, entity, ids)
+            failed.extend(unbuilt)
+            if not documents:
+                continue
+            rejected = await self._run_sync(
+                lambda docs=documents: add_documents_reporting_rejected(
+                    self.client, index_name, docs
                 )
-                total_indexed += len(documents)
+            )
+            failed.extend(rejected)
+            total_indexed += len(documents) - len(rejected)
 
         duration_ms = int((time.monotonic() - start) * 1000)
-        logger.info("Journals re-indexed", count=total_indexed, duration_ms=duration_ms)
+        logger.info(
+            "Search index rebuilt",
+            entity_type=entity.entity_type,
+            count=total_indexed,
+            failed=len(failed),
+            duration_ms=duration_ms,
+        )
+        if failed:
+            raise ReindexIncompleteError({entity.entity_type: failed})
         return SingleReindexResult(count=total_indexed, duration_ms=duration_ms)
 
     async def _ensure_index_exists(
@@ -228,12 +202,12 @@ class ReindexService:
             except MeilisearchError:
                 logger.info("Creating search index", index_name=index_name)
                 task = self.client.create_index(index_name, {"primaryKey": "id"})
-                self.client.wait_for_task(task.task_uid)
+                wait_for_task_success(self.client, task.task_uid)
 
             # Always apply latest settings (handles upgrades / config changes)
             index = self.client.index(index_name)
             task = index.update_settings(settings)
-            self.client.wait_for_task(task.task_uid)
+            wait_for_task_success(self.client, task.task_uid)
 
         await self._run_sync(_sync_ensure)
 
@@ -245,28 +219,7 @@ class ReindexService:
         """
         index = self.client.index(index_name)
         task = index.delete_all_documents()
-        self.client.wait_for_task(task.task_uid)
-
-    def _batch_add_documents(
-        self, index_name: str, documents: list[dict[str, Any]]
-    ) -> None:
-        """Add documents to a MeiliSearch index in batches.
-
-        Args:
-            index_name: Name of the index.
-            documents: Documents to add.
-        """
-        index = self.client.index(index_name)
-        for i in range(0, len(documents), MEILI_BATCH_SIZE):
-            batch = documents[i : i + MEILI_BATCH_SIZE]
-            task = index.add_documents(batch)
-            self.client.wait_for_task(task.task_uid)
-            logger.debug(
-                "Batch indexed",
-                index_name=index_name,
-                batch_start=i,
-                batch_size=len(batch),
-            )
+        wait_for_task_success(self.client, task.task_uid)
 
     @staticmethod
     async def _run_sync(func: Any) -> Any:
@@ -275,212 +228,3 @@ class ReindexService:
         Prevents blocking the async event loop during MeiliSearch client calls.
         """
         return await asyncio.to_thread(func)
-
-    async def _fetch_contact_document(self, contact_id: int) -> dict[str, Any] | None:
-        """Fetch a single contact's search document from the database.
-
-        Uses the same query pattern as SearchIndexer._fetch_complete_contact_data.
-
-        Args:
-            contact_id: ID of the contact.
-
-        Returns:
-            Document dict for MeiliSearch, or None if not found.
-        """
-        try:
-            contact_result = await self.db_connection.execute(
-                text("""
-                    SELECT id, user_id, first_name, last_name, middle_name, nick_name,
-                           company, job_title, is_favourite, created_at, updated_at
-                    FROM contacts
-                    WHERE id = :contact_id
-                """),
-                {"contact_id": contact_id},
-            )
-            contact_row = contact_result.fetchone()
-            if not contact_row:
-                return None
-
-            methods_result = await self.db_connection.execute(
-                text("""
-                    SELECT method_type, value, label, is_primary, is_archived
-                    FROM contact_methods
-                    WHERE contact_id = :contact_id
-                    ORDER BY is_primary DESC, created_at ASC
-                """),
-                {"contact_id": contact_id},
-            )
-            methods_rows = methods_result.fetchall()
-
-            notes_result = await self.db_connection.execute(
-                text("""
-                    SELECT content
-                    FROM contact_notes
-                    WHERE contact_id = :contact_id
-                    ORDER BY created_at DESC
-                """),
-                {"contact_id": contact_id},
-            )
-            notes_rows = notes_result.fetchall()
-
-            tags_result = await self.db_connection.execute(
-                text("""
-                    SELECT t.name
-                    FROM tags t
-                    JOIN contact_tags ct ON t.id = ct.tag_id
-                    WHERE ct.contact_id = :contact_id
-                    ORDER BY t.name
-                """),
-                {"contact_id": contact_id},
-            )
-            tags_rows = tags_result.fetchall()
-
-            emails = [row.value for row in methods_rows if row.method_type == "email"]
-            phones = [row.value for row in methods_rows if row.method_type == "phone"]
-            primary_email = primary_or_first_in_use(methods_rows, "email")
-            primary_phone = primary_or_first_in_use(methods_rows, "phone")
-
-            full_name = (
-                f"{contact_row.first_name} {contact_row.last_name or ''}".strip()
-            )
-
-            return {
-                "id": contact_row.id,
-                "user_id": contact_row.user_id,
-                "first_name": contact_row.first_name,
-                "last_name": contact_row.last_name or "",
-                "middle_name": contact_row.middle_name or "",
-                "nick_name": contact_row.nick_name or "",
-                "company": contact_row.company,
-                "job_title": contact_row.job_title,
-                "full_name": full_name,
-                "email": primary_email,
-                "emails": emails,
-                "phone": primary_phone,
-                "phones": phones,
-                "notes_content": " ".join(row.content for row in notes_rows),
-                "tags": [row.name for row in tags_rows],
-                "entity_type": "contact",
-                "is_favourite": contact_row.is_favourite,
-                "created_at": contact_row.created_at.isoformat()
-                if contact_row.created_at
-                else None,
-                "updated_at": contact_row.updated_at.isoformat()
-                if contact_row.updated_at
-                else None,
-            }
-
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "Failed to fetch contact for re-indexing",
-                contact_id=contact_id,
-                error=str(e),
-            )
-            return None
-
-    async def _fetch_journal_document(self, journal_id: int) -> dict[str, Any] | None:
-        """Fetch a single journal's search document from the database.
-
-        Uses the same query pattern as
-        JournalIndexingService._fetch_complete_journal_data.
-
-        Args:
-            journal_id: ID of the journal.
-
-        Returns:
-            Document dict for MeiliSearch, or None if not found.
-        """
-        try:
-            journal_result = await self.db_connection.execute(
-                text("""
-                    SELECT id, user_id, title, content,
-                           event_date_range_start, event_date_range_end,
-                           parent_id, created_at, updated_at
-                    FROM journals
-                    WHERE id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            journal_row = journal_result.fetchone()
-            if not journal_row:
-                return None
-
-            types = await SqlJournalRepository(self.db_connection).get_concrete_types(
-                journal_id
-            )
-
-            contacts_result = await self.db_connection.execute(
-                text("""
-                    SELECT DISTINCT contact_id
-                    FROM journal_contact_relationships
-                    WHERE journal_id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            contact_ids = [row.contact_id for row in contacts_result.fetchall()]
-
-            tags_result = await self.db_connection.execute(
-                text("""
-                    SELECT DISTINCT tag_id
-                    FROM journal_tag_assignments
-                    WHERE journal_id = :journal_id
-                """),
-                {"journal_id": journal_id},
-            )
-            tag_ids = [str(row.tag_id) for row in tags_result.fetchall()]
-
-            calendar_id = None
-            location = None
-            if "EVENT" in types:
-                cal_result = await self.db_connection.execute(
-                    text("""
-                        SELECT calendar_id, location
-                        FROM journal_calendar_info
-                        WHERE journal_id = :journal_id
-                    """),
-                    {"journal_id": journal_id},
-                )
-                cal_row = cal_result.fetchone()
-                if cal_row:
-                    calendar_id = (
-                        str(cal_row.calendar_id) if cal_row.calendar_id else None
-                    )
-                    location = cal_row.location
-
-            return {
-                "id": journal_row.id,
-                "user_id": journal_row.user_id,
-                "title": journal_row.title,
-                "content": journal_row.content,
-                "event_date_range_start": (
-                    journal_row.event_date_range_start.isoformat()
-                    if journal_row.event_date_range_start
-                    else None
-                ),
-                "event_date_range_end": (
-                    journal_row.event_date_range_end.isoformat()
-                    if journal_row.event_date_range_end
-                    else None
-                ),
-                "types": types,
-                "contact_ids": contact_ids,
-                "tag_ids": tag_ids,
-                "calendar_id": calendar_id,
-                "parent_id": journal_row.parent_id,
-                "location": location,
-                "entity_type": "journal",
-                "created_at": journal_row.created_at.isoformat()
-                if journal_row.created_at
-                else None,
-                "updated_at": journal_row.updated_at.isoformat()
-                if journal_row.updated_at
-                else None,
-            }
-
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                "Failed to fetch journal for re-indexing",
-                journal_id=journal_id,
-                error=str(e),
-            )
-            return None
