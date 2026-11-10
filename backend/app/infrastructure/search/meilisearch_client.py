@@ -5,7 +5,7 @@ Provides a configured MeiliSearch client with proper settings
 for Lifecontour search functionality.
 """
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from functools import lru_cache
 from typing import Any
 
@@ -18,6 +18,16 @@ from app.infrastructure.config import get_settings
 
 logger = structlog.get_logger()
 
+# How long one HTTP request may take. The SDK sets no limit by default, and a
+# call blocked on a hung server holds its worker thread until the process exits.
+HTTP_TIMEOUT_SECONDS = 30
+
+# How long bulk work waits for one task; the SDK's 5s default is too short.
+TASK_TIMEOUT_MS = 60_000
+
+# Maximum number of documents to push in a single MeiliSearch task.
+MEILI_BATCH_SIZE = 100
+
 
 @lru_cache
 def get_meilisearch_client() -> MeiliSearchClient:
@@ -27,6 +37,7 @@ def get_meilisearch_client() -> MeiliSearchClient:
     client = MeiliSearchClient(
         url=settings.meilisearch_url,
         api_key=settings.meilisearch_api_key or None,
+        timeout=HTTP_TIMEOUT_SECONDS,
     )
 
     logger.info("MeiliSearch client created", url=settings.meilisearch_url)
@@ -51,6 +62,78 @@ def check_meilisearch_connection() -> bool:
     except Exception as e:  # noqa: BLE001
         logger.error("Unexpected error checking MeiliSearch connection", error=str(e))
         return False
+
+
+class SearchTaskFailedError(MeilisearchError):
+    """A MeiliSearch task finished without succeeding."""
+
+    def __init__(self, task_uid: int, status: str, error: object) -> None:
+        self.task_uid = task_uid
+        self.status = status
+        self.error = error
+        super().__init__(f"Task {task_uid} finished as {status}: {error}")
+
+
+def wait_for_task_success(client: MeiliSearchClient, task_uid: int) -> None:
+    """Wait for a task and raise unless it succeeded.
+
+    The SDK's ``wait_for_task`` returns on any terminal status, so a failed or
+    cancelled task otherwise looks exactly like a successful one.
+    """
+    task = client.wait_for_task(task_uid, timeout_in_ms=TASK_TIMEOUT_MS)
+    if task.status != "succeeded":
+        raise SearchTaskFailedError(task_uid, task.status, task.error)
+
+
+def add_documents_reporting_rejected(
+    client: MeiliSearchClient,
+    index_name: str,
+    documents: Sequence[Mapping[str, Any]],
+) -> list[int]:
+    """Upsert documents in bounded batches and return the ids MeiliSearch rejected.
+
+    One invalid document fails its whole task with nothing written, so a failed
+    batch is retried a document at a time to save the rest of it. Timeouts and
+    connection errors say nothing about any one document and propagate.
+    """
+    index = client.index(index_name)
+    rejected: list[int] = []
+    for start in range(0, len(documents), MEILI_BATCH_SIZE):
+        batch = [
+            dict(document) for document in documents[start : start + MEILI_BATCH_SIZE]
+        ]
+        try:
+            wait_for_task_success(client, index.add_documents(batch).task_uid)
+        except SearchTaskFailedError as batch_failure:
+            logger.warning(
+                "Search batch rejected; retrying documents individually",
+                index_name=index_name,
+                error=str(batch_failure),
+            )
+            rejected.extend(_add_individually(client, index_name, batch))
+    return rejected
+
+
+def _add_individually(
+    client: MeiliSearchClient,
+    index_name: str,
+    documents: Sequence[dict[str, Any]],
+) -> list[int]:
+    """Upsert each document in its own task and return the ids that failed."""
+    index = client.index(index_name)
+    rejected: list[int] = []
+    for document in documents:
+        try:
+            wait_for_task_success(client, index.add_documents([document]).task_uid)
+        except SearchTaskFailedError as failure:
+            logger.error(
+                "Search document rejected",
+                index_name=index_name,
+                document_id=document["id"],
+                error=str(failure),
+            )
+            rejected.append(document["id"])
+    return rejected
 
 
 def get_index_name(entity_type: str) -> str:
@@ -85,7 +168,7 @@ def ensure_index_configured(
     except MeilisearchError:
         logger.info("Creating search index", index_name=index_name)
         task = client.create_index(index_name, {"primaryKey": "id"})
-        client.wait_for_task(task.task_uid)
+        wait_for_task_success(client, task.task_uid)
         filterable = None
 
     if filterable and set(required_filterable) <= set(filterable):
@@ -93,7 +176,7 @@ def ensure_index_configured(
 
     logger.info("Configuring search index settings", index_name=index_name)
     task = client.index(index_name).update_settings(dict(settings))
-    client.wait_for_task(task.task_uid)
+    wait_for_task_success(client, task.task_uid)
     return True
 
 
