@@ -28,7 +28,6 @@ from app.core.journal.services.journal_enrichment_service import (
 )
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.infrastructure.search.journal_indexing_service import JournalIndexingService
-from app.infrastructure.search.reindex_service import ReindexService
 from app.mcp.domains.journals import schemas as mcp_schemas
 from app.mcp.domains.journals.tools import _shared as mcp_tool_shared
 
@@ -127,20 +126,13 @@ def test_type_data_helpers_handle_every_table_backed_type(helper) -> None:
     assert not missing, f"{helper.__name__} does not handle {sorted(missing)}"
 
 
-@pytest.mark.parametrize(
-    ("owner", "method"),
-    [
-        (JournalIndexingService, "_fetch_complete_journal_data"),
-        (ReindexService, "_fetch_journal_document"),
-    ],
-)
-def test_search_indexers_take_types_from_the_repository(owner, method) -> None:
+def test_search_indexer_takes_types_from_the_repository() -> None:
     """The search index must carry every type, not a hand-rolled subset.
 
-    Both indexers used to know only five types, so fitness/activity journals
+    The indexers used to know only five types, so fitness/activity journals
     were indexed as plain notes and a ``types`` filter never matched them.
     """
-    source = inspect.getsource(getattr(owner, method))
+    source = inspect.getsource(JournalIndexingService.build_journal_document)
     assert ".get_concrete_types(" in source
     assert "CASE WHEN" not in source
 

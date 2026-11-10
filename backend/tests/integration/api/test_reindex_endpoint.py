@@ -10,9 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from meilisearch.errors import MeilisearchTimeoutError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.infrastructure.search.search_indexer import SearchIndexer
 from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
 
 
@@ -78,7 +80,7 @@ def _make_mock_meilisearch_client() -> MagicMock:
     mock_index.get_stats.return_value = {"numberOfDocuments": 0}
 
     client.create_index.return_value = mock_task
-    client.wait_for_task.return_value = None
+    client.wait_for_task.return_value = MagicMock(status="succeeded")
 
     return client
 
@@ -266,6 +268,108 @@ class TestReindexEndpoint:
         assert doc["entity_type"] == "contact"
         # Every contact search filters on the owner.
         assert doc["user_id"] == TEST_USER_ID
+
+    @pytest.mark.asyncio
+    async def test_reindex_writes_the_same_contact_document_as_the_indexer(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Reindexed contacts keep their relationships and ranking signals."""
+        contact_id = await seed_contact(async_connection, first_name="Alice")
+        expected = await SearchIndexer(
+            db_connection=async_connection
+        ).build_contact_document(contact_id)
+        assert expected is not None
+        assert "relationships" in expected
+        assert "activity_count_30d" in expected
+        mock_client = _make_mock_meilisearch_client()
+
+        with patch(
+            "app.infrastructure.search.reindex_service.get_meilisearch_client",
+            return_value=mock_client,
+        ):
+            response = await authenticated_client.post(
+                "/api/search/reindex?entity_type=contacts"
+            )
+
+        assert response.status_code == 200
+        mock_client.index.return_value.add_documents.assert_called_once_with([expected])
+
+    @pytest.mark.asyncio
+    async def test_reindex_returns_503_when_a_task_fails(
+        self,
+        authenticated_client,
+        sample_contacts: list[int],
+    ) -> None:
+        """A task MeiliSearch reports as failed is not a completed reindex."""
+        mock_client = _make_mock_meilisearch_client()
+        mock_client.wait_for_task.return_value = MagicMock(
+            status="failed", error={"code": "internal"}
+        )
+
+        with patch(
+            "app.infrastructure.search.reindex_service.get_meilisearch_client",
+            return_value=mock_client,
+        ):
+            response = await authenticated_client.post(
+                "/api/search/reindex?entity_type=contacts"
+            )
+
+        assert response.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_reindex_returns_503_when_a_task_times_out(
+        self,
+        authenticated_client,
+        sample_contacts: list[int],
+    ) -> None:
+        """A task that never finished is not a completed reindex either."""
+        mock_client = _make_mock_meilisearch_client()
+        mock_client.wait_for_task.side_effect = MeilisearchTimeoutError("slow")
+
+        with patch(
+            "app.infrastructure.search.reindex_service.get_meilisearch_client",
+            return_value=mock_client,
+        ):
+            response = await authenticated_client.post(
+                "/api/search/reindex?entity_type=contacts"
+            )
+
+        assert response.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_reindex_returns_503_naming_a_contact_it_could_not_build(
+        self,
+        authenticated_client,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A failed build is reported by id, after the others are indexed."""
+        bad_id = await seed_contact(async_connection, first_name="Bad")
+        good_id = await seed_contact(async_connection, first_name="Good")
+        original = SearchIndexer.build_contact_document
+
+        async def fail_for_bad_id(self: SearchIndexer, contact_id: int):
+            if contact_id == bad_id:
+                raise ValueError("unbuildable")
+            return await original(self, contact_id)
+
+        mock_client = _make_mock_meilisearch_client()
+        with (
+            patch(
+                "app.infrastructure.search.reindex_service.get_meilisearch_client",
+                return_value=mock_client,
+            ),
+            patch.object(SearchIndexer, "build_contact_document", fail_for_bad_id),
+        ):
+            response = await authenticated_client.post(
+                "/api/search/reindex?entity_type=contacts"
+            )
+
+        assert response.status_code == 503
+        assert str(bad_id) in response.text
+        written = mock_client.index.return_value.add_documents.call_args[0][0]
+        assert [document["id"] for document in written] == [good_id]
 
     @pytest.mark.asyncio
     async def test_reindex_requires_authentication(

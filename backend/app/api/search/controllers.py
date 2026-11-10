@@ -5,7 +5,7 @@ Handles search-related HTTP endpoints including contact search,
 global search, and search suggestions following JSON API specification.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import structlog
 from dishka.integrations.fastapi import FromDishka, inject
@@ -38,10 +38,17 @@ from app.core.search.exceptions import SearchServiceUnavailableError
 from app.infrastructure.auth.models import SessionUser
 from app.infrastructure.config import Settings
 from app.infrastructure.di.auth import AdminAccess
+from app.infrastructure.search.indexed_entities import ReindexIncompleteError
 from app.infrastructure.search.reindex_service import ReindexService
 from app.infrastructure.search.search_service import SearchService
 
 logger = structlog.get_logger()
+
+# Errors the bulk search maintenance endpoints raise themselves.
+_MAINTENANCE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"description": "The maintenance endpoints are disabled"},
+    503: {"description": "Some records could not be indexed"},
+}
 
 
 # Router for authenticated search endpoints
@@ -291,7 +298,7 @@ def get_search_suggestions(
         return SearchSuggestionsResponse(suggestions=[], query=q)
 
 
-@authenticated_router.post("/reindex")
+@authenticated_router.post("/reindex", responses=_MAINTENANCE_RESPONSES)
 @inject
 async def reindex_search(
     reindex_service: FromDishka[ReindexService],
@@ -349,6 +356,9 @@ async def reindex_search(
     except MeilisearchError as e:
         logger.error("MeiliSearch error during re-index", error=str(e))
         raise SearchServiceUnavailableError("MeiliSearch", str(e)) from e
+    except ReindexIncompleteError as e:
+        logger.error("Re-index incomplete", failed_ids=e.failed_ids)
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
 
 @public_router.get("/health")

@@ -5,16 +5,35 @@ Tests the bulk re-indexing service that rebuilds MeiliSearch indices
 from PostgreSQL data.
 """
 
+from collections.abc import Mapping
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from meilisearch.errors import MeilisearchError
 
+from app.infrastructure.search.indexed_entities import ReindexIncompleteError
+from app.infrastructure.search.journal_indexing_service import JournalIndexingService
+from app.infrastructure.search.meilisearch_client import SearchTaskFailedError
 from app.infrastructure.search.reindex_service import (
     ReindexResult,
     ReindexService,
     SingleReindexResult,
 )
+from app.infrastructure.search.search_indexer import SearchIndexer
+
+
+def _builder(
+    outcomes: Mapping[int, dict[str, object] | Exception | None],
+) -> AsyncMock:
+    """A document builder that answers per id, raising any exception it is given."""
+
+    async def build(entity_id: int) -> dict[str, object] | None:
+        outcome = outcomes[entity_id]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return AsyncMock(side_effect=build)
 
 
 class TestReindexService:
@@ -24,8 +43,8 @@ class TestReindexService:
     def mock_meilisearch_client(self) -> MagicMock:
         """Create a mock MeiliSearch client."""
         client = MagicMock()
-        # By default, wait_for_task succeeds
-        client.wait_for_task.return_value = None
+        # By default, every task succeeds
+        client.wait_for_task.return_value = MagicMock(status="succeeded")
         return client
 
     @pytest.fixture
@@ -57,150 +76,57 @@ class TestReindexService:
         mock_index.delete_all_documents.return_value = mock_task
         return mock_index
 
-    def _mock_contact_rows(self, mock_conn: AsyncMock, count: int = 2) -> None:
-        """Set up mock DB to return contact rows with keyset pagination."""
-        contact_rows = []
-        for i in range(count):
-            row = MagicMock()
-            row.id = i + 1
-            row.first_name = f"Contact{i + 1}"
-            row.last_name = f"Last{i + 1}"
-            row.middle_name = None
-            row.nick_name = None
-            row.company = None
-            row.job_title = None
-            row.is_favourite = False
-            row.created_at = MagicMock()
-            row.created_at.isoformat.return_value = "2024-01-01T00:00:00"
-            row.updated_at = MagicMock()
-            row.updated_at.isoformat.return_value = "2024-01-01T00:00:00"
-            contact_rows.append(row)
-
-        # Keyset pagination: first page returns all IDs, second page is empty
-        contact_ids = [MagicMock(id=i + 1) for i in range(count)]
-        id_result_page1 = MagicMock()
-        id_result_page1.fetchall.return_value = contact_ids
-        id_result_page2 = MagicMock()
-        id_result_page2.fetchall.return_value = []
-
-        methods_result = MagicMock()
-        methods_result.fetchall.return_value = []
-        notes_result = MagicMock()
-        notes_result.fetchall.return_value = []
-        tags_result = MagicMock()
-        tags_result.fetchall.return_value = []
-
-        # Build execute sequence:
-        # 1. keyset page 1 (returns IDs)
-        # 2-5 per contact: info, methods, notes, tags
-        # N+1. keyset page 2 (empty - terminates loop)
-        execute_returns = [id_result_page1]
-        for i in range(count):
-            info_result = MagicMock()
-            info_result.fetchone.return_value = contact_rows[i]
-            execute_returns.extend(
-                [info_result, methods_result, notes_result, tags_result]
-            )
-        execute_returns.append(id_result_page2)
-
-        mock_conn.execute = AsyncMock(side_effect=execute_returns)
-
-    def _mock_journal_rows(self, mock_conn: AsyncMock, count: int = 2) -> None:
-        """Set up mock DB to return journal rows with keyset pagination."""
-        journal_rows = []
-        for i in range(count):
-            row = MagicMock()
-            row.id = i + 100
-            row.user_id = 1
-            row.title = f"Journal {i + 1}"
-            row.content = f"Content {i + 1}"
-            row.event_date_range_start = None
-            row.event_date_range_end = None
-            row.parent_id = None
-            row.created_at = MagicMock()
-            row.created_at.isoformat.return_value = "2024-01-01T00:00:00"
-            row.updated_at = MagicMock()
-            row.updated_at.isoformat.return_value = "2024-01-01T00:00:00"
-            journal_rows.append(row)
-
-        journal_ids = [MagicMock(id=i + 100) for i in range(count)]
-        id_result_page1 = MagicMock()
-        id_result_page1.fetchall.return_value = journal_ids
-        id_result_page2 = MagicMock()
-        id_result_page2.fetchall.return_value = []
-
-        execute_returns = [id_result_page1]
-        for i in range(count):
-            info_result = MagicMock()
-            info_result.fetchone.return_value = journal_rows[i]
-            types_result = MagicMock()
-            types_result.fetchone.return_value = None  # No special types
-            contacts_result = MagicMock()
-            contacts_result.fetchall.return_value = []
-            tags_result = MagicMock()
-            tags_result.fetchall.return_value = []
-            execute_returns.extend(
-                [info_result, types_result, contacts_result, tags_result]
-            )
-        execute_returns.append(id_result_page2)
-
-        mock_conn.execute = AsyncMock(side_effect=execute_returns)
+    def _mock_id_pages(self, mock_conn: AsyncMock, ids: list[int]) -> None:
+        """Set up the keyset query: one page of ids, then an empty page."""
+        first_page = MagicMock()
+        first_page.fetchall.return_value = [MagicMock(id=i) for i in ids]
+        last_page = MagicMock()
+        last_page.fetchall.return_value = []
+        mock_conn.execute = AsyncMock(side_effect=[first_page, last_page])
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_reindex_contacts_fetches_all_and_pushes_to_meilisearch(
+    async def test_reindex_contacts_writes_the_indexers_documents(
         self,
         service: ReindexService,
         mock_meilisearch_client: MagicMock,
         mock_db_connection: AsyncMock,
     ) -> None:
-        """Test that reindex_contacts fetches all contacts and indexes them."""
+        """Contacts are built by the indexer, so the two can never drift."""
         mock_index = self._setup_index_creation(mock_meilisearch_client)
-        self._mock_contact_rows(mock_db_connection, count=2)
+        self._mock_id_pages(mock_db_connection, [1, 2])
+        documents = {1: {"id": 1, "user_id": "a"}, 2: {"id": 2, "user_id": "a"}}
 
-        with patch(
-            "app.infrastructure.search.reindex_service.get_index_name",
-            return_value="pms_contacts",
-        ):
+        with patch.object(SearchIndexer, "build_contact_document", _builder(documents)):
             result = await service.reindex_contacts()
 
         assert isinstance(result, SingleReindexResult)
         assert result.count == 2
         assert result.duration_ms >= 0
         mock_index.delete_all_documents.assert_called_once()
-        mock_index.add_documents.assert_called_once()
-        docs = mock_index.add_documents.call_args[0][0]
-        assert len(docs) == 2
-        assert docs[0]["first_name"] == "Contact1"
-        assert docs[1]["first_name"] == "Contact2"
+        mock_index.add_documents.assert_called_once_with(list(documents.values()))
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_reindex_journals_fetches_all_and_pushes_to_meilisearch(
+    async def test_reindex_journals_writes_the_indexers_documents(
         self,
         service: ReindexService,
         mock_meilisearch_client: MagicMock,
         mock_db_connection: AsyncMock,
     ) -> None:
-        """Test that reindex_journals fetches all journals and indexes them."""
+        """Journals are built by the indexer too."""
         mock_index = self._setup_index_creation(mock_meilisearch_client)
-        self._mock_journal_rows(mock_db_connection, count=2)
+        self._mock_id_pages(mock_db_connection, [100])
+        documents = {100: {"id": 100, "user_id": "a"}}
 
-        with patch(
-            "app.infrastructure.search.reindex_service.get_index_name",
-            return_value="pms_journals",
+        with patch.object(
+            JournalIndexingService, "build_journal_document", _builder(documents)
         ):
             result = await service.reindex_journals()
 
-        assert isinstance(result, SingleReindexResult)
-        assert result.count == 2
-        assert result.duration_ms >= 0
+        assert result.count == 1
         mock_index.delete_all_documents.assert_called_once()
-        mock_index.add_documents.assert_called_once()
-        docs = mock_index.add_documents.call_args[0][0]
-        assert len(docs) == 2
-        assert docs[0]["title"] == "Journal 1"
-        assert docs[1]["title"] == "Journal 2"
+        mock_index.add_documents.assert_called_once_with(list(documents.values()))
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -230,6 +156,31 @@ class TestReindexService:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_reindex_all_still_runs_journals_after_a_contact_failure(
+        self,
+        service: ReindexService,
+    ) -> None:
+        """Every entity is attempted, and every failure is reported together."""
+        with (
+            patch.object(
+                service,
+                "reindex_contacts",
+                side_effect=ReindexIncompleteError({"contacts": [1]}),
+            ),
+            patch.object(
+                service,
+                "reindex_journals",
+                side_effect=ReindexIncompleteError({"journals": [9]}),
+            ) as reindex_journals,
+            pytest.raises(ReindexIncompleteError) as raised,
+        ):
+            await service.reindex_all()
+
+        reindex_journals.assert_awaited_once()
+        assert raised.value.failed_ids == {"contacts": [1], "journals": [9]}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_reindex_contacts_with_empty_database(
         self,
         service: ReindexService,
@@ -244,11 +195,7 @@ class TestReindexService:
         id_result.fetchall.return_value = []
         mock_db_connection.execute = AsyncMock(return_value=id_result)
 
-        with patch(
-            "app.infrastructure.search.reindex_service.get_index_name",
-            return_value="pms_contacts",
-        ):
-            result = await service.reindex_contacts()
+        result = await service.reindex_contacts()
 
         assert result.count == 0
         assert result.duration_ms >= 0
@@ -257,71 +204,100 @@ class TestReindexService:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_reindex_contacts_skips_unfetchable_contacts(
+    async def test_a_contact_deleted_mid_run_is_skipped_without_error(
         self,
         service: ReindexService,
         mock_meilisearch_client: MagicMock,
         mock_db_connection: AsyncMock,
     ) -> None:
-        """Test that contacts that can't be fetched are skipped."""
+        """``None`` means the row has gone, which is not a failure."""
         mock_index = self._setup_index_creation(mock_meilisearch_client)
+        self._mock_id_pages(mock_db_connection, [1, 2])
+        alice = {"id": 1, "user_id": "a"}
 
-        # Keyset page 1: returns 2 IDs
-        id_result_page1 = MagicMock()
-        id_result_page1.fetchall.return_value = [
-            MagicMock(id=1),
-            MagicMock(id=2),
-        ]
-        # Keyset page 2: empty (terminates)
-        id_result_page2 = MagicMock()
-        id_result_page2.fetchall.return_value = []
-
-        # Contact 1: has data
-        contact_row = MagicMock()
-        contact_row.id = 1
-        contact_row.first_name = "Alice"
-        contact_row.last_name = "Smith"
-        contact_row.middle_name = None
-        contact_row.nick_name = None
-        contact_row.company = None
-        contact_row.job_title = None
-        contact_row.is_favourite = False
-        contact_row.created_at = MagicMock()
-        contact_row.created_at.isoformat.return_value = "2024-01-01T00:00:00"
-        contact_row.updated_at = MagicMock()
-        contact_row.updated_at.isoformat.return_value = "2024-01-01T00:00:00"
-
-        info_result1 = MagicMock()
-        info_result1.fetchone.return_value = contact_row
-        empty_list_result = MagicMock()
-        empty_list_result.fetchall.return_value = []
-
-        # Contact 2: not found
-        info_result2 = MagicMock()
-        info_result2.fetchone.return_value = None
-
-        mock_db_connection.execute = AsyncMock(
-            side_effect=[
-                id_result_page1,
-                info_result1,
-                empty_list_result,
-                empty_list_result,
-                empty_list_result,  # contact 1
-                info_result2,  # contact 2 - not found, stops here
-                id_result_page2,  # keyset page 2 - terminates
-            ]
-        )
-
-        with patch(
-            "app.infrastructure.search.reindex_service.get_index_name",
-            return_value="pms_contacts",
+        with patch.object(
+            SearchIndexer, "build_contact_document", _builder({1: alice, 2: None})
         ):
             result = await service.reindex_contacts()
 
         assert result.count == 1
-        docs = mock_index.add_documents.call_args[0][0]
-        assert len(docs) == 1
-        assert docs[0]["first_name"] == "Alice"
+        mock_index.add_documents.assert_called_once_with([alice])
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_contact_that_cannot_be_built_fails_the_run_after_the_rest(
+        self,
+        service: ReindexService,
+        mock_meilisearch_client: MagicMock,
+        mock_db_connection: AsyncMock,
+    ) -> None:
+        """One bad contact must neither hide the failure nor stop the others."""
+        mock_index = self._setup_index_creation(mock_meilisearch_client)
+        self._mock_id_pages(mock_db_connection, [1, 2])
+        bob = {"id": 2, "user_id": "a"}
+
+        with (
+            patch.object(
+                SearchIndexer,
+                "build_contact_document",
+                _builder({1: ValueError("bad row"), 2: bob}),
+            ),
+            pytest.raises(ReindexIncompleteError) as raised,
+        ):
+            await service.reindex_contacts()
+
+        assert raised.value.failed_ids == {"contacts": [1]}
+        mock_index.add_documents.assert_called_once_with([bob])
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_document_meilisearch_rejects_fails_the_run(
+        self,
+        service: ReindexService,
+        mock_meilisearch_client: MagicMock,
+        mock_db_connection: AsyncMock,
+    ) -> None:
+        """The batch fails, the retry isolates the document, and the run reports it."""
+        self._setup_index_creation(mock_meilisearch_client)
+        self._mock_id_pages(mock_db_connection, [1])
+        mock_meilisearch_client.wait_for_task.side_effect = [
+            MagicMock(status="succeeded"),  # settings
+            MagicMock(status="succeeded"),  # delete all
+            MagicMock(status="failed", error={"code": "bad"}),  # batch
+            MagicMock(status="failed", error={"code": "bad"}),  # retry
+        ]
+
+        with (
+            patch.object(
+                SearchIndexer,
+                "build_contact_document",
+                _builder({1: {"id": 1, "user_id": "a"}}),
+            ),
+            pytest.raises(ReindexIncompleteError) as raised,
+        ):
+            await service.reindex_contacts()
+
+        assert raised.value.failed_ids == {"contacts": [1]}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_failed_delete_stops_the_run(
+        self,
+        service: ReindexService,
+        mock_meilisearch_client: MagicMock,
+        mock_db_connection: AsyncMock,
+    ) -> None:
+        """Adding onto an index that did not clear would hide the failure."""
+        mock_index = self._setup_index_creation(mock_meilisearch_client)
+        mock_meilisearch_client.wait_for_task.side_effect = [
+            MagicMock(status="succeeded"),  # settings
+            MagicMock(status="failed", error={"code": "bad"}),  # delete all
+        ]
+
+        with pytest.raises(SearchTaskFailedError):
+            await service.reindex_contacts()
+
+        mock_index.add_documents.assert_not_called()
 
     @pytest.mark.unit
     @pytest.mark.asyncio

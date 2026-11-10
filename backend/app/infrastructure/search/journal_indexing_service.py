@@ -185,121 +185,19 @@ class JournalIndexingService:
     async def _fetch_complete_journal_data(
         self, journal_id: int
     ) -> dict[str, Any] | None:
-        """
-        Fetch complete journal data from the database for search indexing.
+        """Build the search document for the event path, which has a fallback.
 
-        Args:
-            journal_id: ID of the journal to fetch
-
-        Returns:
-            Complete journal data dictionary or None if not found
+        A failure is logged and reported as ``None``, the same answer as a
+        missing journal, so the caller can index the event's own data instead.
+        Bulk callers need to tell the two apart and use
+        :meth:`build_journal_document`.
         """
         if not self.db_connection:
             logger.warning("No database connection available for fetching journal data")
             return None
 
         try:
-            # Fetch basic journal info
-            journal_query = text("""
-                SELECT id, user_id, title, content,
-                       event_date_range_start, event_date_range_end,
-                       parent_id, created_at, updated_at
-                FROM journals
-                WHERE id = :journal_id
-            """)
-            journal_result = await self.db_connection.execute(
-                journal_query, {"journal_id": journal_id}
-            )
-            journal_row = journal_result.fetchone()
-
-            if not journal_row:
-                return None
-
-            # The repository owns the (generated) type-detection query; NOTE is
-            # indexed only for journals with no typed rows, matching the read
-            # paths so a types=NOTE filter means the same thing everywhere.
-            types = await SqlJournalRepository(self.db_connection).get_concrete_types(
-                journal_id
-            )
-
-            # Fetch contact IDs
-            contacts_query = text("""
-                SELECT DISTINCT contact_id
-                FROM journal_contact_relationships
-                WHERE journal_id = :journal_id
-            """)
-            contacts_result = await self.db_connection.execute(
-                contacts_query, {"journal_id": journal_id}
-            )
-            contacts_rows = contacts_result.fetchall()
-            contact_ids = [row.contact_id for row in contacts_rows]
-
-            # Fetch tag IDs
-            tags_query = text("""
-                SELECT DISTINCT tag_id
-                FROM journal_tag_assignments
-                WHERE journal_id = :journal_id
-            """)
-            tags_result = await self.db_connection.execute(
-                tags_query, {"journal_id": journal_id}
-            )
-            tags_rows = tags_result.fetchall()
-            tag_ids = [str(row.tag_id) for row in tags_rows]
-
-            # Fetch calendar ID if EVENT type
-            calendar_id = None
-            if "EVENT" in types:
-                calendar_query = text("""
-                    SELECT calendar_id FROM journal_calendar_info
-                    WHERE journal_id = :journal_id
-                """)
-                calendar_result = await self.db_connection.execute(
-                    calendar_query, {"journal_id": journal_id}
-                )
-                calendar_row = calendar_result.fetchone()
-                if calendar_row:
-                    calendar_id = str(calendar_row.calendar_id)
-
-            # Fetch location if EVENT type
-            location = None
-            if "EVENT" in types:
-                location_query = text("""
-                    SELECT location FROM journal_calendar_info
-                    WHERE journal_id = :journal_id
-                """)
-                location_result = await self.db_connection.execute(
-                    location_query, {"journal_id": journal_id}
-                )
-                location_row = location_result.fetchone()
-                if location_row and location_row.location:
-                    location = location_row.location
-
-            return {
-                "id": journal_row.id,
-                "user_id": journal_row.user_id,
-                "title": journal_row.title,
-                "content": journal_row.content,
-                "event_date_range_start": journal_row.event_date_range_start.isoformat()
-                if journal_row.event_date_range_start
-                else None,
-                "event_date_range_end": journal_row.event_date_range_end.isoformat()
-                if journal_row.event_date_range_end
-                else None,
-                "types": types,
-                "contact_ids": contact_ids,
-                "tag_ids": tag_ids,
-                "calendar_id": calendar_id,
-                "parent_id": journal_row.parent_id,
-                "location": location,
-                "entity_type": "journal",
-                "created_at": journal_row.created_at.isoformat()
-                if journal_row.created_at
-                else None,
-                "updated_at": journal_row.updated_at.isoformat()
-                if journal_row.updated_at
-                else None,
-            }
-
+            return await self.build_journal_document(journal_id)
         except Exception as e:  # noqa: BLE001
             logger.error(
                 "Failed to fetch complete journal data",
@@ -307,6 +205,122 @@ class JournalIndexingService:
                 error=str(e),
             )
             return None
+
+    async def build_journal_document(self, journal_id: int) -> dict[str, Any] | None:
+        """Build the complete search document for a journal from the database.
+
+        Args:
+            journal_id: ID of the journal to read
+
+        Returns:
+            The document, or None if the journal does not exist
+
+        Raises:
+            Exception: Whatever went wrong reading or formatting the journal.
+        """
+        if not self.db_connection:
+            raise RuntimeError("Building a search document needs a database connection")
+
+        # Fetch basic journal info
+        journal_query = text("""
+            SELECT id, user_id, title, content,
+                   event_date_range_start, event_date_range_end,
+                   parent_id, created_at, updated_at
+            FROM journals
+            WHERE id = :journal_id
+        """)
+        journal_result = await self.db_connection.execute(
+            journal_query, {"journal_id": journal_id}
+        )
+        journal_row = journal_result.fetchone()
+
+        if not journal_row:
+            return None
+
+        # The repository owns the (generated) type-detection query; NOTE is
+        # indexed only for journals with no typed rows, matching the read
+        # paths so a types=NOTE filter means the same thing everywhere.
+        types = await SqlJournalRepository(self.db_connection).get_concrete_types(
+            journal_id
+        )
+
+        # Fetch contact IDs
+        contacts_query = text("""
+            SELECT DISTINCT contact_id
+            FROM journal_contact_relationships
+            WHERE journal_id = :journal_id
+        """)
+        contacts_result = await self.db_connection.execute(
+            contacts_query, {"journal_id": journal_id}
+        )
+        contacts_rows = contacts_result.fetchall()
+        contact_ids = [row.contact_id for row in contacts_rows]
+
+        # Fetch tag IDs
+        tags_query = text("""
+            SELECT DISTINCT tag_id
+            FROM journal_tag_assignments
+            WHERE journal_id = :journal_id
+        """)
+        tags_result = await self.db_connection.execute(
+            tags_query, {"journal_id": journal_id}
+        )
+        tags_rows = tags_result.fetchall()
+        tag_ids = [str(row.tag_id) for row in tags_rows]
+
+        # Fetch calendar ID if EVENT type
+        calendar_id = None
+        if "EVENT" in types:
+            calendar_query = text("""
+                SELECT calendar_id FROM journal_calendar_info
+                WHERE journal_id = :journal_id
+            """)
+            calendar_result = await self.db_connection.execute(
+                calendar_query, {"journal_id": journal_id}
+            )
+            calendar_row = calendar_result.fetchone()
+            if calendar_row:
+                calendar_id = str(calendar_row.calendar_id)
+
+        # Fetch location if EVENT type
+        location = None
+        if "EVENT" in types:
+            location_query = text("""
+                SELECT location FROM journal_calendar_info
+                WHERE journal_id = :journal_id
+            """)
+            location_result = await self.db_connection.execute(
+                location_query, {"journal_id": journal_id}
+            )
+            location_row = location_result.fetchone()
+            if location_row and location_row.location:
+                location = location_row.location
+
+        return {
+            "id": journal_row.id,
+            "user_id": journal_row.user_id,
+            "title": journal_row.title,
+            "content": journal_row.content,
+            "event_date_range_start": journal_row.event_date_range_start.isoformat()
+            if journal_row.event_date_range_start
+            else None,
+            "event_date_range_end": journal_row.event_date_range_end.isoformat()
+            if journal_row.event_date_range_end
+            else None,
+            "types": types,
+            "contact_ids": contact_ids,
+            "tag_ids": tag_ids,
+            "calendar_id": calendar_id,
+            "parent_id": journal_row.parent_id,
+            "location": location,
+            "entity_type": "journal",
+            "created_at": journal_row.created_at.isoformat()
+            if journal_row.created_at
+            else None,
+            "updated_at": journal_row.updated_at.isoformat()
+            if journal_row.updated_at
+            else None,
+        }
 
     def _create_fallback_journal_data(
         self, journal_id: int, journal_data: dict[str, Any], event: OutboxEvent
