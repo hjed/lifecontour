@@ -120,9 +120,11 @@ class SearchBackfillService:
                 }
             )
             # An absent field raises on attribute access, so read it as a dict.
+            # An empty owner, as the journal event fallback writes when its
+            # event names none, matches no owner filter either.
             for document in page.results:
                 fields = dict(document)
-                if fields.get("user_id") is not None:
+                if fields.get("user_id") not in (None, ""):
                     owned.add(fields["id"])
             offset += len(page.results)
             if not page.results or offset >= page.total:

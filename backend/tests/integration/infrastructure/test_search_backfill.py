@@ -93,10 +93,14 @@ async def test_a_contact_with_no_document_becomes_searchable(
     assert stored.relationships == expected["relationships"]
 
 
-@pytest.mark.parametrize("ownerless", [{}, {"user_id": None}])
+# An empty owner is what the journal event fallback writes when its event names
+# none; no owner filter matches it either.
+@pytest.mark.parametrize("ownerless", [{}, {"user_id": None}, {"user_id": ""}])
 @pytest.mark.asyncio
 async def test_a_document_without_an_owner_is_repaired(
-    clean_database: AsyncConnection, contacts_index: str, ownerless: dict[str, None]
+    clean_database: AsyncConnection,
+    contacts_index: str,
+    ownerless: dict[str, str | None],
 ) -> None:
     contact_id = await seed_contact(clean_database, first_name="Ottoline")
     _put(contacts_index, [{"id": contact_id, "first_name": "Ottoline", **ownerless}])
