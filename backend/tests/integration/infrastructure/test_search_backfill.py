@@ -4,6 +4,7 @@ Real PostgreSQL and real MeiliSearch: what matters is whether an owner-filtered
 search finds the record afterwards.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -210,3 +211,25 @@ async def test_absent_and_ownerless_journals_are_restored(
     assert sorted(_owner_search(journals_index, "Kayaking")) == sorted(
         [absent_id, ownerless_id]
     )
+
+
+@pytest.mark.asyncio
+async def test_the_loop_cannot_hold_up_startup_and_stops_on_shutdown(
+    authenticated_lifespan_client: Callable[[], Any],
+) -> None:
+    started = asyncio.Event()
+    cancelled: list[bool] = []
+
+    async def never_finishes(*_args: object, **_kwargs: object) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    with patch("app.main.run_contact_search_backfill_loop", never_finishes):
+        async with authenticated_lifespan_client():
+            await asyncio.wait_for(started.wait(), timeout=5)
+
+    assert cancelled == [True]

@@ -811,36 +811,42 @@ echo "Backup completed: $BACKUP_FILE.gz"
 ### Rebuilding the Search Index
 
 MeiliSearch is a projection of PostgreSQL, so it can always be rebuilt from the
-database. Rebuild it after restoring a backup, after a MeiliSearch upgrade that
-loses its data, or when a release adds a field that every search filters on.
+database.
 
-To restore journals missing from search without clearing the index, call
-`POST /api/search/backfill/journals` instead, through the same steps. It only
-writes journals with no search document, or a document with no owner, deletes
-nothing, and is safe on a live system.
+**Contacts repair themselves.** At startup and then every hour
+(`SEARCH_BACKFILL_INTERVAL_SECONDS`), the backend finds contacts with no search
+document, or a document with no owner, and writes them. Every search filters on
+the owner, so those contacts could not otherwise be found. The backfill only
+upserts what is missing and deletes nothing. Look for the
+`Contact search backfill complete` log line, which reports the documents written
+and the id of anything it could not index.
+
+**Journals are repaired on request**, through the steps below with
+`POST /api/search/backfill/journals`. It is equally safe on a live system.
+
+Run a full rebuild with `POST /api/search/reindex` to clear documents whose
+records no longer exist, to bring older documents up to the current schema, or
+when a release adds a field that every search filters on. It clears each index
+first. Add `?entity_type=contacts` or `?entity_type=journals` to rebuild one
+index only.
 
 1. Set `ENABLE_REINDEX_ENDPOINT=true` on the backend and restart it. Both endpoints
    are disabled by default.
-2. As a session user, or with a token that carries `pms_admin`, call
-   `POST /api/search/reindex`. Add `?entity_type=contacts` or `?entity_type=journals`
-   to rebuild one index only.
+2. As a session user, or with a token that carries `pms_admin`, call the endpoint.
 3. Unset `ENABLE_REINDEX_ENDPOINT` again.
 
-The rebuild clears each index first. Both endpoints return `503` if anything
-could not be indexed, naming the ids where they can. Everything else has still
-been indexed, so they are safe to run again.
+Both endpoints return `503` if anything could not be indexed, naming the ids where
+it can. Everything else has still been indexed, so they are safe to run again.
 
 At startup the backend checks that the contacts and journals indexes allow
 filtering on every attribute searches depend on, and reapplies the settings if
-they do not. When it does, it logs a warning that names the reindex step.
-Documents indexed before the change still lack the new field until the reindex
-runs.
+they do not. When it does, it logs a warning. Contact documents without an owner
+are then restored by the backfill; for any other new field, run the rebuild.
 
-**Release note: owner-filtered contact search.** Contact search documents now
-carry their owner (`user_id`), and every contact and global search filters on
-it. Documents indexed before this release have no owner, so **contact search
-returns nothing until `POST /api/search/reindex?entity_type=contacts` is run**.
-Missing results are the safe failure: no search can return another user's
+**Release note: owner-filtered contact search.** Contact search documents carry
+their owner (`user_id`), and every contact and global search filters on it. A
+contact whose document has no owner cannot be found until the backfill restores
+it. Missing results are the safe failure: no search can return another user's
 contacts.
 
 ## Related Documents

@@ -30,6 +30,9 @@ from app.infrastructure.secret_paths import redact_secret_path_span_attributes
 from app.infrastructure.tasks.attendance_transition_task import (
     run_attendance_transition_loop,
 )
+from app.infrastructure.tasks.contact_search_backfill_task import (
+    run_contact_search_backfill_loop,
+)
 from app.mcp.server import create_mcp_app
 
 
@@ -84,6 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Start background tasks
     attendance_task = None
+    search_backfill_task = None
     relay_task = None
     sweeper_task = None
     search_consumer_task = None
@@ -120,6 +124,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             run_attendance_transition_loop(container, interval_seconds=3600)
         )
         logger.info("Attendance transition background task started")
+
+        # Restore contacts the search index has lost. Backgrounded so that a
+        # slow or unavailable MeiliSearch cannot hold up startup.
+        search_backfill_task = asyncio.create_task(
+            run_contact_search_backfill_loop(
+                container,
+                interval_seconds=settings.search_backfill_interval_seconds,
+            )
+        )
+        logger.info("Contact search backfill background task started")
 
         # Start the Redis Streams outbox relay
         from core_shared.stream_client import StreamClient
@@ -258,6 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             (search_consumer_task, "Search indexer consumer"),
             (sweeper_task, "Summary refresh sweeper"),
             (relay_task, "Outbox relay"),
+            (search_backfill_task, "Contact search backfill"),
             (attendance_task, "Attendance transition"),
         ]:
             if task:

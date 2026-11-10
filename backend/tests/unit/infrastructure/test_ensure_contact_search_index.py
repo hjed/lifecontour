@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from meilisearch.errors import MeilisearchError
+from structlog.testing import capture_logs
 
 from app.infrastructure.search.meilisearch_client import CONTACTS_INDEX_SETTINGS
 from app.infrastructure.search.search_indexer import ensure_contact_search_index
@@ -52,3 +53,15 @@ def test_missing_index_is_created_and_configured() -> None:
     client.index.return_value.update_settings.assert_called_once_with(
         CONTACTS_INDEX_SETTINGS
     )
+
+
+def test_reconfiguring_points_at_the_automatic_backfill() -> None:
+    """Nobody has to run anything by hand any more, so the log must not ask."""
+    client = _client(["tags"])
+
+    with capture_logs() as logs:
+        ensure_contact_search_index(client)
+
+    warning = next(log for log in logs if log["log_level"] == "warning")
+    assert "automatic contact search backfill" in warning["event"]
+    assert "POST /api/search/reindex" not in warning["event"]

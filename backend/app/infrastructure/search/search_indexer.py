@@ -37,9 +37,9 @@ def ensure_contact_search_index(client: MeiliSearchClient | None = None) -> bool
 
     Settings are otherwise applied only when the next contact event arrives,
     and until then a search filtering on its owner would be a MeiliSearch
-    error. Returns True when settings were (re)applied; existing documents then
-    still lack their owner, and so match no search, until
-    ``POST /api/search/reindex`` is run, and a warning says so.
+    error. Returns True when settings were (re)applied; existing documents may
+    then lack their owner, and so match no search, until the automatic backfill
+    restores them, and a warning says so.
     """
     index_name = get_index_name("contacts")
     reconfigured = ensure_index_configured(
@@ -51,8 +51,8 @@ def ensure_contact_search_index(client: MeiliSearchClient | None = None) -> bool
     if reconfigured:
         logger.warning(
             "Contacts search index settings were (re)applied; existing documents "
-            "may predate the current schema and match no search. Run "
-            "POST /api/search/reindex to backfill them.",
+            "may predate the current schema and match no search until the "
+            "automatic contact search backfill restores them.",
             index_name=index_name,
         )
     return reconfigured
