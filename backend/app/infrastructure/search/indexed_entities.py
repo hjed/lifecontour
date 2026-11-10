@@ -1,9 +1,9 @@
 """
 What bulk search maintenance needs to know about each indexed entity.
 
-Bulk maintenance walks a table and rebuilds documents from it. It builds
-through the event indexers, so a document looks the same however it reached
-the index.
+The re-index and the backfill both walk a table and rebuild documents from it.
+Both build through the event indexers, so a document looks the same however it
+reached the index.
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping

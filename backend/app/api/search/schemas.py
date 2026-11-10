@@ -142,3 +142,11 @@ class ReindexResponse(BaseModel):
     contacts_indexed: int = Field(..., description="Number of contacts indexed")
     journals_indexed: int = Field(..., description="Number of journals indexed")
     duration_ms: int = Field(..., description="Operation duration in milliseconds")
+
+
+class BackfillResponse(BaseModel):
+    """Response model for search backfill operations."""
+
+    status: str = Field(..., description="Operation status")
+    examined: int = Field(..., description="Number of records compared with the index")
+    documents_written: int = Field(..., description="Number of documents restored")

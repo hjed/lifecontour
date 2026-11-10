@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.search.reindex_service import ReindexService
+from app.infrastructure.search.search_backfill_service import SearchBackfillService
 from app.infrastructure.search.search_service import SearchService
 
 
@@ -33,6 +34,13 @@ class InfrastructureProvider(Provider):
     def get_reindex_service(self, connection: AsyncConnection) -> ReindexService:
         """Get re-index service for request scope."""
         return ReindexService(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def get_search_backfill_service(
+        self, connection: AsyncConnection
+    ) -> SearchBackfillService:
+        """Get search backfill service for request scope."""
+        return SearchBackfillService(connection)
 
     @provide(scope=Scope.REQUEST)
     def get_outbox_event_publisher(
