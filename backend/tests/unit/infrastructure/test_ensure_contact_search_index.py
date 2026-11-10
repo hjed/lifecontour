@@ -17,6 +17,7 @@ def _client(filterable: list[str] | None, *, exists: bool = True) -> MagicMock:
         index.get_filterable_attributes.side_effect = MeilisearchError(
             "index not found"
         )
+    client.wait_for_task.return_value = MagicMock(status="succeeded")
     client.create_index.return_value.task_uid = 1
     index.update_settings.return_value.task_uid = 2
     return client
