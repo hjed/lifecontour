@@ -143,9 +143,14 @@ class Settings(BaseSettings):
     search_index_prefix: str = Field(
         default="pms_", description="Prefix for search indices"
     )
+    search_backfill_interval_seconds: float = Field(
+        default=3600.0,
+        description="Seconds between automatic contact search backfill cycles",
+    )
     enable_reindex_endpoint: bool = Field(
         default=False,
-        description="Enable the /api/search/reindex admin endpoint. "
+        description="Enable the /api/search/reindex and /api/search/backfill admin "
+        "endpoints. "
         "Disabled by default for safety — set ENABLE_REINDEX_ENDPOINT=true "
         "when performing MeiliSearch upgrades or index rebuilds.",
     )
