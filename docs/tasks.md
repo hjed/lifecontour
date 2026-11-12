@@ -40,6 +40,7 @@ Read these first when working on the active product-alignment streams:
 - **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
 - **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven activity history across contacts and journals
 - **[Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md)** - the journal-anchored Tasks entity and the home dashboard that replaces the placeholder home page
+- **[Task Lists & Navigation Product Specification](./product-specifications/task-lists-and-navigation-product-specification.md)** - task lists as a second home for tasks (due dates, recurrence, series template lists, search), the global Create button and the mobile navigation revamp; partly supersedes the Home Dashboard & Tasks specification
 - **[Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)** - every entity owned by exactly one user (contacts first), owner-scoped reads/writes across REST, MCP, search and integrations, and the single-user data migration
 
 ---
