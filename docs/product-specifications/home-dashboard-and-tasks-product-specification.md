@@ -1,5 +1,7 @@
 # Home Dashboard and Tasks Product Specification
 
+> **Partly superseded.** The [Task Lists and Navigation Product Specification](./task-lists-and-navigation-product-specification.md) adds task lists, due dates, recurrence and tasks in search. The rules here still govern *journal-only* tasks (tasks with no list); sections it changes are marked below, and its [Superseded behaviour](./task-lists-and-navigation-product-specification.md#superseded-behaviour) table lists every change.
+
 ## Overview
 
 This document defines the target product behaviour for two intertwined pieces of work: the introduction of **Tasks** as a new core entity, and the completion of the **Home Dashboard**, which today is a non-functional placeholder.
@@ -39,6 +41,8 @@ The Tasks entity should help the user:
 3. Be reminded of it exactly then, and not before or endlessly after.
 
 ## Product Principles
+
+> **Partly superseded.** Principles 2, 3 and 4 now hold only for journal-only tasks: a task may instead live on a list, list tasks show an overdue marker, and lists are a place where open tasks accumulate. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 1. **AI-first:** Any meaningful capability available in the UI should also be available to AI agents through MCP.
 2. **Tasks are anchored, not free-floating:** A task exists in relation to two journals. This is a deliberate constraint, not an implementation detail.
@@ -92,6 +96,8 @@ Tasks do not exist in any form today.
 
 ## Out of Scope
 
+> **Partly superseded.** A tasks page, a single task flag, recurring tasks (on lists) and tasks in global search are now in scope. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+
 - A global tasks list, tasks page, or task browsing experience
 - Task assignment to other people, or any multi-user notion of a task
 - Sub-tasks, task hierarchy, or task dependencies
@@ -125,6 +131,8 @@ The task's own content is deliberately minimal: short text, a status, its journa
 
 ### Core invariants
 
+> **Partly superseded.** Invariants 1–3 and 5 apply only to tasks with no list. A list task needs neither journal and may carry a plain due date. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+
 These are absolute and should be enforced at every entry point, including MCP:
 
 1. A task **must** have a creating journal.
@@ -141,6 +149,8 @@ Invariant 4 is checked when a due journal is **set**, not continuously. A task w
 Invariant 5 is the heart of the model. Task lists become overwhelming because tasks are cheap to create and free-floating. Requiring the user to name a real future journal — a meeting, a trip, a day they have already planned — means every task is attached to a moment they have already committed to thinking about. If there is no such journal, the user creates one first, and that act is itself a small useful piece of planning.
 
 ### Creating a task
+
+> **Partly superseded.** Tasks can also be created on a list, or from the global Create button. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 Tasks are created from a journal. The journal the user creates the task from becomes its creating journal; it is never chosen separately.
 
@@ -205,6 +215,8 @@ Updating a task never requires a journal. The journal links describe where the t
 
 ### Lapsed tasks
 
+> **Partly superseded.** Only journal-only tasks lapse. A task on a list is marked overdue instead and stays open. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+
 A task is **lapsed** when its due journal's date has passed and it is still not done. A task whose due journal has been cancelled is also treated as lapsed.
 
 Lapsed tasks behave as follows:
@@ -251,6 +263,8 @@ Each event carries provenance and the actor, consistent with the activity histor
 
 ### Tasks and search
 
+> **Partly superseded.** Open tasks and lists are now searchable. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+
 Tasks are **not** indexed and do not appear in global search. There is no tasks index, and a global search never returns a task.
 
 The search indexer should ignore task events rather than failing on them.
@@ -258,6 +272,8 @@ The search indexer should ignore task events rather than failing on them.
 This follows from the no-accumulating-backlog principle: a searchable task corpus is a backlog by another name.
 
 ### Where tasks appear
+
+> **Partly superseded.** Tasks also appear on list pages, the `/tasks` overview, the sidebar and in search. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 There are exactly two places where tasks are *worked with* — where the user reads them, actions them, and browses them as tasks.
 
@@ -280,6 +296,8 @@ A task does also appear as an entry in a linked contact's activity history, and 
 Because a task can never exist without both anchors, journal operations must respect those anchors.
 
 ### Deletion
+
+> **Partly superseded.** Deletion is still blocked by journal-only tasks, but not by tasks that are on a list; those lose the link and become undated. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 Deleting a journal that is the creating journal or the due journal of **any** task is **blocked**.
 
@@ -310,6 +328,8 @@ Cancelling a journal is permitted and does not affect a task's links.
 A not-done task whose **due** journal has been cancelled is treated as lapsed: it leaves the dashboard and remains visible on its journals, where the user can retarget it. The journal listing on the task should make it obvious that the reason is cancellation rather than the passage of time.
 
 ## The Home Dashboard
+
+> **Partly superseded.** The Tasks card also shows dated and recently overdue list tasks, and lists associated with an upcoming journal. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 ### Purpose
 
@@ -473,6 +493,8 @@ There must be no meaningful UI-only behaviour in this work.
 
 ### Tasks over MCP
 
+> **Partly superseded.** An agent may create a task on a list with neither journal anchor, and tasks may carry due dates. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+
 MCP must support the ability to:
 
 - create a task, specifying the creating journal, the due journal, the text, and any contacts
@@ -503,6 +525,8 @@ The tradeoff is accepted knowingly: an agent never sees exactly the arrangement 
 The existing daily summary tool continues to serve the summary for a given date, and picks up the extended inputs, the always-eligible-today rule, and the staleness-based refresh automatically, since they are properties of the summary rather than of the surface requesting it.
 
 ## Success Criteria
+
+> **Partly superseded.** Criterion 5 no longer holds: list pages and the `/tasks` overview list outstanding tasks by design. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
 This work will be successful when the user can:
 
