@@ -37,6 +37,17 @@ SYNCED_ENTRIES_KEY: Final = "synced_entries"
 # hold, so the next pull must apply the record even with an unchanged version.
 PENDING_IMPORT_KEY: Final = "pending_import"
 
+# ``reference_data`` key: the remote versions pushes have replaced, oldest first
+# (#1938). A pull read before a push but applied after it carries one of them,
+# and would otherwise write the remote's older copy over the push. Versions are
+# compared, not timestamps: a pull is stamped after it reads, and the worker and
+# database clocks need not agree.
+SUPERSEDED_VERSIONS_KEY: Final = "superseded_versions"
+
+# How many replaced versions a link keeps; the oldest are dropped first. Only
+# the pulls still queued when the push lands need one.
+MAX_SUPERSEDED_VERSIONS: Final = 10
+
 # Half a SHA-256 tells entries of one record apart with room to spare.
 _KEY_LENGTH: Final = 32
 
@@ -95,6 +106,20 @@ def serialise_synced_entries[F: str](
 def pending_import(reference_data: str | None) -> bool:
     """Whether a push left entries for the next pull to import."""
     return parse_reference_data(reference_data).get(PENDING_IMPORT_KEY) is True
+
+
+def superseded_versions(reference_data: str | None) -> frozenset[str]:
+    """The remote versions pushes have replaced, so an inbound one is stale.
+
+    An event at one of them was read before a push the link has since
+    recorded: applying it would revert the push until the next pull.
+    """
+    recorded = parse_reference_data(reference_data).get(SUPERSEDED_VERSIONS_KEY)
+    if not isinstance(recorded, list):
+        return frozenset()
+    return frozenset(
+        version for version in recorded if isinstance(version, str) and version
+    )
 
 
 def remote_unchanged_since_sync(

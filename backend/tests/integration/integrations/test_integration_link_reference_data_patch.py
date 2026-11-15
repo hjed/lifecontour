@@ -2,7 +2,8 @@
 
 A worker's push records the synced base on the link while the backend may be
 recording its own keys on the same row. The patch is one statement that merges
-into the stored JSON, so neither writer can drop the other's keys.
+into the stored JSON, so neither writer can drop the other's keys. The versions
+a push replaced (#1938) are appended the same way.
 """
 
 import json
@@ -10,6 +11,12 @@ import json
 import pytest
 from core_shared.repositories.integration_link_repository import (
     IntegrationLinkRepository,
+)
+from core_shared.sync_base import (
+    MAX_SUPERSEDED_VERSIONS,
+    PENDING_IMPORT_KEY,
+    SUPERSEDED_VERSIONS_KEY,
+    SYNCED_ENTRIES_KEY,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -98,5 +105,107 @@ class TestPatchReferenceData:
         await IntegrationLinkRepository(clean_database).patch_reference_data(
             "google", REMOTE, {"pending_import": True}, user_id=TEST_USER_ID
         )
+
+        assert await _reference_data(clean_database, OTHER_USER_ID) == {}
+
+
+@pytest.mark.integration
+class TestRecordSupersededVersions:
+    """A push records the remote versions it replaced (#1938)."""
+
+    async def _record(self, connection: AsyncConnection, *versions: str) -> None:
+        await IntegrationLinkRepository(connection).record_superseded_versions(
+            "google", REMOTE, versions, user_id=TEST_USER_ID
+        )
+
+    async def test_appends_beside_the_stored_keys(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(
+            clean_database,
+            user_id=TEST_USER_ID,
+            reference_data=json.dumps(
+                {
+                    SYNCED_ENTRIES_KEY: {"emailAddresses": ["k"]},
+                    PENDING_IMPORT_KEY: True,
+                    SUPERSEDED_VERSIONS_KEY: ["e0"],
+                }
+            ),
+        )
+
+        await self._record(clean_database, "e1", "e2")
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            SYNCED_ENTRIES_KEY: {"emailAddresses": ["k"]},
+            PENDING_IMPORT_KEY: True,
+            SUPERSEDED_VERSIONS_KEY: ["e0", "e1", "e2"],
+        }
+
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            None,
+            "not json",
+            "[1, 2]",
+            json.dumps({SUPERSEDED_VERSIONS_KEY: "e0"}),
+            json.dumps({SUPERSEDED_VERSIONS_KEY: [3, None]}),
+        ],
+    )
+    async def test_unreadable_records_start_empty(
+        self, clean_database: AsyncConnection, stored: str | None
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data=stored)
+
+        await self._record(clean_database, "e1")
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            SUPERSEDED_VERSIONS_KEY: ["e1"]
+        }
+
+    async def test_a_repeated_version_moves_to_the_newest(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(
+            clean_database,
+            user_id=TEST_USER_ID,
+            reference_data=json.dumps({SUPERSEDED_VERSIONS_KEY: ["e0", "e1"]}),
+        )
+
+        await self._record(clean_database, "e0", "e2", "e2")
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            SUPERSEDED_VERSIONS_KEY: ["e1", "e0", "e2"]
+        }
+
+    async def test_keeps_only_the_newest(self, clean_database: AsyncConnection) -> None:
+        stored = [f"old{i}" for i in range(MAX_SUPERSEDED_VERSIONS)]
+        await _seed_link(
+            clean_database,
+            user_id=TEST_USER_ID,
+            reference_data=json.dumps({SUPERSEDED_VERSIONS_KEY: stored}),
+        )
+
+        await self._record(clean_database, "new0", "new1")
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            SUPERSEDED_VERSIONS_KEY: [*stored[2:], "new0", "new1"]
+        }
+
+    async def test_records_nothing_without_versions(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data=None)
+
+        await self._record(clean_database)
+
+        assert await _reference_data(clean_database, TEST_USER_ID) is None
+
+    async def test_records_only_on_the_owners_link(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data="{}")
+        await _seed_link(clean_database, user_id=OTHER_USER_ID, reference_data="{}")
+
+        await self._record(clean_database, "e1")
 
         assert await _reference_data(clean_database, OTHER_USER_ID) == {}

@@ -11,6 +11,7 @@ import pytest
 
 from core_shared.sync_base import (
     PENDING_IMPORT_KEY,
+    SUPERSEDED_VERSIONS_KEY,
     SYNCED_ENTRIES_KEY,
     Winner,
     entry_key,
@@ -18,6 +19,7 @@ from core_shared.sync_base import (
     recorded_synced_entries,
     remote_unchanged_since_sync,
     serialise_synced_entries,
+    superseded_versions,
     three_way_entries,
     three_way_keys,
     three_way_value,
@@ -108,6 +110,31 @@ class TestPendingImport:
     )
     def test_anything_else_is_not_pending(self, reference_data: str | None) -> None:
         assert pending_import(reference_data) is False
+
+
+class TestSupersededVersions:
+    def test_reads_the_recorded_versions(self) -> None:
+        reference_data = json.dumps({SUPERSEDED_VERSIONS_KEY: ["v1", "v2"]})
+        assert superseded_versions(reference_data) == frozenset({"v1", "v2"})
+
+    @pytest.mark.parametrize(
+        "reference_data",
+        [
+            None,
+            "",
+            "not json",
+            json.dumps([]),
+            json.dumps({}),
+            json.dumps({SUPERSEDED_VERSIONS_KEY: "v1"}),
+            json.dumps({SUPERSEDED_VERSIONS_KEY: {"v1": True}}),
+        ],
+    )
+    def test_anything_unreadable_records_none(self, reference_data: str | None) -> None:
+        assert superseded_versions(reference_data) == frozenset()
+
+    def test_entries_that_are_not_versions_are_ignored(self) -> None:
+        reference_data = json.dumps({SUPERSEDED_VERSIONS_KEY: ["v1", 2, None, ""]})
+        assert superseded_versions(reference_data) == frozenset({"v1"})
 
 
 class TestRemoteUnchangedSinceSync:
