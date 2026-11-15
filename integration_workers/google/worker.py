@@ -1221,6 +1221,8 @@ class PushOutcome:
     ``pending_import`` whether Google holds anything local does not, for the
     next pull to import. ``new_person`` is whether this push created the person,
     so it must not be left in Google if its link can't be recorded.
+    ``replaced_versions`` are the etags Google held before the write: a pull
+    read at one of them is older than the push (#1938).
     """
 
     person: dict[str, Any]
@@ -1228,6 +1230,7 @@ class PushOutcome:
     synced_base: SyncedEntries
     pending_import: bool = False
     new_person: bool = False
+    replaced_versions: frozenset[str] = frozenset()
 
 
 def _created_outcome(person: dict[str, Any], *, recreated: bool = False) -> PushOutcome:
@@ -1309,9 +1312,11 @@ async def _record_push_link(
     The etag is always the push's own, so a failed later push still leaves the
     next pull skipping the contact. A push that left Google holding what local
     does not marks the link ``pending_import`` instead, which only the backend
-    clears, when a pull is applied. The keys are merged into
-    ``reference_data`` in one statement beside the backend's own. A person this
-    push created is removed again if the link can't be recorded.
+    clears, when a pull is applied. The etags the push replaced are appended
+    too, so the backend skips a pull queued before it (#1938). The keys are
+    merged into ``reference_data`` beside the backend's own, each in one
+    statement. A person this push created is removed again if the link can't
+    be recorded.
     """
     resource_name = outcome.person["resourceName"]
     patch: dict[str, Any] = {
@@ -1329,9 +1334,16 @@ async def _record_push_link(
             user_id=user_id,
             synced_at=synced_at,
         )
-        await IntegrationLinkRepository(
-            await session.connection()
-        ).patch_reference_data("google", resource_name, patch, user_id=user_id)
+        links = IntegrationLinkRepository(await session.connection())
+        await links.patch_reference_data(
+            "google", resource_name, patch, user_id=user_id
+        )
+        await links.record_superseded_versions(
+            "google",
+            resource_name,
+            sorted(outcome.replaced_versions),
+            user_id=user_id,
+        )
     except Exception:
         if outcome.new_person:
             await _remove_unlinked_person(client, contact_id, resource_name)
@@ -1369,6 +1381,9 @@ async def _update_or_recreate_contact_in_google(
     state = await _read_link_sync_state(session, external_id, user_id=user_id)
     fallback = state.address_fallback_country
     merges: list[tuple[PushMerge, SyncedEntries]] = []
+    # Every version merged into - the read, and a conflict retry's refetch -
+    # plus the one the link last synced: all older than this push.
+    read_versions: set[str] = {etag} if etag else set()
 
     def merge(person: dict[str, Any]) -> dict[str, Any]:
         # Resolved from the first read alone: on a link with no recorded base
@@ -1388,6 +1403,8 @@ async def _update_or_recreate_contact_in_google(
             person_data, person, synced_base=base, address_fallback_country=fallback
         )
         merges.append((merged, base))
+        if person.get("etag"):
+            read_versions.add(person["etag"])
         return merged.payload
 
     try:
@@ -1404,6 +1421,7 @@ async def _update_or_recreate_contact_in_google(
             recreated=False,
             synced_base=_base_after_update(result, merged, base, fallback),
             pending_import=merged.pending_import,
+            replaced_versions=frozenset(read_versions - {result.get("etag")}),
         )
     except GoogleContactNotFoundError:
         logger.warning(

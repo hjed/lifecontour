@@ -15,7 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from core_shared.sync_base import serialise_synced_entries
+from core_shared.sync_base import SUPERSEDED_VERSIONS_KEY, serialise_synced_entries
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -429,3 +429,99 @@ async def test_a_rename_after_the_push_read_the_name_is_still_owed_a_push(
     )
 
     assert len(await find_contacts_to_push(db_session, user_id=CONTACT_OWNER)) == 1
+
+
+def _superseded(link: Any) -> list[str]:
+    return list(json.loads(link.reference_data)[SUPERSEDED_VERSIONS_KEY])
+
+
+@pytest.mark.asyncio
+async def test_a_push_records_the_versions_it_replaced(
+    db_session: AsyncSession,
+) -> None:
+    """A pull queued at either version would otherwise revert the push (#1938)."""
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    client = _client(
+        {"etag": "etag_google_edit", "emailAddresses": _google(_HELD)},
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    link = await _link(db_session)
+    assert link.version_hash == "etag_pushed"
+    assert sorted(_superseded(link)) == ["etag_google_edit", "etag_synced"]
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_retry_records_the_version_it_refetched(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    refetched = {
+        "resourceName": _REMOTE,
+        "etag": "etag_raced",
+        "emailAddresses": _google(_HELD),
+    }
+    client = _client(
+        {"etag": "etag_synced", "emailAddresses": _google(_HELD)},
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    async def update_after_a_race(**kwargs: Any) -> dict[str, Any]:
+        kwargs["rebase"](refetched)
+        return client.update_contact.return_value
+
+    client.update_contact.side_effect = update_after_a_race
+
+    await _push(db_session, client)
+
+    assert sorted(_superseded(await _link(db_session))) == [
+        "etag_raced",
+        "etag_synced",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_second_push_appends_the_version_it_replaced(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    first = _client(
+        {"etag": "etag_synced", "emailAddresses": _google(_HELD)},
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+    await _push(db_session, first)
+    await db_session.execute(
+        text(
+            "UPDATE sync_metadata SET last_synced_at = NOW() - interval '1 minute' "
+            "WHERE external_id = :ext"
+        ),
+        {"ext": _REMOTE},
+    )
+    second = _client(
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+        {"etag": "etag_pushed_again", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, second)
+
+    link = await _link(db_session)
+    assert link.version_hash == "etag_pushed_again"
+    assert _superseded(link) == ["etag_synced", "etag_pushed"]
+
+
+@pytest.mark.asyncio
+async def test_a_recreated_person_records_no_replaced_versions(
+    db_session: AsyncSession,
+) -> None:
+    """The new person has no older versions a pull could have read."""
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    client = _client({}, {"etag": "etag_created", "emailAddresses": _google(_HELD)})
+    client.get_person.side_effect = GoogleContactNotFoundError(_REMOTE)
+
+    await _push(db_session, client)
+
+    assert SUPERSEDED_VERSIONS_KEY not in json.loads(
+        (await _link(db_session)).reference_data
+    )

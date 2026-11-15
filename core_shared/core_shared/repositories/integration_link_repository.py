@@ -4,8 +4,9 @@ ITER15-001 Phase 3 consolidates integration entity links onto ``sync_metadata``.
 This repository provides the unified link-lookup reads used by both the backend
 consumer and the integration workers, replacing the legacy
 ``external_references`` reads. Writes remain on the existing upsert paths,
-apart from :meth:`IntegrationLinkRepository.patch_reference_data`, which a
-worker uses to record per-link sync state without racing the backend's writes.
+apart from :meth:`IntegrationLinkRepository.patch_reference_data` and
+:meth:`IntegrationLinkRepository.record_superseded_versions`, which a worker
+uses to record per-link sync state without racing the backend's writes.
 
 The repository provides the link-lookup reads (plus the contact reads behind an
 outbound sync) used by both ``core_shared`` consumers and the integration workers,
@@ -15,14 +16,19 @@ in the same constructor and raw-SQL style as the rest of the data layer.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Final
 
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from core_shared.sync_base import MAX_SUPERSEDED_VERSIONS, SUPERSEDED_VERSIONS_KEY
+
 logger = structlog.get_logger(__name__)
+
+# Ranks a push's versions after any recorded ones, however long the record.
+_SUPERSEDED_RANK_OFFSET: Final = 1_000_000_000
 
 
 class IntegrationLinkRepository:
@@ -245,6 +251,88 @@ class IntegrationLinkRepository:
             """),
             {
                 "patch": json.dumps(dict(patch)),
+                "user_id": user_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
+
+    async def record_superseded_versions(
+        self,
+        integration_source: str,
+        external_id: str,
+        versions: Sequence[str],
+        *,
+        user_id: str,
+    ) -> None:
+        """Append remote ``versions`` a push replaced to ``user_id``'s link (#1938).
+
+        Kept under ``SUPERSEDED_VERSIONS_KEY``, oldest first: a version already
+        recorded moves to the newest end, and only the newest
+        ``MAX_SUPERSEDED_VERSIONS`` are kept. One statement, like
+        :meth:`patch_reference_data`, so the backend's keys on the same row are
+        never lost; a record that cannot be read as a list of versions starts
+        empty.
+        """
+        if not versions:
+            return
+        await self._conn.execute(
+            text("""
+                UPDATE sync_metadata AS link
+                SET reference_data = (
+                    stored.data || jsonb_build_object(
+                        CAST(:key AS text),
+                        (
+                            SELECT COALESCE(jsonb_agg(version ORDER BY position), '[]')
+                            FROM (
+                                SELECT version, position
+                                FROM (
+                                    SELECT version, max(position) AS position
+                                    FROM (
+                                        SELECT entry #>> '{}' AS version,
+                                               ordinality AS position
+                                        FROM jsonb_array_elements(
+                                            CASE WHEN jsonb_typeof(stored.data -> CAST(:key AS text))
+                                                      = 'array'
+                                                 THEN stored.data -> CAST(:key AS text)
+                                                 ELSE '[]'::jsonb
+                                            END
+                                        ) WITH ORDINALITY AS recorded(entry, ordinality)
+                                        WHERE jsonb_typeof(entry) = 'string'
+                                        UNION ALL
+                                        SELECT added.version,
+                                               CAST(:offset AS bigint) + added.ordinality
+                                        FROM jsonb_array_elements_text(
+                                            CAST(:versions AS jsonb)
+                                        ) WITH ORDINALITY AS added(version, ordinality)
+                                    ) AS candidates
+                                    GROUP BY version
+                                ) AS distinct_versions
+                                ORDER BY position DESC
+                                LIMIT CAST(:keep AS integer)
+                            ) AS newest
+                        )
+                    )
+                )::text
+                FROM (
+                    SELECT id,
+                           CASE WHEN reference_data IS JSON OBJECT
+                                THEN reference_data::jsonb
+                                ELSE '{}'::jsonb
+                           END AS data
+                    FROM sync_metadata
+                    WHERE user_id = :user_id
+                      AND integration_source = :integration_source
+                      AND external_id = :external_id
+                ) AS stored
+                WHERE link.id = stored.id
+            """),
+            {
+                "key": SUPERSEDED_VERSIONS_KEY,
+                "versions": json.dumps(list(versions)),
+                # Added versions rank after every recorded one.
+                "offset": _SUPERSEDED_RANK_OFFSET,
+                "keep": MAX_SUPERSEDED_VERSIONS,
                 "user_id": user_id,
                 "integration_source": integration_source,
                 "external_id": external_id,

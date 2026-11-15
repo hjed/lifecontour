@@ -43,6 +43,7 @@ from core_shared.sync_base import (
     SYNCED_ENTRIES_KEY,
     pending_import,
     recorded_synced_entries,
+    superseded_versions,
 )
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -1053,6 +1054,12 @@ class OutboxEventProcessor:
 
         Decided against the contact and link as read under their locks.
         """
+        # A version a push has replaced was read before that push: applying it
+        # would revert the push until the next pull (#1938). Checked first, as
+        # it differs from the link's version - and a full sync's copy, or what
+        # a push left ``pending_import``, is no newer.
+        if new_version_hash in superseded_versions(link.reference_data):
+            return "superseded_by_push"
         # Idempotency: the version is unchanged - unless the event is from a
         # full sync, which re-applies every person, or a push kept entries the
         # contact does not hold: the version is then the push's own, and the
