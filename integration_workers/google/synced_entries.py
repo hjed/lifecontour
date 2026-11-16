@@ -220,3 +220,28 @@ def empty_at_source(person: GooglePerson) -> dict[ContactSyncField, BaseField]:
         ContactSyncField.ADDRESSES: person.addresses,
     }
     return {field: base for field, base in LIST_BASES.items() if not held[field]}
+
+
+def person_source_versions(metadata: Mapping[str, Any]) -> dict[str, str]:
+    """Each source's version time, from a person's ``metadata`` (#1938).
+
+    Keyed ``"<type>/<id>"``, valued with Google's RFC 3339 ``updateTime``. A
+    source without one leaves the person unordered, so it records none: a
+    version missing from the record must never let an event look older.
+    """
+    sources = metadata.get("sources")
+    if not isinstance(sources, list):
+        return {}
+    versions: dict[str, str] = {}
+    for source in sources:
+        if not isinstance(source, Mapping):
+            return {}
+        kind, source_id, at = (
+            source.get("type"),
+            source.get("id"),
+            source.get("updateTime"),
+        )
+        if not (kind and source_id and isinstance(at, str) and at):
+            return {}
+        versions[f"{kind}/{source_id}"] = at
+    return versions

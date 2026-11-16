@@ -15,6 +15,7 @@ from synced_entries import (
     BASE_FIELDS,
     LIST_BASES,
     empty_at_source,
+    person_source_versions,
     raw_entry_keys,
     raw_synced_entries,
     synced_entries_of,
@@ -234,3 +235,46 @@ class TestEmptyAtSource:
     def test_every_list_base_is_a_base_field_of_an_owned_list(self) -> None:
         assert set(LIST_BASES.values()) <= set(BASE_FIELDS)
         assert set(LIST_BASES) <= GOOGLE_CONTACT_SYNC_SCOPE.fields
+
+
+class TestPersonSourceVersions:
+    """The version time of each source, so a push can order a pull (#1938)."""
+
+    def test_reads_each_sources_update_time(self) -> None:
+        metadata = {
+            "sources": [
+                {"type": "CONTACT", "id": "c1", "etag": "x", "updateTime": "t1"},
+                {"type": "PROFILE", "id": "p1", "updateTime": "t2"},
+            ]
+        }
+        assert person_source_versions(metadata) == {
+            "CONTACT/c1": "t1",
+            "PROFILE/p1": "t2",
+        }
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            {},
+            {"sources": None},
+            {"sources": "CONTACT"},
+            {"sources": [{"type": "CONTACT", "id": "c1"}]},
+            {"sources": [{"type": "CONTACT", "updateTime": "t1"}]},
+            {"sources": [{"id": "c1", "updateTime": "t1"}]},
+            {"sources": ["CONTACT"]},
+        ],
+    )
+    def test_a_source_without_a_readable_version_records_none(
+        self, metadata: dict[str, Any]
+    ) -> None:
+        """One source missing its version leaves the person unordered."""
+        assert person_source_versions(metadata) == {}
+
+    def test_one_unreadable_source_records_none_for_the_person(self) -> None:
+        metadata = {
+            "sources": [
+                {"type": "CONTACT", "id": "c1", "updateTime": "t1"},
+                {"type": "PROFILE", "id": "p1"},
+            ]
+        }
+        assert person_source_versions(metadata) == {}

@@ -26,6 +26,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Final
 
@@ -43,6 +44,12 @@ PENDING_IMPORT_KEY: Final = "pending_import"
 # compared, not timestamps: a pull is stamped after it reads, and the worker and
 # database clocks need not agree.
 SUPERSEDED_VERSIONS_KEY: Final = "superseded_versions"
+
+# ``reference_data`` key: per remote source, the version time of the record the
+# last push merged into (#1938). A pull read at a version no newer in every
+# source is that record or an older one, so the push already merged it. Etags
+# alone cannot order a pull read before a remote edit the push then merged.
+MERGED_SOURCE_VERSIONS_KEY: Final = "merged_source_versions"
 
 # How many replaced versions a link keeps; the oldest are dropped first. Only
 # the pulls still queued when the push lands need one.
@@ -119,6 +126,53 @@ def superseded_versions(reference_data: str | None) -> frozenset[str]:
         return frozenset()
     return frozenset(
         version for version in recorded if isinstance(version, str) and version
+    )
+
+
+def parse_source_versions(raw: object) -> dict[str, datetime] | None:
+    """Per-source version times, from ``{"<source>": "<RFC 3339 time>"}``.
+
+    The times are the remote's own, so they order its versions without any
+    clock of ours. Precision past the microsecond is dropped. Anything
+    unreadable, even one source, reads as ``None``: an unknown version must
+    never look older than it is.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    parsed: dict[str, datetime] = {}
+    for source, value in raw.items():
+        if not (isinstance(source, str) and source and isinstance(value, str)):
+            return None
+        try:
+            at = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if at.tzinfo is None:
+            return None
+        parsed[source] = at
+    return parsed
+
+
+def merged_source_versions(reference_data: str | None) -> dict[str, datetime] | None:
+    """The source versions of the record a link's last push merged into."""
+    return parse_source_versions(
+        parse_reference_data(reference_data).get(MERGED_SOURCE_VERSIONS_KEY)
+    )
+
+
+def is_dominated(
+    event: Mapping[str, datetime] | None, merged: Mapping[str, datetime] | None
+) -> bool:
+    """Whether a pull read a version no newer, in every source, than a push merged.
+
+    Such a version is the merged record or an older one, so its content already
+    went through the push's merge. Unknown, empty, or a source the merged record
+    lacks is not dominated: when unsure, the pull is applied.
+    """
+    if not event or not merged:
+        return False
+    return all(
+        source in merged and at <= merged[source] for source, at in event.items()
     )
 
 

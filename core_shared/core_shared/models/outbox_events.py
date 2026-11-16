@@ -110,6 +110,13 @@ class ContactSyncEventData(BaseModel):
         "entries for keeps its own; when the link's base recorded entries, the "
         "source deleted them since the last sync and the list is cleared (#1909).",
     )
+    source_versions: dict[str, str] | None = Field(
+        default=None,
+        description="Per remote source, the version time of the record the "
+        "import read, as RFC 3339 strings (see core_shared.sync_base), or None "
+        "from a worker that records none. A record no newer in every source "
+        "than the one a push merged is skipped: the push already merged it (#1938).",
+    )
 
 
 # ── Sync Completed ───────────────────────────────────────────────────

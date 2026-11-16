@@ -231,6 +231,28 @@ class TestCreateContactSyncEvent:
 
         assert event.event_data["user_id"] == "user-1"
 
+    def test_event_data_carries_source_versions(self) -> None:
+        """The versions a pull read, so a push can order it (#1938)."""
+        versions = {"CONTACT/c1": "2026-11-01T10:00:00.123456789Z"}
+        event = OutboxEvent.create_contact_sync_event(
+            contact_data={"first_name": "Alice"},
+            integration_source="google",
+            external_id="people/c1",
+            user_id="user-1",
+            source_versions=versions,
+        )
+
+        assert event.event_data["source_versions"] == versions
+        parsed = ContactSyncEventData.model_validate(event.event_data)
+        assert parsed.source_versions == versions
+
+    def test_source_versions_default_to_none(
+        self, contact_sync_data: dict[str, Any]
+    ) -> None:
+        """An event queued before source versions still validates."""
+        model = ContactSyncEventData.model_validate(contact_sync_data)
+        assert model.source_versions is None
+
 
 # ── SyncCompletedEventData Tests ──────────────────────────────────────
 

@@ -3,7 +3,8 @@
 A worker's push records the synced base on the link while the backend may be
 recording its own keys on the same row. The patch is one statement that merges
 into the stored JSON, so neither writer can drop the other's keys. The versions
-a push replaced (#1938) are appended the same way.
+a push replaced, and the source versions it merged (#1938), are recorded the
+same way.
 """
 
 import json
@@ -14,6 +15,7 @@ from core_shared.repositories.integration_link_repository import (
 )
 from core_shared.sync_base import (
     MAX_SUPERSEDED_VERSIONS,
+    MERGED_SOURCE_VERSIONS_KEY,
     PENDING_IMPORT_KEY,
     SUPERSEDED_VERSIONS_KEY,
     SYNCED_ENTRIES_KEY,
@@ -207,5 +209,108 @@ class TestRecordSupersededVersions:
         await _seed_link(clean_database, user_id=OTHER_USER_ID, reference_data="{}")
 
         await self._record(clean_database, "e1")
+
+        assert await _reference_data(clean_database, OTHER_USER_ID) == {}
+
+
+_T1 = "2026-11-01T10:00:00Z"
+_T2 = "2026-11-01T11:00:00.123456789Z"
+
+
+@pytest.mark.integration
+class TestRecordMergedSourceVersions:
+    """A push records the source versions of the person it merged (#1938)."""
+
+    async def _record(
+        self, connection: AsyncConnection, versions: dict[str, str]
+    ) -> None:
+        await IntegrationLinkRepository(connection).record_merged_source_versions(
+            "google", REMOTE, versions, user_id=TEST_USER_ID
+        )
+
+    async def test_records_beside_the_stored_keys(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(
+            clean_database,
+            user_id=TEST_USER_ID,
+            reference_data=json.dumps(
+                {PENDING_IMPORT_KEY: True, SUPERSEDED_VERSIONS_KEY: ["e0"]}
+            ),
+        )
+
+        await self._record(clean_database, {"CONTACT/c": _T1})
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            PENDING_IMPORT_KEY: True,
+            SUPERSEDED_VERSIONS_KEY: ["e0"],
+            MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c": _T1},
+        }
+
+    async def test_keeps_the_later_version_of_each_source(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        """A push recorded out of order never moves a source back."""
+        await _seed_link(
+            clean_database,
+            user_id=TEST_USER_ID,
+            reference_data=json.dumps(
+                {MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c": _T2, "PROFILE/p": _T1}}
+            ),
+        )
+
+        await self._record(
+            clean_database,
+            {"CONTACT/c": _T1, "PROFILE/p": _T2, "PROFILE/q": _T1},
+        )
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            MERGED_SOURCE_VERSIONS_KEY: {
+                "CONTACT/c": _T2,
+                "PROFILE/p": _T2,
+                "PROFILE/q": _T1,
+            }
+        }
+
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            None,
+            "not json",
+            json.dumps({MERGED_SOURCE_VERSIONS_KEY: ["CONTACT/c"]}),
+            json.dumps({MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c": "not a time"}}),
+            json.dumps({MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c": 5}}),
+        ],
+    )
+    async def test_unreadable_records_start_empty(
+        self, clean_database: AsyncConnection, stored: str | None
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data=stored)
+
+        await self._record(clean_database, {"CONTACT/c": _T1})
+
+        assert await _reference_data(clean_database, TEST_USER_ID) == {
+            MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c": _T1}
+        }
+
+    @pytest.mark.parametrize(
+        "versions", [{}, {"CONTACT/c": "not a time"}, {"CONTACT/c": "2026-11-01"}]
+    )
+    async def test_records_nothing_without_readable_versions(
+        self, clean_database: AsyncConnection, versions: dict[str, str]
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data=None)
+
+        await self._record(clean_database, versions)
+
+        assert await _reference_data(clean_database, TEST_USER_ID) is None
+
+    async def test_records_only_on_the_owners_link(
+        self, clean_database: AsyncConnection
+    ) -> None:
+        await _seed_link(clean_database, user_id=TEST_USER_ID, reference_data="{}")
+        await _seed_link(clean_database, user_id=OTHER_USER_ID, reference_data="{}")
+
+        await self._record(clean_database, {"CONTACT/c": _T1})
 
         assert await _reference_data(clean_database, OTHER_USER_ID) == {}

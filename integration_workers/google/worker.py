@@ -8,8 +8,8 @@ It runs as a separate process from the main FastAPI application.
 
 import asyncio
 from collections import Counter
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -109,7 +109,12 @@ from group_mapping import _build_contact_group_mapping, _fetch_contact_group_map
 from group_naming import group_tag_path
 from group_translator import GoogleGroupNameTranslator
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
-from synced_entries import empty_at_source, raw_synced_entries, synced_entries_of
+from synced_entries import (
+    empty_at_source,
+    person_source_versions,
+    raw_synced_entries,
+    synced_entries_of,
+)
 from transformer import GOOGLE_CONTACT_SYNC_SCOPE, GoogleContactTransformer
 
 # Global settings instance
@@ -1222,7 +1227,10 @@ class PushOutcome:
     next pull to import. ``new_person`` is whether this push created the person,
     so it must not be left in Google if its link can't be recorded.
     ``replaced_versions`` are the etags Google held before the write: a pull
-    read at one of them is older than the push (#1938).
+    read at one of them is older than the push (#1938). ``merged_source_versions``
+    are the source versions of the person the push merged into: a pull read at
+    a version no newer in every source is older too, though its etag was never
+    seen.
     """
 
     person: dict[str, Any]
@@ -1231,6 +1239,7 @@ class PushOutcome:
     pending_import: bool = False
     new_person: bool = False
     replaced_versions: frozenset[str] = frozenset()
+    merged_source_versions: Mapping[str, str] = field(default_factory=dict)
 
 
 def _created_outcome(person: dict[str, Any], *, recreated: bool = False) -> PushOutcome:
@@ -1313,7 +1322,8 @@ async def _record_push_link(
     next pull skipping the contact. A push that left Google holding what local
     does not marks the link ``pending_import`` instead, which only the backend
     clears, when a pull is applied. The etags the push replaced are appended
-    too, so the backend skips a pull queued before it (#1938). The keys are
+    too, with the source versions of the person it merged into, so the backend
+    skips a pull queued before it (#1938). The keys are
     merged into ``reference_data`` beside the backend's own, each in one
     statement. A person this push created is removed again if the link can't
     be recorded.
@@ -1343,6 +1353,9 @@ async def _record_push_link(
             resource_name,
             sorted(outcome.replaced_versions),
             user_id=user_id,
+        )
+        await links.record_merged_source_versions(
+            "google", resource_name, outcome.merged_source_versions, user_id=user_id
         )
     except Exception:
         if outcome.new_person:
@@ -1384,6 +1397,8 @@ async def _update_or_recreate_contact_in_google(
     # Every version merged into - the read, and a conflict retry's refetch -
     # plus the one the link last synced: all older than this push.
     read_versions: set[str] = {etag} if etag else set()
+    # The source versions of each person merged into; the last was written over.
+    merged_versions: list[dict[str, str]] = []
 
     def merge(person: dict[str, Any]) -> dict[str, Any]:
         # Resolved from the first read alone: on a link with no recorded base
@@ -1405,6 +1420,7 @@ async def _update_or_recreate_contact_in_google(
         merges.append((merged, base))
         if person.get("etag"):
             read_versions.add(person["etag"])
+        merged_versions.append(person_source_versions(person.get("metadata") or {}))
         return merged.payload
 
     try:
@@ -1422,6 +1438,7 @@ async def _update_or_recreate_contact_in_google(
             synced_base=_base_after_update(result, merged, base, fallback),
             pending_import=merged.pending_import,
             replaced_versions=frozenset(read_versions - {result.get("etag")}),
+            merged_source_versions=merged_versions[-1],
         )
     except GoogleContactNotFoundError:
         logger.warning(
@@ -1992,6 +2009,8 @@ async def _emit_contact_sync_events(
                 etag=google_person.etag,
                 user_id=str(user_id),
                 sync_scope=GOOGLE_CONTACT_SYNC_SCOPE,
+                # What the backend orders it by against a push (#1938).
+                source_versions=person_source_versions(google_person.metadata) or None,
                 force_apply=force_apply,
                 skipped_addresses=transformer.skipped_addresses(google_person),
                 address_fallback_country=fallback_country,

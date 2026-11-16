@@ -119,6 +119,7 @@ class OutboxEvent(Base):
         address_fallback_country: str | None = None,
         synced_entries: dict[str, list[str]] | None = None,
         empty_at_source: Mapping[ContactSyncField, str] | None = None,
+        source_versions: Mapping[str, str] | None = None,
     ) -> OutboxEvent:
         """
         Create an outbox event for contact synchronization.
@@ -139,6 +140,8 @@ class OutboxEvent(Base):
                 read, if the worker records them (#1861)
             empty_at_source: The list fields the source holds no entries in,
                 each with the ``synced_entries`` field that records them (#1909)
+            source_versions: Per remote source, the version time the import
+                read, if the worker records them (#1938)
 
         Returns:
             OutboxEvent instance ready to be saved
@@ -160,6 +163,9 @@ class OutboxEvent(Base):
             address_fallback_country=address_fallback_country,
             synced_entries=synced_entries,
             empty_at_source=dict(empty_at_source or {}),
+            source_versions=(
+                None if source_versions is None else dict(source_versions)
+            ),
         )
         return cls(
             event_type=f"contact.{sync_type}",
