@@ -362,3 +362,51 @@ class TestResolveSyncedBase:
     def test_without_a_record_a_changed_person_has_an_empty_base(self) -> None:
         """Nothing tells an addition from a deletion, so keep everything."""
         assert resolve_synced_base(None, self.CURRENT, synced_version="e1") == {}
+
+
+class TestFieldsThePushLeavesOut:
+    """A field the payload omits keeps Google's value, unmerged (#1938).
+
+    Local holding no company leaves ``organizations`` out of the push, so
+    Google keeps the one it gained. Nothing merged it, so nothing else marks
+    it for import - and the backend skips the pulls older than the push.
+    """
+
+    def test_a_value_google_holds_in_an_omitted_field_is_pending_import(
+        self,
+    ) -> None:
+        merged = merge_for_push(
+            {"emailAddresses": [ADA]},
+            {
+                "emailAddresses": _google(ADA),
+                "organizations": _google({"name": "Analytical Engines"}),
+            },
+            synced_base={"emailAddresses": _keys("emailAddresses", ADA)},
+        )
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+    @pytest.mark.parametrize("held", [None, []])
+    def test_an_omitted_field_google_holds_nothing_in_is_not(
+        self, held: list[dict[str, Any]] | None
+    ) -> None:
+        merged = merge_for_push(
+            {"emailAddresses": [ADA]},
+            {"emailAddresses": _google(ADA), "organizations": held},
+            synced_base={"emailAddresses": _keys("emailAddresses", ADA)},
+        )
+
+        assert merged.pending_import is False
+
+    def test_a_field_google_reads_but_the_merge_does_not_own_is_ignored(
+        self,
+    ) -> None:
+        """``metadata`` and the like are never imported as contact data."""
+        merged = merge_for_push(
+            {"emailAddresses": [ADA]},
+            {"emailAddresses": _google(ADA), "metadata": {"sources": []}},
+            synced_base={"emailAddresses": _keys("emailAddresses", ADA)},
+        )
+
+        assert merged.pending_import is False

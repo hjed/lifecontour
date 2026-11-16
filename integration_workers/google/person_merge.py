@@ -360,6 +360,12 @@ def merge_for_push(
         if isinstance(policy, KeepUnsynced | SingletonUnsynced):
             kept[policy.field] = result.kept
             suppressed[policy.field] = result.suppressed
+    # A field the payload leaves out - local holds none, so the transformer
+    # omits it - keeps Google's value unmerged, which local may lack. The pulls
+    # older than this push are skipped (#1938), so the next pull must import it.
+    pending_import = pending_import or any(
+        current.get(field) for field in FIELD_POLICIES if field not in payload
+    )
     return PushMerge(
         payload=merged,
         kept=kept,

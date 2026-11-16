@@ -816,7 +816,9 @@ integration the missing piece, the **base**: per field, opaque keys
   not the time it finished, so an edit landing mid-push is still owed a push
   and a pull never applies over it.
 - A push that leaves the remote holding what local does not sets
-  `pending_import`. The backend then applies the next pull even though its
+  `pending_import`. That includes a field the push leaves out entirely (local
+  holds none, so it is not sent) while the remote holds a value: nothing merged
+  it, and the pulls older than the push are skipped (#1938). The backend then applies the next pull even though its
   version is the push's own — but never over a local edit still to push, so a
   failed push stays as safe as before. The stored version always stays the
   push's own.
