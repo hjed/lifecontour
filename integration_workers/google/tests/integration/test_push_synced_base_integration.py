@@ -654,3 +654,35 @@ async def test_a_second_push_moves_the_source_versions_forward(
     )
 
     assert _merged(await _link(db_session)) == {"CONTACT/cBASE": _PUSHED_AT}
+
+
+@pytest.mark.asyncio
+async def test_a_company_google_gained_while_local_has_none_is_pending_import(
+    db_session: AsyncSession,
+) -> None:
+    """The push leaves ``organizations`` out, so nothing merged the company.
+
+    The backend skips the pull that carried it, as older than the push (#1938);
+    only the marker gets it imported, from the push's own version.
+    """
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    company = [{**_CONTACT_SOURCE, "name": "Analytical Engines"}]
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "emailAddresses": _google(_HELD),
+            "organizations": company,
+        },
+        {
+            "etag": "etag_pushed",
+            "emailAddresses": _google(_HELD),
+            "organizations": company,
+        },
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert "organizations" not in sent
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
