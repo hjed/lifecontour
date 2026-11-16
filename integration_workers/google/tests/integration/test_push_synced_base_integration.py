@@ -15,7 +15,11 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from core_shared.sync_base import SUPERSEDED_VERSIONS_KEY, serialise_synced_entries
+from core_shared.sync_base import (
+    MERGED_SOURCE_VERSIONS_KEY,
+    SUPERSEDED_VERSIONS_KEY,
+    serialise_synced_entries,
+)
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -525,3 +529,128 @@ async def test_a_recreated_person_records_no_replaced_versions(
     assert SUPERSEDED_VERSIONS_KEY not in json.loads(
         (await _link(db_session)).reference_data
     )
+
+
+def _versioned(contact_at: str) -> dict[str, Any]:
+    """Person metadata with its CONTACT source's version time."""
+    return {"sources": [{"type": "CONTACT", "id": "cBASE", "updateTime": contact_at}]}
+
+
+def _merged(link: Any) -> dict[str, str]:
+    return dict(json.loads(link.reference_data)[MERGED_SOURCE_VERSIONS_KEY])
+
+
+_READ_AT = "2026-11-01T10:00:00Z"
+_RACED_AT = "2026-11-01T11:00:00Z"
+_PUSHED_AT = "2026-11-01T12:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_a_push_records_the_source_versions_it_merged(
+    db_session: AsyncSession,
+) -> None:
+    """The person read, not the one written: that is what the merge saw (#1938)."""
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "metadata": _versioned(_READ_AT),
+            "emailAddresses": _google(_HELD),
+        },
+        {
+            "etag": "etag_pushed",
+            "metadata": _versioned(_PUSHED_AT),
+            "emailAddresses": _google(_HELD),
+        },
+    )
+
+    await _push(db_session, client)
+
+    assert _merged(await _link(db_session)) == {"CONTACT/cBASE": _READ_AT}
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_retry_records_the_source_versions_it_refetched(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    refetched = {
+        "resourceName": _REMOTE,
+        "etag": "etag_raced",
+        "metadata": _versioned(_RACED_AT),
+        "emailAddresses": _google(_HELD),
+    }
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "metadata": _versioned(_READ_AT),
+            "emailAddresses": _google(_HELD),
+        },
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    async def update_after_a_race(**kwargs: Any) -> dict[str, Any]:
+        kwargs["rebase"](refetched)
+        return client.update_contact.return_value
+
+    client.update_contact.side_effect = update_after_a_race
+
+    await _push(db_session, client)
+
+    assert _merged(await _link(db_session)) == {"CONTACT/cBASE": _RACED_AT}
+
+
+@pytest.mark.asyncio
+async def test_a_person_without_source_versions_records_none(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    client = _client(
+        {"etag": "etag_synced", "emailAddresses": _google(_HELD)},
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    assert MERGED_SOURCE_VERSIONS_KEY not in json.loads(
+        (await _link(db_session)).reference_data
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_second_push_moves_the_source_versions_forward(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
+    await _push(
+        db_session,
+        _client(
+            {
+                "etag": "etag_synced",
+                "metadata": _versioned(_READ_AT),
+                "emailAddresses": _google(_HELD),
+            },
+            {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+        ),
+    )
+    await db_session.execute(
+        text(
+            "UPDATE sync_metadata SET last_synced_at = NOW() - interval '1 minute' "
+            "WHERE external_id = :ext"
+        ),
+        {"ext": _REMOTE},
+    )
+
+    await _push(
+        db_session,
+        _client(
+            {
+                "etag": "etag_pushed",
+                "metadata": _versioned(_PUSHED_AT),
+                "emailAddresses": _google(_HELD),
+            },
+            {"etag": "etag_pushed_again", "emailAddresses": _google(_HELD)},
+        ),
+    )
+
+    assert _merged(await _link(db_session)) == {"CONTACT/cBASE": _PUSHED_AT}

@@ -234,7 +234,8 @@ dual-write has been removed: every writer now persists the canonical link (plus
   address only when that record says it was imported
   (`core_shared.models.sync_metadata.recorded_address_fallback`).
   `synced_entries` and `pending_import` are the synced base and its marker,
-  below; `superseded_versions`, written by the push, marks pulls it outdated.
+  below; `superseded_versions` and `merged_source_versions`, written by the
+  push, mark the pulls it outdated.
 - `SyncMetadataRepository.upsert_contact_link` (manual Immich linking) and
   `repoint_contact_links` (contact merge) operate on `sync_metadata` only.
 - `SyncMetadataRepository.repoint_journal_links` does the same for journal merge.
@@ -819,18 +820,37 @@ integration the missing piece, the **base**: per field, opaque keys
   version is the push's own — but never over a local edit still to push, so a
   failed push stays as safe as before. The stored version always stays the
   push's own.
-- A push also records the remote versions it **replaced** — every version it
-  merged into (the read, and a conflict retry's refetch) plus the one the link
-  last synced — in `reference_data.superseded_versions`
-  (`IntegrationLinkRepository.record_superseded_versions`: one statement,
-  oldest first, the newest `MAX_SUPERSEDED_VERSIONS` kept; #1938). A pull read
-  before that push but processed after it carries one of them, and applied it
-  would replace every list the remote owns with its older copy. The backend
-  skips it (`superseded_by_push`) before any other check, full syncs and
-  `pending_import` included. Versions are compared rather than timestamps: a
-  pull event is stamped after its read, and worker and database clocks need not
-  agree. Google contacts records them; the helpers in `core_shared` take any
-  source, so other inbound paths can adopt them.
+- A pull read before a push but processed after it would replace every list
+  the remote owns with its older copy, undoing the push. The push records two
+  things, so the backend skips such a pull (`superseded_by_push`) before any
+  other check, full syncs and `pending_import` included (#1938):
+  - **The versions it replaced:** every etag it merged into (the read, and a
+    conflict retry's refetch) plus the one the link last synced, in
+    `reference_data.superseded_versions`
+    (`IntegrationLinkRepository.record_superseded_versions`: one statement,
+    oldest first, the newest `MAX_SUPERSEDED_VERSIONS` kept). This catches a
+    pull at a version the push saw.
+  - **The source versions it merged:** each remote source's own version time
+    (Google's `metadata.sources[].updateTime`, keyed `<type>/<id>`) of the
+    person the push merged into, in `reference_data.merged_source_versions`
+    (`record_merged_source_versions`: one statement, each source keeps its later
+    time). Pull events carry the same map as `source_versions`. An event no
+    newer in every source (`core_shared.sync_base.is_dominated`) is that person
+    or an older one, even at an etag the push never saw — read before a Google
+    edit the push then merged. Etags alone cannot order that.
+  - **Why this is safe:** the push writes under the person-etag precondition,
+    so it wrote over exactly the person it merged. Whatever an older event held
+    went through the push's merge, which decided its fate: kept and marked
+    `pending_import` when local lacks it, kept but never imported, or replaced
+    where local owns the field.
+  - **What still applies:** an event newer in any source, with a source the
+    merged person lacked, or without readable versions is applied as before.
+    So is the push's own version, so `pending_import` still imports it.
+  - **Clocks:** only the remote's version times are compared, with each other.
+    Our own timestamps are never used: a pull event is stamped after its read,
+    and worker and database clocks need not agree.
+  - **Scope:** Google contacts records both. The helpers in `core_shared` take
+    any source, so other inbound paths can adopt them (#1981).
 - A link recorded before bases existed falls back on the version:
   `remote_unchanged_since_sync` means the remote is its own base; otherwise
   the base is empty and the push keeps everything.

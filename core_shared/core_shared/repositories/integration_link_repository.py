@@ -5,7 +5,8 @@ This repository provides the unified link-lookup reads used by both the backend
 consumer and the integration workers, replacing the legacy
 ``external_references`` reads. Writes remain on the existing upsert paths,
 apart from :meth:`IntegrationLinkRepository.patch_reference_data` and
-:meth:`IntegrationLinkRepository.record_superseded_versions`, which a worker
+:meth:`IntegrationLinkRepository.record_superseded_versions` and
+:meth:`IntegrationLinkRepository.record_merged_source_versions`, which a worker
 uses to record per-link sync state without racing the backend's writes.
 
 The repository provides the link-lookup reads (plus the contact reads behind an
@@ -23,7 +24,12 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from core_shared.sync_base import MAX_SUPERSEDED_VERSIONS, SUPERSEDED_VERSIONS_KEY
+from core_shared.sync_base import (
+    MAX_SUPERSEDED_VERSIONS,
+    MERGED_SOURCE_VERSIONS_KEY,
+    SUPERSEDED_VERSIONS_KEY,
+    parse_source_versions,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -333,6 +339,81 @@ class IntegrationLinkRepository:
                 # Added versions rank after every recorded one.
                 "offset": _SUPERSEDED_RANK_OFFSET,
                 "keep": MAX_SUPERSEDED_VERSIONS,
+                "user_id": user_id,
+                "integration_source": integration_source,
+                "external_id": external_id,
+            },
+        )
+
+    async def record_merged_source_versions(
+        self,
+        integration_source: str,
+        external_id: str,
+        versions: Mapping[str, str],
+        *,
+        user_id: str,
+    ) -> None:
+        """Record the source versions of the record a push merged into (#1938).
+
+        Kept under ``MERGED_SOURCE_VERSIONS_KEY``, per source the later of the
+        stored and the given time, so a push recorded out of order never moves
+        a source back. ``versions`` that are not all readable record nothing;
+        a stored entry that is not a readable time is dropped. One statement,
+        like :meth:`patch_reference_data`, so the backend's keys on the same
+        row are never lost.
+        """
+        if not parse_source_versions(versions):
+            return
+        await self._conn.execute(
+            text("""
+                UPDATE sync_metadata AS link
+                SET reference_data = (
+                    stored.data || jsonb_build_object(
+                        CAST(:key AS text),
+                        (
+                            SELECT jsonb_object_agg(source, version)
+                            FROM (
+                                SELECT DISTINCT ON (source) source, version
+                                FROM (
+                                    SELECT recorded.key AS source,
+                                           recorded.value AS version
+                                    FROM jsonb_each(
+                                        CASE WHEN jsonb_typeof(stored.data -> CAST(:key AS text))
+                                                  = 'object'
+                                             THEN stored.data -> CAST(:key AS text)
+                                             ELSE '{}'::jsonb
+                                        END
+                                    ) AS recorded
+                                    WHERE jsonb_typeof(recorded.value) = 'string'
+                                      AND pg_input_is_valid(
+                                          recorded.value #>> '{}', 'timestamptz'
+                                      )
+                                    UNION ALL
+                                    SELECT added.key, added.value
+                                    FROM jsonb_each(CAST(:versions AS jsonb)) AS added
+                                ) AS candidates
+                                ORDER BY source,
+                                         CAST(version #>> '{}' AS timestamptz) DESC
+                            ) AS latest
+                        )
+                    )
+                )::text
+                FROM (
+                    SELECT id,
+                           CASE WHEN reference_data IS JSON OBJECT
+                                THEN reference_data::jsonb
+                                ELSE '{}'::jsonb
+                           END AS data
+                    FROM sync_metadata
+                    WHERE user_id = :user_id
+                      AND integration_source = :integration_source
+                      AND external_id = :external_id
+                ) AS stored
+                WHERE link.id = stored.id
+            """),
+            {
+                "key": MERGED_SOURCE_VERSIONS_KEY,
+                "versions": json.dumps(dict(versions)),
                 "user_id": user_id,
                 "integration_source": integration_source,
                 "external_id": external_id,

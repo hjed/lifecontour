@@ -6,15 +6,20 @@ only Google contacts.
 """
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from core_shared.sync_base import (
+    MERGED_SOURCE_VERSIONS_KEY,
     PENDING_IMPORT_KEY,
     SUPERSEDED_VERSIONS_KEY,
     SYNCED_ENTRIES_KEY,
     Winner,
     entry_key,
+    is_dominated,
+    merged_source_versions,
+    parse_source_versions,
     pending_import,
     recorded_synced_entries,
     remote_unchanged_since_sync,
@@ -135,6 +140,100 @@ class TestSupersededVersions:
     def test_entries_that_are_not_versions_are_ignored(self) -> None:
         reference_data = json.dumps({SUPERSEDED_VERSIONS_KEY: ["v1", 2, None, ""]})
         assert superseded_versions(reference_data) == frozenset({"v1"})
+
+
+class TestParseSourceVersions:
+    def test_reads_rfc3339_versions_to_the_microsecond(self) -> None:
+        raw = {
+            "CONTACT/c1": "2026-11-01T10:00:00.123456789Z",
+            "PROFILE/p1": "2026-10-01T09:00:00Z",
+        }
+        assert parse_source_versions(raw) == {
+            "CONTACT/c1": datetime(2026, 11, 1, 10, 0, 0, 123456, tzinfo=UTC),
+            "PROFILE/p1": datetime(2026, 10, 1, 9, 0, 0, tzinfo=UTC),
+        }
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            None,
+            "2026-11-01T10:00:00Z",
+            ["2026-11-01T10:00:00Z"],
+            {"CONTACT/c1": "not a time"},
+            {"CONTACT/c1": 5},
+            # No zone: it cannot be ordered against Google's.
+            {"CONTACT/c1": "2026-11-01T10:00:00"},
+            {"": "2026-11-01T10:00:00Z"},
+            # One unreadable source makes the whole record unreadable.
+            {"CONTACT/c1": "2026-11-01T10:00:00Z", "PROFILE/p1": "?"},
+        ],
+    )
+    def test_anything_unreadable_reads_as_none(self, raw: object) -> None:
+        assert parse_source_versions(raw) is None
+
+
+class TestMergedSourceVersions:
+    def test_reads_the_recorded_versions(self) -> None:
+        reference_data = json.dumps(
+            {MERGED_SOURCE_VERSIONS_KEY: {"CONTACT/c1": "2026-11-01T10:00:00Z"}}
+        )
+        assert merged_source_versions(reference_data) == {
+            "CONTACT/c1": datetime(2026, 11, 1, 10, 0, tzinfo=UTC)
+        }
+
+    @pytest.mark.parametrize(
+        "reference_data", [None, "not json", json.dumps({}), json.dumps({"x": 1})]
+    )
+    def test_nothing_recorded_reads_as_none(self, reference_data: str | None) -> None:
+        assert merged_source_versions(reference_data) is None
+
+
+_T1 = datetime(2026, 11, 1, 10, 0, tzinfo=UTC)
+_T2 = datetime(2026, 11, 1, 11, 0, tzinfo=UTC)
+
+
+class TestIsDominated:
+    """Whether every source of an event is no newer than the merged person."""
+
+    @pytest.mark.parametrize(
+        ("event", "merged"),
+        [
+            ({"CONTACT/c": _T1}, {"CONTACT/c": _T2}),
+            ({"CONTACT/c": _T2}, {"CONTACT/c": _T2}),
+            (
+                {"CONTACT/c": _T1, "PROFILE/p": _T1},
+                {"CONTACT/c": _T2, "PROFILE/p": _T1},
+            ),
+            # A source the merged person gained later.
+            ({"CONTACT/c": _T1}, {"CONTACT/c": _T2, "PROFILE/p": _T2}),
+        ],
+    )
+    def test_no_newer_in_every_source_is_dominated(
+        self, event: dict[str, datetime], merged: dict[str, datetime]
+    ) -> None:
+        assert is_dominated(event, merged) is True
+
+    @pytest.mark.parametrize(
+        ("event", "merged"),
+        [
+            ({"CONTACT/c": _T2}, {"CONTACT/c": _T1}),
+            # A profile change the push never merged.
+            (
+                {"CONTACT/c": _T1, "PROFILE/p": _T2},
+                {"CONTACT/c": _T2, "PROFILE/p": _T1},
+            ),
+            # A source the merged person did not have.
+            ({"CONTACT/c": _T1, "PROFILE/p": _T1}, {"CONTACT/c": _T2}),
+            ({}, {"CONTACT/c": _T2}),
+            ({"CONTACT/c": _T1}, {}),
+            (None, {"CONTACT/c": _T2}),
+            ({"CONTACT/c": _T1}, None),
+        ],
+    )
+    def test_anything_newer_or_unknown_is_not_dominated(
+        self, event: dict[str, datetime] | None, merged: dict[str, datetime] | None
+    ) -> None:
+        assert is_dominated(event, merged) is False
 
 
 class TestRemoteUnchangedSinceSync:

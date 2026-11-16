@@ -11,7 +11,7 @@ This processor implements production-grade resilience patterns:
 """
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 import structlog
@@ -41,6 +41,9 @@ from core_shared.repositories.integration_link_repository import (
 from core_shared.sync_base import (
     PENDING_IMPORT_KEY,
     SYNCED_ENTRIES_KEY,
+    is_dominated,
+    merged_source_versions,
+    parse_source_versions,
     pending_import,
     recorded_synced_entries,
     superseded_versions,
@@ -170,6 +173,25 @@ def _has_unpushed_local_changes(contact: Contact, link: SyncMetadata) -> bool:
     The same test the Google worker selects contacts to push by.
     """
     return contact.updated_at is not None and contact.updated_at > link.last_synced_at
+
+
+def _superseded_by_push(
+    link: SyncMetadata, version: str, source_versions: Mapping[str, str] | None
+) -> bool:
+    """Whether a push has already merged the version an inbound event read (#1938).
+
+    Either the push replaced that very version, or the version is no newer in
+    every source than the record the push merged into - which catches a pull
+    read before a remote edit the push then merged, an etag it never saw. The
+    push's own version is never older: what it left ``pending_import`` must
+    still be imported.
+    """
+    if version in superseded_versions(link.reference_data):
+        return True
+    return version != link.version_hash and is_dominated(
+        parse_source_versions(source_versions),
+        merged_source_versions(link.reference_data),
+    )
 
 
 def _skipped_update(
@@ -1049,16 +1071,17 @@ class OutboxEventProcessor:
         stored: Contact,
         new_version_hash: str,
         force_apply: bool,
+        source_versions: Mapping[str, str] | None,
     ) -> str | None:
         """Why a ``contact.updated`` event should write nothing, if it should not.
 
         Decided against the contact and link as read under their locks.
         """
-        # A version a push has replaced was read before that push: applying it
-        # would revert the push until the next pull (#1938). Checked first, as
-        # it differs from the link's version - and a full sync's copy, or what
-        # a push left ``pending_import``, is no newer.
-        if new_version_hash in superseded_versions(link.reference_data):
+        # A version a push already merged was read before that push: applying
+        # it would revert the push until the next pull (#1938). Checked first,
+        # as it differs from the link's version - and a full sync's copy, or
+        # what a push left ``pending_import``, is no newer.
+        if _superseded_by_push(link, new_version_hash, source_versions):
             return "superseded_by_push"
         # Idempotency: the version is unchanged - unless the event is from a
         # full sync, which re-applies every person, or a push kept entries the
@@ -1176,7 +1199,11 @@ class OutboxEventProcessor:
             locked_version = sync_metadata.version_hash
 
             reason = self._update_skip_reason(
-                sync_metadata, stored, new_version_hash, payload.force_apply
+                sync_metadata,
+                stored,
+                new_version_hash,
+                payload.force_apply,
+                payload.source_versions,
             )
             if reason is not None:
                 logger.info(

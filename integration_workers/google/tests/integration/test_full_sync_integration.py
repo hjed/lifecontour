@@ -80,7 +80,19 @@ class TestFullSyncIntegration:
             else:
                 return {
                     "connections": [
-                        {"resourceName": "people/full_sync_2", "etag": "etag_2"}
+                        {
+                            "resourceName": "people/full_sync_2",
+                            "etag": "etag_2",
+                            "metadata": {
+                                "sources": [
+                                    {
+                                        "type": "CONTACT",
+                                        "id": "c2",
+                                        "updateTime": "2026-11-01T10:00:00.5Z",
+                                    }
+                                ]
+                            },
+                        }
                     ],
                     "nextSyncToken": "new_sync_token_after_full_sync",
                 }
@@ -180,6 +192,26 @@ class TestFullSyncIntegration:
                 )
             )
             assert [row[0] for row in result_force] == [True, True]
+
+            # Each event carries the source versions Google read it at, so the
+            # backend can tell it from one a push already merged (#1938); a
+            # person without them carries none.
+            result_versions = await db_session.execute(
+                text(
+                    """
+                    SELECT (event_data::jsonb)->>'external_id',
+                           (event_data::jsonb)->'source_versions'
+                    FROM outbox_events
+                    WHERE (event_data::jsonb)->>'external_id'
+                          IN ('people/full_sync_1', 'people/full_sync_2')
+                    ORDER BY 1
+                    """
+                )
+            )
+            assert result_versions.all() == [
+                ("people/full_sync_1", None),
+                ("people/full_sync_2", {"CONTACT/c2": "2026-11-01T10:00:00.5Z"}),
+            ]
 
             # Neither person holds an address, so the backend clears addresses
             # Google deleted since the last sync (#1909).
