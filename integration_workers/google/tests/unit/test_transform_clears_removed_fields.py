@@ -15,6 +15,8 @@ important dates.
 
 from typing import Any
 
+import pytest
+
 
 def _contact(**fields: Any) -> dict[str, Any]:
     """A minimal contact dict as the push paths build it."""
@@ -108,3 +110,59 @@ class TestNicknameClearsGoogle:
         result = _transform_contact_to_google_person(_contact())
 
         assert "nicknames" not in result
+
+
+class TestCompanyClearsGoogle:
+    """A company and job title cleared locally are sent empty (#1822, #1938).
+
+    The push merge decides from the synced base whether Google's company was
+    cleared locally or added in Google since, so it must see the field.
+    """
+
+    def test_set_company_is_sent(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(
+            _contact(company="Engines", job_title=None)
+        )
+
+        assert result["organizations"] == [{"current": True, "name": "Engines"}]
+
+    @pytest.mark.parametrize(
+        ("company", "job_title"), [(None, None), ("  ", ""), ("", None)]
+    )
+    def test_cleared_company_is_sent_empty(
+        self, company: str | None, job_title: str | None
+    ) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(
+            _contact(company=company, job_title=job_title)
+        )
+
+        assert result["organizations"] == []
+
+    def test_company_keys_absent_leave_the_field_alone(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact())
+
+        assert "organizations" not in result
+
+
+class TestNotesClearGoogle:
+    """Every note deleted locally is sent as no biographies (#1822, #1938)."""
+
+    def test_no_notes_left_clears_biographies(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact(notes=[]))
+
+        assert result["biographies"] == []
+
+    def test_notes_key_absent_leaves_the_field_alone(self) -> None:
+        from worker import _transform_contact_to_google_person
+
+        result = _transform_contact_to_google_person(_contact())
+
+        assert "biographies" not in result

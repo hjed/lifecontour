@@ -15,7 +15,7 @@ with it canonical: two entries are one when any of their keys match
 never held locally.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final, Literal
 
 import phonenumbers
@@ -25,8 +25,10 @@ from pydantic import BaseModel, ValidationError
 
 from api_models import (
     GoogleAddress,
+    GoogleBiography,
     GoogleBirthday,
     GoogleEmailAddress,
+    GoogleOrganization,
     GooglePerson,
     GooglePhoneNumber,
 )
@@ -35,13 +37,21 @@ from transformer import (
     import_birthday,
     import_email,
     import_phone,
+    imported_organization_index,
 )
 
 type Keys = frozenset[str]
 
 _NO_KEYS: Final[Keys] = frozenset()
 
-type BaseField = Literal["emailAddresses", "phoneNumbers", "addresses", "birthdays"]
+type BaseField = Literal[
+    "emailAddresses",
+    "phoneNumbers",
+    "addresses",
+    "birthdays",
+    "organizations",
+    "biographies",
+]
 
 # The Google fields the push merges against a base, in the person's raw names.
 BASE_FIELDS: Final[tuple[BaseField, ...]] = (
@@ -49,6 +59,8 @@ BASE_FIELDS: Final[tuple[BaseField, ...]] = (
     "phoneNumbers",
     "addresses",
     "birthdays",
+    "organizations",
+    "biographies",
 )
 
 
@@ -142,6 +154,27 @@ def birthday_keys(birthday: GoogleBirthday) -> Keys:
     )
 
 
+def organization_keys(organization: GoogleOrganization) -> Keys:
+    """The organization's key: its company and job title, stripped as inbound reads them.
+
+    None when both are blank, which inbound reads as no company at all. Only the
+    organization inbound imports is in a base (:func:`imported_organization_index`).
+    """
+    company = (organization.name or "").strip()
+    title = (organization.title or "").strip()
+    if not company and not title:
+        return _NO_KEYS
+    return frozenset({entry_key("organization", company, title)})
+
+
+def biography_keys(biography: GoogleBiography) -> Keys:
+    """The biography's key: its text, stripped but with its case, as a note holds it."""
+    value = biography.value.strip()
+    if not value:
+        return _NO_KEYS
+    return frozenset({entry_key("biography", value)})
+
+
 def _raw[M: BaseModel](
     model: type[M], keys: Callable[[M], Keys]
 ) -> Callable[[Mapping[str, Any]], Keys]:
@@ -165,8 +198,20 @@ def raw_entry_keys(
             GoogleAddress, lambda address: address_keys(address, fallback_country)
         ),
         "birthdays": _raw(GoogleBirthday, birthday_keys),
+        "organizations": _raw(GoogleOrganization, organization_keys),
+        "biographies": _raw(GoogleBiography, biography_keys),
     }
     return readers[field](entry)
+
+
+def _imported[E](
+    field: BaseField, entries: Sequence[E], current: Sequence[object]
+) -> list[E]:
+    """The entries of ``field`` inbound imports: one organization, every other entry."""
+    if field != "organizations":
+        return list(entries)
+    index = imported_organization_index(current)
+    return [] if index is None else [entries[index]]
 
 
 def synced_entries_of(
@@ -182,6 +227,15 @@ def synced_entries_of(
         "phoneNumbers": [phone_keys(p) for p in person.phone_numbers],
         "addresses": [address_keys(a, fallback_country) for a in person.addresses],
         "birthdays": [birthday_keys(b) for b in person.birthdays],
+        "organizations": [
+            organization_keys(o)
+            for o in _imported(
+                "organizations",
+                person.organizations,
+                [o.current for o in person.organizations],
+            )
+        ],
+        "biographies": [biography_keys(b) for b in person.biographies],
     }
     return {field: _NO_KEYS.union(*keys) for field, keys in keyed.items()}
 
@@ -190,22 +244,21 @@ def raw_synced_entries(
     person: Mapping[str, Any], fallback_country: str | None
 ) -> SyncedEntries:
     """:func:`synced_entries_of` for a raw People API person, as the push holds it."""
-    return {
-        field: _NO_KEYS.union(
-            *(
-                raw_entry_keys(field, entry, fallback_country)
-                for entry in person.get(field) or []
-            )
+    synced: dict[str, Keys] = {}
+    for field in BASE_FIELDS:
+        entries: list[Mapping[str, Any]] = person.get(field) or []
+        imported = _imported(field, entries, [e.get("current") for e in entries])
+        synced[field] = _NO_KEYS.union(
+            *(raw_entry_keys(field, entry, fallback_country) for entry in imported)
         )
-        for field in BASE_FIELDS
-    }
+    return synced
 
 
 # The contact lists inbound sends as None when Google holds no entries in them,
-# each with the base field that records what Google held. Notes join once
-# biographies are in the base (#1925).
+# each with the base field that records what Google held.
 LIST_BASES: Final[Mapping[ContactSyncField, BaseField]] = {
     ContactSyncField.ADDRESSES: "addresses",
+    ContactSyncField.NOTES: "biographies",
 }
 
 
@@ -218,6 +271,7 @@ def empty_at_source(person: GooglePerson) -> dict[ContactSyncField, BaseField]:
     """
     held: dict[ContactSyncField, list[Any]] = {
         ContactSyncField.ADDRESSES: person.addresses,
+        ContactSyncField.NOTES: person.biographies,
     }
     return {field: base for field, base in LIST_BASES.items() if not held[field]}
 

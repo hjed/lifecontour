@@ -17,7 +17,7 @@ from core_shared.models.contacts.entities import Contact
 
 from api_models import GooglePerson
 from group_translator import GoogleGroupNameTranslator
-from person_merge import FIELD_POLICIES, merge_with_current_person
+from person_merge import FIELD_POLICIES, merge_for_push, merge_with_current_person
 from transformer import GoogleContactTransformer
 from worker import _build_reverse_group_mapping, _transform_contact_to_google_person
 
@@ -82,10 +82,10 @@ def _current_person() -> dict[str, Any]:
     }
 
 
-def _push_contact(contact: Contact, *, with_organization: bool) -> dict[str, Any]:
+def _push_contact(contact: Contact) -> dict[str, Any]:
     """The contact dict a push builds its payload from, as the loaders shape it.
 
-    The cron push loads no company or job title; the event push does.
+    Both push paths load the same fields, company and job title included.
     """
     loaded: dict[str, Any] = {
         "first_name": contact.first_name,
@@ -93,6 +93,8 @@ def _push_contact(contact: Contact, *, with_organization: bool) -> dict[str, Any
         "middle_name": contact.middle_name,
         "nick_name": contact.nick_name,
         "is_favourite": contact.is_favourite,
+        "company": contact.company,
+        "job_title": contact.job_title,
         "methods": [
             {
                 "method_type": method.method_type.value,
@@ -131,9 +133,6 @@ def _push_contact(contact: Contact, *, with_organization: bool) -> dict[str, Any
         ],
         "group_name_to_resource": {},
     }
-    if with_organization:
-        loaded["company"] = contact.company
-        loaded["job_title"] = contact.job_title
     return loaded
 
 
@@ -162,7 +161,6 @@ def test_every_pushed_field_has_a_merge_policy() -> None:
     assert payload.keys() == FIELD_POLICIES.keys()
 
 
-@pytest.mark.parametrize("with_organization", [False, True], ids=["cron", "event"])
 @pytest.mark.parametrize(
     ("field", "entry"),
     [
@@ -172,15 +170,13 @@ def test_every_pushed_field_has_a_merge_policy() -> None:
     ],
 )
 def test_an_unchanged_round_trip_keeps_what_inbound_skipped(
-    field: str, entry: dict[str, Any], with_organization: bool
+    field: str, entry: dict[str, Any]
 ) -> None:
     current = _current_person()
     contact = GoogleContactTransformer(user_id="1").transform_person(
         GooglePerson.model_validate(current)
     )
-    payload = _transform_contact_to_google_person(
-        _push_contact(contact, with_organization=with_organization)
-    )
+    payload = _transform_contact_to_google_person(_push_contact(contact))
 
     merged = merge_with_current_person(payload, current)
 
@@ -209,11 +205,19 @@ def _clear_methods(contact: Contact) -> None:
     contact.methods = []
 
 
+def _clear_company(contact: Contact) -> None:
+    contact.company = None
+    contact.job_title = None
+
+
+def _clear_notes(contact: Contact) -> None:
+    contact.notes = []
+
+
 def _unchanged(contact: Contact) -> None:
     return None
 
 
-@pytest.mark.parametrize("with_organization", [False, True], ids=["cron", "event"])
 @pytest.mark.parametrize(
     "edit",
     [
@@ -222,11 +226,19 @@ def _unchanged(contact: Contact) -> None:
         _set_nickname(None),
         _clear_addresses,
         _clear_methods,
+        _clear_notes,
     ],
-    ids=["unchanged", "nickname-renamed", "nickname-cleared", "addresses", "methods"],
+    ids=[
+        "unchanged",
+        "nickname-renamed",
+        "nickname-cleared",
+        "addresses",
+        "methods",
+        "notes",
+    ],
 )
 def test_a_pull_after_the_push_reads_back_what_was_pushed(
-    edit: Callable[[Contact], None], with_organization: bool
+    edit: Callable[[Contact], None],
 ) -> None:
     """Keeping an entry must not make it the value the next pull imports.
 
@@ -237,7 +249,7 @@ def test_a_pull_after_the_push_reads_back_what_was_pushed(
     current = _current_person()
     contact = _pull(current)
     edit(contact)
-    pushed = _push_contact(contact, with_organization=with_organization)
+    pushed = _push_contact(contact)
     payload = _transform_contact_to_google_person(pushed)
 
     after_push = {**current, **merge_with_current_person(payload, current)}
@@ -246,10 +258,45 @@ def test_a_pull_after_the_push_reads_back_what_was_pushed(
         **merge_with_current_person(payload, after_push),
     }
 
-    assert _push_contact(_pull(after_push), with_organization=with_organization) == (
-        pushed
-    )
+    assert _push_contact(_pull(after_push)) == pushed
     assert after_second_push == after_push
+
+
+def test_a_cleared_company_reads_back_cleared() -> None:
+    """Google's owned organization goes; with no other, the pull reads none."""
+    current = {
+        **_current_person(),
+        "organizations": _IMPORTED["organizations"],
+    }
+    contact = _pull(current)
+    _clear_company(contact)
+    pushed = _push_contact(contact)
+
+    merged = merge_for_push(_transform_contact_to_google_person(pushed), current)
+    after_push = {**current, **merged.payload}
+
+    assert _push_contact(_pull(after_push)) == pushed
+    assert merged.pending_import is False
+
+
+def test_a_cleared_company_leaves_the_next_organization_owed_to_the_pull() -> None:
+    """The accepted edge (#1938): another organization is what inbound reads next.
+
+    Local cannot hold it, so the push keeps it and marks it for the next pull
+    rather than deleting every organization Google holds.
+    """
+    current = _current_person()
+    contact = _pull(current)
+    _clear_company(contact)
+
+    merged = merge_for_push(
+        _transform_contact_to_google_person(_push_contact(contact)), current
+    )
+
+    assert merged.payload["organizations"] == [
+        _writable(org) for org in _UNIMPORTED["organizations"]
+    ]
+    assert merged.pending_import is True
 
 
 # Groups whose names inbound must sanitise or split before they are tags.
@@ -354,9 +401,7 @@ def test_a_countryless_address_the_pull_imported_is_owned(
     person = GooglePerson.model_validate(current)
     contact = transformer.transform_person(person)
     edit(contact)
-    payload = _transform_contact_to_google_person(
-        _push_contact(contact, with_organization=False)
-    )
+    payload = _transform_contact_to_google_person(_push_contact(contact))
 
     merged = merge_with_current_person(
         payload,

@@ -123,7 +123,12 @@ class TestLoadFullContactIncludesTags:
 
         from worker import _load_full_contact
 
-        # Mock each database query in order: methods, addresses, notes, important_dates
+        # Mock each database query in order: company, methods, addresses,
+        # notes, important_dates
+        organization_result = MagicMock()
+        organization_result.fetchone.return_value = MagicMock(
+            company=None, job_title=None
+        )
         methods_result = MagicMock()
         methods_result.fetchall.return_value = []
         addresses_result = MagicMock()
@@ -134,6 +139,7 @@ class TestLoadFullContactIncludesTags:
         dates_result.fetchall.return_value = []
 
         mock_session.execute.side_effect = [
+            organization_result,
             methods_result,
             addresses_result,
             notes_result,

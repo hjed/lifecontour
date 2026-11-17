@@ -5,6 +5,7 @@ Handles the mapping between Google People API response structures and our
 internal Contact domain entities.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import structlog
@@ -431,17 +432,12 @@ class GoogleContactTransformer:
         self, organizations: list[Any]
     ) -> tuple[str | None, str | None]:
         """Extract company and job title from Google organizations."""
-        if not organizations:
+        index = imported_organization_index(
+            [getattr(org, "current", None) for org in organizations]
+        )
+        if index is None:
             return (None, None)
-
-        selected_org = None
-        for org in organizations:
-            if hasattr(org, "current") and org.current is True:
-                selected_org = org
-                break
-
-        if selected_org is None:
-            selected_org = organizations[0]
+        selected_org = organizations[index]
 
         company = None
         if hasattr(selected_org, "name") and selected_org.name:
@@ -569,6 +565,18 @@ class GoogleContactTransformer:
 # (``person_merge.py``) asks the same functions, so an entry a push treats as
 # owned is exactly one the import reads: whatever these reject, the push keeps
 # in Google (#1788).
+
+
+def imported_organization_index(current: Sequence[object]) -> int | None:
+    """The organization inbound reads into company and job title, by position.
+
+    The first marked ``current``, else the first: given each organization's
+    ``current`` flag in order. The push and the synced base choose with it too,
+    so all three agree on which organization the contact owns.
+    """
+    if not current:
+        return None
+    return next((index for index, flag in enumerate(current) if flag is True), 0)
 
 
 def select_nickname(nicknames: list[GoogleNickname]) -> GoogleNickname | None:

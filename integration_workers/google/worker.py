@@ -274,7 +274,10 @@ async def find_contacts_to_push(
 
 async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str, Any]:
     """
-    Load full contact data including methods, addresses, and notes.
+    Load full contact data including company, methods, addresses, and notes.
+
+    Both push paths load through here, so both send every field the contact
+    owns - a field left out of the push keeps Google's value (#1787).
 
     Args:
         session: Database session
@@ -283,6 +286,16 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     Returns:
         Dictionary with full contact data
     """
+    organization_stmt = text("""
+        SELECT company, job_title
+        FROM contacts
+        WHERE id = :contact_id
+    """)
+    organization_result = await session.execute(
+        organization_stmt, {"contact_id": contact_id}
+    )
+    organization_row = organization_result.fetchone()
+
     # Load contact methods
     methods_stmt = text("""
         SELECT id, method_type, value, label, is_primary, is_archived
@@ -367,6 +380,8 @@ async def _load_full_contact(session: AsyncSession, contact_id: int) -> dict[str
     ]
 
     return {
+        "company": organization_row.company if organization_row else None,
+        "job_title": organization_row.job_title if organization_row else None,
         "methods": methods,
         "addresses": addresses,
         "notes": notes,
@@ -672,15 +687,15 @@ def _transform_contact_to_google_person(contact: dict[str, Any]) -> dict[str, An
     if "addresses" in contact:
         person_data["addresses"] = _transform_addresses(contact["addresses"] or [])
 
-    # Transform notes to biographies
-    biographies = _transform_notes(contact.get("notes", []))
-    if biographies:
-        person_data["biographies"] = biographies
+    # Notes, company and job title are sent even when empty, whenever they
+    # were loaded: the push merge tells a value cleared locally from one Google
+    # added since the last sync by the synced base, so it must see the field
+    # (#1938). Left out, Google's value would stand and the next pull restore it.
+    if "notes" in contact:
+        person_data["biographies"] = _transform_notes(contact["notes"] or []) or []
 
-    # Transform company and job_title to organizations
-    organizations = _transform_organizations(contact)
-    if organizations:
-        person_data["organizations"] = organizations
+    if "company" in contact or "job_title" in contact:
+        person_data["organizations"] = _transform_organizations(contact) or []
 
     # Transform tags to Google group memberships
     tag_names = contact.get("tags", [])
@@ -3790,7 +3805,7 @@ async def _push_contact_to_google_for_event(
     # Load base contact data from DB
     base_stmt = text("""
         SELECT first_name, last_name, middle_name, nick_name, is_favourite,
-               company, job_title, updated_at
+               updated_at
         FROM contacts
         WHERE id = :contact_id
     """)
@@ -3811,12 +3826,7 @@ async def _push_contact_to_google_for_event(
     contact["middle_name"] = base_row.middle_name
     contact["nick_name"] = base_row.nick_name
     contact["is_favourite"] = base_row.is_favourite
-    contact["company"] = base_row.company if hasattr(base_row, "company") else None
-    contact["job_title"] = (
-        base_row.job_title if hasattr(base_row, "job_title") else None
-    )
-
-    # Load full contact data (methods, addresses, notes, tags, important_dates)
+    # Load full contact data (company, methods, addresses, notes, tags, dates)
     full_data = await _load_full_contact(session, contact_id)
     contact.update(full_data)
 
