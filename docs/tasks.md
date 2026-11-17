@@ -40,7 +40,7 @@ Read these first when working on the active product-alignment streams:
 - **[Integration Architecture & Strava Product Specification](./product-specifications/integration-architecture-and-strava-product-specification.md)** - event bus migration and Strava integration
 - **[Activity History Product Specification](./product-specifications/activity-history-product-specification.md)** - unified, event-driven activity history across contacts and journals
 - **[Home Dashboard & Tasks Product Specification](./product-specifications/home-dashboard-and-tasks-product-specification.md)** - the journal-anchored Tasks entity and the home dashboard that replaces the placeholder home page
-- **[Task Lists & Navigation Product Specification](./product-specifications/task-lists-and-navigation-product-specification.md)** - task lists as a second home for tasks (due dates, recurrence, series template lists, search), the global Create button and the mobile navigation revamp; partly supersedes the Home Dashboard & Tasks specification
+- **[Task Lists & Navigation Product Specification](./product-specifications/task-lists-and-navigation-product-specification.md)** - task lists as a second home for tasks (due dates, recurrence, series template lists, search), the global New button and the mobile navigation revamp; partly supersedes the Home Dashboard & Tasks specification
 - **[Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)** - every entity owned by exactly one user (contacts first), owner-scoped reads/writes across REST, MCP, search and integrations, and the single-user data migration
 
 ---
@@ -352,6 +352,23 @@ Read these first when working on the active product-alignment streams:
 - ITER20-005: Closure — architecture documents, divergence resolution, grep gates
 
 **Reference:** [Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)
+
+### [Iteration 21: Task Lists and Navigation](./tasks/iteration-21-task-lists-and-navigation.md)
+**Status:** 📋 PLANNED — 8 sub-iterations, 115 phases (one PR each); per-phase detail in the [iteration document](./tasks/iteration-21-task-lists-and-navigation.md)
+**Dependencies:** Iteration 18 (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), Iteration 20 (entity ownership), journal series, MeiliSearch indexing through the transactional outbox, the design-system sync
+**Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable through a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar, while journal-only tasks keep behaving exactly as today
+
+**Sub-Iterations:**
+- ITER21-001: Lists and the list-task model, API and MCP — task lists, tasks that live on a list with an optional due date or due journal, flag and icon, overdue instead of lapse, journal deletion no longer blocked by list tasks, list and task history
+- ITER21-002: Tasks in the web app — sidebar Tasks section, `/tasks` overview, list page with drag reordering and a Completed group, archived lists page, task details panel, icon picker
+- ITER21-003: New button and mobile navigation — one New dialog for tasks, journals and contacts; a bottom tab bar, Tags controls and a More page replacing the hamburger sheet on phones
+- ITER21-004: Dashboard and daily summary for list tasks — dated and overdue list tasks on the Tasks card, in `list_upcoming_tasks` and in the daily summary
+- ITER21-005: List ↔ journal association — a list belongs to one journal, shows on its page, and surfaces as one dashboard row while the journal is upcoming
+- ITER21-006: Recurring tasks — completing a recurring list task creates the next copy, undated, by interval, or due in the next journal of a series
+- ITER21-007: Templates and series copies — templates at `/tasks/templates`, Use template, per-journal instance lists for a series, timely visibility and auto-archive
+- ITER21-008: Tasks and lists in search — open tasks and unarchived lists in global search and its MCP tool, kept fresh by task, list, journal and contact changes
+
+**Reference:** [Task Lists and Navigation Product Specification](./product-specifications/task-lists-and-navigation-product-specification.md)
 
 ---
 
