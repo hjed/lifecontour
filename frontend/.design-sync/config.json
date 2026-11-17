@@ -31,6 +31,7 @@
     "UserMenu": { "cardMode": "single", "primaryStory": "OpenMenu" },
     "Toaster": { "cardMode": "single", "primaryStory": "Variants" },
     "MobileSidebar": { "cardMode": "single", "viewport": "420x760" },
+    "NewDialog": { "cardMode": "single", "viewport": "820x760" },
     "ActivityFeed": { "cardMode": "column" },
     "Calendar": { "cardMode": "column" }
   },
@@ -77,6 +78,7 @@
     "Sidebar": "src/components/layout/Sidebar.tsx",
     "DesktopSidebar": "src/components/layout/Sidebar.tsx",
     "MobileSidebar": "src/components/layout/Sidebar.tsx",
+    "NewDialog": "src/components/layout/new-dialog/NewDialog.tsx",
     "Breadcrumb": "src/components/navigation/Breadcrumb.tsx",
     "UserMenu": "src/components/auth/UserMenu.tsx",
     "ActivityFeed": "src/components/history/ActivityFeed.tsx",
@@ -127,6 +129,7 @@
     "Sidebar": ".design-sync/docs/Sidebar.md",
     "DesktopSidebar": ".design-sync/docs/DesktopSidebar.md",
     "MobileSidebar": ".design-sync/docs/MobileSidebar.md",
+    "NewDialog": ".design-sync/docs/NewDialog.md",
     "Breadcrumb": ".design-sync/docs/Breadcrumb.md",
     "UserMenu": ".design-sync/docs/UserMenu.md",
     "ActivityFeed": ".design-sync/docs/ActivityFeed.md",

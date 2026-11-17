@@ -4,7 +4,8 @@
  * Main header component with home icon and centered search.
  *
  * Features a prominent home icon on the left, centered global search box,
- * and user menu/theme toggle on the right. Navigation links moved to sidebar.
+ * and the New control, theme toggle and user menu on the right. Navigation
+ * links moved to sidebar.
  */
 
 import Link from 'next/link';
@@ -14,6 +15,7 @@ import { UserMenu } from '@/components/auth/UserMenu';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { GlobalSearch } from '@/components/search/GlobalSearch';
 import { MobileSidebar } from './Sidebar';
+import { NewDialog } from './new-dialog';
 
 export function Header() {
   const { state } = useAuth();
@@ -46,6 +48,7 @@ export function Header() {
 
         {/* Right side - Theme Toggle and User Menu */}
         <div className='flex items-center space-x-2'>
+          {state.isAuthenticated && <NewDialog />}
           <button
             className='border-input bg-background hover:bg-accent hover:text-accent-foreground inline-flex h-8 w-8 items-center justify-center rounded-md border px-0'
             onClick={() => {

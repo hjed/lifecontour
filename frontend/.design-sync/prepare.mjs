@@ -63,7 +63,7 @@ console.error('  types: types/ declaration tree emitted');
 // This file provides that entry. It re-exports EXACTLY the components in
 // componentSrcMap and no more: `exportedNames()` reads this file to build the
 // component list, so re-exporting the whole tree would balloon the synced set
-// from the intended 47 primaries to all 158 exports.
+// from the intended 48 primaries to all 159 exports.
 const cfg = JSON.parse(readFileSync('.design-sync/config.json', 'utf8'));
 const byModule = new Map();
 for (const [name, src] of Object.entries(cfg.componentSrcMap)) {

@@ -55,6 +55,7 @@ export { toast } from 'sonner';
 export * from '../src/components/shared/ExternalLinksDisplay';
 export * from '../src/components/layout/Header';
 export * from '../src/components/layout/Sidebar';
+export * from '../src/components/layout/new-dialog/NewDialog';
 export * from '../src/components/navigation/Breadcrumb';
 export * from '../src/components/auth/UserMenu';
 export * from '../src/components/history/ActivityFeed';

@@ -56,14 +56,14 @@ Repo-specific gotchas for future syncs. Read this before re-running.
 ## Scope
 
 - Synced: `ui/` primitives plus shared app chrome (`layout/`, `navigation/`,
-  `auth/UserMenu`, `history/`, `shared/`). **47 primary components.**
+  `auth/UserMenu`, `history/`, `shared/`). **48 primary components.**
 - Deliberately excluded: the ~130 feature components under `journals/`,
   `contacts/`, `integrations/`, `settings/`, `search/` — app features bound to
   the API and React Query, not design-system parts.
 - `auth/AuthGuard` is excluded on purpose: a redirect gate that renders nothing.
-- The 40 in-scope files export **158** components (shadcn compounds ship all
-  their parts). All 158 are in the bundle and importable from `window.Lifecontour`; only
-  the 47 primaries get cards and `.d.ts` contracts, with parts composed into
+- The 41 in-scope files export **159** components (shadcn compounds ship all
+  their parts). All 159 are in the bundle and importable from `window.Lifecontour`; only
+  the 48 primaries get cards and `.d.ts` contracts, with parts composed into
   their parent's preview.
 
 ## The two generated inputs (`prepare.mjs`)
@@ -113,7 +113,7 @@ contract at all. `prepare.mjs` runs a declaration-only `tsc`
 `findTypesRoot()` discovers by convention.
 
 Deliberately: `exportedNames()` reads only `<pkg>/index.d.ts`, which does not
-exist, so this does **not** balloon the component list from 47 to 158.
+exist, so this does **not** balloon the component list from 48 to 159.
 
 The tsconfig excludes test helpers (`__tests__`, `__mocks__`, `test-utils/`,
 `*test-helpers*`); without those exclusions tsc exits non-zero on missing `jest`
