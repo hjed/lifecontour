@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the target product behaviour for **Task Lists** — a second home for tasks alongside journals — and for the navigation changes that make them reachable: a new sidebar section, a global Create button, and a revamped mobile navigation.
+This document defines the target product behaviour for **Task Lists** — a second home for tasks alongside journals — and for the navigation changes that make them reachable: a new sidebar section, a global **New** button, and a revamped mobile navigation.
 
 It is a product specification rather than a technical design. It describes the intended experience across the web interface, the home dashboard, the AI daily summary, global search, and AI-facing workflows through MCP.
 
@@ -26,7 +26,7 @@ Builds on and refines:
 |---|---|
 | Principle 2 and invariants 1–3: every task is anchored to a creating and a due journal | A task has a list, a due journal, or both. The two-journal rule holds only for tasks with no list. |
 | Invariant 5: the product must not offer a bare date picker for a task | List tasks may carry a plain due date. Journal-only tasks still may not. |
-| *Creating a task*: always created from a journal | Also created on a list, or from the global Create button. |
+| *Creating a task*: always created from a journal | Also created on a list, or from the global New button. |
 | Principle 3 and *Lapsed tasks*: no overdue section, counter or badge | True for journal-only tasks. List tasks show an overdue marker, and lists show open-task counts. |
 | Principle 4 and Success Criterion 5: no screen lists outstanding tasks together | Lists and `/tasks` are such screens, by design. The dashboard still shows only what is timely. |
 | *Where tasks appear*: exactly two places | Also the list page, `/tasks`, the sidebar counts, and search. |
@@ -60,7 +60,7 @@ The navigation changes should help the user:
 4. **Dates are optional:** a list task with no date is complete as it is, not missing something.
 5. **Archive over delete:** a finished list is archived, consistent with *cancel over delete*.
 6. **One tap between sections on mobile.**
-7. **Built to admit notes:** nothing in the navigation, create menu or search model assumes tasks are the last standalone entity.
+7. **Built to admit notes:** nothing in the navigation, New dialog or search model assumes tasks are the last standalone entity.
 
 ## Scope Priority
 
@@ -70,11 +70,11 @@ Priority order:
 
 1. Task model changes: list membership, optional due date, relaxed journal anchoring, flag and icon
 2. Task Lists: model, list page, `/tasks` overview, sidebar section, archive
-3. Global Create button and mobile navigation
+3. Global New button and mobile navigation
 4. Dashboard and daily summary rules for list tasks
 5. List ↔ journal association
 6. Recurring tasks
-7. Series template lists
+7. Template lists and series copies
 8. Tasks and lists in search
 
 MCP parity ships with each item, not after.
@@ -94,9 +94,9 @@ MCP parity ships with each item, not after.
 - Flag and icon on all tasks, including journal-only ones
 - List ↔ journal association
 - Recurring list tasks
-- Series template lists and per-instance copies
+- Template lists, used by hand or attached to a series, and per-instance copies
 - Tasks sidebar section, list page, `/tasks` overview
-- Top-bar Create button (task, journal, contact)
+- Top-bar New button (task, journal, contact)
 - Mobile navigation revamp
 - Dashboard and daily-summary treatment of list tasks
 - Open tasks and lists in global search
@@ -126,7 +126,7 @@ erDiagram
     TASK_LIST ||--o{ TASK : holds
     TASK_LIST }o--o| JOURNAL : "associated with"
     TASK_LIST }o--o| TASK_LIST : "copied from template"
-    SERIES ||--o{ TASK_LIST : "has template lists"
+    SERIES |o--o{ TASK_LIST : "has template lists"
     TASK }o--o| JOURNAL : "due in"
     TASK }o--o| JOURNAL : "created in"
     TASK }o--o{ CONTACT : references
@@ -214,7 +214,7 @@ There are three kinds, distinguished by how they came to exist:
 | Kind | Created by | Shown in sidebar | Tasks actionable |
 |---|---|---|---|
 | **Ordinary list** | The user | Yes, until archived | Yes |
-| **Template list** | The user, on a series | No — managed from the series | No; a template is a pattern, not work |
+| **Template list** | The user, on the Templates page or a series page | No — managed from the Templates page (`/tasks/templates`) and from its series, if it has one | No; a template is a pattern, not work |
 | **Instance list** | The system, copying a template for one series journal | Only while timely (see *Series Template Lists*) | Yes |
 
 ### The list page
@@ -227,13 +227,14 @@ There are three kinds, distinguished by how they came to exist:
 
 ### The Tasks overview (`/tasks`)
 
-A page showing every open list as a card: name, icon, associated journal, count of open tasks, and a **preview of its first few open tasks** (completable in place). From here the user can create a list, reorder lists, and open an **Archived** area listing archived lists with an unarchive action. Template lists are not shown here; they are reached from their series.
+A page showing every open list as a card: name, icon, associated journal, count of open tasks, and a **preview of its first few open tasks** (completable in place). From here the user can create a list and reorder lists. Archived lists are a **separate page** reached from the overview — grouped by the month they were archived, filterable by name and loaded in pages, each with an unarchive action — so the overview stays usable however many lists have been archived. Template lists are not shown among the cards; the overview links to the **Templates** page (`/tasks/templates`).
 
 ### Sidebar
 
 A **Tasks** section sits alongside Contacts and Journals:
 
 - *All lists* → `/tasks`
+- *Templates* → `/tasks/templates`
 - one entry per unarchived ordinary list, in the user's order, with its icon and open-task count
 - instance lists that are currently timely
 - *New list*
@@ -241,7 +242,7 @@ A **Tasks** section sits alongside Contacts and Journals:
 ### Archiving and deleting
 
 - Archiving hides a list from the sidebar and the overview, and hides it and its tasks from the dashboard, the daily summary and search. Task state is untouched. A list with open tasks can be archived.
-- An archived list is read-only until unarchived. It remains openable from the Archived area and still appears, marked archived, on its associated journal's page. Its tasks still appear, marked archived, on their own due or creating journal's page (where they cannot be acted on) and in the record on linked contacts' pages.
+- An archived list is read-only until unarchived. It remains openable from the archived lists page and still appears, marked archived, on its associated journal's page. Its tasks still appear, marked archived, on their own due or creating journal's page (where they cannot be acted on) and in the record on linked contacts' pages.
 - Unarchiving restores everything.
 - Deleting a list is a confirmed, destructive action intended for mistakes. Tasks with both a creating and a due journal survive as journal-only tasks (lapsed if that journal has passed, and no longer recurring); all other tasks, open or completed, are deleted with it.
 
@@ -280,10 +281,12 @@ Editing recurrence affects the current task and future copies only.
 
 ## Series Template Lists
 
-A series can hold one or more **template lists**: named checklists that are copied for the series' journals.
+A **template list** is a named checklist kept as a pattern. A template can be used by hand — *Use template* creates an ordinary list from it, optionally associated with a journal — and it can be attached to **at most one series**, which then copies it for the series' journals. A template attached to no series makes copies only through *Use template*.
 
-- A template is created on the series page, either empty or **from an existing list**. Using an existing list copies its open tasks' text, order, flag, icon and contacts into the template; statuses, dates and recurrence are dropped, and the original list is left as it was.
+- Templates live on the **Templates** page (`/tasks/templates`), reached from the sidebar and the Tasks overview. A series page shows the templates attached to it, and can attach an existing template or create one.
+- A template is created either empty or **from an existing list**. Using an existing list copies its open tasks' text, order, flag, icon and contacts into the template; statuses, dates and recurrence are dropped, and the original list is left as it was.
 - Template tasks have no status, no dates and no recurrence.
+- A template can be renamed, edited, archived, restored and deleted. An archived template makes no copies and sits in an archived area of the Templates page until restored.
 - Each copy — an **instance list** — is associated with one series journal, named after the template, and starts with every task not done. Editing a template changes future copies only.
 - An instance list is an ordinary working list in every other respect: it can be renamed, added to, re-associated, archived or deleted.
 - A journal receives at most one copy of a given template. Journals dated in the past, and cancelled journals, never receive one.
@@ -317,24 +320,24 @@ stateDiagram-v2
 |---|---|
 | Journal removed from the series | Its instance list stays, as an ordinary associated list |
 | Template detached | Future copies stop; existing instance lists stay |
-| Series deleted | Its templates are deleted; instance lists stay as ordinary associated lists |
+| Series deleted | Its templates are detached, and each is archived unless it is used elsewhere — that is, unless a list made from it by *Use template* still exists. Instance lists stay as ordinary associated lists |
 | Series merged | Templates move to the surviving series; journals that already hold a copy of a template keep it and receive no second one |
 | Two journals merged, each holding a copy of the same template | Both instance lists are kept on the surviving journal — the one explicit exception to "at most one copy" |
 
 ## Navigation
 
-### Create button
+### New button
 
-The top bar gains a **Create** control, present on every authenticated page and at every viewport size, offering:
+The top bar gains a **New** control, present on every authenticated page and at every viewport size. It opens one dialog — a sheet on phones — with a switch between the entity types below; switching keeps what was typed in each:
 
-- **Task** — opens a compact dialog: text, then a required destination. There is no built-in inbox.
+- **Task** — text, then a required destination. There is no built-in inbox.
   - **A list** (existing, or a new one named inline): optional due date or due journal, flag, icon, contacts.
   - **A journal**: creates a journal-only task under the existing rules, so the dialog asks for the creating journal and the future due journal. No date field is offered.
   - The destination is pre-filled from context: the list being viewed, or the journal being viewed as creating journal. Otherwise the user must choose.
-- **Journal** — the existing journal creation flow.
-- **Contact** — the existing contact creation flow.
+- **Journal** — the full existing journal creation form, inside the dialog.
+- **Contact** — the full existing contact creation form, inside the dialog.
 
-Existing page-level create buttons may remain. The menu is built so further entries (a note) can be added.
+Existing page-level create buttons may remain. The dialog is built so further entries (a note) can be added.
 
 ### Mobile navigation
 
@@ -343,12 +346,12 @@ The current mobile experience puts every destination behind a hamburger sheet co
 Requirements:
 
 1. Home, Journals, Tasks and Contacts are each reachable in **one tap** from any page.
-2. Create is reachable in **one tap** from any page.
+2. New is reachable in **one tap** from any page.
 3. Search remains reachable from any page.
 4. Secondary destinations (tags, individual lists, favourites, outdoor logbook, integrations, settings) are reachable in at most two taps from their section.
 5. Navigation never obscures the primary action of a page (the journal editor, an inline add-task row) and respects device safe areas and the on-screen keyboard.
 
-**Recommended pattern:** a fixed bottom tab bar — Home, Journals, Tasks, Contacts, More — with Create as a prominent control. Whether the sheet survives as "More", and how section sub-navigation (tags, lists) is presented within each tab, is for design to decide against the requirements above. Desktop keeps the sidebar.
+**Recommended pattern:** a fixed bottom tab bar — Home, Journals, Tasks, Contacts, More — with New as a prominent control. Whether the sheet survives as "More", and how section sub-navigation (tags, lists) is presented within each tab, is for design to decide against the requirements above. Desktop keeps the sidebar.
 
 ## Dashboard and Daily Summary
 
@@ -411,7 +414,7 @@ Agents can do everything the UI can:
 
 - Lists: create, rename, set icon, reorder, archive, unarchive, delete, associate with a journal, list all (with archived filter), read one with its tasks.
 - Tasks: create on a list (with or without date or due journal), set or clear due date, flag, icon, move between lists, add to or remove from a list, reorder, set recurrence. Existing task tools keep working for journal-only tasks.
-- Series: create (empty or from a list), edit and detach template lists; set regeneration mode.
+- Templates: create (empty or from a list), edit, archive, restore and delete; use a template to create a list; attach to and detach from a series; set regeneration mode.
 - Upcoming-task and dashboard tools return list tasks under the dashboard rules above as individual tasks — the one-row-per-list grouping is presentation only — each marked with its list, whether it is overdue, and the journal that surfaced it if it is undated.
 - Global search accepts tasks and lists as entity types.
 - The server's task guidance is rewritten: tasks may live on lists and may carry due dates.
@@ -420,7 +423,7 @@ Agents can do everything the UI can:
 
 Standalone notes — notes attached to neither a journal nor a contact — are future work. This specification should not make them harder:
 
-- The Create menu is a list of entity types, not three hard-coded buttons.
+- The New dialog is a list of entity types, not three hard-coded buttons.
 - The sidebar and the mobile tab bar can admit one more top-level section without redesign; "More" is the overflow.
 - Search treats result types as an open set.
 - A list's optional association with a journal is the pattern a note would reuse: standalone by default, attachable when relevant.
