@@ -801,9 +801,9 @@ async def test_the_base_records_the_company_and_notes_google_returns(
     sent = client.update_contact.call_args.kwargs["contact_data"]
     assert sent["organizations"] == [_COMPANY]
     recorded = json.loads((await _link(db_session)).reference_data)
-    assert recorded["synced_entries"]["organizations"] == [
-        _key("organizations", _COMPANY)
-    ]
+    assert recorded["synced_entries"]["organizations"] == _keys_of(
+        "organizations", _COMPANY
+    )
     assert recorded["synced_entries"]["biographies"] == []
 
 
@@ -872,3 +872,75 @@ async def test_an_anniversary_google_gained_survives_the_push(
     recorded = json.loads((await _link(db_session)).reference_data)
     assert recorded["pending_import"] is True
     assert recorded["synced_entries"]["events"] == []
+
+
+def _keys_of(field: Any, entry: dict[str, Any]) -> list[str]:
+    return sorted(raw_synced_entries({field: [entry]}, None)[field])
+
+
+@pytest.mark.asyncio
+async def test_a_middle_name_google_added_survives_a_local_rename(
+    db_session: AsyncSession,
+) -> None:
+    """Each name part merges on its own: the rename and the addition both stand."""
+    await _seed(
+        db_session, base=_base_with(names=_keys_of("names", {"givenName": "Augusta"}))
+    )
+    added = _google({"givenName": "Augusta", "middleName": "Byron"})
+    client = _client(
+        {"etag": "etag_google_edit", "emailAddresses": _google(_HELD), "names": added},
+        {
+            "etag": "etag_pushed",
+            "emailAddresses": _google(_HELD),
+            "names": _google({"givenName": "Ada", "middleName": "Byron"}),
+        },
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["names"] == [{"givenName": "Ada", "middleName": "Byron"}]
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
+    # Local's name, not Google's middle name: that is the pull's to import.
+    assert recorded["synced_entries"]["names"] == _keys_of(
+        "names", {"givenName": "Ada"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_job_title_google_added_survives_a_local_company_edit(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(
+        db_session,
+        company="Acme Ltd",
+        base=_base_with(
+            organizations=_keys_of("organizations", {"current": True, "name": "Acme"})
+        ),
+    )
+    written = {"current": True, "name": "Acme Ltd", "title": "Engineer"}
+    client = _client(
+        {
+            "etag": "etag_google_edit",
+            "emailAddresses": _google(_HELD),
+            "organizations": _google(
+                {"current": True, "name": "Acme", "title": "Engineer"}
+            ),
+        },
+        {
+            "etag": "etag_pushed",
+            "emailAddresses": _google(_HELD),
+            "organizations": _google(written),
+        },
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["organizations"] == [written]
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
+    assert recorded["synced_entries"]["organizations"] == _keys_of(
+        "organizations", {"current": True, "name": "Acme Ltd"}
+    )

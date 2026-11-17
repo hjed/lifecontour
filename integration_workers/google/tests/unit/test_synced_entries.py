@@ -15,6 +15,7 @@ from synced_entries import (
     BASE_FIELDS,
     LIST_BASES,
     empty_at_source,
+    organization_part_keys,
     person_source_versions,
     raw_entry_keys,
     raw_synced_entries,
@@ -178,6 +179,32 @@ class TestRawEntryKeys:
             "biographies", {"value": "met at the conference"}, None
         )
 
+    def test_a_name_keys_each_part_as_inbound_reads_it(self) -> None:
+        """Empty parts are keyed too: the base records a name had no middle name."""
+        held = {"givenName": " Ada", "familyName": "Lovelace", "displayName": "A L"}
+        relabelled = {
+            "metadata": _CONTACT,
+            "givenName": "Ada",
+            "familyName": "Lovelace",
+        }
+
+        assert raw_entry_keys("names", held, None) == raw_entry_keys(
+            "names", relabelled, None
+        )
+        assert raw_entry_keys("names", held, None) != raw_entry_keys(
+            "names", {**held, "middleName": "Augusta"}, None
+        )
+        assert len(raw_entry_keys("names", held, None)) == 3
+
+    def test_a_name_with_no_given_name_keys_as_the_unknown_inbound_reads(
+        self,
+    ) -> None:
+        assert raw_entry_keys("names", {"familyName": "Lovelace"}, None) == (
+            raw_entry_keys(
+                "names", {"givenName": "Unknown", "familyName": "Lovelace"}, None
+            )
+        )
+
     def test_a_nickname_keys_by_its_text_as_inbound_strips_it(self) -> None:
         first = {"value": " Addy "}
         second = {"metadata": {**_CONTACT, "primary": True}, "value": "Addy"}
@@ -228,7 +255,50 @@ class TestRawEntryKeys:
         assert raw_entry_keys(field, entry, None) == frozenset()
 
 
+class TestOrganizationPartKeys:
+    def test_keys_the_company_and_title_apart_as_inbound_strips_them(self) -> None:
+        titled = {"name": " Acme ", "title": "Engineer"}
+
+        assert organization_part_keys(titled) & organization_part_keys(
+            {"name": "Acme", "title": "Director"}
+        )
+        assert organization_part_keys(titled) & organization_part_keys(
+            {"name": "Globex", "title": "Engineer "}
+        )
+        assert len(organization_part_keys(titled)) == 2
+
+    def test_a_part_and_the_combined_key_never_collide(self) -> None:
+        acme = {"name": "Acme"}
+
+        assert not organization_part_keys(acme) & raw_entry_keys(
+            "organizations", acme, None
+        )
+
+    def test_an_organization_inbound_reads_as_no_company_has_no_part_keys(
+        self,
+    ) -> None:
+        assert organization_part_keys({"department": "R&D"}) == frozenset()
+
+
 class TestSyncedEntriesOf:
+    def test_a_person_with_no_name_keys_as_the_unknown_inbound_reads(self) -> None:
+        unknown = raw_entry_keys("names", {"givenName": "Unknown"}, None)
+
+        assert synced_entries_of(_person(), None)["names"] == unknown
+        assert raw_synced_entries({"resourceName": "people/c1"}, None)["names"] == (
+            unknown
+        )
+
+    def test_keys_only_the_primary_name_inbound_imports(self) -> None:
+        names = [
+            {"givenName": "Augusta"},
+            {"metadata": {"primary": True}, "givenName": "Ada"},
+        ]
+
+        assert synced_entries_of(_person(names=names), None)["names"] == (
+            raw_entry_keys("names", names[1], None)
+        )
+
     def test_keys_every_imported_entry_per_field(self) -> None:
         email = {"value": "ada@example.com", "formattedType": "Home"}
         phone = {"value": "+61412345678", "canonicalForm": "+61412345678"}
@@ -237,8 +307,10 @@ class TestSyncedEntriesOf:
         organization = {"name": "Acme", "title": "Engineer", "current": True}
         biographies = [{"value": "Met at the conference"}, {"value": "Likes tea"}]
         nickname = {"value": "Addy"}
+        name = {"givenName": "Ada", "familyName": "Lovelace"}
         anniversary = {"type": "anniversary", "date": {"year": 2001, "month": 6}}
         person = _person(
+            names=[name, {"givenName": "Augusta"}],
             nicknames=[nickname, {"value": "Ace"}],
             events=[anniversary, {"type": "graduation", "date": {"year": 1999}}],
             emailAddresses=[email, {"value": "not an email"}],
@@ -254,11 +326,13 @@ class TestSyncedEntriesOf:
             "phoneNumbers": raw_entry_keys("phoneNumbers", phone, None),
             "addresses": raw_entry_keys("addresses", address, None),
             "birthdays": raw_entry_keys("birthdays", birthday, None),
-            "organizations": raw_entry_keys("organizations", organization, None),
+            "organizations": raw_entry_keys("organizations", organization, None)
+            | organization_part_keys(organization),
             "biographies": frozenset().union(
                 *(raw_entry_keys("biographies", bio, None) for bio in biographies)
             ),
             "nicknames": raw_entry_keys("nicknames", nickname, None),
+            "names": raw_entry_keys("names", name, None),
             "events": raw_entry_keys("events", anniversary, None),
         }
 
@@ -294,7 +368,9 @@ class TestSyncedEntriesOf:
         self, organizations: list[dict[str, Any]], imported: int
     ) -> None:
         """Inbound reads one organization, current else first, into the company."""
-        expected = raw_entry_keys("organizations", organizations[imported], None)
+        expected = raw_entry_keys(
+            "organizations", organizations[imported], None
+        ) | organization_part_keys(organizations[imported])
         raw = {"resourceName": "people/c1", "organizations": organizations}
 
         assert (
@@ -306,10 +382,14 @@ class TestSyncedEntriesOf:
         assert raw_synced_entries(raw, None)["organizations"] == expected
 
     def test_records_every_field_even_when_empty(self) -> None:
-        """An empty field is a statement: the sync agreed it held nothing."""
-        assert synced_entries_of(_person(), None) == {
-            field: frozenset() for field in BASE_FIELDS
-        }
+        """An empty field is a statement: the sync agreed it held nothing.
+
+        A name is never empty: inbound reads no name as "Unknown".
+        """
+        synced = synced_entries_of(_person(), None)
+
+        assert synced.keys() == set(BASE_FIELDS)
+        assert all(not keys for field, keys in synced.items() if field != "names")
 
     def test_keys_a_countryless_address_with_the_fallback(self) -> None:
         address = {"streetAddress": "1 Queen St", "city": "Auckland"}
@@ -331,6 +411,10 @@ class TestSyncedEntriesOf:
             "organizations": [{"name": "Acme"}, {"name": "Globex", "current": True}],
             "biographies": [{"value": "Likes tea", "contentType": "TEXT_PLAIN"}],
             "nicknames": [{"value": "Addy"}, {"value": "Ace"}],
+            "names": [
+                {"givenName": "Augusta"},
+                {"metadata": {"primary": True}, "givenName": "Ada"},
+            ],
             "events": [
                 {"type": "Anniversary", "date": {"year": 2001, "month": 6, "day": 2}}
             ],

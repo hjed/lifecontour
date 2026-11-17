@@ -868,7 +868,7 @@ integration the missing piece, the **base**: per field, opaque keys
   once by the next pull, never deleted on a guess.
 
 Google contacts uses it for emails, phones, addresses, birthdays,
-organizations, biographies, nicknames and anniversary events
+organizations, biographies, nicknames, anniversary events and names
 (`integration_workers/google/synced_entries.py`, `person_merge.py`):
 
 - **Organizations** key only the one inbound reads into company and job title
@@ -879,6 +879,19 @@ organizations, biographies, nicknames and anniversary events
   organization to the one inbound reads, the push keeps it out of the next
   base and marks it `pending_import`, so the next pull imports it as the
   company rather than a second push deleting it.
+- **Names and organization parts** merge part by part (#1901): the given,
+  family and middle name of the name inbound reads, and the company and job
+  title of the organization it reads, each through `three_way_value` (the side
+  whose key the base holds stands for the base value; a conflict goes to
+  local). So a middle name or title Google added survives a local rename or
+  company edit, and a name Google deleted whole is not pushed back. Each part
+  is keyed apart, empty included (a missing given name, or no name at all, as
+  the "Unknown" inbound reads), beside the organization's combined key,
+  which still decides the whole-entry cases above. A base from before the part
+  keys holds only that combined key, so its parts merge as before (local wins)
+  until the next sync records them. A part Google won is kept out of the next
+  base, and an organization holding a company and title local never held
+  together keeps its combined key out too. A profile's name is never merged.
 - **Biographies** key each note's text, case and all. Notes cleared locally
   clear Google's when every biography is in the base; one Google added or
   edited since is kept. Google deleting the last note clears the local notes

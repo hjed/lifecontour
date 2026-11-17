@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
-from synced_entries import BASE_FIELDS, BaseField, raw_entry_keys
+from synced_entries import BASE_FIELDS, BaseField, raw_entry_keys, raw_synced_entries
 
 pytestmark = pytest.mark.unit
 
@@ -341,7 +341,7 @@ class TestMergedFields:
             synced_base={},
         )
 
-        assert merged.merged_fields == {"emailAddresses"}
+        assert merged.merged_fields == {"emailAddresses", "names"}
 
 
 ACME = {"current": True, "name": "Acme", "title": "Engineer"}
@@ -368,7 +368,7 @@ class TestOrganizations:
         merged = _merge("organizations", [], google=[ACME, GLOBEX], base=[ACME])
 
         assert merged.payload["organizations"] == [GLOBEX]
-        assert merged.kept["organizations"] == _keys("organizations", GLOBEX)
+        assert merged.kept["organizations"] == _organization_base(GLOBEX)
         assert merged.pending_import is True
 
     def test_a_second_push_before_the_pull_keeps_the_organization_left(
@@ -791,8 +791,227 @@ class TestNewBaseFieldsBeforeTheirBase:
 
         assert base["events"] == _keys("events", WEDDING)
 
+    def test_names_are_read_from_an_unchanged_person(self) -> None:
+        """Every older push sent the name, replacing its owned parts."""
+        current = {"etag": "e2", "names": _google(LOVELACE)}
+
+        base = resolve_synced_base({}, current, synced_version="e2")
+
+        assert base["names"] == _keys("names", LOVELACE)
+
     def test_nicknames_are_empty_even_for_an_unchanged_person(self) -> None:
         """An older push left out an unset nickname, at its own etag."""
         base = resolve_synced_base({}, self.CURRENT, synced_version="e2")
 
         assert base["nicknames"] == frozenset()
+
+
+LOVELACE = {"givenName": "Ada", "familyName": "Lovelace"}
+
+
+def _organization_base(*organizations: dict[str, Any]) -> frozenset[str]:
+    """The organizations base a sync records: the combined key and the parts."""
+    return frozenset().union(
+        *(
+            raw_synced_entries({"organizations": [org]}, None)["organizations"]
+            for org in organizations
+        )
+    )
+
+
+class TestNameParts:
+    """Local owns given, family and middle name, each merged on its own (#1901)."""
+
+    def test_a_middle_name_google_added_survives_a_local_rename(self) -> None:
+        augusta = {**LOVELACE, "middleName": "Augusta"}
+
+        merged = _merge(
+            "names",
+            [{"givenName": "Ada", "familyName": "King"}],
+            google=[augusta],
+            base=[LOVELACE],
+        )
+
+        assert merged.payload["names"] == [
+            {"givenName": "Ada", "familyName": "King", "middleName": "Augusta"}
+        ]
+        assert merged.pending_import is True
+        assert merged.kept["names"] == _keys("names", augusta) - _keys(
+            "names", LOVELACE
+        )
+
+    def test_a_name_google_edited_wins_over_the_unchanged_local_one(self) -> None:
+        merged = _merge(
+            "names",
+            [LOVELACE],
+            google=[{**LOVELACE, "givenName": "Augusta"}],
+            base=[LOVELACE],
+        )
+
+        assert merged.payload["names"] == [{**LOVELACE, "givenName": "Augusta"}]
+        assert merged.pending_import is True
+
+    def test_a_name_part_google_deleted_stays_deleted(self) -> None:
+        merged = _merge(
+            "names",
+            [{**LOVELACE, "middleName": "Augusta"}],
+            google=[LOVELACE],
+            base=[{**LOVELACE, "middleName": "Augusta"}],
+        )
+
+        assert merged.payload["names"] == [LOVELACE]
+        assert merged.pending_import is True
+
+    def test_a_name_edited_locally_is_pushed(self) -> None:
+        renamed = {**LOVELACE, "familyName": "King"}
+
+        merged = _merge("names", [renamed], google=[LOVELACE], base=[LOVELACE])
+
+        assert merged.payload["names"] == [renamed]
+        assert merged.pending_import is False
+
+    def test_a_name_edited_on_both_sides_takes_the_local_one(self) -> None:
+        merged = _merge(
+            "names",
+            [{**LOVELACE, "givenName": "Countess"}],
+            google=[{**LOVELACE, "givenName": "Augusta"}],
+            base=[LOVELACE],
+        )
+
+        assert merged.payload["names"] == [{**LOVELACE, "givenName": "Countess"}]
+        assert merged.pending_import is False
+
+    def test_a_given_name_google_added_replaces_the_unknown_placeholder(
+        self,
+    ) -> None:
+        """Inbound reads a person with no given name as "Unknown"."""
+        merged = _merge(
+            "names",
+            [{"givenName": "Unknown", "familyName": "Lovelace"}],
+            google=[LOVELACE],
+            base=[{"familyName": "Lovelace"}],
+        )
+
+        assert merged.payload["names"] == [LOVELACE]
+        assert merged.pending_import is True
+
+    def test_a_name_google_added_to_a_nameless_person_replaces_the_placeholder(
+        self,
+    ) -> None:
+        """The pull read no name as "Unknown", so the base records that."""
+        nameless = raw_synced_entries({"names": []}, None)["names"]
+        merged = merge_for_push(
+            {"names": [{"givenName": "Unknown"}]},
+            {"names": _google(LOVELACE)},
+            synced_base={"names": nameless},
+        )
+
+        assert merged.payload["names"] == [LOVELACE]
+        assert merged.pending_import is True
+
+    def test_a_name_google_deleted_whole_is_not_pushed_back(self) -> None:
+        merged = _merge("names", [LOVELACE], google=[], base=[LOVELACE])
+
+        assert "names" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_local_rename_after_google_deleted_the_name_is_pushed(self) -> None:
+        """Only the part local changed goes; the parts Google deleted stay gone."""
+        merged = _merge(
+            "names",
+            [{**LOVELACE, "familyName": "King"}],
+            google=[],
+            base=[LOVELACE],
+        )
+
+        assert merged.payload["names"] == [{"familyName": "King"}]
+        assert merged.pending_import is True
+
+    def test_a_second_push_before_the_pull_keeps_googles_part(self) -> None:
+        """The first push's base holds local's parts, so Google's still wins."""
+        king = {"givenName": "Ada", "familyName": "King"}
+        augusta = {**king, "middleName": "Augusta"}
+
+        merged = _merge("names", [king], google=[augusta], base=[king])
+
+        assert merged.payload["names"] == [augusta]
+        assert merged.pending_import is True
+
+    def test_a_profile_name_is_never_merged_into_the_pushed_one(self) -> None:
+        merged = merge_for_push(
+            {"names": [LOVELACE]},
+            {
+                "names": [
+                    {
+                        "metadata": {"primary": True, **PROFILE_SOURCE},
+                        **LOVELACE,
+                        "middleName": "Augusta",
+                    }
+                ]
+            },
+            synced_base={"names": _keys("names", LOVELACE)},
+        )
+
+        assert merged.payload["names"] == [LOVELACE]
+
+
+class TestOrganizationParts:
+    """The company and job title of the imported organization merge apart (#1901)."""
+
+    def test_a_title_google_added_survives_a_local_company_edit(self) -> None:
+        acme = {"current": True, "name": "Acme"}
+        titled = {**acme, "title": "Engineer"}
+        renamed = {"current": True, "name": "Acme Ltd"}
+
+        merged = merge_for_push(
+            {"organizations": [renamed]},
+            {"organizations": _google(titled)},
+            synced_base={"organizations": _organization_base(acme)},
+        )
+
+        written = {**renamed, "title": "Engineer"}
+        assert merged.payload["organizations"] == [written]
+        assert merged.pending_import is True
+        # Google's title is the pull's to import, not part of the next base.
+        assert _keys("organizations", written) <= merged.kept["organizations"]
+        assert _keys("organizations", renamed) <= merged.suppressed["organizations"]
+
+    def test_a_title_edited_on_both_sides_takes_the_local_one(self) -> None:
+        director = {**ACME, "title": "Director"}
+
+        merged = merge_for_push(
+            {"organizations": [director]},
+            {"organizations": _google({**ACME, "title": "Chief Engineer"})},
+            synced_base={"organizations": _organization_base(ACME)},
+        )
+
+        assert merged.payload["organizations"] == [director]
+        assert merged.pending_import is False
+
+    def test_a_base_from_before_the_parts_writes_the_local_organization(
+        self,
+    ) -> None:
+        """Only the combined key is recorded: no part is known to be unchanged."""
+        acme = {"current": True, "name": "Acme"}
+        renamed = {"current": True, "name": "Acme Ltd"}
+
+        merged = merge_for_push(
+            {"organizations": [renamed]},
+            {"organizations": _google({**acme, "title": "Engineer"})},
+            synced_base={"organizations": _keys("organizations", acme)},
+        )
+
+        assert merged.payload["organizations"] == [renamed]
+        assert merged.pending_import is False
+
+    def test_a_company_cleared_while_google_edited_the_title_is_kept(
+        self,
+    ) -> None:
+        merged = merge_for_push(
+            {"organizations": []},
+            {"organizations": _google({**ACME, "title": "Chief Engineer"})},
+            synced_base={"organizations": _organization_base(ACME)},
+        )
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True

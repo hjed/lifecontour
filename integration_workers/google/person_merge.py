@@ -12,8 +12,8 @@ one local never held, so the push keeps it (#1788).
 
 Importable is not the same as held, though: an email added in Google since the
 last pull is importable, but the contact has never seen it. So the emails,
-phones, addresses, birthdays, organizations, notes, nicknames and anniversaries
-merge three ways against the *synced base* -
+phones, addresses, birthdays, organizations, notes, nicknames, anniversaries
+and name parts merge three ways against the *synced base* -
 the keys of the entries the last sync agreed both sides held, recorded on the
 link (``synced_entries``, ``core_shared.sync_base``). An entry Google gained
 since the base is kept, one deleted locally is dropped, and one Google deleted
@@ -34,15 +34,23 @@ from typing import Any, Final, Literal, Protocol
 import structlog
 from core_shared.sync_base import (
     SyncedEntries,
+    Winner,
     remote_unchanged_since_sync,
     three_way_entries,
+    three_way_value,
 )
 
 from synced_entries import (
     BASE_FIELDS,
+    NAME_PARTS,
+    ORGANIZATION_PARTS,
     BaseField,
     Keys,
     chosen_nickname_index,
+    imported_name,
+    name_part_keys,
+    organization_part_key,
+    organization_part_keys,
     raw_entry_keys,
     raw_synced_entries,
 )
@@ -266,16 +274,91 @@ class OwnedNickname:
         return FieldMerge(value, kept=kept, remote_won=bool(kept))
 
 
-@dataclass(frozen=True)
-class MergedBy:
-    """A field whose owned entry keeps parts of Google's (names, organizations)."""
+def _remote_part_wins(base: Keys, local: str, remote: str) -> bool:
+    """Whether Google's value of one owned part should stand over local's.
 
-    merge_entries: Callable[[list[Entry], list[Entry]], list[Entry]]
+    ``three_way_value`` over the part's keys: the base holds hashes, so the
+    side whose key it holds stands for the base value. A conflict goes to
+    local, as the push follows a local edit.
+    """
+    held = local if local in base else remote if remote in base else None
+    return three_way_value(base=held, local=local, remote=remote) is Winner.REMOTE
+
+
+@dataclass(frozen=True)
+class PartMerge:
+    """An owned entry with Google's parts written over local's where they win.
+
+    ``kept`` is the keys of the parts taken from Google, ``suppressed`` those
+    of the local parts they replaced.
+    """
+
+    entry: Entry
+    kept: frozenset[str]
+    suppressed: frozenset[str]
+
+
+def _merge_parts(
+    pushed: Entry,
+    owned: Entry,
+    base: Keys,
+    part_keys: Callable[[Entry, str], str],
+    parts: tuple[str, ...],
+) -> PartMerge:
+    """Merge each owned part of ``pushed`` three ways with Google's ``owned``."""
+    entry = dict(pushed)
+    kept: set[str] = set()
+    suppressed: set[str] = set()
+    for part in parts:
+        local, remote = part_keys(pushed, part), part_keys(owned, part)
+        if not _remote_part_wins(base, local, remote):
+            continue
+        if owned.get(part):
+            entry[part] = owned[part]
+        else:
+            entry.pop(part, None)
+        kept.add(remote)
+        suppressed.add(local)
+    return PartMerge(entry, frozenset(kept), frozenset(suppressed))
+
+
+@dataclass(frozen=True)
+class OwnedName:
+    """Local owns the given, family and middle name of the name inbound reads.
+
+    Each part merges three ways on its own, so a middle name Google added
+    survives a local rename, and a part Google edited while local's is
+    unchanged is not pushed back - a whole name Google deleted included, which
+    leaves the field alone when local changed none of it. Honorifics and
+    phonetic names are kept from Google's name. A profile's name is never
+    merged: nothing of it is copied into the contact, and the pushed name goes
+    as it is.
+    """
+
+    field: Literal["names"] = "names"
 
     def merge(
         self, pushed: list[Entry], current: list[Entry], sync: SyncContext
     ) -> FieldMerge:
-        return FieldMerge(self.merge_entries(pushed, current))
+        owned = imported_name(current)
+        if not pushed or (owned and not _is_contact_entry(dict(owned))):
+            return FieldMerge(_merge_names(pushed, current))
+        parts = _merge_parts(
+            pushed[0],
+            dict(owned),
+            sync.base_of(self.field),
+            lambda entry, part: name_part_keys(entry)[part],
+            NAME_PARTS,
+        )
+        if not owned and not any(part in parts.entry for part in NAME_PARTS):
+            # Google deleted the name, and local changed none of it since.
+            return FieldMerge(Omit.FIELD, remote_won=True)
+        return FieldMerge(
+            _merge_names([parts.entry, *pushed[1:]], current),
+            kept=parts.kept,
+            suppressed=parts.suppressed,
+            remote_won=bool(parts.kept),
+        )
 
 
 @dataclass(frozen=True)
@@ -284,7 +367,8 @@ class OwnedOrganization:
 
     A pushed company merges into it as :func:`_merge_organizations` does,
     unless local still holds the base value and Google edited or deleted it
-    since. With nothing pushed, the base tells a company cleared locally (in
+    since. Otherwise the company and job title merge three ways apart, so a
+    title Google added survives a local company edit (#1901). With nothing pushed, the base tells a company cleared locally (in
     the base: the organization goes, the others stay) from one Google added
     since the last sync (kept, and owed to the next pull). A profile's
     organization cannot be cleared, so the pull imports it again.
@@ -303,14 +387,29 @@ class OwnedOrganization:
         if pushed:
             if keys(pushed[0]) & base and not remote & base:
                 return FieldMerge(Omit.FIELD, remote_won=True)
-            return FieldMerge(_merge_organizations(pushed, current))
+            if owned is None or not _is_contact_entry(owned):
+                return FieldMerge(_merge_organizations(pushed, current))
+            parts = _merge_parts(
+                pushed[0], owned, base, organization_part_key, ORGANIZATION_PARTS
+            )
+            if not parts.kept:
+                return FieldMerge(_merge_organizations(pushed, current))
+            # Google now holds a company and title local never held together.
+            return FieldMerge(
+                _merge_organizations([parts.entry, *pushed[1:]], current),
+                kept=parts.kept | keys(parts.entry),
+                suppressed=parts.suppressed | keys(pushed[0]),
+                remote_won=True,
+            )
         if owned is None or not remote:
             return FieldMerge(Omit.FIELD)
         if not remote & base or not _is_contact_entry(owned):
             return FieldMerge(Omit.FIELD, remote_won=True)
         others = [org for position, org in enumerate(current) if position != index]
         # Whichever of the others inbound reads next is Google's, not local's.
-        kept: Keys = frozenset().union(*map(keys, others))
+        kept: Keys = frozenset().union(
+            *(keys(org) | organization_part_keys(org) for org in others)
+        )
         return FieldMerge(
             [_writable(org) for org in others if _is_contact_entry(org)],
             kept=kept,
@@ -390,7 +489,7 @@ class PushMerge:
 # The base fields every push sent while they were loaded, empty included, from
 # before they were in a base: an unchanged etag shows local held their values.
 _ALWAYS_SENT_FIELDS: Final[frozenset[BaseField]] = frozenset(
-    {"emailAddresses", "phoneNumbers", "addresses", "birthdays", "events"}
+    {"emailAddresses", "phoneNumbers", "addresses", "birthdays", "events", "names"}
 )
 
 
@@ -595,10 +694,11 @@ _BASED_POLICIES: Final = (
     OwnedOrganization,
     OwnedBiographies,
     OwnedNickname,
+    OwnedName,
 )
 
 FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
-    "names": MergedBy(_merge_names),
+    "names": OwnedName(),
     "nicknames": OwnedNickname(),
     "emailAddresses": KeepUnsynced("emailAddresses"),
     "phoneNumbers": KeepUnsynced("phoneNumbers"),
