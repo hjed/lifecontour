@@ -35,7 +35,7 @@ table's DDL:
 |---|---|
 | Contacts | `contacts`, `tags`, `custom_date_types`, `contact_suggestion_ignores`, `contact_import_issues` |
 | Journals | `journals`, `journal_tags`, `journal_series`, `journal_series_recurrence_aliases`, `journal_merged_aliases`, `journal_review_items`, `journal_daily_summaries`, `outdoor_activity_dismissals`, `activity_templates`, `gear_items`, `calendars` |
-| Tasks | `tasks`; `field_history` (task rows) |
+| Tasks | `tasks`, `task_lists`; `field_history` (task rows) |
 | Integrations | `sync_metadata`, `sync_jobs`, `pending_entity_mappings`, `strava_athlete_mappings`, `calendar_sync_tokens`, and the per-user credentials and settings: `user_google_auth`, `user_google_integration`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`, `user_immich_auth` |
 | Settings | `user_settings` |
 
@@ -723,6 +723,37 @@ matches the `journals.id` and `contacts.id` every task foreign key points at.
 Following the journal domain's convention, these tables have **no SQLAlchemy `Table` object**: the
 migration is the schema's source of truth and repositories use raw SQL. (Note the unrelated
 `app/infrastructure/tasks/` package, which holds ARQ background jobs, not domain tasks.)
+
+#### Task lists (ITER21-001)
+
+A task list is a user's named home for tasks — see the
+[Task Lists and Navigation specification](../product-specifications/task-lists-and-navigation-product-specification.md#task-lists).
+Introduced by migration `0145` (create/drop round-trip). Tasks join lists in a later migration;
+the list kind, journal association and template columns arrive with the phases that use them.
+
+- `task_lists` — `id` (serial pk), `user_id` (varchar 50), `name` (varchar 200), `icon`
+  (varchar 50, nullable), `position` (int), `archived_at` (timestamptz, nullable — NULL means not
+  archived), `created_at` / `updated_at`. Indexed by `(user_id, position)`, which serves both the
+  owner scoping and the list order.
+
+`ck_task_lists_name_not_blank CHECK (btrim(name) <> '')` and
+`ck_task_lists_position_non_negative CHECK (position >= 0)` repeat the `TaskList` entity's rules
+(`core_shared.models.tasks.TaskList`) as a last line of defence. The entity is the stricter gate:
+it also refuses tab- or newline-only names, which `btrim` does not strip.
+
+**No CHECK on `icon`.** The icon is a key from the fixed `TaskIcon` set
+(`core_shared.models.tasks.TaskIcon`), shared with tasks. Unlike `ck_tasks_status`, the set is
+not a closed lifecycle — it is expected to grow — and a CHECK would cost a migration on every
+icon-bearing table for each new icon. Every write goes through an entity that accepts only a
+`TaskIcon`. The consequence is a rule: **icon keys are only ever added, never renamed or
+removed**, because a removed key would leave rows the entities cannot read back. Keys currently
+match `lucide-react` icon names, but the key is the contract; the web app maps it to a component.
+
+**Positions are not unique.** Reordering shifts many rows at once, which a plain unique
+constraint would refuse mid-update. Lists are ordered by `(position, id)` instead, so the order is
+total even if two lists briefly share a position (two concurrent creates both taking the bottom).
+
+Like `tasks`, the table has no SQLAlchemy `Table` object; the migration is the source of truth.
 
 ### Photo Integration (Iteration 4)
 ```sql

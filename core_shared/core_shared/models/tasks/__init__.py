@@ -8,6 +8,7 @@ from .exceptions import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
+    TaskListValidationError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatusTransitionError,
@@ -26,6 +27,8 @@ from .read_model import (
     TaskReadModel,
     build_task_read_model,
 )
+from .task_icon import TaskIcon
+from .task_list import MAX_TASK_LIST_NAME_LENGTH, TaskList
 from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
@@ -38,6 +41,7 @@ from .upcoming import (
 
 __all__ = [
     "DEFAULT_UPCOMING_DAYS_AHEAD",
+    "MAX_TASK_LIST_NAME_LENGTH",
     "MAX_UPCOMING_DAYS_AHEAD",
     "JournalTaskGroups",
     "LapseReason",
@@ -47,11 +51,14 @@ __all__ = [
     "TaskContactRepointing",
     "TaskDomainError",
     "TaskDueJournalNotFutureError",
+    "TaskIcon",
     "TaskJournalAnchor",
     "TaskJournalIsAnchorError",
     "TaskJournalRef",
     "TaskJournalRepointing",
     "TaskLinkRole",
+    "TaskList",
+    "TaskListValidationError",
     "TaskNotFoundError",
     "TaskReadModel",
     "TaskReopenNotAcknowledgedError",

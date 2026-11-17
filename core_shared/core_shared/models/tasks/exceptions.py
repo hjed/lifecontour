@@ -46,6 +46,17 @@ class TaskValidationError(TaskDomainError):
         return {"field": self.field}
 
 
+class TaskListValidationError(TaskValidationError):
+    """Exception raised when task list validation fails.
+
+    A subclass of :class:`TaskValidationError` because lists are part of the
+    tasks domain: a list refusal reaches REST and MCP exactly as a task refusal
+    does — a 400 with the field as data. MCP matches by ``isinstance``; the
+    REST code map matches by exact type, so it lists this class beside its
+    parent.
+    """
+
+
 class TaskNotFoundError(TaskDomainError):
     """Exception raised when a task is not found.
 

@@ -150,9 +150,22 @@ See [Journal System Specification](../journal-system-specification.md) for compr
 See [Home Dashboard & Tasks Specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#tasks)
 for the behaviour contract. A task is a short plain-text commitment anchored to exactly two journals —
 the *creating* journal where it arose and the *due* journal where it matters.
-- **Entities**: `Task` (`core_shared/core_shared/models/tasks/entities.py`)
+- **Entities**: `Task` (`core_shared/core_shared/models/tasks/entities.py`); `TaskList`
+  (`core_shared/core_shared/models/tasks/task_list.py`) — a user's named home for tasks, added by
+  [Task Lists and Navigation](../product-specifications/task-lists-and-navigation-product-specification.md#task-lists)
+  (ITER21-001). Lists are part of the tasks domain, not a domain of their own: a list refusal is a
+  `TaskListValidationError`, a subclass of `TaskValidationError`, so it reaches REST and MCP as a
+  400 with the field as data exactly as a task refusal does. The entity validates the owner, a
+  non-blank name of at most `MAX_TASK_LIST_NAME_LENGTH` (200), the icon and a non-negative
+  position; `position` is `None` until the repository places a new list at the bottom on insert,
+  the same way `id` is. Fields are keyword-only, since later phases add the journal association
+  and template columns
 - **Domain Enums**: `TaskStatus` — not done (default), done, cancelled
-  (`core_shared/core_shared/models/tasks/task_status.py`)
+  (`core_shared/core_shared/models/tasks/task_status.py`); `TaskIcon` — the fixed set of icon keys
+  a list or task may carry (`core_shared/core_shared/models/tasks/task_icon.py`). The keys are the
+  published contract and are **add-only**: the database holds no CHECK on icon values (see
+  [Database Design → Task lists](database-design.md#task-lists-iter21-001)), so a renamed or removed key would leave
+  unreadable rows
 - **Business Rules**:
   - Both journal anchors are mandatory and can never be absent at any point in a task's life; the
     entity validates their presence, and the schema enforces it (see

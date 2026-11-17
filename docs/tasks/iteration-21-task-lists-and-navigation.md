@@ -1,6 +1,6 @@
 # Iteration 21: Task Lists and Navigation
 
-**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-003 Phase 1.
+**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-001 Phase 1, ITER21-003 Phase 1.
 **Dependencies:** [Iteration 18](./iteration-18-home-dashboard-and-tasks.md) (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), [Iteration 20](./iteration-20-entity-ownership.md) (entity ownership: every new table carries `user_id`), journal series (migrations 0101 and 0121), MeiliSearch indexing through the transactional outbox, the design-system sync (`frontend/.design-sync/`).
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable: a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar. Journal-only tasks keep behaving exactly as today.
 
@@ -148,14 +148,48 @@ Search is last because its rules name things the earlier steps create (templates
 
 **Phase ordering:** Phases 1–8 (lists) and 9–18 (task model and its safety work) are independent and can interleave. Phase 19 is the first that lets a list task exist; phases 11, 12, 15, 16 and 18 are what keep existing pages, journal deletion and archived lists correct at that moment.
 
-#### Phase 1: Task list table, entity and icon set
+#### Phase 1: Task list table, entity and icon set ✅ DONE
 
 **Prerequisites:** None beyond the iteration's dependencies.
-**Estimated diff:** ~110 production → **~440 tracked**
+**Estimated diff:** ~110 production → **~440 tracked** · **Actual:** ~255 production → **~740 tracked**
+(739 insertions, 3 deletions excluding this document: 255 production — migration 76, entity 92, icon set
+65, exceptions and exports 18, REST error-code entry 4; 437 tests; 47 architecture docs). Ratio ×1.7
+on the estimate, driven by a 40-key icon set and the docstrings carrying the decisions below; the
+×4 multiplier held for tracked lines over production (×2.9).
 
 **Acceptance Criteria:**
 
-- [ ] Migration for `task_lists` (owner, name, icon, position, archived-at); `TaskList` entity; the fixed icon-key set in `core_shared`.
+- [x] Migration for `task_lists` (owner, name, icon, position, archived-at); `TaskList` entity; the fixed icon-key set in `core_shared`.
+
+**Delivered:** migration `0145_create_task_lists_table.py`; `TaskList`, `TaskIcon`,
+`TaskListValidationError` and `MAX_TASK_LIST_NAME_LENGTH` in `core_shared.models.tasks`;
+`TaskListValidationError` mapped to `TASK_VALIDATION_ERROR` in `app/api/error_handlers.py`.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_entity.py`, `test_task_icon.py`, and list cases in
+`test_task_validation_error_surfaces.py` (REST and MCP); integration
+`tests/integration/tasks/test_task_lists_migration.py` (round trip) and
+`test_task_list_table_constraints.py` (defaults, blank name, length bound, negative position,
+NOT NULLs, no accidental uniqueness across two owners). No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **No DB CHECK on icon values** (user decision). `TaskIcon` gates every write; the set is
+  **add-only** — never rename or remove a key. Keys are our own stable kebab-case keys that today
+  match `lucide-react` names (all 40 verified against the installed package).
+- **`TaskList.position` is `None` until inserted**, like `id`; the repository places a new list at
+  the bottom in the INSERT itself. Positions are not unique; lists order by `(position, id)`.
+- **Lists are part of the tasks domain.** `TaskListValidationError` subclasses
+  `TaskValidationError`; the REST code map is an exact-type lookup, so it needed its own entry
+  (MCP matches by `isinstance`).
+- **`TaskList` is keyword-only**, so later columns (association, kind, template) break no call site.
+- A varchar overflow reaches SQLAlchemy from asyncpg as a bare `DBAPIError`, not `DataError`; the
+  constraint tests assert SQLSTATEs rather than message text or wrapper class.
+
+**Notes for later phases:**
+- *Phase 2:* implement the bottom-of-list insert and `(position, id)` ordering above.
+- *Phase 3:* the `{journal_id}`/`{contact_id}` route ownership guards do not see `{list_id}` routes;
+  add a list-route coverage guard alongside the cross-user tests.
+- *ITER21-002 Phase 2:* the icon picker needs the key set in the frontend — take it from the API's
+  published enum (OpenAPI/MCP schema) rather than hand-copying the 40 keys.
 
 #### Phase 2: Task list repository
 
