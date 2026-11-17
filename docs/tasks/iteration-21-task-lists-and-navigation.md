@@ -165,7 +165,8 @@ on the estimate, driven by a 40-key icon set and the docstrings carrying the dec
 `TaskListValidationError` and `MAX_TASK_LIST_NAME_LENGTH` in `core_shared.models.tasks`;
 `TaskListValidationError` mapped to `TASK_VALIDATION_ERROR` in `app/api/error_handlers.py`.
 
-**Tests:** unit `tests/unit/tasks/test_task_list_entity.py`, `test_task_icon.py`, and list cases in
+**Tests:** unit `tests/unit/tasks/test_task_list_entity.py`, `test_task_icon.py` (including the
+add-only guard: every published key must stay in the enum), and list cases in
 `test_task_validation_error_surfaces.py` (REST and MCP); integration
 `tests/integration/tasks/test_task_lists_migration.py` (round trip) and
 `test_task_list_table_constraints.py` (defaults, blank name, length bound, negative position,
