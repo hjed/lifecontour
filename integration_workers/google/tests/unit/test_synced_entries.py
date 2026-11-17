@@ -153,6 +153,31 @@ class TestRawEntryKeys:
             "birthdays", second, None
         )
 
+    def test_an_organization_keys_by_company_and_title_as_inbound_strips_them(
+        self,
+    ) -> None:
+        held = {"name": " Acme ", "title": "Engineer", "department": "R&D"}
+        relabelled = {"metadata": _CONTACT, "name": "Acme", "title": "Engineer "}
+
+        assert raw_entry_keys("organizations", held, None) == raw_entry_keys(
+            "organizations", relabelled, None
+        )
+        assert raw_entry_keys("organizations", held, None) != raw_entry_keys(
+            "organizations", {"name": "Acme"}, None
+        )
+
+    def test_a_biography_keys_by_its_text_case_and_all(self) -> None:
+        """A case-only edit in Google is an edit: a local clear must not delete it."""
+        first = {"value": "Met at the conference\n", "contentType": "TEXT_PLAIN"}
+        second = {"metadata": _CONTACT, "value": "Met at the conference"}
+
+        assert raw_entry_keys("biographies", first, None) == raw_entry_keys(
+            "biographies", second, None
+        )
+        assert raw_entry_keys("biographies", first, None) != raw_entry_keys(
+            "biographies", {"value": "met at the conference"}, None
+        )
+
     @pytest.mark.parametrize(
         ("field", "entry"),
         [
@@ -161,6 +186,9 @@ class TestRawEntryKeys:
             ("phoneNumbers", {"value": ""}),
             ("addresses", {"streetAddress": "2 Nowhere Rd", "city": "Leeds"}),
             ("birthdays", {"text": "sometime in December"}),
+            ("organizations", {"department": "Research", "current": True}),
+            ("organizations", {"name": "  ", "title": ""}),
+            ("biographies", {"value": "   "}),
         ],
     )
     def test_an_entry_inbound_never_imports_has_no_key(
@@ -175,11 +203,15 @@ class TestSyncedEntriesOf:
         phone = {"value": "+61412345678", "canonicalForm": "+61412345678"}
         address = {"streetAddress": "1 Queen St", "countryCode": "NZ"}
         birthday = {"date": {"year": 1990, "month": 3, "day": 4}}
+        organization = {"name": "Acme", "title": "Engineer", "current": True}
+        biographies = [{"value": "Met at the conference"}, {"value": "Likes tea"}]
         person = _person(
             emailAddresses=[email, {"value": "not an email"}],
             phoneNumbers=[phone],
             addresses=[address, {"streetAddress": "2 Nowhere Rd"}],
             birthdays=[birthday, {"text": "December"}],
+            organizations=[organization],
+            biographies=[*biographies, {"value": " "}],
         )
 
         assert synced_entries_of(person, None) == {
@@ -187,7 +219,34 @@ class TestSyncedEntriesOf:
             "phoneNumbers": raw_entry_keys("phoneNumbers", phone, None),
             "addresses": raw_entry_keys("addresses", address, None),
             "birthdays": raw_entry_keys("birthdays", birthday, None),
+            "organizations": raw_entry_keys("organizations", organization, None),
+            "biographies": frozenset().union(
+                *(raw_entry_keys("biographies", bio, None) for bio in biographies)
+            ),
         }
+
+    @pytest.mark.parametrize(
+        ("organizations", "imported"),
+        [
+            ([{"name": "Acme"}, {"name": "Globex", "current": True}], 1),
+            ([{"name": "Acme"}, {"name": "Globex"}], 0),
+            ([{"name": "Acme", "current": False}, {"name": "Globex"}], 0),
+        ],
+    )
+    def test_keys_only_the_organization_inbound_imports(
+        self, organizations: list[dict[str, Any]], imported: int
+    ) -> None:
+        """Inbound reads one organization, current else first, into the company."""
+        expected = raw_entry_keys("organizations", organizations[imported], None)
+        raw = {"resourceName": "people/c1", "organizations": organizations}
+
+        assert (
+            synced_entries_of(_person(organizations=organizations), None)[
+                "organizations"
+            ]
+            == expected
+        )
+        assert raw_synced_entries(raw, None)["organizations"] == expected
 
     def test_records_every_field_even_when_empty(self) -> None:
         """An empty field is a statement: the sync agreed it held nothing."""
@@ -212,6 +271,8 @@ class TestSyncedEntriesOf:
             ],
             "addresses": [{"streetAddress": "1 Queen St"}],
             "birthdays": [{"date": {"month": 3, "day": 4}}],
+            "organizations": [{"name": "Acme"}, {"name": "Globex", "current": True}],
+            "biographies": [{"value": "Likes tea", "contentType": "TEXT_PLAIN"}],
         }
 
         assert raw_synced_entries(raw, "NZ") == synced_entries_of(
@@ -222,15 +283,29 @@ class TestSyncedEntriesOf:
 class TestEmptyAtSource:
     """The lists Google holds no entries in, for the backend to clear (#1909)."""
 
-    def test_a_person_with_no_addresses_reports_them_empty(self) -> None:
-        assert empty_at_source(_person()) == {ContactSyncField.ADDRESSES: "addresses"}
+    def test_a_person_with_no_addresses_or_notes_reports_them_empty(self) -> None:
+        assert empty_at_source(_person()) == {
+            ContactSyncField.ADDRESSES: "addresses",
+            ContactSyncField.NOTES: "biographies",
+        }
+
+    def test_a_person_with_a_biography_holds_notes(self) -> None:
+        """Google deleting the last note reaches the contact (#1925)."""
+        person = _person(addresses=[{"streetAddress": "1 Nowhere Rd"}])
+        noted = _person(
+            addresses=[{"streetAddress": "1 Nowhere Rd"}],
+            biographies=[{"value": "Likes tea"}],
+        )
+
+        assert empty_at_source(person) == {ContactSyncField.NOTES: "biographies"}
+        assert empty_at_source(noted) == {}
 
     def test_an_address_inbound_cannot_import_still_counts_as_held(self) -> None:
         """Google still holds it, so the contact's addresses are not cleared."""
         person = _person(addresses=[{"streetAddress": "1 Nowhere Rd"}])
 
         assert synced_entries_of(person, None)["addresses"] == frozenset()
-        assert empty_at_source(person) == {}
+        assert ContactSyncField.ADDRESSES not in empty_at_source(person)
 
     def test_every_list_base_is_a_base_field_of_an_owned_list(self) -> None:
         assert set(LIST_BASES.values()) <= set(BASE_FIELDS)

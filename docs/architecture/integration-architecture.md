@@ -754,8 +754,8 @@ branch of `contact.created`) pass the incoming contact through
   records them. When the link's base (below) recorded entries there, the source
   deleted them all since the last sync, and `apply_source_deletions` clears the
   list instead (archived values are still kept; #1909). Google reports
-  addresses only when its raw list is empty: an address inbound cannot import
-  still counts as held. A contact whose last address was deleted before this
+  addresses and notes (biographies, #1925) only when its raw list is empty: an
+  entry inbound cannot import still counts as held. A contact whose last address was deleted before this
   shipped already has an empty base, so the next push recreates the address
   once.
 - **Important dates:** owned per type. Incoming dates of owned types replace the
@@ -816,9 +816,11 @@ integration the missing piece, the **base**: per field, opaque keys
   not the time it finished, so an edit landing mid-push is still owed a push
   and a pull never applies over it.
 - A push that leaves the remote holding what local does not sets
-  `pending_import`. That includes a field the push leaves out entirely (local
-  holds none, so it is not sent) while the remote holds a value: nothing merged
-  it, and the pulls older than the push are skipped (#1938). The backend then applies the next pull even though its
+  `pending_import`. That includes a field the push did not load, and so left
+  out, while the remote holds a value: nothing merged it, and the pulls older
+  than the push are skipped (#1938). Every field local owns is sent once
+  loaded, empty included, so a local clear reaches the merge and the base
+  decides it. The backend then applies the next pull even though its
   version is the push's own — but never over a local edit still to push, so a
   failed push stays as safe as before. The stored version always stays the
   push's own.
@@ -855,10 +857,28 @@ integration the missing piece, the **base**: per field, opaque keys
     any source, so other inbound paths can adopt them (#1981).
 - A link recorded before bases existed falls back on the version:
   `remote_unchanged_since_sync` means the remote is its own base; otherwise
-  the base is empty and the push keeps everything.
+  the base is empty and the push keeps everything. A field that joined the
+  base later falls back the same way, per field, and is recorded empty rather
+  than left absent: otherwise the next push, at its own etag, would read the
+  remote as unchanged and own what it just kept.
 
-Google contacts uses it for emails, phones, addresses and birthdays
-(`integration_workers/google/synced_entries.py`, `person_merge.py`).
+Google contacts uses it for emails, phones, addresses, birthdays,
+organizations and biographies (`integration_workers/google/synced_entries.py`,
+`person_merge.py`):
+
+- **Organizations** key only the one inbound reads into company and job title
+  (`transformer.imported_organization_index`: the current one, else the first),
+  by those two parts. A company cleared locally while Google still holds the
+  base one drops it and keeps Google's other organizations; one Google added
+  or edited since is kept and owed to the pull. If clearing promotes another
+  organization to the one inbound reads, the push keeps it out of the next
+  base and marks it `pending_import`, so the next pull imports it as the
+  company rather than a second push deleting it.
+- **Biographies** key each note's text, case and all. Notes cleared locally
+  clear Google's when every biography is in the base; one Google added or
+  edited since is kept. Google deleting the last note clears the local notes
+  through `empty_at_source` (#1925).
+- A value from a linked profile can't be cleared, so it is owed to the pull.
 
 Immich people use it for `name` and `birthDate` (#1900,
 `integration_workers/immich/person_base.py`), each merged with

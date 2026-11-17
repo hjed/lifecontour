@@ -213,8 +213,9 @@ class TestFullSyncIntegration:
                 ("people/full_sync_2", {"CONTACT/c2": "2026-11-01T10:00:00.5Z"}),
             ]
 
-            # Neither person holds an address, so the backend clears addresses
-            # Google deleted since the last sync (#1909).
+            # Neither person holds an address or a biography, so the backend
+            # clears the addresses (#1909) and notes (#1925) Google deleted
+            # since the last sync.
             result_empty = await db_session.execute(
                 text(
                     """
@@ -225,7 +226,9 @@ class TestFullSyncIntegration:
                     """
                 )
             )
-            assert [row[0] for row in result_empty] == [{"addresses": "addresses"}] * 2
+            assert [row[0] for row in result_empty] == [
+                {"addresses": "addresses", "notes": "biographies"}
+            ] * 2
 
     async def test_full_sync_gives_a_countryless_address_the_default_country(
         self, db_session
@@ -316,7 +319,7 @@ class TestFullSyncIntegration:
         )
         [(contact_addresses, fallback, synced, empty)] = addresses.all()
         # Google holds the address, so the backend never clears it (#1909).
-        assert empty == {}
+        assert empty == {"notes": "biographies"}
         assert [(a["street_line_1"], a["country_code"]) for a in contact_addresses] == [
             ("1 Queen St", "NZ")
         ]
@@ -335,6 +338,8 @@ class TestFullSyncIntegration:
                 )
             ),
             "birthdays": [],
+            "organizations": [],
+            "biographies": [],
         }
 
     async def test_full_sync_reports_an_address_whose_region_is_unrecognised(

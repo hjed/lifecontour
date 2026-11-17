@@ -39,8 +39,14 @@ from core_shared.sync_base import (
 from pydantic import ValidationError
 
 from api_models import GoogleNickname
-from synced_entries import BaseField, Keys, raw_entry_keys, raw_synced_entries
-from transformer import select_nickname
+from synced_entries import (
+    BASE_FIELDS,
+    BaseField,
+    Keys,
+    raw_entry_keys,
+    raw_synced_entries,
+)
+from transformer import imported_organization_index, select_nickname
 
 logger = structlog.get_logger()
 
@@ -249,6 +255,81 @@ class MergedBy:
 
 
 @dataclass(frozen=True)
+class OwnedOrganization:
+    """The organization inbound imports is the contact's company and job title.
+
+    A pushed company merges into it as :func:`_merge_organizations` does,
+    unless local still holds the base value and Google edited or deleted it
+    since. With nothing pushed, the base tells a company cleared locally (in
+    the base: the organization goes, the others stay) from one Google added
+    since the last sync (kept, and owed to the next pull). A profile's
+    organization cannot be cleared, so the pull imports it again.
+    """
+
+    field: Literal["organizations"] = "organizations"
+
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        keys = sync.keys_of(self.field)
+        base = sync.base_of(self.field)
+        index = _imported_organization(current)
+        owned = None if index is None else current[index]
+        remote: Keys = frozenset() if owned is None else keys(owned)
+        if pushed:
+            if keys(pushed[0]) & base and not remote & base:
+                return FieldMerge(Omit.FIELD, remote_won=True)
+            return FieldMerge(_merge_organizations(pushed, current))
+        if owned is None or not remote:
+            return FieldMerge(Omit.FIELD)
+        if not remote & base or not _is_contact_entry(owned):
+            return FieldMerge(Omit.FIELD, remote_won=True)
+        others = [org for position, org in enumerate(current) if position != index]
+        # Whichever of the others inbound reads next is Google's, not local's.
+        kept: Keys = frozenset().union(*map(keys, others))
+        return FieldMerge(
+            [_writable(org) for org in others if _is_contact_entry(org)],
+            kept=kept,
+            remote_won=bool(kept),
+        )
+
+
+@dataclass(frozen=True)
+class OwnedBiographies:
+    """Inbound imports every biography as a note, so local owns them all.
+
+    Pushed notes replace Google's, unless local still holds the base notes and
+    Google edited them since. With no notes pushed, the base tells notes
+    cleared locally (all in the base: cleared) from one Google added since
+    (kept, and owed to the next pull). A profile's biography cannot be
+    cleared, so the pull imports it again.
+    """
+
+    field: Literal["biographies"] = "biographies"
+
+    def merge(
+        self, pushed: list[Entry], current: list[Entry], sync: SyncContext
+    ) -> FieldMerge:
+        keys = sync.keys_of(self.field)
+        base = sync.base_of(self.field)
+        contact = [bio for bio in current if _is_contact_entry(bio)]
+        remote: Keys = frozenset().union(*map(keys, contact))
+        profile: Keys = frozenset().union(
+            *(keys(bio) for bio in current if not _is_contact_entry(bio))
+        )
+        local: Keys = frozenset().union(*map(keys, pushed))
+        if pushed:
+            if local and local <= base and remote != base:
+                return FieldMerge(Omit.FIELD, remote_won=True)
+            return FieldMerge(pushed)
+        if not remote - base:
+            if not contact:
+                return FieldMerge(Omit.FIELD, remote_won=bool(profile))
+            return FieldMerge([], kept=profile, remote_won=bool(profile))
+        return FieldMerge(Omit.FIELD, remote_won=True)
+
+
+@dataclass(frozen=True)
 class WhollyOwned:
     """Local holds every entry inbound imports, and inbound imports them all."""
 
@@ -303,16 +384,27 @@ def resolve_synced_base(
 ) -> SyncedEntries:
     """The base a push merges against.
 
-    The link's recorded base when it has one. A link from before bases were
-    recorded falls back on the etag: a person unchanged since the last sync is
-    its own base, and a changed one gets an empty base, which keeps every
-    Google entry - nothing tells an addition there from a local deletion.
+    The link's recorded base when it has one. A field it lacks - the whole
+    base for a link from before bases were recorded, or a field that joined
+    the base since (#1938) - falls back on the etag: a person unchanged since
+    the last sync is its own base, and a changed one gets an empty base, which
+    keeps every Google entry - nothing tells an addition there from a local
+    deletion. The empty base is recorded as such, so a push that leaves the
+    field out keeps it rather than reading its own etag as unchanged.
     """
-    if recorded is not None:
+    recorded = recorded or {}
+    missing = [field for field in BASE_FIELDS if field not in recorded]
+    if not missing:
         return recorded
-    if remote_unchanged_since_sync(synced_version, current.get("etag")):
-        return raw_synced_entries(current, address_fallback_country)
-    return {}
+    own: SyncedEntries = (
+        raw_synced_entries(current, address_fallback_country)
+        if remote_unchanged_since_sync(synced_version, current.get("etag"))
+        else {}
+    )
+    return {
+        **recorded,
+        **{field: own.get(field, frozenset()) for field in missing},
+    }
 
 
 def merge_for_push(
@@ -357,12 +449,13 @@ def merge_for_push(
         if result.value is Omit.FIELD:
             continue
         merged[field] = result.value
-        if isinstance(policy, KeepUnsynced | SingletonUnsynced):
+        if isinstance(policy, _BASED_POLICIES):
             kept[policy.field] = result.kept
             suppressed[policy.field] = result.suppressed
-    # A field the payload leaves out - local holds none, so the transformer
-    # omits it - keeps Google's value unmerged, which local may lack. The pulls
-    # older than this push are skipped (#1938), so the next pull must import it.
+    # A field the payload leaves out - one this push did not load, as every
+    # owned field is sent once loaded - keeps Google's value unmerged, which
+    # local may lack. The pulls older than this push are skipped (#1938), so
+    # the next pull must import it.
     pending_import = pending_import or any(
         current.get(field) for field in FIELD_POLICIES if field not in payload
     )
@@ -451,12 +544,9 @@ def _merge_organizations(
     pushed: list[dict[str, Any]], current: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Write the pushed organization over the owned one, keeping the others."""
-    if not pushed or not current:
+    owned_index = _imported_organization(current)
+    if not pushed or owned_index is None:
         return pushed
-    owned_index = next(
-        (index for index, org in enumerate(current) if org.get("current") is True),
-        0,
-    )
     owned = current[owned_index]
     merged: list[dict[str, Any]] = []
     if not _is_contact_entry(owned):
@@ -476,14 +566,27 @@ def _merge_organizations(
     return [*merged, *pushed[1:]]
 
 
+def _imported_organization(current: list[Entry]) -> int | None:
+    """The index of the organization inbound reads into the contact."""
+    return imported_organization_index([org.get("current") for org in current])
+
+
+# The policies that merge against the synced base and record it.
+_BASED_POLICIES: Final = (
+    KeepUnsynced,
+    SingletonUnsynced,
+    OwnedOrganization,
+    OwnedBiographies,
+)
+
 FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
     "names": MergedBy(_merge_names),
     "nicknames": KeepUnchosen(_chosen_nickname),
     "emailAddresses": KeepUnsynced("emailAddresses"),
     "phoneNumbers": KeepUnsynced("phoneNumbers"),
     "addresses": KeepUnsynced("addresses"),
-    "biographies": WhollyOwned("inbound imports every biography as a note"),
-    "organizations": MergedBy(_merge_organizations),
+    "biographies": OwnedBiographies(),
+    "organizations": OwnedOrganization(),
     "memberships": WhollyOwned(
         "the push rebuilds reserved groups, starred and every tag's group (#1821)"
     ),

@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from person_merge import PushMerge, merge_for_push, resolve_synced_base
-from synced_entries import BaseField, raw_entry_keys
+from synced_entries import BASE_FIELDS, BaseField, raw_entry_keys
 
 pytestmark = pytest.mark.unit
 
@@ -344,15 +344,202 @@ class TestMergedFields:
         assert merged.merged_fields == {"emailAddresses"}
 
 
+ACME = {"current": True, "name": "Acme", "title": "Engineer"}
+GLOBEX = {"name": "Globex", "title": "Director"}
+PROFILE_SOURCE = {"source": {"type": "PROFILE", "id": "p1"}}
+
+
+class TestOrganizations:
+    """The organization inbound imports is the contact's company (#1938).
+
+    Local holding no company sends ``organizations: []``; the base tells a
+    company cleared locally from one Google added since the last sync.
+    """
+
+    def test_a_company_cleared_locally_is_cleared(self) -> None:
+        merged = _merge("organizations", [], google=[ACME], base=[ACME])
+
+        assert merged.payload["organizations"] == []
+        assert merged.pending_import is False
+        assert "organizations" in merged.merged_fields
+
+    def test_a_cleared_company_keeps_googles_other_organizations(self) -> None:
+        """The next one inbound reads is owed to the pull, and kept out of the base."""
+        merged = _merge("organizations", [], google=[ACME, GLOBEX], base=[ACME])
+
+        assert merged.payload["organizations"] == [GLOBEX]
+        assert merged.kept["organizations"] == _keys("organizations", GLOBEX)
+        assert merged.pending_import is True
+
+    def test_a_second_push_before_the_pull_keeps_the_organization_left(
+        self,
+    ) -> None:
+        """The first push's base holds Globex less what it kept: nothing."""
+        merged = _merge("organizations", [], google=[GLOBEX], base=[])
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_company_added_in_google_is_kept_and_owed_to_the_pull(self) -> None:
+        merged = _merge("organizations", [], google=[ACME], base=[])
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_company_edited_in_google_wins_over_the_unchanged_local_one(
+        self,
+    ) -> None:
+        edited = {**ACME, "title": "Chief Engineer"}
+
+        merged = _merge("organizations", [ACME], google=[edited], base=[ACME])
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_company_deleted_in_google_is_not_pushed_back(self) -> None:
+        merged = _merge("organizations", [ACME], google=[], base=[ACME])
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_company_edited_locally_is_written_over_googles(self) -> None:
+        renamed = {"current": True, "name": "Acme Ltd", "title": "Engineer"}
+        held = {**ACME, "department": "R&D"}
+
+        merged = _merge("organizations", [renamed], google=[held], base=[ACME])
+
+        assert merged.payload["organizations"] == [{**renamed, "department": "R&D"}]
+        assert merged.pending_import is False
+
+    def test_no_company_on_either_side_leaves_the_field_alone(self) -> None:
+        merged = _merge("organizations", [], google=[], base=[])
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is False
+
+    def test_a_company_from_the_linked_profile_cannot_be_cleared(self) -> None:
+        """The pull imports it again, so it is owed rather than silently kept."""
+        merged = merge_for_push(
+            {"organizations": []},
+            {"organizations": [{"metadata": PROFILE_SOURCE, **ACME}]},
+            synced_base={"organizations": _keys("organizations", ACME)},
+        )
+
+        assert "organizations" not in merged.payload
+        assert merged.pending_import is True
+
+
+NOTE = {"value": "Met at the conference", "contentType": "TEXT_PLAIN"}
+OTHER_NOTE = {"value": "Likes tea", "contentType": "TEXT_PLAIN"}
+
+
+class TestBiographies:
+    """Inbound imports every biography as a note (#1938, #1822)."""
+
+    def test_notes_cleared_locally_are_cleared(self) -> None:
+        merged = _merge(
+            "biographies", [], google=[NOTE, OTHER_NOTE], base=[NOTE, OTHER_NOTE]
+        )
+
+        assert merged.payload["biographies"] == []
+        assert merged.pending_import is False
+
+    def test_a_note_added_in_google_is_kept_and_owed_to_the_pull(self) -> None:
+        merged = _merge("biographies", [], google=[NOTE, OTHER_NOTE], base=[NOTE])
+
+        assert "biographies" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_note_edited_in_google_wins_over_the_unchanged_local_one(
+        self,
+    ) -> None:
+        edited = {**NOTE, "value": "Met at the conference in Leeds"}
+
+        merged = _merge("biographies", [NOTE], google=[edited], base=[NOTE])
+
+        assert "biographies" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_note_edited_locally_is_written_over_googles(self) -> None:
+        merged = _merge("biographies", [OTHER_NOTE], google=[NOTE], base=[NOTE])
+
+        assert merged.payload["biographies"] == [OTHER_NOTE]
+        assert merged.pending_import is False
+
+    def test_no_notes_on_either_side_leaves_the_field_alone(self) -> None:
+        merged = _merge("biographies", [], google=[], base=[])
+
+        assert "biographies" not in merged.payload
+        assert merged.pending_import is False
+
+    def test_a_note_from_the_linked_profile_cannot_be_cleared(self) -> None:
+        merged = merge_for_push(
+            {"biographies": []},
+            {"biographies": [NOTE, {"metadata": PROFILE_SOURCE, **OTHER_NOTE}]},
+            synced_base={"biographies": _keys("biographies", NOTE, OTHER_NOTE)},
+        )
+
+        assert merged.payload["biographies"] == []
+        assert merged.pending_import is True
+
+
 class TestResolveSyncedBase:
-    CURRENT = {"etag": "e2", "emailAddresses": _google(ADA)}
+    CURRENT = {
+        "etag": "e2",
+        "emailAddresses": _google(ADA),
+        "organizations": _google(ACME),
+    }
 
     def test_a_recorded_base_is_used_as_recorded(self) -> None:
-        recorded = {"emailAddresses": frozenset({"k"})}
+        recorded = {field: frozenset({"k"}) for field in BASE_FIELDS}
 
         assert (
             resolve_synced_base(recorded, self.CURRENT, synced_version="e2") is recorded
         )
+
+    def test_a_field_the_record_predates_is_read_from_an_unchanged_person(
+        self,
+    ) -> None:
+        """A base recorded before organizations joined it (#1938)."""
+        recorded = {"emailAddresses": frozenset({"k"})}
+
+        base = resolve_synced_base(recorded, self.CURRENT, synced_version="e2")
+
+        assert base["emailAddresses"] == frozenset({"k"})
+        assert base["organizations"] == _keys("organizations", ACME)
+
+    def test_a_field_the_record_predates_is_empty_for_a_changed_person(
+        self,
+    ) -> None:
+        """Recorded empty, so the push that keeps Google's company keeps that base."""
+        recorded = {"emailAddresses": frozenset({"k"})}
+
+        base = resolve_synced_base(recorded, self.CURRENT, synced_version="e1")
+
+        assert base["organizations"] == frozenset()
+
+    def test_a_company_google_added_before_the_deploy_survives_two_pushes(
+        self,
+    ) -> None:
+        """The second push's etag is the first's own: it must not reread the base."""
+        recorded = {"emailAddresses": _keys("emailAddresses", ADA)}
+        first_base = resolve_synced_base(recorded, self.CURRENT, synced_version="e1")
+        first = merge_for_push(
+            {"emailAddresses": [ADA], "organizations": []},
+            self.CURRENT,
+            synced_base=first_base,
+        )
+        # The update leaves organizations out, so it keeps the resolved base.
+        second_base = resolve_synced_base(first_base, self.CURRENT, synced_version="e2")
+        second = merge_for_push(
+            {"emailAddresses": [ADA], "organizations": []},
+            self.CURRENT,
+            synced_base=second_base,
+        )
+
+        assert "organizations" not in first.payload
+        assert "organizations" not in second.payload
+        assert second.pending_import is True
 
     def test_without_a_record_an_unchanged_person_is_its_own_base(self) -> None:
         base = resolve_synced_base(None, self.CURRENT, synced_version="e2")
@@ -360,16 +547,22 @@ class TestResolveSyncedBase:
         assert base["emailAddresses"] == _keys("emailAddresses", ADA)
 
     def test_without_a_record_a_changed_person_has_an_empty_base(self) -> None:
-        """Nothing tells an addition from a deletion, so keep everything."""
-        assert resolve_synced_base(None, self.CURRENT, synced_version="e1") == {}
+        """Nothing tells an addition from a deletion, so keep everything.
+
+        Each field is recorded empty, so a push that leaves one out keeps it so.
+        """
+        assert resolve_synced_base(None, self.CURRENT, synced_version="e1") == {
+            field: frozenset() for field in BASE_FIELDS
+        }
 
 
 class TestFieldsThePushLeavesOut:
     """A field the payload omits keeps Google's value, unmerged (#1938).
 
-    Local holding no company leaves ``organizations`` out of the push, so
-    Google keeps the one it gained. Nothing merged it, so nothing else marks
-    it for import - and the backend skips the pulls older than the push.
+    Every owned field is sent once it is loaded, so a field is left out only
+    when the push did not load it: local's value is unknown. Google's stands,
+    nothing merged it, and the backend skips the pulls older than the push, so
+    the next pull must import it.
     """
 
     def test_a_value_google_holds_in_an_omitted_field_is_pending_import(

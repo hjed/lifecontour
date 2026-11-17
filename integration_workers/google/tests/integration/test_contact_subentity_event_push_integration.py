@@ -663,6 +663,36 @@ class TestDeletingTheLastValueClearsGoogle:
         pushed = mock_client.update_contact.call_args[1]["contact_data"]
         assert pushed["addresses"] == []
 
+    async def test_deleting_the_last_note_and_the_company_clears_them(
+        self, db_session: AsyncSession, synced_contact: dict[str, int]
+    ) -> None:
+        """Google still holds them as last synced, so local cleared them (#1822)."""
+        mock_client = _mock_google_client()
+        mock_client.get_person.return_value = {
+            "resourceName": _REMOTE,
+            "etag": "etag-before",
+            "biographies": [{"value": "Met at the conference"}],
+            "organizations": [{"current": True, "name": "Old Co"}],
+        }
+
+        with (
+            patch("worker.GoogleAuthService"),
+            patch("worker.GoogleAPIClient", return_value=mock_client),
+        ):
+            await process_contact_event(
+                ctx=_ctx(db_session),
+                event_type="ContactUpdated",
+                event_data={
+                    "user_id": CONTACT_OWNER,
+                    "contact_id": synced_contact["contact_id"],
+                    "source": "ui",
+                },
+            )
+
+        pushed = mock_client.update_contact.call_args[1]["contact_data"]
+        assert pushed["biographies"] == []
+        assert pushed["organizations"] == []
+
 
 @pytest.mark.asyncio
 class TestPushReachesOnlyTheOwnersAccount:

@@ -50,10 +50,13 @@ async def _seed(
     db_session: AsyncSession,
     *,
     phone: str | None = None,
+    company: str | None = None,
     base: dict[str, list[str]] | None = None,
 ) -> int:
     """A linked contact holding ``ada@example.com``, last synced an hour ago."""
-    contact_id = await seed_contact(db_session, user_id=CONTACT_OWNER, first_name="Ada")
+    contact_id = await seed_contact(
+        db_session, user_id=CONTACT_OWNER, first_name="Ada", company=company
+    )
     await db_session.execute(
         text(
             "INSERT INTO contact_methods (contact_id, method_type, value, is_primary) "
@@ -656,20 +659,29 @@ async def test_a_second_push_moves_the_source_versions_forward(
     assert _merged(await _link(db_session)) == {"CONTACT/cBASE": _PUSHED_AT}
 
 
+_COMPANY = {"current": True, "name": "Analytical Engines"}
+_NOTE = {"value": "Met at the Analytical Society", "contentType": "TEXT_PLAIN"}
+
+
+def _base_with(**fields: list[str]) -> dict[str, list[str]]:
+    return {"emailAddresses": [_key("emailAddresses", _HELD)], **fields}
+
+
 @pytest.mark.asyncio
 async def test_a_company_google_gained_while_local_has_none_is_pending_import(
     db_session: AsyncSession,
 ) -> None:
-    """The push leaves ``organizations`` out, so nothing merged the company.
+    """The base holds no company, so Google added it since the last sync.
 
-    The backend skips the pull that carried it, as older than the push (#1938);
-    only the marker gets it imported, from the push's own version.
+    The push keeps it, and the backend skips the pull that carried it as older
+    than the push (#1938): only the marker gets it imported, from the push's
+    own version.
     """
-    await _seed(db_session, base={"emailAddresses": [_key("emailAddresses", _HELD)]})
-    company = [{**_CONTACT_SOURCE, "name": "Analytical Engines"}]
+    await _seed(db_session, base=_base_with(organizations=[]))
+    company = _google(_COMPANY)
     client = _client(
         {
-            "etag": "etag_synced",
+            "etag": "etag_google_edit",
             "emailAddresses": _google(_HELD),
             "organizations": company,
         },
@@ -686,3 +698,100 @@ async def test_a_company_google_gained_while_local_has_none_is_pending_import(
     assert "organizations" not in sent
     recorded = json.loads((await _link(db_session)).reference_data)
     assert recorded["pending_import"] is True
+    assert recorded["synced_entries"]["organizations"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_company_cleared_locally_is_cleared_in_google(
+    db_session: AsyncSession,
+) -> None:
+    """The base holds Google's company, so local cleared it (#1822, #1938)."""
+    await _seed(
+        db_session, base=_base_with(organizations=[_key("organizations", _COMPANY)])
+    )
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "emailAddresses": _google(_HELD),
+            "organizations": _google(_COMPANY),
+        },
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["organizations"] == []
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded.get("pending_import") is not True
+    assert recorded["synced_entries"]["organizations"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_company_cleared_on_a_base_from_before_organizations_is_cleared(
+    db_session: AsyncSession,
+) -> None:
+    """A base recorded before organizations joined it reads Google unchanged as synced."""
+    await _seed(db_session, base=_base_with())
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "emailAddresses": _google(_HELD),
+            "organizations": _google(_COMPANY),
+        },
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["organizations"] == []
+
+
+@pytest.mark.asyncio
+async def test_notes_cleared_locally_are_cleared_in_google(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base=_base_with(biographies=[_key("biographies", _NOTE)]))
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "emailAddresses": _google(_HELD),
+            "biographies": _google(_NOTE),
+        },
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["biographies"] == []
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded.get("pending_import") is not True
+
+
+@pytest.mark.asyncio
+async def test_the_base_records_the_company_and_notes_google_returns(
+    db_session: AsyncSession,
+) -> None:
+    """The cron push loads the company, so it reaches Google (#1787)."""
+    await _seed(db_session, company="Analytical Engines", base=_base_with())
+    returned = {
+        "etag": "etag_pushed",
+        "emailAddresses": _google(_HELD),
+        "organizations": _google(_COMPANY),
+        "biographies": [],
+    }
+    client = _client(
+        {"etag": "etag_synced", "emailAddresses": _google(_HELD)}, returned
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["organizations"] == [_COMPANY]
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["synced_entries"]["organizations"] == [
+        _key("organizations", _COMPANY)
+    ]
+    assert recorded["synced_entries"]["biographies"] == []
