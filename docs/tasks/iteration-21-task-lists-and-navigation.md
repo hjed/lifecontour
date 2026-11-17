@@ -1,6 +1,6 @@
 # Iteration 21: Task Lists and Navigation
 
-**Status:** 📋 PLANNED — 8 sub-iterations, **115 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. No phase has started.
+**Status:** 📋 PLANNED — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. No phase has started.
 **Dependencies:** [Iteration 18](./iteration-18-home-dashboard-and-tasks.md) (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), [Iteration 20](./iteration-20-entity-ownership.md) (entity ownership: every new table carries `user_id`), journal series (migrations 0101 and 0121), MeiliSearch indexing through the transactional outbox, the design-system sync (`frontend/.design-sync/`).
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable: a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar. Journal-only tasks keep behaving exactly as today.
 
@@ -77,7 +77,7 @@ One phase is one PR. Estimates are **production lines → tracked lines**, using
 - frontend phases are priced by counting their components (Iteration 18's title-priced frontend phases landed at 3–6 times their estimates), so they sit at 650–1,100;
 - a phase that exposes **one capability on REST and MCP together** is budgeted at 900–1,500 and says so on its estimate line.
 
-**On the 500-line standard.** About 70 phases sit between 400 and 1,100 tracked lines. The other 45 expose one capability on both surfaces, and that shape has never landed near 500 here: Iteration 18 estimated it at about 600 and measured 2,036, 2,483 and 3,300. Those phases are kept whole, at one capability each, rather than split into a REST PR and a trailing MCP PR, because MCP must not trail its API. If a capability phase is on course to pass 1,500, split it by capability (for example, set and clear) — never by surface.
+**On the 500-line standard.** About 70 phases sit between 400 and 1,100 tracked lines. The other 46 expose one capability on both surfaces, and that shape has never landed near 500 here: Iteration 18 estimated it at about 600 and measured 2,036, 2,483 and 3,300. Those phases are kept whole, at one capability each, rather than split into a REST PR and a trailing MCP PR, because MCP must not trail its API. If a capability phase is on course to pass 1,500, split it by capability (for example, set and clear) — never by surface.
 
 ## Sequencing Strategy
 
@@ -101,7 +101,7 @@ flowchart TD
 | ITER21-004 | Dashboard and daily summary for list tasks | 002 | 003 | 6 |
 | ITER21-005 | List ↔ journal association | 004 | 003, 006 | 10 |
 | ITER21-006 | Recurring tasks | 004 | 003, 005 | 10 |
-| ITER21-007 | Templates and series copies | 005, 006 | 003 | 20 |
+| ITER21-007 | Templates and series copies | 005, 006 | 003 | 21 |
 | ITER21-008 | Tasks and lists in search | 007 | 003 | 10 |
 
 Search is last because its rules name things the earlier steps create (templates, instance lists, association, auto-archive).
@@ -146,7 +146,7 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] The server's task guidance no longer says there is no task list and no due date.
 - [ ] No test of journal-only behaviour (two anchors required, lapse, retarget-to-revive, reopen acknowledgement, delete guard) changes its assertions.
 
-**Phase ordering:** Phases 1–8 (lists) and 9–17 (task model and its safety work) are independent and can interleave. Phase 18 is the first that lets a list task exist; phases 11, 12, 15 and 16 are what keep existing pages and journal deletion correct at that moment.
+**Phase ordering:** Phases 1–8 (lists) and 9–18 (task model and its safety work) are independent and can interleave. Phase 19 is the first that lets a list task exist; phases 11, 12, 15, 16 and 18 are what keep existing pages, journal deletion and archived lists correct at that moment.
 
 #### Phase 1: Task list table, entity and icon set
 
@@ -316,19 +316,30 @@ Search is last because its rules name things the earlier steps create (templates
 
 - [ ] Existing delete dialog; E2E in the journal-tasks spec.
 
-#### Phase 18: Create a task on a list
+#### Phase 18: Archived lists freeze their tasks
 
-**Prerequisites:** Phase 12, Phase 15, Phase 16.
+**Prerequisites:** Phase 6, Phase 11.
+**Estimated diff:** ~90 production → **~800 tracked**
+
+**Acceptance Criteria:**
+
+- [ ] Status, text, delete, retarget, contact-link and attach endpoints and tools refuse a task on an archived list.
+- [ ] Tests seed a list task directly.
+- [ ] Lands before any list task can be created, so an archived list is never editable; each later list-task write refuses an archived list in its own phase.
+
+#### Phase 19: Create a task on a list
+
+**Prerequisites:** Phase 12, Phase 15, Phase 16, Phase 18.
 **Estimated diff:** ~170 production → **~1,500 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] Undated or with a due date; joins the bottom; the created event carries the list; server task guidance rewritten.
+- [ ] Undated or with a due date; joins the bottom; refused on an archived list; the created event carries the list; server task guidance rewritten.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 19: Create on a list with a due journal
+#### Phase 20: Create on a list with a due journal
 
-**Prerequisites:** Phase 18.
+**Prerequisites:** Phase 19.
 **Estimated diff:** ~90 production → **~800 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -336,9 +347,9 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Future-dated journal; never together with a due date.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 20: Read a list's tasks
+#### Phase 21: Read a list's tasks
 
-**Prerequisites:** Phase 18.
+**Prerequisites:** Phase 19.
 **Estimated diff:** ~110 production → **~1,000 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -346,18 +357,9 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Open in order; closed paged.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 21: Archived lists freeze their tasks
-
-**Prerequisites:** Phase 6, Phase 18.
-**Estimated diff:** ~90 production → **~800 tracked**
-
-**Acceptance Criteria:**
-
-- [ ] Status, text, delete, retarget, contact-link and attach endpoints and tools refuse a task on an archived list.
-
 #### Phase 22: Change a list task's due date
 
-**Prerequisites:** Phase 18.
+**Prerequisites:** Phase 19.
 **Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -367,7 +369,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 23: Change a list task's due journal
 
-**Prerequisites:** Phase 19.
+**Prerequisites:** Phase 20.
 **Estimated diff:** ~120 production → **~1,200 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -377,7 +379,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 24: Direct reopen of list tasks
 
-**Prerequisites:** Phase 18.
+**Prerequisites:** Phase 19.
 **Estimated diff:** ~60 production → **~500 tracked**
 
 **Acceptance Criteria:**
@@ -386,7 +388,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 25: Reorder tasks in a list
 
-**Prerequisites:** Phase 20.
+**Prerequisites:** Phase 21.
 **Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -396,7 +398,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 26: Move a task onto or between lists
 
-**Prerequisites:** Phase 20.
+**Prerequisites:** Phase 21.
 **Estimated diff:** ~150 production → **~1,500 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -427,7 +429,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 29: Delete a list
 
-**Prerequisites:** Phase 20.
+**Prerequisites:** Phase 21.
 **Estimated diff:** ~150 production → **~1,300 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -939,7 +941,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 7: Surfaced-list rule
 
-**Prerequisites:** Phase 2, ITER21-004 Phase hase 1.
+**Prerequisites:** Phase 2, ITER21-004 Phase 1.
 **Estimated diff:** ~110 production → **~660 tracked** (×6)
 
 **Acceptance Criteria:**
@@ -948,7 +950,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 8: Tasks card: one expandable row per list
 
-**Prerequisites:** ITER21-004 Phase hase 2.
+**Prerequisites:** ITER21-004 Phase 2.
 **Estimated diff:** ~180 production → **~900 tracked**
 
 **Acceptance Criteria:**
@@ -969,7 +971,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 10: Daily summary and association
 
-**Prerequisites:** Phase 7, ITER21-004 Phase hase 4.
+**Prerequisites:** Phase 7, ITER21-004 Phase 4.
 **Estimated diff:** ~110 production → **~750 tracked**
 
 **Acceptance Criteria:**
@@ -1017,19 +1019,9 @@ Search is last because its rules name things the earlier steps create (templates
 
 - [ ] Days, weeks, months, years including month ends; suggestion from the creation → due gap.
 
-#### Phase 3: Set, change, clear recurrence
+#### Phase 3: Completion creates the next copy
 
 **Prerequisites:** Phase 2.
-**Estimated diff:** ~170 production → **~1,500 tracked** · one capability on REST and MCP together
-
-**Acceptance Criteria:**
-
-- [ ] Carried on the task-updated event into history.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
-
-#### Phase 4: Completion creates the next copy
-
-**Prerequisites:** Phase 3.
 **Estimated diff:** ~160 production → **~1,200 tracked**
 
 **Acceptance Criteria:**
@@ -1037,46 +1029,58 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] No-date and interval modes; same list and position; inheritance; cancel ends it.
 - [ ] Proven through every completion entry point.
 - [ ] The copy's created event refreshes the summary.
+- [ ] Tests seed the recurrence setting directly: nothing can set it yet, so the behaviour is inert until Phase 8.
 
-#### Phase 5: Next journal in a series
+#### Phase 4: Next journal in a series
 
-**Prerequisites:** Phase 4.
+**Prerequisites:** Phase 3.
 **Estimated diff:** ~130 production → **~800 tracked** (×6)
 
 **Acceptance Criteria:**
 
 - [ ] Next non-cancelled journal after today; none → no copy, chain stops, task says it did not recur.
 
-#### Phase 6: Undoing a completion
+#### Phase 5: Undoing a completion
 
-**Prerequisites:** Phase 4.
+**Prerequisites:** Phase 3.
 **Estimated diff:** ~120 production → **~800 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Untouched copy removed on reopen; changed copy stays and the original stops recurring.
 
-#### Phase 7: Series merge and delete
+#### Phase 6: Series merge and delete
 
-**Prerequisites:** Phase 5.
+**Prerequisites:** Phase 4.
 **Estimated diff:** ~70 production → **~500 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Follows the surviving series; falls back to no date.
 
-#### Phase 8: Leaving a list
+#### Phase 7: Leaving a list
 
-**Prerequisites:** Phase 3.
+**Prerequisites:** Phase 1.
 **Estimated diff:** ~60 production → **~450 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Removal from the list, or surviving the list's deletion, clears recurrence; flagged in the response.
 
+#### Phase 8: Set, change, clear recurrence
+
+**Prerequisites:** Phase 3, Phase 4, Phase 5, Phase 6, Phase 7.
+**Estimated diff:** ~170 production → **~1,500 tracked** · one capability on REST and MCP together
+
+**Acceptance Criteria:**
+
+- [ ] All three modes, exposed only now that completion, the series mode, undo and leaving a list already behave correctly — a saved setting is never inert.
+- [ ] Carried on the task-updated event into history.
+- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
 #### Phase 9: Repeat editor in task details
 
-**Prerequisites:** Phase 3, ITER21-002 Phase 15.
+**Prerequisites:** Phase 8, ITER21-002 Phase 15.
 **Estimated diff:** ~200 production → **~1,000 tracked**
 
 **Acceptance Criteria:**
@@ -1173,17 +1177,30 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Copies open tasks' text, order, flag, icon, contacts; source untouched.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 6: Edit, archive and delete a template
+#### Phase 6: Rename, archive, restore and delete a template
 
 **Prerequisites:** Phase 4.
 **Estimated diff:** ~120 production → **~1,000 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] Through the list operations with kind guards.
+- [ ] Name and icon, archive, restore and delete through the list operations with kind guards.
+- [ ] An archived template makes no copies.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 7: Use a template
+#### Phase 7: Template tasks: add, edit, reorder, delete
+
+**Prerequisites:** Phase 4.
+**Estimated diff:** ~130 production → **~1,200 tracked** · one capability on REST and MCP together
+
+**Acceptance Criteria:**
+
+- [ ] The existing list-task operations work on a template: create, text, flag, icon, contact links, reorder and delete.
+- [ ] Status changes, due dates, due journals and recurrence are refused on a template task.
+- [ ] This is how an empty template gains its tasks.
+- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+#### Phase 8: Use a template
 
 **Prerequisites:** Phase 4, ITER21-005 Phase 2.
 **Estimated diff:** ~130 production → **~1,200 tracked** · one capability on REST and MCP together
@@ -1193,7 +1210,7 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Creates an ordinary list, optionally associated with a journal.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 8: Attach, detach and mode
+#### Phase 9: Attach, detach and mode
 
 **Prerequisites:** Phase 4.
 **Estimated diff:** ~150 production → **~1,400 tracked** · one capability on REST and MCP together
@@ -1203,9 +1220,9 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] One series per template; detaching stops future copies.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 9: Copies for each journal, when it is created
+#### Phase 10: Copies for each journal, when it is created
 
-**Prerequisites:** Phase 3, Phase 8.
+**Prerequisites:** Phase 3, Phase 9.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**
@@ -1213,61 +1230,61 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] At attach for journals today or later; then as a journal joins the series, by hand or through calendar sync; one copy per journal; never past or cancelled.
 - [ ] Instance creation refreshes the summary.
 
-#### Phase 10: Copies after the previous one has passed
+#### Phase 11: Copies after the previous one has passed
 
-**Prerequisites:** Phase 9.
+**Prerequisites:** Phase 10.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Next upcoming at attach; a periodic backend loop moves on once a journal is over; no back-fill; a date change neither moves nor duplicates.
 
-#### Phase 11: Auto-archive
+#### Phase 12: Auto-archive
 
-**Prerequisites:** Phase 9.
+**Prerequisites:** Phase 10.
 **Estimated diff:** ~130 production → **~900 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Periodic loop: journal over and all closed, or seven days; once only; emits list-updated and refreshes the summary.
 
-#### Phase 12: Journal leaves a series; series merged
+#### Phase 13: Journal leaves a series; series merged
 
-**Prerequisites:** Phase 9.
+**Prerequisites:** Phase 10.
 **Estimated diff:** ~90 production → **~650 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Instance list stays; templates move to the survivor with no duplicate copies.
 
-#### Phase 13: Journals merged
+#### Phase 14: Journals merged
 
-**Prerequisites:** Phase 9.
+**Prerequisites:** Phase 10.
 **Estimated diff:** ~60 production → **~450 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Both copies kept on the surviving journal.
 
-#### Phase 14: Series deleted
+#### Phase 15: Series deleted
 
-**Prerequisites:** Phase 8, Phase 7.
+**Prerequisites:** Phase 9, Phase 8.
 **Estimated diff:** ~80 production → **~550 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Templates detached; archived unless used elsewhere; instance lists stay.
 
-#### Phase 15: Recurrence and special lists
+#### Phase 16: Recurrence and special lists
 
-**Prerequisites:** Phase 2, ITER21-006 Phase 3.
+**Prerequisites:** Phase 2, ITER21-006 Phase 8.
 **Estimated diff:** ~70 production → **~450 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Refused on template and instance lists; moving a recurring task onto an instance list clears it, flagged in the response.
 
-#### Phase 16: Templates page
+#### Phase 17: Templates page
 
 **Prerequisites:** Phase 6, ITER21-002 Phase 8.
 **Estimated diff:** ~180 production → **~900 tracked**
@@ -1277,36 +1294,36 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] `/tasks/templates`, linked from the sidebar and `/tasks`; active and archived templates.
 - [ ] Creates `task-templates.spec.ts`.
 
-#### Phase 17: Template editor and New template from a list
+#### Phase 18: Template editor and New template from a list
 
-**Prerequisites:** Phase 16, Phase 5.
+**Prerequisites:** Phase 17, Phase 5, Phase 7.
 **Estimated diff:** ~200 production → **~1,000 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Non-tickable task rows; the copy-from-a-list dialog.
 
-#### Phase 18: Use template and attach dialogs
+#### Phase 19: Use template and attach dialogs
 
-**Prerequisites:** Phase 16, Phase 7, Phase 8.
+**Prerequisites:** Phase 17, Phase 8, Phase 9.
 **Estimated diff:** ~150 production → **~750 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] *Use template* with optional journal; attach to a series with mode.
 
-#### Phase 19: Series page Template lists card
+#### Phase 20: Series page Template lists card
 
-**Prerequisites:** Phase 17, Phase 18.
+**Prerequisites:** Phase 18, Phase 19.
 **Estimated diff:** ~180 production → **~900 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Attached templates, attach existing or create, mode, detach; breadcrumb and link to Templates.
 
-#### Phase 20: Instance lists in the app
+#### Phase 21: Instance lists in the app
 
-**Prerequisites:** Phase 3, Phase 15, ITER21-005 Phase 6, ITER21-002 Phase 16.
+**Prerequisites:** Phase 3, Phase 16, ITER21-005 Phase 6, ITER21-002 Phase 16.
 **Estimated diff:** ~130 production → **~700 tracked**
 
 **Acceptance Criteria:**

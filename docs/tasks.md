@@ -354,7 +354,7 @@ Read these first when working on the active product-alignment streams:
 **Reference:** [Entity Ownership Product Specification](./product-specifications/entity-ownership-product-specification.md)
 
 ### [Iteration 21: Task Lists and Navigation](./tasks/iteration-21-task-lists-and-navigation.md)
-**Status:** 📋 PLANNED — 8 sub-iterations, 115 phases (one PR each); per-phase detail in the [iteration document](./tasks/iteration-21-task-lists-and-navigation.md)
+**Status:** 📋 PLANNED — 8 sub-iterations, 116 phases (one PR each); per-phase detail in the [iteration document](./tasks/iteration-21-task-lists-and-navigation.md)
 **Dependencies:** Iteration 18 (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), Iteration 20 (entity ownership), journal series, MeiliSearch indexing through the transactional outbox, the design-system sync
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable through a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar, while journal-only tasks keep behaving exactly as today
 
