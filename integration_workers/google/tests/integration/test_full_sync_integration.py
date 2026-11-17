@@ -342,6 +342,7 @@ class TestFullSyncIntegration:
             "biographies": [],
             "nicknames": [],
             "events": [],
+            "names": sorted(raw_entry_keys("names", {"givenName": "Kiri"}, None)),
         }
 
     async def test_full_sync_reports_an_address_whose_region_is_unrecognised(

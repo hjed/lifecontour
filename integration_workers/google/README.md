@@ -200,13 +200,13 @@ fails when a pushed field has none:
 
 | Field | Local contact owns | Kept from Google |
 |---|---|---|
-| `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
+| `names` | given, family and middle name of the name inbound reads (primary, else first), each part merged against the synced base | honorific prefix/suffix, phonetic names; a part added, edited or deleted in Google since the base while local's is unchanged (#1901). A profile's name is never merged |
 | `nicknames` | the one inbound reads (primary, else first), when it is in the synced base | every other nickname, beside a pushed one (which replaces the base nickname); one added, edited or deleted in Google since the base. Clearing a nickname in the base clears them all, or the next pull would import a survivor |
 | `emailAddresses`, `phoneNumbers` | the entries inbound imports that are in the synced base | entries it rejects (invalid values), and entries added in Google since the base |
 | `addresses` | the entries inbound imports that are in the synced base, including a countryless one the last applied pull gave a country (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country and none recorded, or an AU/US/CA region naming no state, province or territory in the country it is imported with — reported on the event as `skipped_addresses` for the user to review (#1820); and entries added in Google since the base |
 | `birthdays` | a birthday with a usable date | a text-only birthday, or one added or edited in Google since the base while the local one is unchanged: the field leaves the update mask, so Google keeps it |
 | `events` | `anniversary` events inbound imports that are in the synced base | every other event (custom, untyped, an anniversary with no usable date), and anniversaries added in Google since the base |
-| `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
+| `organizations` | name and title of the org inbound reads (first current, else first), each merged against the synced base | that org's other parts (department, type…), every other org, and a company or title Google added or edited since the base while local's is unchanged (#1901) |
 | `biographies`, `memberships` | everything | nothing (memberships: see #1821) |
 
 Parts of an owned entry the local model cannot hold (an address's type, a

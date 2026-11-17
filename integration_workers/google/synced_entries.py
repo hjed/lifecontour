@@ -7,13 +7,17 @@ deleted. See ``core_shared.sync_base``.
 
 A key covers only the value inbound imports - an email's address, a phone's
 number, an address's parts, a birthday's or anniversary's date, a nickname's
-text - never its label, primary flag
+text, each part of a name - never its label, primary flag
 or formatting, so the pull, the push and Google's response agree on an entry
 however each presents it. A phone carries a key per spelling - E.164, and the
 digits as typed - since the push sends a number as typed and Google answers
 with it canonical: two entries are one when any of their keys match
 (``three_way_entries``). An entry inbound does not import has no keys: it was
 never held locally.
+
+A name and the imported organization are merged part by part, so they carry a
+key per part (``name_part_keys``, ``organization_part_keys``), an empty part
+included: the base then records that the name had no middle name.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +62,7 @@ type BaseField = Literal[
     "biographies",
     "nicknames",
     "events",
+    "names",
 ]
 
 # The Google fields the push merges against a base, in the person's raw names.
@@ -70,7 +75,15 @@ BASE_FIELDS: Final[tuple[BaseField, ...]] = (
     "biographies",
     "nicknames",
     "events",
+    "names",
 )
+
+# The parts of a name and an organization the local contact owns, raw names.
+NAME_PARTS: Final = ("givenName", "familyName", "middleName")
+ORGANIZATION_PARTS: Final = ("name", "title")
+
+# Inbound's given name for a person Google holds none for.
+_UNKNOWN_GIVEN_NAME: Final = "Unknown"
 
 
 def _normalised(value: str) -> str:
@@ -184,6 +197,38 @@ def biography_keys(biography: GoogleBiography) -> Keys:
     return frozenset({entry_key("biography", value)})
 
 
+def imported_part(entry: Mapping[str, Any], part: str) -> str:
+    """One owned part of a raw name or organization, as inbound reads it."""
+    value = str(entry.get(part) or "").strip()
+    if part == "givenName" and not value:
+        return _UNKNOWN_GIVEN_NAME
+    return value
+
+
+def name_part_keys(entry: Mapping[str, Any]) -> dict[str, str]:
+    """The key of each part of a raw name, empty parts included."""
+    return {
+        part: entry_key("name", part, imported_part(entry, part)) for part in NAME_PARTS
+    }
+
+
+def organization_part_keys(entry: Mapping[str, Any]) -> Keys:
+    """The keys of a raw organization's company and job title, apart.
+
+    None for one inbound reads as no company at all. They sit beside the
+    combined key (:func:`organization_keys`) in the base, which the whole-entry
+    decisions read; a base from before them holds only that one.
+    """
+    if not any(imported_part(entry, part) for part in ORGANIZATION_PARTS):
+        return _NO_KEYS
+    return frozenset(organization_part_key(entry, part) for part in ORGANIZATION_PARTS)
+
+
+def organization_part_key(entry: Mapping[str, Any], part: str) -> str:
+    """The key of one part of a raw organization."""
+    return entry_key("organization-part", part, imported_part(entry, part))
+
+
 def nickname_keys(nickname: GoogleNickname) -> Keys:
     """The nickname's key: its text, stripped as inbound reads it.
 
@@ -252,8 +297,34 @@ def raw_entry_keys(
         "biographies": _raw(GoogleBiography, biography_keys),
         "nicknames": _raw(GoogleNickname, nickname_keys),
         "events": _raw(GooglePersonEvent, event_keys),
+        "names": lambda name: frozenset(name_part_keys(name).values()),
     }
     return readers[field](entry)
+
+
+def imported_name_index(current: Sequence[Mapping[str, Any]]) -> int | None:
+    """The index of the raw name inbound reads: the primary one, else the first."""
+    if not current:
+        return None
+    return next(
+        (
+            index
+            for index, name in enumerate(current)
+            if (name.get("metadata") or {}).get("primary")
+        ),
+        0,
+    )
+
+
+def imported_name(current: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """The raw name inbound reads; empty for a person with none.
+
+    Inbound reads no name as the given name "Unknown", so even no name has
+    keys (:func:`name_part_keys`): a name Google adds later is then an edit
+    of the placeholder, not a conflict with it.
+    """
+    index = imported_name_index(current)
+    return {} if index is None else current[index]
 
 
 def _raw_imported(
@@ -261,12 +332,14 @@ def _raw_imported(
 ) -> list[Mapping[str, Any]]:
     """The raw entries of ``field`` inbound imports.
 
-    One organization, one nickname, and every entry of the other fields.
+    One organization, nickname and name, and every entry of the other fields.
     """
     if field == "organizations":
         index = imported_organization_index([e.get("current") for e in entries])
     elif field == "nicknames":
         index = chosen_nickname_index(entries)
+    elif field == "names":
+        return [imported_name(entries)]
     else:
         return list(entries)
     return [] if index is None else [entries[index]]
@@ -278,6 +351,11 @@ def _imported_organization(
     """The organization inbound imports, if any, as a list."""
     index = imported_organization_index([o.current for o in organizations])
     return [] if index is None else [organizations[index]]
+
+
+def _dumped(entry: BaseModel) -> dict[str, Any]:
+    """A parsed entry in the People API's own raw names."""
+    return entry.model_dump(by_alias=True, exclude_none=True)
 
 
 def synced_entries_of(
@@ -294,7 +372,8 @@ def synced_entries_of(
         "addresses": [address_keys(a, fallback_country) for a in person.addresses],
         "birthdays": [birthday_keys(b) for b in person.birthdays],
         "organizations": [
-            organization_keys(o) for o in _imported_organization(person.organizations)
+            organization_keys(o) | organization_part_keys(_dumped(o))
+            for o in _imported_organization(person.organizations)
         ],
         "biographies": [biography_keys(b) for b in person.biographies],
         "nicknames": [
@@ -303,6 +382,13 @@ def synced_entries_of(
             if n is not None
         ],
         "events": [event_keys(e) for e in person.events],
+        "names": [
+            frozenset(
+                name_part_keys(
+                    imported_name([_dumped(name) for name in person.names])
+                ).values()
+            )
+        ],
     }
     return {field: _NO_KEYS.union(*keys) for field, keys in keyed.items()}
 
@@ -318,6 +404,8 @@ def raw_synced_entries(
         synced[field] = _NO_KEYS.union(
             *(raw_entry_keys(field, entry, fallback_country) for entry in imported)
         )
+        if field == "organizations":
+            synced[field] |= _NO_KEYS.union(*map(organization_part_keys, imported))
     return synced
 
 
