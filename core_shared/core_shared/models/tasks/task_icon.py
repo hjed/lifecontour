@@ -10,7 +10,8 @@ frontend's mapping changes and the stored key does not.
 **Keys are only ever added, never renamed or removed.** The database holds no
 CHECK on icon values (so a new icon needs no migration on every table that
 carries one); every write goes through an entity that accepts only a member of
-this enum. A removed key would leave rows the entities cannot read back.
+this enum. A removed key would leave rows the entities cannot read back; the
+unit tests pin every published key, and a new key is appended to that list too.
 
 ``flag`` is deliberately absent: the flag is a separate on/off marker on every
 task, and an icon that looked like it would be confusing.

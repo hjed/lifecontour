@@ -746,7 +746,8 @@ it also refuses tab- or newline-only names, which `btrim` does not strip.
 not a closed lifecycle — it is expected to grow — and a CHECK would cost a migration on every
 icon-bearing table for each new icon. Every write goes through an entity that accepts only a
 `TaskIcon`. The consequence is a rule: **icon keys are only ever added, never renamed or
-removed**, because a removed key would leave rows the entities cannot read back. Keys currently
+removed**, because a removed key would leave rows the entities cannot read back. `tests/unit/tasks/test_task_icon.py`
+pins every published key, so removing or renaming one fails CI. Keys currently
 match `lucide-react` icon names, but the key is the contract; the web app maps it to a component.
 
 **Positions are not unique.** Reordering shifts many rows at once, which a plain unique
