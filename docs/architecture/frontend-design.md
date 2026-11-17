@@ -106,6 +106,17 @@ depends on are therefore asserted in
 - Create reusable compound components
 - Follow single responsibility principle
 
+### The New Dialog
+
+The top bar's **New** button (`components/layout/new-dialog/`) opens one dialog for creating any entity. `Header` renders it for signed-in users on every page.
+
+- **One registry.** The dialog lists the entries of `NEW_ENTITY_TYPES` (`registry.ts`), in order, as a `role="group"` "What to create" of `aria-pressed` buttons. Each entry is a `NewEntityType`: an `id` from the `NewEntityId` union, a label, a Lucide icon and a `Panel`. The dialog never names a type itself.
+- **Adding a type** is a new `NewEntityId` member, one registry entry, and a panel component taking `NewEntityPanelProps` (`onCreated`, `onCancel`). The panel owns its form and mutation, and calls `onCreated` only after the create succeeds; the dialog closes on either callback. Context pre-fill (the list or journal being viewed) belongs inside the panel, for example via `usePathname`.
+- **Input survives switching, not closing.** Every panel stays mounted while the dialog is open, inactive ones `hidden`, so what was typed in one type is still there after switching away and back. Closing the dialog unmounts the panels and discards it; each opening starts on the first type.
+- **One component at every width.** Below `md` the dialog is a sheet pinned to the top of the screen, full width, with a 44px New trigger, type switch and close button (the panel's own form keeps its usual control sizes); from `md` up it is the centred dialog. The switch is CSS only (mobile-first base classes with `md:` overrides on `DialogContent`), with no JavaScript media query.
+- **Panels reuse the page forms.** The Contact panel is `CreateContactForm`, which `/contacts/new` also renders: it runs `useCreateContact`, then on success calls `onCreated` and opens the new contact, but only while it is still mounted: a create that settles after the dialog was closed (or the page left) does not navigate. A failed create leaves the form as it was and the mutation's toast explains why.
+- `NewDialog` accepts a `types` prop, defaulting to the registry, so tests can drive the shell with several fake types.
+
 ### State Management
 
 - Use React hooks for local component state management

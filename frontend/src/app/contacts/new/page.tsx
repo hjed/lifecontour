@@ -10,11 +10,9 @@
 import { ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-import { useCreateContact } from '@/lib/api/contacts';
-import { ContactFormData } from '@/types/contacts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ContactForm } from '@/components/contacts/ContactForm';
+import { CreateContactForm } from '@/components/contacts/CreateContactForm';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 
 export default function NewContactPage() {
@@ -27,19 +25,6 @@ export default function NewContactPage() {
 
 function NewContactPageContent() {
   const router = useRouter();
-  const createContactMutation = useCreateContact();
-
-  const handleSubmit = async (data: ContactFormData) => {
-    try {
-      const result = await createContactMutation.mutateAsync(data);
-      // Navigate to the created contact's detail page
-      router.push(`/contacts/${result.data.id}`);
-    } catch (error) {
-      // Error is handled by the mutation
-      console.error('Failed to create contact:', error);
-    }
-  };
-
   const handleCancel = () => {
     router.push('/contacts');
   };
@@ -72,11 +57,7 @@ function NewContactPageContent() {
           <CardTitle>Contact Information</CardTitle>
         </CardHeader>
         <CardContent>
-          <ContactForm
-            onSubmit={handleSubmit}
-            onCancel={handleCancel}
-            isLoading={createContactMutation.isPending}
-          />
+          <CreateContactForm onCancel={handleCancel} />
         </CardContent>
       </Card>
     </div>

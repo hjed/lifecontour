@@ -31,7 +31,7 @@ interface DesignSyncConfig {
 const FRONTEND_ROOT = resolve(__dirname, '../..');
 const DESIGN_SYNC_DIR = join(FRONTEND_ROOT, '.design-sync');
 const PREVIEWS_DIR = join(DESIGN_SYNC_DIR, 'previews');
-const PREVIEW_COUNT = 47;
+const PREVIEW_COUNT = 48;
 const RETIRED_PACKAGE = 'personal-management-frontend';
 const RETIRED_GLOBAL = 'window.PMS';
 const AGENT_FACING_DOCS = ['conventions.md', 'NOTES.md'];

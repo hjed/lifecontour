@@ -2,8 +2,10 @@ import { Breadcrumb, Header } from 'lifecontour-frontend';
 
 /**
  * The app bar as it renders for a signed-in user: home affordance, centred
- * global search, theme toggle and the avatar menu. The preview harness signs
- * in as Alex Taylor, which is what drives the search box and avatar to appear.
+ * global search, the New button (which opens `NewDialog`), theme toggle and
+ * the avatar menu. The preview harness signs in as Alex Taylor, which is what
+ * drives the search box, New and the avatar to appear. Below `md` New shrinks
+ * to a 44px plus icon.
  */
 export function Default() {
   return <Header />;

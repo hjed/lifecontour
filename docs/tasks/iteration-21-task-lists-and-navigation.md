@@ -1,6 +1,6 @@
 # Iteration 21: Task Lists and Navigation
 
-**Status:** 📋 PLANNED — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. No phase has started.
+**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-003 Phase 1.
 **Dependencies:** [Iteration 18](./iteration-18-home-dashboard-and-tasks.md) (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), [Iteration 20](./iteration-20-entity-ownership.md) (entity ownership: every new table carries `user_id`), journal series (migrations 0101 and 0121), MeiliSearch indexing through the transactional outbox, the design-system sync (`frontend/.design-sync/`).
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable: a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar. Journal-only tasks keep behaving exactly as today.
 
@@ -688,14 +688,16 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 1: New dialog shell and Contact
 
+**Status:** ✅ Complete.
 **Prerequisites:** None.
 **Estimated diff:** ~170 production → **~900 tracked**
+**Actual diff:** ~350 production → **~1,000 tracked**. Production ran over mostly on docblocks: `NewDialog` (148 lines) carries the responsive-sheet and retention rationale, and `CreateContactForm` was extracted so `/contacts/new` and the dialog share one create path. The tracked total also includes a one-off fix to `frontend/pnpm-lock.yaml`, whose duplicated `baseline-browser-mapping` entry had broken `pnpm install` on main.
 
 **Acceptance Criteria:**
 
-- [ ] **New** in the top bar; dialog on desktop, top sheet on phones; type switch from one registry, keeping each type's input; Contact tab holding `ContactForm`.
-- [ ] `Header` design-sync preview updated.
-- [ ] Creates `new-dialog.spec.ts`.
+- [x] **New** in the top bar; dialog on desktop, top sheet on phones; type switch from one registry, keeping each type's input; Contact tab holding `ContactForm`.
+- [x] `Header` design-sync preview updated. `NewDialog` is registered as a new primary component (48), with one desktop-width card: the card viewport is per component, so the phone top sheet is described in the preview's doc comment.
+- [x] Creates `new-dialog.spec.ts`.
 
 #### Phase 2: New → Journal
 

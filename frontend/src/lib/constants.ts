@@ -176,6 +176,10 @@ export const UI_TEXT = {
   AUTH_FAILED: 'Authentication Failed',
   PROBLEM_SIGNING_IN: 'There was a problem signing you in',
   TRY_AGAIN: 'Try signing in again',
+  NEW: 'New',
+  NEW_TYPE_SWITCH: 'What to create',
+  NEW_DESCRIPTION: 'Choose what to create, then fill in its details.',
+  CLOSE: 'Close',
 } as const;
 
 // External project links shown on the login page and in the user menu
