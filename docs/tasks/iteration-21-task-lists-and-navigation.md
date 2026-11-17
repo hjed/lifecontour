@@ -49,7 +49,7 @@ The [Delivery Rules](./iteration-18-home-dashboard-and-tasks.md#delivery-rules) 
 
 1. **Tests first.** Each phase writes its failing tests before its implementation.
 2. **One phase, one PR, one capability.** A phase never spans two domains.
-3. **Every phase is safe alone.** It can be merged and deployed without any later phase. Where a backend change would put something new in front of an existing screen, the screen's tolerance lands first; new search result types are opt-in until the dropdown can show them.
+3. **Every phase is safe alone.** It can be merged and deployed without any later phase. Where a backend change would put something new in front of an existing screen, the screen's tolerance lands first; new search result types are opt-in until the dropdown can show them. A setting is never exposed over REST or MCP before the behaviour it controls: that behaviour lands first as a service, with the setting seeded in tests, and a guard lands before the first row it guards can exist.
 4. **A hard rule gets its own phase.** A rule matrix (dates, invariants, selection) lands as a pure service with unit tests ahead of the phase that exposes it.
 5. **MCP ships with its API.** A REST endpoint and its MCP tool land in the same phase. MCP tools open no transactions; they call a `@transactional` service.
 6. **Events ship with the change.** A domain event is emitted in the phase that makes the change possible, so no write is ever missing from history. At most two new event types per phase.
@@ -235,7 +235,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 **Acceptance Criteria:**
 
-- [ ] Migration only: `task_list_id`, position, due date, flag, icon; both anchors nullable; database CHECKs for invariants 1, 4, 5.
+- [ ] Migration only: `task_list_id`, position, due date, flag, icon; both anchors nullable; database CHECKs for invariants 1, 2, 4 and 5 — a task with no list must hold both a creating and a due journal, so relaxing the columns never weakens the two-anchor guarantee for journal-only tasks.
 - [ ] Existing code untouched.
 
 #### Phase 10: Task entity and invariants
@@ -1145,6 +1145,7 @@ Search is last because its rules name things the earlier steps create (templates
 **Acceptance Criteria:**
 
 - [ ] Template tasks carry no status, dates or recurrence and cannot be completed; templates excluded from every working-list read.
+- [ ] Until Phase 7 opens the allowed ones, every list-task write that targets a template (create, move onto) is refused, so a template can never hold a working task.
 
 #### Phase 3: Timely visibility of instance lists
 
@@ -1156,15 +1157,16 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Listed for the sidebar and `/tasks` only from their journal entering the window until archived.
 - [ ] Lands before any copy can be made, so copies never flood the sidebar.
 
-#### Phase 4: Create an empty template
+#### Phase 4: Create and read templates
 
 **Prerequisites:** Phase 2.
-**Estimated diff:** ~130 production → **~1,200 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~160 production → **~1,500 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] A template with no tasks can be created over REST and MCP, with a name and an optional icon.
-- [ ] It is a template-kind list and is never returned among working lists.
+- [ ] Create a template with no tasks, with a name and an optional icon.
+- [ ] List the user's templates with an archived filter, each with its task count and attached series; read one template with its tasks.
+- [ ] This is the read the Templates page and an agent use to find templates, since working-list reads never return them.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 5: Create a template from a list
@@ -1210,72 +1212,63 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Creates an ordinary list, optionally associated with a journal.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 9: Attach, detach and mode
+#### Phase 9: Copies for each journal, when it is created
 
-**Prerequisites:** Phase 4.
-**Estimated diff:** ~150 production → **~1,400 tracked** · one capability on REST and MCP together
-
-**Acceptance Criteria:**
-
-- [ ] One series per template; detaching stops future copies.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
-
-#### Phase 10: Copies for each journal, when it is created
-
-**Prerequisites:** Phase 3, Phase 9.
+**Prerequisites:** Phase 3.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] At attach for journals today or later; then as a journal joins the series, by hand or through calendar sync; one copy per journal; never past or cancelled.
 - [ ] Instance creation refreshes the summary.
+- [ ] The attachment is made in the service and seeded in tests: nothing exposes it until Phase 16.
 
-#### Phase 11: Copies after the previous one has passed
+#### Phase 10: Copies after the previous one has passed
 
-**Prerequisites:** Phase 10.
+**Prerequisites:** Phase 9.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Next upcoming at attach; a periodic backend loop moves on once a journal is over; no back-fill; a date change neither moves nor duplicates.
 
-#### Phase 12: Auto-archive
+#### Phase 11: Auto-archive
 
-**Prerequisites:** Phase 10.
+**Prerequisites:** Phase 9.
 **Estimated diff:** ~130 production → **~900 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Periodic loop: journal over and all closed, or seven days; once only; emits list-updated and refreshes the summary.
 
-#### Phase 13: Journal leaves a series; series merged
+#### Phase 12: Journal leaves a series; series merged
 
-**Prerequisites:** Phase 10.
+**Prerequisites:** Phase 9.
 **Estimated diff:** ~90 production → **~650 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Instance list stays; templates move to the survivor with no duplicate copies.
 
-#### Phase 14: Journals merged
+#### Phase 13: Journals merged
 
-**Prerequisites:** Phase 10.
+**Prerequisites:** Phase 9.
 **Estimated diff:** ~60 production → **~450 tracked**
 
 **Acceptance Criteria:**
 
 - [ ] Both copies kept on the surviving journal.
 
-#### Phase 15: Series deleted
+#### Phase 14: Series deleted
 
-**Prerequisites:** Phase 9, Phase 8.
+**Prerequisites:** Phase 8, Phase 9.
 **Estimated diff:** ~80 production → **~550 tracked**
 
 **Acceptance Criteria:**
 
-- [ ] Templates detached; archived unless used elsewhere; instance lists stay.
+- [ ] The series' templates are detached in the service; each is archived unless used elsewhere; instance lists stay.
 
-#### Phase 16: Recurrence and special lists
+#### Phase 15: Recurrence and special lists
 
 **Prerequisites:** Phase 2, ITER21-006 Phase 8.
 **Estimated diff:** ~70 production → **~450 tracked**
@@ -1283,6 +1276,17 @@ Search is last because its rules name things the earlier steps create (templates
 **Acceptance Criteria:**
 
 - [ ] Refused on template and instance lists; moving a recurring task onto an instance list clears it, flagged in the response.
+
+#### Phase 16: Attach, detach and mode
+
+**Prerequisites:** Phase 4, Phase 10, Phase 11, Phase 12, Phase 13, Phase 14, Phase 15.
+**Estimated diff:** ~150 production → **~1,400 tracked** · one capability on REST and MCP together
+
+**Acceptance Criteria:**
+
+- [ ] One series per template; detaching stops future copies and keeps existing ones.
+- [ ] Exposed only now that both copy modes, auto-archive, the series changes and the recurrence guards are in place, so an attached template always produces its copies and an instance list can never hold a recurring task.
+- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 17: Templates page
 
@@ -1305,7 +1309,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 19: Use template and attach dialogs
 
-**Prerequisites:** Phase 17, Phase 8, Phase 9.
+**Prerequisites:** Phase 17, Phase 8, Phase 16.
 **Estimated diff:** ~150 production → **~750 tracked**
 
 **Acceptance Criteria:**
@@ -1323,7 +1327,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 #### Phase 21: Instance lists in the app
 
-**Prerequisites:** Phase 3, Phase 16, ITER21-005 Phase 6, ITER21-002 Phase 16.
+**Prerequisites:** Phase 3, Phase 15, ITER21-005 Phase 6, ITER21-002 Phase 16.
 **Estimated diff:** ~130 production → **~700 tracked**
 
 **Acceptance Criteria:**
