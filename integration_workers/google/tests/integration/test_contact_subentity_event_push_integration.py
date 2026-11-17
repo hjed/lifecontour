@@ -12,6 +12,7 @@ These tests run the handler against a real database (real ``contacts``,
 the whole read-contact → transform → push path — not just the routing.
 """
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -19,10 +20,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from core_shared.sync_base import serialise_synced_entries
 from core_shared.testing.seeding import seed_contact
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from synced_entries import raw_synced_entries
 from worker import process_contact_event
 
 # The connected Google user these tests push for, and so the owner of
@@ -667,13 +670,26 @@ class TestDeletingTheLastValueClearsGoogle:
         self, db_session: AsyncSession, synced_contact: dict[str, int]
     ) -> None:
         """Google still holds them as last synced, so local cleared them (#1822)."""
-        mock_client = _mock_google_client()
-        mock_client.get_person.return_value = {
+        person = {
             "resourceName": _REMOTE,
             "etag": "etag-before",
             "biographies": [{"value": "Met at the conference"}],
             "organizations": [{"current": True, "name": "Old Co"}],
         }
+        base = serialise_synced_entries(raw_synced_entries(person, None))
+        await db_session.execute(
+            text(
+                "UPDATE sync_metadata SET reference_data = :ref "
+                "WHERE integration_source = 'google' AND internal_id = :cid"
+            ),
+            {
+                "ref": json.dumps({"synced_entries": base}),
+                "cid": synced_contact["contact_id"],
+            },
+        )
+        await db_session.flush()
+        mock_client = _mock_google_client()
+        mock_client.get_person.return_value = person
 
         with (
             patch("worker.GoogleAuthService"),

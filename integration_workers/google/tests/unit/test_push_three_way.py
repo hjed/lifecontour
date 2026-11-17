@@ -460,6 +460,20 @@ class TestBiographies:
         assert "biographies" not in merged.payload
         assert merged.pending_import is True
 
+    def test_a_note_deleted_beside_one_from_the_linked_profile_is_deleted(
+        self,
+    ) -> None:
+        """Local keeping a subset of the base is an edit, not unchanged notes."""
+        profile_note = {"metadata": PROFILE_SOURCE, **OTHER_NOTE}
+        merged = merge_for_push(
+            {"biographies": [OTHER_NOTE]},
+            {"biographies": [*_google(NOTE), profile_note]},
+            synced_base={"biographies": _keys("biographies", NOTE, OTHER_NOTE)},
+        )
+
+        assert merged.payload["biographies"] == [OTHER_NOTE]
+        assert merged.pending_import is False
+
     def test_a_note_edited_locally_is_written_over_googles(self) -> None:
         merged = _merge("biographies", [OTHER_NOTE], google=[NOTE], base=[NOTE])
 
@@ -497,16 +511,29 @@ class TestResolveSyncedBase:
             resolve_synced_base(recorded, self.CURRENT, synced_version="e2") is recorded
         )
 
-    def test_a_field_the_record_predates_is_read_from_an_unchanged_person(
+    def test_a_field_every_push_sent_is_read_from_an_unchanged_person(
         self,
     ) -> None:
-        """A base recorded before organizations joined it (#1938)."""
-        recorded = {"emailAddresses": frozenset({"k"})}
+        recorded = {"organizations": frozenset({"k"})}
 
         base = resolve_synced_base(recorded, self.CURRENT, synced_version="e2")
 
-        assert base["emailAddresses"] == frozenset({"k"})
-        assert base["organizations"] == _keys("organizations", ACME)
+        assert base["organizations"] == frozenset({"k"})
+        assert base["emailAddresses"] == _keys("emailAddresses", ADA)
+
+    @pytest.mark.parametrize("recorded", [None, {"emailAddresses": frozenset()}])
+    def test_a_field_older_pushes_left_out_is_empty_even_for_an_unchanged_person(
+        self, recorded: dict[str, frozenset[str]] | None
+    ) -> None:
+        """An older push left out a company local lacked, at its own etag (#1938).
+
+        The etag matching does not show local ever held what Google holds there,
+        so its company is kept rather than deleted as a local clear.
+        """
+        base = resolve_synced_base(recorded, self.CURRENT, synced_version="e2")
+
+        assert base["organizations"] == frozenset()
+        assert base["biographies"] == frozenset()
 
     def test_a_field_the_record_predates_is_empty_for_a_changed_person(
         self,

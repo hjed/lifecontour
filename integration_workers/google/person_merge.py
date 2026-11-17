@@ -298,8 +298,8 @@ class OwnedOrganization:
 class OwnedBiographies:
     """Inbound imports every biography as a note, so local owns them all.
 
-    Pushed notes replace Google's, unless local still holds the base notes and
-    Google edited them since. With no notes pushed, the base tells notes
+    Pushed notes replace Google's, unless local holds exactly the base notes
+    and Google edited them since. With no notes pushed, the base tells notes
     cleared locally (all in the base: cleared) from one Google added since
     (kept, and owed to the next pull). A profile's biography cannot be
     cleared, so the pull imports it again.
@@ -319,7 +319,7 @@ class OwnedBiographies:
         )
         local: Keys = frozenset().union(*map(keys, pushed))
         if pushed:
-            if local and local <= base and remote != base:
+            if local and local == base and remote != base:
                 return FieldMerge(Omit.FIELD, remote_won=True)
             return FieldMerge(pushed)
         if not remote - base:
@@ -375,6 +375,13 @@ class PushMerge:
     merged_fields: frozenset[BaseField]
 
 
+# The base fields every push sent while they were loaded, empty included, from
+# before they were in a base: an unchanged etag shows local held their values.
+_ALWAYS_SENT_FIELDS: Final[frozenset[BaseField]] = frozenset(
+    {"emailAddresses", "phoneNumbers", "addresses", "birthdays"}
+)
+
+
 def resolve_synced_base(
     recorded: SyncedEntries | None,
     current: Entry,
@@ -386,11 +393,15 @@ def resolve_synced_base(
 
     The link's recorded base when it has one. A field it lacks - the whole
     base for a link from before bases were recorded, or a field that joined
-    the base since (#1938) - falls back on the etag: a person unchanged since
-    the last sync is its own base, and a changed one gets an empty base, which
-    keeps every Google entry - nothing tells an addition there from a local
-    deletion. The empty base is recorded as such, so a push that leaves the
-    field out keeps it rather than reading its own etag as unchanged.
+    the base since (#1938) - gets an empty base, which keeps every Google
+    entry: nothing tells an addition there from a local deletion. A field
+    every push always sent falls back on the etag instead: a person unchanged
+    since the last sync is its own base. Organizations and biographies do not,
+    as an older push left them out when local held none, so an unchanged etag
+    can be that push's own over a value local never imported.
+
+    The empty base is recorded as such, so a push that leaves the field out
+    keeps it rather than reading its own etag as unchanged.
     """
     recorded = recorded or {}
     missing = [field for field in BASE_FIELDS if field not in recorded]
@@ -403,7 +414,14 @@ def resolve_synced_base(
     )
     return {
         **recorded,
-        **{field: own.get(field, frozenset()) for field in missing},
+        **{
+            field: (
+                own.get(field, frozenset())
+                if field in _ALWAYS_SENT_FIELDS
+                else frozenset()
+            )
+            for field in missing
+        },
     }
 
 

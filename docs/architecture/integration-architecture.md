@@ -858,9 +858,14 @@ integration the missing piece, the **base**: per field, opaque keys
 - A link recorded before bases existed falls back on the version:
   `remote_unchanged_since_sync` means the remote is its own base; otherwise
   the base is empty and the push keeps everything. A field that joined the
-  base later falls back the same way, per field, and is recorded empty rather
-  than left absent: otherwise the next push, at its own etag, would read the
-  remote as unchanged and own what it just kept.
+  base later gets that fallback only if every older push sent it once loaded;
+  otherwise (Google's organizations and biographies, which older pushes left
+  out when local held none) a matching etag may be that push's own over a
+  value local never imported, so the field's base is empty. Either way the
+  field is recorded rather than left absent, so the next push, at its own
+  etag, does not reread the remote as unchanged and own what it just kept.
+  A company or note cleared locally before the deploy is therefore restored
+  once by the next pull, never deleted on a guess.
 
 Google contacts uses it for emails, phones, addresses, birthdays,
 organizations and biographies (`integration_workers/google/synced_entries.py`,

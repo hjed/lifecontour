@@ -728,10 +728,13 @@ async def test_a_company_cleared_locally_is_cleared_in_google(
 
 
 @pytest.mark.asyncio
-async def test_a_company_cleared_on_a_base_from_before_organizations_is_cleared(
+async def test_a_company_on_a_base_from_before_organizations_is_kept(
     db_session: AsyncSession,
 ) -> None:
-    """A base recorded before organizations joined it reads Google unchanged as synced."""
+    """Nothing shows local held it: an older push left a company local lacked.
+
+    It is kept and owed to the pull rather than deleted as a local clear.
+    """
     await _seed(db_session, base=_base_with())
     client = _client(
         {
@@ -739,13 +742,20 @@ async def test_a_company_cleared_on_a_base_from_before_organizations_is_cleared(
             "emailAddresses": _google(_HELD),
             "organizations": _google(_COMPANY),
         },
-        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+        {
+            "etag": "etag_pushed",
+            "emailAddresses": _google(_HELD),
+            "organizations": _google(_COMPANY),
+        },
     )
 
     await _push(db_session, client)
 
     sent = client.update_contact.call_args.kwargs["contact_data"]
-    assert sent["organizations"] == []
+    assert "organizations" not in sent
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
+    assert recorded["synced_entries"]["organizations"] == []
 
 
 @pytest.mark.asyncio
