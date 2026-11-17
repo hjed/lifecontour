@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
+    TaskListValidationError,
     TaskNotFoundError,
     TaskValidationError,
 )
@@ -116,6 +117,18 @@ class TestRestMapping:
 
         assert body["errors"][0]["meta"] == {"field": "text"}
 
+    def test_a_list_refusal_reaches_rest_as_a_task_refusal_does(self):
+        """The code map is an exact-type lookup, so the subclass needs its own
+        entry; without it a list refusal would fall back to ``DOMAIN_ERROR``."""
+        response = create_domain_error_response(
+            TaskListValidationError("name", "List name is required")
+        )
+
+        error = response.errors[0]
+        assert error.code == VALIDATION_CODE
+        assert error.status == "400"
+        assert error.meta == {"field": "name"}
+
     def test_the_refusal_that_has_its_own_code_is_untouched(self):
         """A due journal in the past is refused by
         ``TaskDueJournalNotFutureError``, which has a code of its own and needs
@@ -153,6 +166,15 @@ class TestMcpMapping:
         assert payload["error"] == "Task error"
         assert payload["message"] == "text: Task text is required"
         assert payload["field"] == "text"
+
+    @pytest.mark.asyncio
+    async def test_a_list_refusal_carries_the_field_beside_the_message(self):
+        payload = await call_tool_raising(
+            TaskListValidationError("name", "List name is required")
+        )
+
+        assert payload["message"] == "name: List name is required"
+        assert payload["field"] == "name"
 
     @pytest.mark.asyncio
     async def test_a_task_error_with_no_structured_detail_is_unchanged(self):
