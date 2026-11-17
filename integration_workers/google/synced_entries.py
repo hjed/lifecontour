@@ -6,7 +6,8 @@ whose keys the base lacks was added in Google since, so it is kept rather than
 deleted. See ``core_shared.sync_base``.
 
 A key covers only the value inbound imports - an email's address, a phone's
-number, an address's parts, a birthday's date - never its label, primary flag
+number, an address's parts, a birthday's or anniversary's date, a nickname's
+text - never its label, primary flag
 or formatting, so the pull, the push and Google's response agree on an entry
 however each presents it. A phone carries a key per spelling - E.164, and the
 digits as typed - since the push sends a number as typed and Google answers
@@ -28,16 +29,20 @@ from api_models import (
     GoogleBiography,
     GoogleBirthday,
     GoogleEmailAddress,
+    GoogleNickname,
     GoogleOrganization,
     GooglePerson,
+    GooglePersonEvent,
     GooglePhoneNumber,
 )
 from transformer import (
     import_address,
     import_birthday,
     import_email,
+    import_event,
     import_phone,
     imported_organization_index,
+    select_nickname,
 )
 
 type Keys = frozenset[str]
@@ -51,6 +56,8 @@ type BaseField = Literal[
     "birthdays",
     "organizations",
     "biographies",
+    "nicknames",
+    "events",
 ]
 
 # The Google fields the push merges against a base, in the person's raw names.
@@ -61,6 +68,8 @@ BASE_FIELDS: Final[tuple[BaseField, ...]] = (
     "birthdays",
     "organizations",
     "biographies",
+    "nicknames",
+    "events",
 )
 
 
@@ -175,6 +184,47 @@ def biography_keys(biography: GoogleBiography) -> Keys:
     return frozenset({entry_key("biography", value)})
 
 
+def nickname_keys(nickname: GoogleNickname) -> Keys:
+    """The nickname's key: its text, stripped as inbound reads it.
+
+    Only the nickname inbound imports is in a base (:func:`chosen_nickname_index`).
+    """
+    value = (nickname.value or "").strip()
+    if not value:
+        return _NO_KEYS
+    return frozenset({entry_key("nickname", value)})
+
+
+def event_keys(event: GooglePersonEvent) -> Keys:
+    """The event's key: its type and date, or none for an event inbound skips."""
+    imported = import_event(event)
+    if imported is None:
+        return _NO_KEYS
+    return frozenset(
+        {
+            entry_key(
+                imported.date_type.value,
+                imported.precision.value,
+                imported.year,
+                imported.month,
+                imported.day,
+            )
+        }
+    )
+
+
+def chosen_nickname_index(current: Sequence[Mapping[str, Any]]) -> int | None:
+    """The index of the raw nickname inbound reads into the contact."""
+    parsed: list[tuple[int, GoogleNickname]] = []
+    for index, entry in enumerate(current):
+        try:
+            parsed.append((index, GoogleNickname.model_validate(entry)))
+        except ValidationError:
+            continue
+    chosen = select_nickname([nickname for _, nickname in parsed])
+    return next((index for index, n in parsed if n is chosen), None)
+
+
 def _raw[M: BaseModel](
     model: type[M], keys: Callable[[M], Keys]
 ) -> Callable[[Mapping[str, Any]], Keys]:
@@ -200,18 +250,34 @@ def raw_entry_keys(
         "birthdays": _raw(GoogleBirthday, birthday_keys),
         "organizations": _raw(GoogleOrganization, organization_keys),
         "biographies": _raw(GoogleBiography, biography_keys),
+        "nicknames": _raw(GoogleNickname, nickname_keys),
+        "events": _raw(GooglePersonEvent, event_keys),
     }
     return readers[field](entry)
 
 
-def _imported[E](
-    field: BaseField, entries: Sequence[E], current: Sequence[object]
-) -> list[E]:
-    """The entries of ``field`` inbound imports: one organization, every other entry."""
-    if field != "organizations":
+def _raw_imported(
+    field: BaseField, entries: Sequence[Mapping[str, Any]]
+) -> list[Mapping[str, Any]]:
+    """The raw entries of ``field`` inbound imports.
+
+    One organization, one nickname, and every entry of the other fields.
+    """
+    if field == "organizations":
+        index = imported_organization_index([e.get("current") for e in entries])
+    elif field == "nicknames":
+        index = chosen_nickname_index(entries)
+    else:
         return list(entries)
-    index = imported_organization_index(current)
     return [] if index is None else [entries[index]]
+
+
+def _imported_organization(
+    organizations: Sequence[GoogleOrganization],
+) -> list[GoogleOrganization]:
+    """The organization inbound imports, if any, as a list."""
+    index = imported_organization_index([o.current for o in organizations])
+    return [] if index is None else [organizations[index]]
 
 
 def synced_entries_of(
@@ -228,14 +294,15 @@ def synced_entries_of(
         "addresses": [address_keys(a, fallback_country) for a in person.addresses],
         "birthdays": [birthday_keys(b) for b in person.birthdays],
         "organizations": [
-            organization_keys(o)
-            for o in _imported(
-                "organizations",
-                person.organizations,
-                [o.current for o in person.organizations],
-            )
+            organization_keys(o) for o in _imported_organization(person.organizations)
         ],
         "biographies": [biography_keys(b) for b in person.biographies],
+        "nicknames": [
+            nickname_keys(n)
+            for n in [select_nickname(person.nicknames)]
+            if n is not None
+        ],
+        "events": [event_keys(e) for e in person.events],
     }
     return {field: _NO_KEYS.union(*keys) for field, keys in keyed.items()}
 
@@ -247,7 +314,7 @@ def raw_synced_entries(
     synced: dict[str, Keys] = {}
     for field in BASE_FIELDS:
         entries: list[Mapping[str, Any]] = person.get(field) or []
-        imported = _imported(field, entries, [e.get("current") for e in entries])
+        imported = _raw_imported(field, entries)
         synced[field] = _NO_KEYS.union(
             *(raw_entry_keys(field, entry, fallback_country) for entry in imported)
         )

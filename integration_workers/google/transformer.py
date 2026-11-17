@@ -501,23 +501,7 @@ class GoogleContactTransformer:
         Only events whose type maps to a supported ImportantDateType are
         included.  Unknown types are silently skipped.
         """
-        results: list[ImportantDate] = []
-        for event in events:
-            if event.date is None or event.type is None:
-                continue
-
-            date_type = self._GOOGLE_EVENT_TYPE_MAP.get(event.type.lower())
-            if date_type is None:
-                logger.debug(
-                    "Skipping unsupported Google event type",
-                    event_type=event.type,
-                )
-                continue
-
-            important_date = self._google_date_to_important_date(event.date, date_type)
-            if important_date:
-                results.append(important_date)
-        return results
+        return [d for d in map(import_event, events) if d is not None]
 
     @staticmethod
     def _google_date_to_important_date(
@@ -681,6 +665,19 @@ def import_birthday(birthday: GoogleBirthday) -> ImportantDate | None:
         return None
     return GoogleContactTransformer._google_date_to_important_date(
         birthday.date, ImportantDateType.BIRTHDAY
+    )
+
+
+def import_event(event: GooglePersonEvent) -> ImportantDate | None:
+    """The event's date, or None for a type inbound skips or an unusable date."""
+    if event.date is None or event.type is None:
+        return None
+    date_type = GoogleContactTransformer._GOOGLE_EVENT_TYPE_MAP.get(event.type.lower())
+    if date_type is None:
+        logger.debug("Skipping unsupported Google event type", event_type=event.type)
+        return None
+    return GoogleContactTransformer._google_date_to_important_date(
+        event.date, date_type
     )
 
 

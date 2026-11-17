@@ -178,9 +178,40 @@ class TestRawEntryKeys:
             "biographies", {"value": "met at the conference"}, None
         )
 
+    def test_a_nickname_keys_by_its_text_as_inbound_strips_it(self) -> None:
+        first = {"value": " Addy "}
+        second = {"metadata": {**_CONTACT, "primary": True}, "value": "Addy"}
+
+        assert raw_entry_keys("nicknames", first, None) == raw_entry_keys(
+            "nicknames", second, None
+        )
+        assert raw_entry_keys("nicknames", first, None) != raw_entry_keys(
+            "nicknames", {"value": "addy"}, None
+        )
+
+    def test_an_anniversary_keys_by_its_date_not_its_label(self) -> None:
+        first = {"type": "anniversary", "date": {"year": 2001, "month": 6, "day": 2}}
+        second = {
+            "metadata": _CONTACT,
+            "type": "Anniversary",
+            "formattedType": "Anniversary",
+            "date": {"year": 2001, "month": 6, "day": 2},
+        }
+
+        assert raw_entry_keys("events", first, None) == raw_entry_keys(
+            "events", second, None
+        )
+        assert raw_entry_keys("events", first, None) != raw_entry_keys(
+            "events", {**first, "date": {"month": 6, "day": 2}}, None
+        )
+
     @pytest.mark.parametrize(
         ("field", "entry"),
         [
+            ("nicknames", {"value": "  "}),
+            ("events", {"type": "graduation", "date": {"year": 1999, "month": 1}}),
+            ("events", {"date": {"year": 2001, "month": 6, "day": 2}}),
+            ("events", {"type": "anniversary"}),
             ("emailAddresses", {"value": "not an email"}),
             ("emailAddresses", {"type": "home"}),
             ("phoneNumbers", {"value": ""}),
@@ -205,7 +236,11 @@ class TestSyncedEntriesOf:
         birthday = {"date": {"year": 1990, "month": 3, "day": 4}}
         organization = {"name": "Acme", "title": "Engineer", "current": True}
         biographies = [{"value": "Met at the conference"}, {"value": "Likes tea"}]
+        nickname = {"value": "Addy"}
+        anniversary = {"type": "anniversary", "date": {"year": 2001, "month": 6}}
         person = _person(
+            nicknames=[nickname, {"value": "Ace"}],
+            events=[anniversary, {"type": "graduation", "date": {"year": 1999}}],
             emailAddresses=[email, {"value": "not an email"}],
             phoneNumbers=[phone],
             addresses=[address, {"streetAddress": "2 Nowhere Rd"}],
@@ -223,7 +258,29 @@ class TestSyncedEntriesOf:
             "biographies": frozenset().union(
                 *(raw_entry_keys("biographies", bio, None) for bio in biographies)
             ),
+            "nicknames": raw_entry_keys("nicknames", nickname, None),
+            "events": raw_entry_keys("events", anniversary, None),
         }
+
+    @pytest.mark.parametrize(
+        ("nicknames", "imported"),
+        [
+            ([{"value": "Addy"}, {"value": "Ace"}], 0),
+            ([{"value": " "}, {"value": "Ace"}], 1),
+            ([{"value": "Addy"}, {"value": "Ace", "metadata": {"primary": True}}], 1),
+        ],
+    )
+    def test_keys_only_the_nickname_inbound_imports(
+        self, nicknames: list[dict[str, Any]], imported: int
+    ) -> None:
+        """Inbound reads one nickname, primary else the first with a value."""
+        expected = raw_entry_keys("nicknames", nicknames[imported], None)
+        raw = {"resourceName": "people/c1", "nicknames": nicknames}
+
+        assert synced_entries_of(_person(nicknames=nicknames), None)["nicknames"] == (
+            expected
+        )
+        assert raw_synced_entries(raw, None)["nicknames"] == expected
 
     @pytest.mark.parametrize(
         ("organizations", "imported"),
@@ -273,6 +330,10 @@ class TestSyncedEntriesOf:
             "birthdays": [{"date": {"month": 3, "day": 4}}],
             "organizations": [{"name": "Acme"}, {"name": "Globex", "current": True}],
             "biographies": [{"value": "Likes tea", "contentType": "TEXT_PLAIN"}],
+            "nicknames": [{"value": "Addy"}, {"value": "Ace"}],
+            "events": [
+                {"type": "Anniversary", "date": {"year": 2001, "month": 6, "day": 2}}
+            ],
         }
 
         assert raw_synced_entries(raw, "NZ") == synced_entries_of(

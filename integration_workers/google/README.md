@@ -180,7 +180,8 @@ same way.
 The nickname is two-way. Inbound sync imports the primary Google nickname (or
 the first one), and the push always sends `nicknames`: a nickname cleared locally
 goes as an empty list, so Google drops it too and the next pull does not bring it
-back. The import changes only the fields in `GOOGLE_CONTACT_SYNC_SCOPE`
+back - provided the synced base holds Google's nickname. One Google added since
+the last pull is left in place and imported by the next pull (#1901). The import changes only the fields in `GOOGLE_CONTACT_SYNC_SCOPE`
 (`transformer.py`); see "Contact sync scope" in
 `docs/architecture/integration-architecture.md`. A full sync re-applies every
 person, even one whose etag is unchanged (`force_apply`), so a field the scope
@@ -200,11 +201,11 @@ fails when a pushed field has none:
 | Field | Local contact owns | Kept from Google |
 |---|---|---|
 | `names` | given, family and middle name | honorific prefix/suffix, phonetic names |
-| `nicknames` | the one inbound reads (primary, else first) | every other nickname, beside a pushed one; clearing the nickname clears them all, or the next pull would import a survivor |
+| `nicknames` | the one inbound reads (primary, else first), when it is in the synced base | every other nickname, beside a pushed one (which replaces the base nickname); one added, edited or deleted in Google since the base. Clearing a nickname in the base clears them all, or the next pull would import a survivor |
 | `emailAddresses`, `phoneNumbers` | the entries inbound imports that are in the synced base | entries it rejects (invalid values), and entries added in Google since the base |
 | `addresses` | the entries inbound imports that are in the synced base, including a countryless one the last applied pull gave a country (a recognised AU/US/CA region as its code) | entries it rejects: no street, no country and none recorded, or an AU/US/CA region naming no state, province or territory in the country it is imported with — reported on the event as `skipped_addresses` for the user to review (#1820); and entries added in Google since the base |
 | `birthdays` | a birthday with a usable date | a text-only birthday, or one added or edited in Google since the base while the local one is unchanged: the field leaves the update mask, so Google keeps it |
-| `events` | `anniversary` events | every other event (custom, untyped) |
+| `events` | `anniversary` events inbound imports that are in the synced base | every other event (custom, untyped, an anniversary with no usable date), and anniversaries added in Google since the base |
 | `organizations` | name and title of the org inbound reads (first current, else first) | that org's other parts (department, type…) and every other org |
 | `biographies`, `memberships` | everything | nothing (memberships: see #1821) |
 

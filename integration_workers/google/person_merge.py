@@ -12,7 +12,8 @@ one local never held, so the push keeps it (#1788).
 
 Importable is not the same as held, though: an email added in Google since the
 last pull is importable, but the contact has never seen it. So the emails,
-phones, addresses and birthdays merge three ways against the *synced base* -
+phones, addresses, birthdays, organizations, notes, nicknames and anniversaries
+merge three ways against the *synced base* -
 the keys of the entries the last sync agreed both sides held, recorded on the
 link (``synced_entries``, ``core_shared.sync_base``). An entry Google gained
 since the base is kept, one deleted locally is dropped, and one Google deleted
@@ -36,17 +37,16 @@ from core_shared.sync_base import (
     remote_unchanged_since_sync,
     three_way_entries,
 )
-from pydantic import ValidationError
 
-from api_models import GoogleNickname
 from synced_entries import (
     BASE_FIELDS,
     BaseField,
     Keys,
+    chosen_nickname_index,
     raw_entry_keys,
     raw_synced_entries,
 )
-from transformer import imported_organization_index, select_nickname
+from transformer import imported_organization_index
 
 logger = structlog.get_logger()
 
@@ -70,9 +70,6 @@ _PRESERVED_NAME_KEYS = frozenset(
 
 # Organization parts the local contact owns (company and job title).
 _OWNED_ORGANIZATION_KEYS = frozenset({"name", "title"})
-
-# Event types the local contact owns, matching inbound sync's event type map.
-_OWNED_EVENT_TYPES = frozenset({"anniversary"})
 
 # Output-only parts of a field entry, never sent back to Google.
 _OUTPUT_ONLY_KEYS = frozenset({"metadata", "formattedType"})
@@ -218,28 +215,55 @@ class SingletonUnsynced:
 
 
 @dataclass(frozen=True)
-class KeepUnchosen:
-    """Inbound reads one entry, which local owns; the others are kept beside it.
+class OwnedNickname:
+    """Inbound reads one nickname into the contact; the base records that one.
 
-    The pushed entry leads the list, so it is the one inbound and the next push
-    choose. With nothing pushed every entry goes: inbound would read a survivor
-    as the contact's own, undoing the local clear on the next pull.
+    A pushed nickname leads the list, so it is the one inbound and the next
+    push choose, and replaces Google's base nickname (else the one inbound
+    reads); the others are kept beside it. An unchanged local nickname is not
+    pushed back once Google reads another: one it edited, deleted or chose
+    over the base one since. With nothing pushed, every contact
+    nickname is cleared when the one inbound reads is in the base - a survivor
+    would be read as the contact's own, undoing the clear - and the field is
+    left alone when Google added it since. A nickname inbound would still read
+    over the pushed one (a profile's) is owed to the next pull.
     """
 
-    choose: Callable[[list[Entry]], int | None]
+    field: Literal["nicknames"] = "nicknames"
 
     def merge(
         self, pushed: list[Entry], current: list[Entry], sync: SyncContext
     ) -> FieldMerge:
+        keys = sync.keys_of(self.field)
+        base = sync.base_of(self.field)
+        chosen = chosen_nickname_index(current)
         if not pushed:
-            return FieldMerge(pushed)
-        owned = self.choose(current)
-        kept = [
-            _writable(entry)
-            for index, entry in enumerate(current)
-            if index != owned and _is_contact_entry(entry)
-        ]
-        return FieldMerge([*pushed, *kept])
+            if chosen is not None and not keys(current[chosen]) & base:
+                return FieldMerge(Omit.FIELD, remote_won=True)
+            value: list[Entry] = []
+        else:
+            # Local unchanged while Google reads another nickname now: edited,
+            # deleted, or another chosen over it, even if it is still listed.
+            read_remote = frozenset() if chosen is None else keys(current[chosen])
+            if keys(pushed[0]) & base and not read_remote & base:
+                return FieldMerge(Omit.FIELD, remote_won=True)
+            replaced = next(
+                (index for index, entry in enumerate(current) if keys(entry) & base),
+                chosen,
+            )
+            value = [
+                *pushed,
+                *(
+                    _writable(entry)
+                    for index, entry in enumerate(current)
+                    if index != replaced and _is_contact_entry(entry)
+                ),
+            ]
+        held = [*value, *(entry for entry in current if not _is_contact_entry(entry))]
+        read = chosen_nickname_index(held)
+        read_keys = frozenset() if read is None else keys(held[read])
+        kept = read_keys - (keys(pushed[0]) if pushed else frozenset())
+        return FieldMerge(value, kept=kept, remote_won=bool(kept))
 
 
 @dataclass(frozen=True)
@@ -341,18 +365,6 @@ class WhollyOwned:
         return FieldMerge(pushed)
 
 
-def _chosen_nickname(current: list[Entry]) -> int | None:
-    """The index of the nickname inbound reads into the contact."""
-    parsed: list[tuple[int, GoogleNickname]] = []
-    for index, entry in enumerate(current):
-        try:
-            parsed.append((index, GoogleNickname.model_validate(entry)))
-        except ValidationError:
-            continue
-    chosen = select_nickname([nickname for _, nickname in parsed])
-    return next((index for index, n in parsed if n is chosen), None)
-
-
 @dataclass(frozen=True)
 class PushMerge:
     """A merged push payload, and what it leaves Google holding beyond local.
@@ -378,7 +390,7 @@ class PushMerge:
 # The base fields every push sent while they were loaded, empty included, from
 # before they were in a base: an unchanged etag shows local held their values.
 _ALWAYS_SENT_FIELDS: Final[frozenset[BaseField]] = frozenset(
-    {"emailAddresses", "phoneNumbers", "addresses", "birthdays"}
+    {"emailAddresses", "phoneNumbers", "addresses", "birthdays", "events"}
 )
 
 
@@ -396,9 +408,9 @@ def resolve_synced_base(
     the base since (#1938) - gets an empty base, which keeps every Google
     entry: nothing tells an addition there from a local deletion. A field
     every push always sent falls back on the etag instead: a person unchanged
-    since the last sync is its own base. Organizations and biographies do not,
-    as an older push left them out when local held none, so an unchanged etag
-    can be that push's own over a value local never imported.
+    since the last sync is its own base. Organizations, biographies and
+    nicknames do not, as an older push left them out when local held none, so
+    an unchanged etag can be that push's own over a value local never imported.
 
     The empty base is recorded as such, so a push that leaves the field out
     keeps it rather than reading its own etag as unchanged.
@@ -545,19 +557,6 @@ def _merge_names(
     return [{**pushed[0], **preserved}, *pushed[1:]]
 
 
-def _merge_events(
-    pushed: list[dict[str, Any]], current: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Append the current events of every type the local contact does not own."""
-    kept = [
-        _writable(event)
-        for event in current
-        if _is_contact_entry(event)
-        and str(event.get("type") or "").lower() not in _OWNED_EVENT_TYPES
-    ]
-    return [*pushed, *kept]
-
-
 def _merge_organizations(
     pushed: list[dict[str, Any]], current: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -595,11 +594,12 @@ _BASED_POLICIES: Final = (
     SingletonUnsynced,
     OwnedOrganization,
     OwnedBiographies,
+    OwnedNickname,
 )
 
 FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
     "names": MergedBy(_merge_names),
-    "nicknames": KeepUnchosen(_chosen_nickname),
+    "nicknames": OwnedNickname(),
     "emailAddresses": KeepUnsynced("emailAddresses"),
     "phoneNumbers": KeepUnsynced("phoneNumbers"),
     "addresses": KeepUnsynced("addresses"),
@@ -609,5 +609,5 @@ FIELD_POLICIES: Final[Mapping[str, FieldPolicy]] = {
         "the push rebuilds reserved groups, starred and every tag's group (#1821)"
     ),
     "birthdays": SingletonUnsynced("birthdays"),
-    "events": MergedBy(_merge_events),
+    "events": KeepUnsynced("events"),
 }

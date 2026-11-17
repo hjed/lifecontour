@@ -859,8 +859,8 @@ integration the missing piece, the **base**: per field, opaque keys
   `remote_unchanged_since_sync` means the remote is its own base; otherwise
   the base is empty and the push keeps everything. A field that joined the
   base later gets that fallback only if every older push sent it once loaded;
-  otherwise (Google's organizations and biographies, which older pushes left
-  out when local held none) a matching etag may be that push's own over a
+  otherwise (Google's organizations, biographies and nicknames, which older
+  pushes left out when local held none) a matching etag may be that push's own over a
   value local never imported, so the field's base is empty. Either way the
   field is recorded rather than left absent, so the next push, at its own
   etag, does not reread the remote as unchanged and own what it just kept.
@@ -868,8 +868,8 @@ integration the missing piece, the **base**: per field, opaque keys
   once by the next pull, never deleted on a guess.
 
 Google contacts uses it for emails, phones, addresses, birthdays,
-organizations and biographies (`integration_workers/google/synced_entries.py`,
-`person_merge.py`):
+organizations, biographies, nicknames and anniversary events
+(`integration_workers/google/synced_entries.py`, `person_merge.py`):
 
 - **Organizations** key only the one inbound reads into company and job title
   (`transformer.imported_organization_index`: the current one, else the first),
@@ -883,6 +883,18 @@ organizations and biographies (`integration_workers/google/synced_entries.py`,
   clear Google's when every biography is in the base; one Google added or
   edited since is kept. Google deleting the last note clears the local notes
   through `empty_at_source` (#1925).
+- **Nicknames** key only the one inbound reads (`transformer.select_nickname`:
+  the primary, else the first with a value), by its text. A pushed nickname
+  replaces the base one, keeping Google's others beside it; one Google edited
+  or deleted while local's is unchanged is not pushed back. A nickname cleared
+  locally clears every contact nickname when the one inbound reads is in the
+  base (a survivor would be imported as the nickname), and is left alone when
+  Google added it since (#1901). The trade-off: an unchosen nickname Google
+  added since the last sync goes with that clear, as the base records only the
+  chosen one.
+- **Events** key each `anniversary` inbound imports by its date
+  (`transformer.import_event`) and merge as a list, like emails. Every other
+  event, and an anniversary with no usable date, has no key and is kept.
 - A value from a linked profile can't be cleared, so it is owed to the pull.
 
 Immich people use it for `name` and `birthDate` (#1900,
