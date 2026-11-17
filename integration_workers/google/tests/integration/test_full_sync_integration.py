@@ -340,6 +340,8 @@ class TestFullSyncIntegration:
             "birthdays": [],
             "organizations": [],
             "biographies": [],
+            "nicknames": [],
+            "events": [],
         }
 
     async def test_full_sync_reports_an_address_whose_region_is_unrecognised(

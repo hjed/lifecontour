@@ -630,3 +630,169 @@ class TestFieldsThePushLeavesOut:
         )
 
         assert merged.pending_import is False
+
+
+ADDY = {"value": "Addy"}
+ADDIE = {"value": "Addie"}
+BEE = {"value": "Bee"}
+
+
+class TestNicknames:
+    """Inbound reads one nickname; the base records that one (#1901)."""
+
+    def test_a_nickname_added_in_google_with_none_locally_is_owed_to_the_pull(
+        self,
+    ) -> None:
+        merged = _merge("nicknames", [], google=[ADDY], base=[])
+
+        assert "nicknames" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_nickname_cleared_locally_clears_every_contact_nickname(self) -> None:
+        """A survivor would be imported as the nickname, undoing the clear."""
+        merged = _merge("nicknames", [], google=[ADDY, BEE], base=[ADDY])
+
+        assert merged.payload["nicknames"] == []
+        assert merged.pending_import is False
+        assert "nicknames" in merged.merged_fields
+
+    def test_no_nickname_on_either_side_sends_none(self) -> None:
+        merged = _merge("nicknames", [], google=[], base=[])
+
+        assert merged.payload["nicknames"] == []
+        assert merged.pending_import is False
+
+    @pytest.mark.parametrize("google", [[ADDIE], []])
+    def test_a_nickname_google_edited_or_deleted_is_not_pushed_back(
+        self, google: list[dict[str, Any]]
+    ) -> None:
+        merged = _merge("nicknames", [ADDY], google=google, base=[ADDY])
+
+        assert "nicknames" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_primary_nickname_google_chose_since_stands_over_the_unchanged_one(
+        self,
+    ) -> None:
+        """Google still lists the base nickname, but inbound now reads another."""
+        primary_bee = {"metadata": {**CONTACT_SOURCE, "primary": True}, **BEE}
+        merged = merge_for_push(
+            {"nicknames": [ADDY]},
+            {"nicknames": [*_google(ADDY), primary_bee]},
+            synced_base={"nicknames": _keys("nicknames", ADDY)},
+        )
+
+        assert "nicknames" not in merged.payload
+        assert merged.pending_import is True
+
+    def test_a_nickname_edited_locally_replaces_googles_base_one(self) -> None:
+        merged = _merge("nicknames", [ADDIE], google=[ADDY, BEE], base=[ADDY])
+
+        assert merged.payload["nicknames"] == [ADDIE, BEE]
+        assert merged.pending_import is False
+
+    def test_a_local_edit_keeps_a_primary_nickname_google_added_since(
+        self,
+    ) -> None:
+        """The base one is replaced, not the primary Google chose since."""
+        primary_bee = {"metadata": {**CONTACT_SOURCE, "primary": True}, **BEE}
+        merged = merge_for_push(
+            {"nicknames": [ADDIE]},
+            {"nicknames": [*_google(ADDY), primary_bee]},
+            synced_base={"nicknames": _keys("nicknames", ADDY)},
+        )
+
+        assert merged.payload["nicknames"] == [ADDIE, BEE]
+
+    def test_a_primary_profile_nickname_is_owed_to_the_pull(self) -> None:
+        """Inbound would still read it, so the base must not record it as local's."""
+        profile = {"metadata": {**PROFILE_SOURCE, "primary": True}, **BEE}
+        merged = merge_for_push(
+            {"nicknames": [ADDY]},
+            {"nicknames": [profile]},
+            synced_base={"nicknames": frozenset()},
+        )
+
+        assert merged.payload["nicknames"] == [ADDY]
+        assert merged.kept["nicknames"] == _keys("nicknames", BEE)
+        assert merged.pending_import is True
+
+    def test_a_cleared_nickname_beside_a_profile_one_is_owed_to_the_pull(
+        self,
+    ) -> None:
+        merged = merge_for_push(
+            {"nicknames": []},
+            {"nicknames": [*_google(ADDY), {"metadata": PROFILE_SOURCE, **BEE}]},
+            synced_base={"nicknames": _keys("nicknames", ADDY)},
+        )
+
+        assert merged.payload["nicknames"] == []
+        assert merged.kept["nicknames"] == _keys("nicknames", BEE)
+        assert merged.pending_import is True
+
+
+WEDDING = {"type": "anniversary", "date": {"year": 2001, "month": 6, "day": 2}}
+WEDDING_FIXED = {"type": "anniversary", "date": {"year": 2001, "month": 6, "day": 3}}
+GRADUATION = {"type": "graduation", "date": {"year": 1999, "month": 12, "day": 1}}
+
+
+class TestAnniversaries:
+    """Inbound imports every ``anniversary`` event; the base keys their dates (#1901)."""
+
+    def test_an_anniversary_added_in_google_since_the_base_is_kept(self) -> None:
+        merged = _merge("events", [], google=[WEDDING], base=[])
+
+        assert merged.payload["events"] == [WEDDING]
+        assert merged.kept["events"] == _keys("events", WEDDING)
+        assert merged.pending_import is True
+
+    def test_an_anniversary_cleared_locally_is_cleared(self) -> None:
+        merged = _merge("events", [], google=[WEDDING], base=[WEDDING])
+
+        assert merged.payload["events"] == []
+        assert merged.pending_import is False
+
+    def test_an_anniversary_edited_in_google_is_not_pushed_back(self) -> None:
+        merged = _merge("events", [WEDDING], google=[WEDDING_FIXED], base=[WEDDING])
+
+        assert merged.payload["events"] == [WEDDING_FIXED]
+        assert merged.pending_import is True
+
+    def test_an_anniversary_edited_locally_is_pushed(self) -> None:
+        merged = _merge("events", [WEDDING_FIXED], google=[WEDDING], base=[WEDDING])
+
+        assert merged.payload["events"] == [WEDDING_FIXED]
+        assert merged.pending_import is False
+
+    def test_an_event_inbound_does_not_import_is_kept_without_a_pending_import(
+        self,
+    ) -> None:
+        unreadable = {"type": "anniversary", "date": {}}
+        merged = _merge(
+            "events", [WEDDING], google=[WEDDING, GRADUATION, unreadable], base=[]
+        )
+
+        assert merged.payload["events"] == [WEDDING, GRADUATION, unreadable]
+        assert merged.pending_import is False
+
+
+class TestNewBaseFieldsBeforeTheirBase:
+    """A base recorded before nicknames and events joined it (#1901)."""
+
+    CURRENT = {
+        "etag": "e2",
+        "nicknames": _google(ADDY),
+        "events": _google(WEDDING),
+    }
+
+    def test_events_are_read_from_an_unchanged_person(self) -> None:
+        """Every older push sent events once loaded, replacing the anniversaries."""
+        base = resolve_synced_base({}, self.CURRENT, synced_version="e2")
+
+        assert base["events"] == _keys("events", WEDDING)
+
+    def test_nicknames_are_empty_even_for_an_unchanged_person(self) -> None:
+        """An older push left out an unset nickname, at its own etag."""
+        base = resolve_synced_base({}, self.CURRENT, synced_version="e2")
+
+        assert base["nicknames"] == frozenset()

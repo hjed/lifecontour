@@ -805,3 +805,70 @@ async def test_the_base_records_the_company_and_notes_google_returns(
         _key("organizations", _COMPANY)
     ]
     assert recorded["synced_entries"]["biographies"] == []
+
+
+_NICKNAME = {"value": "Addy"}
+_ANNIVERSARY = {"type": "anniversary", "date": {"year": 2001, "month": 6, "day": 2}}
+
+
+@pytest.mark.asyncio
+async def test_a_nickname_google_gained_while_local_has_none_is_pending_import(
+    db_session: AsyncSession,
+) -> None:
+    """The base holds no nickname, so Google added it since the last pull (#1901)."""
+    await _seed(db_session, base=_base_with(nicknames=[]))
+    current = {"emailAddresses": _google(_HELD), "nicknames": _google(_NICKNAME)}
+    client = _client(
+        {"etag": "etag_google_edit", **current}, {"etag": "etag_pushed", **current}
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert "nicknames" not in sent
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
+    assert recorded["synced_entries"]["nicknames"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_nickname_cleared_locally_is_cleared_in_google(
+    db_session: AsyncSession,
+) -> None:
+    await _seed(db_session, base=_base_with(nicknames=[_key("nicknames", _NICKNAME)]))
+    client = _client(
+        {
+            "etag": "etag_synced",
+            "emailAddresses": _google(_HELD),
+            "nicknames": _google(_NICKNAME),
+        },
+        {"etag": "etag_pushed", "emailAddresses": _google(_HELD)},
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["nicknames"] == []
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded.get("pending_import") is not True
+    assert recorded["synced_entries"]["nicknames"] == []
+
+
+@pytest.mark.asyncio
+async def test_an_anniversary_google_gained_survives_the_push(
+    db_session: AsyncSession,
+) -> None:
+    """Kept in Google, owed to the pull, and kept out of the next base (#1901)."""
+    await _seed(db_session, base=_base_with(events=[]))
+    current = {"emailAddresses": _google(_HELD), "events": _google(_ANNIVERSARY)}
+    client = _client(
+        {"etag": "etag_google_edit", **current}, {"etag": "etag_pushed", **current}
+    )
+
+    await _push(db_session, client)
+
+    sent = client.update_contact.call_args.kwargs["contact_data"]
+    assert sent["events"] == [_ANNIVERSARY]
+    recorded = json.loads((await _link(db_session)).reference_data)
+    assert recorded["pending_import"] is True
+    assert recorded["synced_entries"]["events"] == []
