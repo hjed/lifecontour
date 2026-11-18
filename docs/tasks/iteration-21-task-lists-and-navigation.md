@@ -308,16 +308,60 @@ for a missing list). No E2E: no UI.
 - [ ] Endpoint and tool.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 9: Task schema: list columns and relaxed anchors
+#### Phase 9: Task schema: list columns and relaxed anchors ✅ DONE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~80 production → **~400 tracked**
+**Estimated diff:** ~80 production → **~400 tracked** · **Actual:** ~120 production → **~760 tracked**
+(the migration 122; tests 594 — 584 new, 10 changed; architecture docs 41; this document excluded).
+Ratio ×1.5 on production, from the docstring carrying the invariant mapping and a data-preserving
+downgrade; tracked lines landed at ×6.2 production (the ×4 multiplier did not hold), because each
+invariant and accepted shape got its own test naming its constraint.
 
 **Acceptance Criteria:**
 
-- [ ] Migration only: `task_list_id`, position, due date, flag, icon; both anchors nullable; database CHECKs for invariants 1, 2, 4 and 5 — a task with no list must hold both a creating and a due journal, so relaxing the columns never weakens the two-anchor guarantee for journal-only tasks.
-- [ ] `task_list_id` references `task_lists` with `ON DELETE RESTRICT`, never a cascade: deleting a list (Phase 29) must first keep its tasks that hold both journals.
-- [ ] Existing code untouched.
+- [x] Migration only: `task_list_id`, position, due date, flag, icon; both anchors nullable; database CHECKs for invariants 1, 2, 4 and 5 — a task with no list must hold both a creating and a due journal, so relaxing the columns never weakens the two-anchor guarantee for journal-only tasks.
+- [x] `task_list_id` references `task_lists` with `ON DELETE RESTRICT`, never a cascade: deleting a list (Phase 29) must first keep its tasks that hold both journals.
+- [x] Existing code untouched.
+
+**Delivered:** migration `0146_add_list_columns_to_tasks.py`: `task_list_id` (FK → `task_lists`,
+`ON DELETE RESTRICT`), `position`, `due_date` (date), `flagged` (boolean, default false), `icon`;
+both anchors nullable; `ck_tasks_journal_only_has_both_anchors` (invariants 1 + 2),
+`ck_tasks_due_date_only_on_list_without_due_journal` (4 + 5), `ck_tasks_position_only_on_list`,
+`ck_tasks_position_non_negative`; index `ix_tasks_task_list_id_position`. No application code
+changed beyond the migration.
+
+**Tests:** integration `tests/integration/tasks/test_task_list_columns_migration.py` (round trip;
+a journal-only row survives the upgrade unflagged on no list; downgrade refused while a list task or
+a flagged task exists) and `test_task_list_columns_constraints.py` (each accepted list-task shape;
+one refused row per invariant and position rule, each naming its constraint; unknown list and
+list-delete RESTRICT). `test_task_tables_constraints.py::TestAnchorsAreMandatory` now expects the
+two-anchor CHECK instead of the `NOT NULL` message — same refusal, new mechanism (user decision).
+Gates run locally: ruff format/check, mypy (clean), backend unit tests (5,365 passed) and the full
+backend integration suite (all green). No unit tests added (no domain change) and no E2E (no UI).
+
+**Decisions (recorded during implementation):**
+- **Two combined CHECKs, not four.** Invariant 1 follows from 2, and 5 from 2 and 4, so a CHECK of
+  their own could never be the one that refuses a row; each refused row in the tests breaks exactly
+  one constraint.
+- **The list FK is `RESTRICT`**, not CASCADE or SET NULL: list deletion settles each task with
+  events in the service. PostgreSQL reports it as SQLSTATE `23001`, not `23503`.
+- **`position` is present exactly when the task is on a list** (pairing CHECK) — beyond the AC, to
+  keep stray positions off journal-only tasks.
+- **The flag column is `flagged`.** No composite owner FK between a task and its list; owner scoping
+  stays in the repositories.
+- **The downgrade refuses** while any task holds a list, due date, flag or icon, instead of dropping it.
+
+**Notes for later phases:**
+- *Phase 10:* the entity mirrors these CHECKs; `Task` gains `task_list_id`, `position`, `due_date`,
+  `flagged`, `icon`. `_row_to_task`/`_TASK_COLUMNS` are the one place the repository must learn them.
+- *Phase 14 / 19:* a task joining a list must be given a `position` in the same statement, and one
+  leaving a list must clear `task_list_id`, `position` and `due_date` together — the CHECKs are row-level.
+- *Phase 16:* if journal delete moves the anchor FKs to `SET NULL`, nulling a journal-only task's
+  anchor fails on `ck_tasks_journal_only_has_both_anchors` (`23514`), not on the FK (`23503`).
+- *List delete (Phase 29):* tasks must be deleted or made journal-only before the `task_lists` row goes (RESTRICT).
+- *Phase 14:* the database does not stop a task joining another owner's list (single-column FK, by
+  decision), so the repository's membership writes must be owner-scoped on **both** the task and the
+  list, and proven with a second user (Delivery Rule 9).
 
 #### Phase 10: Task entity and invariants
 
