@@ -56,6 +56,10 @@ The plan document you write with `set_plan` MUST include:
   classes for UI work.
 - **Iteration-doc updates**: a step to update the iteration doc's status/progress for
   **$ARGUMENTS** as work proceeds, and again on completion. This is part of the plan.
+  Record progress **only inside this phase's own section** (its heading marker, **Status:**
+  line, actual diff and acceptance-criteria ticks). Never add or update a roll-up of completed
+  phases in the doc's header or any other shared line: phases run in parallel, one PR each,
+  and every PR editing the same line conflicts with every other one.
 - **Verification / check step**: a dedicated step near the end to review the implemented changes
   back against the **product specification** and the **iteration doc**, confirming every required
   test exists and passes and every acceptance criterion is met.
@@ -87,7 +91,8 @@ resending the full step list with `set_plan` as statuses change:
    do not defer. All tests must be passing before you consider the work done.
 5. Perform the check step: review changes against the product spec and iteration doc, confirming
    all spec-mandated tests are present and passing and acceptance criteria are met.
-6. Update relevant documentation and the iteration doc to mark the phase complete.
+6. Update relevant documentation and the iteration doc to mark the phase complete — in this
+   phase's own section only, never the doc header (see Iteration-doc updates above).
 
 Report what was implemented, which tests/gates were run locally, and their results.
 
