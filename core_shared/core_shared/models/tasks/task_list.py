@@ -2,12 +2,25 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from .exceptions import TaskListValidationError
 from .task_icon import TaskIcon
 
 # Mirrors the ``task_lists.name`` column bound.
 MAX_TASK_LIST_NAME_LENGTH = 200
+
+
+class TaskListArchiveFilter(StrEnum):
+    """Which of a user's lists a listing returns, by archived state.
+
+    ``ACTIVE`` and ``ALL`` come in the user's manual order; ``ARCHIVED`` comes
+    most-recently-archived first, the order the archived lists page shows.
+    """
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    ALL = "all"
 
 
 @dataclass(kw_only=True)

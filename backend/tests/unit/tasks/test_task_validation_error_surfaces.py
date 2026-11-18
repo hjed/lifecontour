@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
+    TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
     TaskValidationError,
@@ -146,6 +147,18 @@ class TestRestMapping:
         assert error.code == "TASK_DUE_JOURNAL_NOT_FUTURE"
         assert "field" not in (error.meta or {})
 
+    def test_a_missing_list_has_its_own_not_found_code(self) -> None:
+        """The code map is an exact-type lookup, so without its own entry a
+        missing list would fall back to ``DOMAIN_ERROR``. The message names the
+        id only: another user's list is reported exactly as a missing one."""
+        response = create_domain_error_response(TaskListNotFoundError(7))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_NOT_FOUND"
+        assert error.status == "404"
+        assert error.detail == "Task list with ID 7 not found"
+        assert error.meta is None
+
     def test_another_task_error_gains_no_meta(self):
         """The no-regression guard: one task error opted in, and only one."""
         response = create_domain_error_response(TaskNotFoundError(7))
@@ -213,3 +226,12 @@ class TestSurfaceParity:
 
         assert rest.meta is not None
         assert rest.meta["field"] == mcp["field"] == "due_journal_id"
+
+    @pytest.mark.asyncio
+    async def test_a_missing_list_is_reported_as_missing(self) -> None:
+        """A list error is a task-domain error, so the MCP decorator's 404
+        branch reaches it with no list-specific mapping."""
+        payload = await call_tool_raising(TaskListNotFoundError(7))
+
+        assert payload["error"] == "Not found"
+        assert payload["message"] == "Task list with ID 7 not found"

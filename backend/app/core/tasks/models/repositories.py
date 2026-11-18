@@ -31,6 +31,8 @@ from core_shared.models.tasks import (
     Task,
     TaskContactRepointing,
     TaskJournalRepointing,
+    TaskList,
+    TaskListArchiveFilter,
 )
 
 
@@ -664,4 +666,95 @@ class TaskContactRepository(ABC):
             One summary per task this call moved, ordered by task id so a merge's
             events go out in the same order every time. Empty when the absorbed
             contact is on no task, which is most merges.
+        """
+
+
+class TaskListRepository(ABC):
+    """Repository interface for task list persistence.
+
+    The owner-scoping contract is the same as :class:`TaskRepository`'s: every
+    method takes the acting user's id and filters on it, so a list the user does
+    not own is treated exactly like one that does not exist — ``find_by_id``
+    returns ``None`` and every write raises ``TaskListNotFoundError``.
+
+    **Positions.** The repository, not the caller, places a new list: at the
+    bottom of *all* the owner's lists, archived ones included, so unarchiving a
+    list returns it to its old place. Positions are not unique; lists order by
+    ``(position, id)``. Moving a list is a separate operation (reordering), so
+    saving a list never changes its position.
+
+    Whether a list may be written while archived is a service-layer rule; the
+    repository persists whatever state it is given.
+    """
+
+    @abstractmethod
+    async def save(self, task_list: TaskList) -> TaskList:
+        """Insert a new list or update an existing one.
+
+        Args:
+            task_list: The list to persist. A list without an ``id`` is inserted
+                at the bottom of its owner's lists, whatever ``position`` it
+                carries. One with an ``id`` has its name, icon and archived
+                state updated in place; its ``position`` and ``created_at`` are
+                left as stored.
+
+        Returns:
+            The persisted list, carrying the database-assigned id, position and
+            timestamps.
+
+        Raises:
+            TaskListNotFoundError: On the update path, when no list with that
+                id belongs to ``task_list.user_id``.
+        """
+
+    @abstractmethod
+    async def find_by_id(self, task_list_id: int, user_id: str) -> TaskList | None:
+        """Find one of the user's lists by id.
+
+        Returns:
+            The list, or ``None`` when it does not exist or is not the user's.
+        """
+
+    @abstractmethod
+    async def find_by_id_for_update(
+        self, task_list_id: int, user_id: str
+    ) -> TaskList | None:
+        """Find one of the user's lists and lock its row against other writers.
+
+        For check-then-write paths — refusing a write to an archived list, say —
+        which must hold the state they checked until they commit. Callers must
+        already be inside their unit of work, or the lock is released at once.
+
+        Returns:
+            The list, or ``None`` when it does not exist or is not the user's.
+        """
+
+    @abstractmethod
+    async def list_for_user(
+        self,
+        user_id: str,
+        archived: TaskListArchiveFilter = TaskListArchiveFilter.ACTIVE,
+    ) -> list[TaskList]:
+        """List the user's lists, filtered by archived state.
+
+        Args:
+            user_id: The acting user; nobody else's lists are ever returned
+            archived: ``ACTIVE`` (the default) or ``ALL`` in the user's order,
+                ``(position, id)``; ``ARCHIVED`` most-recently-archived first.
+
+        Returns:
+            The matching lists, possibly empty.
+        """
+
+    @abstractmethod
+    async def delete(self, task_list_id: int, user_id: str) -> None:
+        """Hard-delete one of the user's lists.
+
+        Deleting only removes the list row. Once tasks can sit on a list, the
+        service decides their fate first — tasks holding both a creating and a
+        due journal survive as journal-only tasks — so the tasks' list column
+        must not cascade on delete.
+
+        Raises:
+            TaskListNotFoundError: When no list with that id belongs to the user.
         """

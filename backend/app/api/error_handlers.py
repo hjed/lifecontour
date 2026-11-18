@@ -42,6 +42,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskJournalIsAnchorError,
+    TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
@@ -166,6 +167,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         # A list refusal is a task refusal (its subclass), but this lookup is by
         # exact type, so the subclass needs its own entry to share the code.
         TaskListValidationError: "TASK_VALIDATION_ERROR",
+        TaskListNotFoundError: "TASK_LIST_NOT_FOUND",
         TaskAnchorJournalNotFoundError: "TASK_ANCHOR_JOURNAL_NOT_FOUND",
         TaskDueJournalNotFutureError: "TASK_DUE_JOURNAL_NOT_FUTURE",
         TaskStatusTransitionError: "TASK_STATUS_TRANSITION_REFUSED",

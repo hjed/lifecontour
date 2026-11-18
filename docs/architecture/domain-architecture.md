@@ -223,7 +223,16 @@ the *creating* journal where it arose and the *due* journal where it matters.
   owner-scoped by contract, and each of the other two hands a *different domain* the narrow
   capability its own data integrity needs — moving journal links, moving contact links — without
   handing it the ability to change a task's text, status or existence. Neither is owner-scoped,
-  because each stands in for what a foreign key would otherwise do
+  because each stands in for what a foreign key would otherwise do.
+  The fourth port is not one of those: `TaskListRepository` (same module), implemented by
+  `SqlTaskListRepository` (`backend/app/core/tasks/adapters/sql/task_list_repository.py`) and
+  provided by `TaskProvider`, persists the tasks domain's own lists under the same owner-scoping
+  contract as `TaskRepository` (an unowned list is
+  `None` or `TaskListNotFoundError`). It places a new list at the bottom of **all** the owner's
+  lists, archived included, so unarchiving returns a list to its old place; saving never changes a
+  list's position, which only reordering moves. `list_for_user` takes a `TaskListArchiveFilter`
+  (`core_shared.models.tasks`): `ACTIVE` (default) and `ALL` in `(position, id)` order, `ARCHIVED`
+  most-recently-archived first. Whether a list may be written while archived is a service rule.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
   link-role grouping a journal's task list is built on, see

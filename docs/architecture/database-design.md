@@ -754,6 +754,14 @@ match `lucide-react` icon names, but the key is the contract; the web app maps i
 constraint would refuse mid-update. Lists are ordered by `(position, id)` instead, so the order is
 total even if two lists briefly share a position (two concurrent creates both taking the bottom).
 
+`SqlTaskListRepository` computes a new list's position inside its `INSERT` as one past the
+owner's highest position over **all** their lists, archived ones included, and its `UPDATE` never
+writes `position` (only reordering moves a list). Archived lists list most-recently-archived first
+(`archived_at DESC, id DESC`); the `(user_id, position)` index serves the other orders, and the
+archived listing's paging (ITER21-002) is where an `archived_at` index would be added if needed.
+When tasks gain their list column, its foreign key must **not** cascade on delete: deleting a list
+keeps tasks that hold both a creating and a due journal, so the service decides their fate first.
+
 Like `tasks`, the table has no SQLAlchemy `Table` object; the migration is the source of truth.
 
 ### Photo Integration (Iteration 4)
