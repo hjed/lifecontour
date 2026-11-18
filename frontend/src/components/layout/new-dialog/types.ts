@@ -18,6 +18,12 @@ export interface NewEntityPanelProps {
   readonly onCreated: () => void;
   /** The user abandoned the panel; the dialog closes. */
   readonly onCancel: () => void;
+  /**
+   * The panel's save started (`true`) or settled (`false`). While any panel is
+   * saving the dialog locks the type switch, so a save that finishes, closes
+   * the dialog and navigates cannot discard a draft in another type.
+   */
+  readonly onBusyChange: (busy: boolean) => void;
 }
 
 export interface NewEntityType {

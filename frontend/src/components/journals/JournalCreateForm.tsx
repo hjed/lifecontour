@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 /**
  * Format a Date as a local YYYY-MM-DD string for HTML date inputs.
@@ -462,6 +462,11 @@ function buildSubmittedTypeData(
 interface JournalCreateFormProps {
   readonly onCancel?: () => void;
   readonly onSuccess?: (journalId: string) => void;
+  /**
+   * Told when a submit starts and settles, the journal and any GPX uploads
+   * included, so a host can hold still meanwhile.
+   */
+  readonly onPendingChange?: (pending: boolean) => void;
   readonly defaultParentId?: number;
   readonly initialDate?: { from: Date; to?: Date };
   readonly initialTypes?: JournalType[];
@@ -470,6 +475,7 @@ interface JournalCreateFormProps {
 export function JournalCreateForm({
   onCancel,
   onSuccess,
+  onPendingChange,
   defaultParentId,
   initialDate,
   initialTypes,
@@ -518,6 +524,12 @@ export function JournalCreateForm({
       parentId: defaultParentId ?? undefined,
     },
   });
+
+  // isSubmitting spans the whole async submit: the create and every upload.
+  const { isSubmitting } = form.formState;
+  useEffect(() => {
+    onPendingChange?.(isSubmitting);
+  }, [isSubmitting, onPendingChange]);
 
   const selectedTypes =
     useWatch({

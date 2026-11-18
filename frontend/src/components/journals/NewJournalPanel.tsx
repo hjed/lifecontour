@@ -19,7 +19,11 @@ import type { Route } from 'next';
 import { JournalCreateForm } from '@/components/journals/JournalCreateForm';
 import type { NewEntityPanelProps } from '@/components/layout/new-dialog/types';
 
-export function NewJournalPanel({ onCreated, onCancel }: NewEntityPanelProps) {
+export function NewJournalPanel({
+  onCreated,
+  onCancel,
+  onBusyChange,
+}: NewEntityPanelProps) {
   const router = useRouter();
   const mounted = useRef(false);
 
@@ -36,5 +40,11 @@ export function NewJournalPanel({ onCreated, onCancel }: NewEntityPanelProps) {
     router.push(`/journals/${journalId}` as Route);
   };
 
-  return <JournalCreateForm onSuccess={handleSuccess} onCancel={onCancel} />;
+  return (
+    <JournalCreateForm
+      onSuccess={handleSuccess}
+      onCancel={onCancel}
+      onPendingChange={onBusyChange}
+    />
+  );
 }

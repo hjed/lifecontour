@@ -199,6 +199,36 @@ describe('JournalCreateForm', () => {
       }
     });
 
+    it('reports a save as pending from submit until it settles', async () => {
+      const user = userEvent.setup();
+      let resolveCreate: (value: { data: { id: string } }) => void = () => {};
+      mockMutateAsync.mockImplementation(
+        () =>
+          new Promise(resolve => {
+            resolveCreate = resolve;
+          })
+      );
+      const onPendingChange = jest.fn();
+      renderWithClient(
+        <JournalCreateForm
+          onSuccess={jest.fn()}
+          onPendingChange={onPendingChange}
+        />
+      );
+      expect(onPendingChange).toHaveBeenLastCalledWith(false);
+
+      await user.type(screen.getByLabelText(/^title$/i), 'Pending');
+      await user.click(screen.getByRole('button', { name: /create journal/i }));
+
+      await waitFor(() =>
+        expect(onPendingChange).toHaveBeenLastCalledWith(true)
+      );
+      await act(async () => resolveCreate({ data: { id: 'j-9' } }));
+      await waitFor(() =>
+        expect(onPendingChange).toHaveBeenLastCalledWith(false)
+      );
+    });
+
     it('renders type selector checkboxes', () => {
       renderWithClient(<JournalCreateForm />);
 

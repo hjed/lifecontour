@@ -128,4 +128,19 @@ describe('CreateContactForm', () => {
     expect(onCreated).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
   });
+
+  it('reports whether a save is in flight', () => {
+    const onBusyChange = jest.fn();
+    mockMutation(jest.fn(), true);
+    const { rerender } = render(
+      <CreateContactForm onCancel={jest.fn()} onBusyChange={onBusyChange} />
+    );
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+    mockMutation(jest.fn(), false);
+    rerender(
+      <CreateContactForm onCancel={jest.fn()} onBusyChange={onBusyChange} />
+    );
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  });
 });

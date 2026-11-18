@@ -81,6 +81,25 @@ async function openDialog() {
   return { ...rendered, dialog: await screen.findByRole('dialog') };
 }
 
+/** A panel whose save the test starts and finishes by hand. */
+function SavingPanel({ onBusyChange }: NewEntityPanelProps) {
+  return (
+    <div>
+      <button type='button' onClick={() => onBusyChange(true)}>
+        Start saving
+      </button>
+      <button type='button' onClick={() => onBusyChange(false)}>
+        Finish saving
+      </button>
+    </div>
+  );
+}
+
+const SAVING_TYPES: readonly NewEntityType[] = [
+  { ...TWO_TYPES[0], Panel: SavingPanel },
+  TWO_TYPES[1],
+];
+
 describe('NewDialog', () => {
   it('renders a New trigger that announces a dialog', () => {
     const { trigger } = renderDialog();
@@ -244,5 +263,54 @@ describe('NewDialog', () => {
     act(() => settleSlowCreate());
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('NewDialog while a panel is saving', () => {
+  async function openSavingDialog() {
+    const user = userEvent.setup();
+    render(<NewDialog types={SAVING_TYPES} />);
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    return { user, dialog: await screen.findByRole('dialog') };
+  }
+
+  it('locks the other types until the save finishes', async () => {
+    const { user, dialog } = await openSavingDialog();
+    const alpha = within(dialog).getByRole('button', { name: 'Alpha' });
+    const beta = within(dialog).getByRole('button', { name: 'Beta' });
+
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Start saving' })
+    );
+
+    expect(beta).toBeDisabled();
+    expect(alpha).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Saving');
+    await user.click(beta);
+    expect(alpha).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Finish saving' })
+    );
+
+    expect(beta).toBeEnabled();
+    expect(within(dialog).getByRole('status')).toBeEmptyDOMElement();
+    await user.click(beta);
+    expect(beta).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('starts unlocked on the next opening', async () => {
+    const { user, dialog } = await openSavingDialog();
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Start saving' })
+    );
+    await user.keyboard('{Escape}');
+
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const reopened = await screen.findByRole('dialog');
+
+    expect(
+      within(reopened).getByRole('button', { name: 'Beta' })
+    ).toBeEnabled();
   });
 });

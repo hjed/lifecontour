@@ -22,15 +22,23 @@ export interface CreateContactFormProps {
   readonly onCancel: () => void;
   /** Called after a successful create, before navigating to the contact. */
   readonly onCreated?: () => void;
+  /** Told when a save starts and settles, so a host can hold still meanwhile. */
+  readonly onBusyChange?: (busy: boolean) => void;
 }
 
 export function CreateContactForm({
   onCancel,
   onCreated,
+  onBusyChange,
 }: CreateContactFormProps) {
   const router = useRouter();
   const createContactMutation = useCreateContact();
   const mounted = useRef(false);
+
+  const { isPending } = createContactMutation;
+  useEffect(() => {
+    onBusyChange?.(isPending);
+  }, [isPending, onBusyChange]);
 
   useEffect(() => {
     mounted.current = true;
