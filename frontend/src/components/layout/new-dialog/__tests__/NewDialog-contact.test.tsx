@@ -13,6 +13,11 @@ jest.mock('@/lib/api/contacts', () => ({
   useCreateContact: jest.fn(),
 }));
 
+// The Journal panel shares the dialog but is covered by its own tests.
+jest.mock('@/components/journals/NewJournalPanel', () => ({
+  NewJournalPanel: () => null,
+}));
+
 const mockPush = jest.fn();
 const mockRouter = { ...createMockAppRouter(), push: mockPush };
 
@@ -41,9 +46,11 @@ describe('NewDialog with the app registry', () => {
     await user.click(screen.getByRole('button', { name: 'New' }));
     const dialog = await screen.findByRole('dialog', { name: 'New' });
 
-    expect(
-      within(dialog).getByRole('button', { name: 'Contact' })
-    ).toHaveAttribute('aria-pressed', 'true');
+    const contactType = within(dialog).getByRole('button', {
+      name: 'Contact',
+    });
+    await user.click(contactType);
+    expect(contactType).toHaveAttribute('aria-pressed', 'true');
 
     await user.type(within(dialog).getByLabelText(/first name/i), 'Grace');
     await user.click(
@@ -76,6 +83,7 @@ describe('NewDialog with the app registry', () => {
     render(<NewDialog />);
     await user.click(screen.getByRole('button', { name: 'New' }));
     const dialog = await screen.findByRole('dialog', { name: 'New' });
+    await user.click(within(dialog).getByRole('button', { name: 'Contact' }));
     await user.type(within(dialog).getByLabelText(/first name/i), 'Late');
     await user.click(
       within(dialog).getByRole('button', { name: /save contact/i })

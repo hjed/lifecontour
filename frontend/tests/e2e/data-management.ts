@@ -169,6 +169,14 @@ export class TestDataManager {
   }
 
   /**
+   * Delete a journal the test created some other way (e.g. through the UI)
+   * during cleanup, as if this manager had created it.
+   */
+  trackJournal(journalId: string): void {
+    this.createdJournalIds.push(journalId);
+  }
+
+  /**
    * Create a test contact via API
    */
   async createContact(contactData: ContactCreateRequest): Promise<TestContact> {

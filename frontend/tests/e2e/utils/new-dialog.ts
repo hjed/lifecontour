@@ -49,3 +49,43 @@ export async function createContactFromDialog(
   const body = (await response.json()) as { data: { id: string | number } };
   return String(body.data.id);
 }
+
+/** The switch button for one type in the open dialog. */
+export function newTypeButton(dialog: Locator, label: string): Locator {
+  return dialog
+    .getByRole('group', { name: 'What to create' })
+    .getByRole('button', { name: label });
+}
+
+/** Switch the open dialog to a type and wait until it is the selected one. */
+export async function selectNewType(
+  dialog: Locator,
+  label: string
+): Promise<void> {
+  const type = newTypeButton(dialog, label);
+  await type.click();
+  await expect(type).toHaveAttribute('aria-pressed', 'true');
+}
+
+/**
+ * Fill the Journal panel's title, create it, and return the new journal's id
+ * taken from the create response.
+ */
+export async function createJournalFromDialog(
+  page: Page,
+  dialog: Locator,
+  title: string
+): Promise<string> {
+  const panel = dialog.getByRole('region', { name: 'Journal' });
+  await panel.getByLabel('Title', { exact: true }).fill(title);
+  const created = page.waitForResponse(
+    response =>
+      new URL(response.url()).pathname === '/api/journals' &&
+      response.request().method() === 'POST'
+  );
+  await panel.getByRole('button', { name: 'Create Journal' }).click();
+  const response = await created;
+  expect(response.status()).toBe(201);
+  const body = (await response.json()) as { data: { id: string | number } };
+  return String(body.data.id);
+}
