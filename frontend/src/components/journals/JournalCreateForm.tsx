@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 
 /**
  * Format a Date as a local YYYY-MM-DD string for HTML date inputs.
@@ -475,6 +475,11 @@ export function JournalCreateForm({
   initialTypes,
 }: JournalCreateFormProps = {}) {
   const router = useRouter();
+  // Per-instance ids: the New dialog can mount this form over /journals/new,
+  // and fixed ids would point the dialog's date labels at the page's inputs.
+  const dateRangeId = useId();
+  const dateRangeStartId = `${dateRangeId}-start`;
+  const dateRangeEndId = `${dateRangeId}-end`;
   const { mutateAsync: createJournal, isPending: isCreatingJournal } =
     useCreateJournal();
   const { mutateAsync: createRoute, isPending: isCreatingRoute } =
@@ -906,13 +911,13 @@ export function JournalCreateForm({
                 <div className='flex items-center gap-4'>
                   <div className='flex w-full flex-col gap-2'>
                     <Label
-                      htmlFor='date-range-start'
+                      htmlFor={dateRangeStartId}
                       className='text-muted-foreground text-xs'
                     >
                       Start Date
                     </Label>
                     <Input
-                      id='date-range-start'
+                      id={dateRangeStartId}
                       type='date'
                       value={formatLocalDate(field.value.from)}
                       onChange={e => {
@@ -933,13 +938,13 @@ export function JournalCreateForm({
                   </div>
                   <div className='flex w-full flex-col gap-2'>
                     <Label
-                      htmlFor='date-range-end'
+                      htmlFor={dateRangeEndId}
                       className='text-muted-foreground text-xs'
                     >
                       End Date
                     </Label>
                     <Input
-                      id='date-range-end'
+                      id={dateRangeEndId}
                       type='date'
                       value={formatLocalDate(
                         field.value.to || field.value.from
