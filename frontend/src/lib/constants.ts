@@ -179,6 +179,7 @@ export const UI_TEXT = {
   NEW: 'New',
   NEW_TYPE_SWITCH: 'What to create',
   NEW_DESCRIPTION: 'Choose what to create, then fill in its details.',
+  NEW_SAVING: 'Saving… you can switch type once it finishes.',
   CLOSE: 'Close',
 } as const;
 

@@ -10,7 +10,7 @@
  * Closing the dialog discards it.
  */
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Plus, XIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,7 @@ export interface NewDialogProps {
 }
 
 const panelId = (id: NewEntityId) => `new-dialog-panel-${id}`;
+const noop = () => {};
 
 export function NewDialog({ types = NEW_ENTITY_TYPES }: NewDialogProps) {
   const [open, setOpen] = useState(false);
@@ -87,6 +88,29 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
   const [selected, setSelected] = useState<NewEntityId | undefined>(
     types[0]?.id
   );
+  // Types whose panel has a save in flight. Any entry locks the switch.
+  const [busy, setBusy] = useState<ReadonlySet<NewEntityId>>(new Set());
+  const locked = busy.size > 0;
+
+  // One stable callback per type, so a panel's effect reporting its pending
+  // state does not re-run on every render of the dialog.
+  const busyHandlers = useMemo(
+    () =>
+      new Map(
+        types.map(({ id }) => [
+          id,
+          (isBusy: boolean) =>
+            setBusy(previous => {
+              if (previous.has(id) === isBusy) return previous;
+              const next = new Set(previous);
+              if (isBusy) next.add(id);
+              else next.delete(id);
+              return next;
+            }),
+        ])
+      ),
+    [types]
+  );
 
   return (
     <DialogContent
@@ -129,9 +153,10 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
               type='button'
               aria-pressed={pressed}
               aria-controls={panelId(id)}
+              disabled={locked && !pressed}
               onClick={() => setSelected(id)}
               className={cn(
-                'focus-visible:ring-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none md:min-h-9',
+                'focus-visible:ring-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:min-h-9',
                 pressed
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -144,6 +169,10 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
         })}
       </div>
 
+      <p role='status' className='sr-only'>
+        {locked ? UI_TEXT.NEW_SAVING : ''}
+      </p>
+
       {types.map(({ id, label, Panel }) => (
         <section
           key={id}
@@ -154,7 +183,11 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
           // (the journal's) would stretch the column past the sheet's edge.
           className='min-w-0'
         >
-          <Panel onCreated={onClose} onCancel={onClose} />
+          <Panel
+            onCreated={onClose}
+            onCancel={onClose}
+            onBusyChange={busyHandlers.get(id) ?? noop}
+          />
         </section>
       ))}
     </DialogContent>

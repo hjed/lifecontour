@@ -11,6 +11,7 @@ import { createMockAppRouter } from '@/test-utils/mock-router';
 interface CapturedFormProps {
   readonly onSuccess?: (journalId: string) => void;
   readonly onCancel?: () => void;
+  readonly onPendingChange?: (pending: boolean) => void;
 }
 
 // The form is exercised by its own tests; here it only reports what the
@@ -48,7 +49,13 @@ describe('NewJournalPanel', () => {
     const onCreated = jest.fn(() => {
       calls.push('created');
     });
-    render(<NewJournalPanel onCreated={onCreated} onCancel={jest.fn()} />);
+    render(
+      <NewJournalPanel
+        onCreated={onCreated}
+        onCancel={jest.fn()}
+        onBusyChange={jest.fn()}
+      />
+    );
 
     act(() => formProps.onSuccess?.('j-1'));
 
@@ -59,7 +66,13 @@ describe('NewJournalPanel', () => {
     const user = userEvent.setup();
     const onCreated = jest.fn();
     const onCancel = jest.fn();
-    render(<NewJournalPanel onCreated={onCreated} onCancel={onCancel} />);
+    render(
+      <NewJournalPanel
+        onCreated={onCreated}
+        onCancel={onCancel}
+        onBusyChange={jest.fn()}
+      />
+    );
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -71,7 +84,11 @@ describe('NewJournalPanel', () => {
   it('does nothing when the create settles after the panel has gone', () => {
     const onCreated = jest.fn();
     const { unmount } = render(
-      <NewJournalPanel onCreated={onCreated} onCancel={jest.fn()} />
+      <NewJournalPanel
+        onCreated={onCreated}
+        onCancel={jest.fn()}
+        onBusyChange={jest.fn()}
+      />
     );
     const settle = formProps.onSuccess;
 
@@ -80,5 +97,21 @@ describe('NewJournalPanel', () => {
 
     expect(onCreated).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("hands the form's pending state to the dialog", () => {
+    const onBusyChange = jest.fn();
+    render(
+      <NewJournalPanel
+        onCreated={jest.fn()}
+        onCancel={jest.fn()}
+        onBusyChange={onBusyChange}
+      />
+    );
+
+    act(() => formProps.onPendingChange?.(true));
+    expect(onBusyChange).toHaveBeenLastCalledWith(true);
+    act(() => formProps.onPendingChange?.(false));
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 });
