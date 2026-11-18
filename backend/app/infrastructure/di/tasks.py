@@ -11,8 +11,9 @@ from app.core.journal.models.repositories import (
     JournalRepository,
 )
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
-from app.core.tasks.models.repositories import TaskRepository
+from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -51,6 +52,11 @@ class TaskProvider(Provider):
     def task_repository(self, connection: AsyncConnection) -> TaskRepository:
         """Provide a TaskRepository instance."""
         return SqlTaskRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def task_list_repository(self, connection: AsyncConnection) -> TaskListRepository:
+        """Provide a TaskListRepository instance on the request connection."""
+        return SqlTaskListRepository(connection)
 
     @provide(scope=Scope.REQUEST)
     def task_service(

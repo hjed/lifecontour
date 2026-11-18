@@ -1,0 +1,473 @@
+"""Integration tests for ``SqlTaskListRepository`` against real PostgreSQL.
+
+The repository is the only persistence surface for task lists, and this phase
+holds it to three promises:
+
+- **round trips** — a list saved is a list read back, icon included;
+- **positions** — a new list joins the bottom of its owner's lists, and lists
+  read back in ``(position, id)`` order, with an archived filter;
+- **owner scoping** — every statement filters on ``user_id``, so no method can
+  read, change or delete another user's list.
+
+Owner scoping is asserted against a second owner's *real* rows rather than an
+absent id: a query that forgot its ``user_id`` filter still finds nothing for
+an id that does not exist, so only a real foreign row can catch it.
+"""
+
+from dataclasses import replace
+from datetime import UTC, datetime
+
+import pytest
+import pytest_asyncio
+from core_shared.models.tasks import (
+    TaskIcon,
+    TaskList,
+    TaskListArchiveFilter,
+    TaskListNotFoundError,
+)
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.models.repositories import TaskListRepository
+from tests.integration.statement_recorder import recorded_statements
+from tests.integration.tasks.task_seeding import (
+    OTHER_USER_ID,
+    USER_ID,
+    make_task_container,
+)
+
+pytestmark = pytest.mark.integration
+
+ARCHIVED_EARLIER = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+ARCHIVED_LATER = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
+
+_SELECT_ROW = text("SELECT name, icon, position FROM task_lists WHERE id = :list_id")
+_COUNT_BY_ID = text("SELECT COUNT(*) FROM task_lists WHERE id = :list_id")
+# The fixture runs every test in one transaction, so ``now()`` is the same
+# instant throughout. Back-dating the row is what lets a test see the update
+# path move ``updated_at`` and leave ``created_at`` alone.
+_BACKDATE = text("""
+    UPDATE task_lists
+    SET created_at = now() - interval '2 days',
+        updated_at = now() - interval '1 day'
+    WHERE id = :list_id
+    RETURNING created_at, updated_at
+""")
+
+
+@pytest_asyncio.fixture
+async def repository(async_connection: AsyncConnection) -> SqlTaskListRepository:
+    return SqlTaskListRepository(async_connection)
+
+
+async def save_list(
+    repository: SqlTaskListRepository,
+    name: str,
+    *,
+    user_id: str = USER_ID,
+    icon: TaskIcon | None = None,
+    archived_at: datetime | None = None,
+) -> TaskList:
+    """Insert a list and return it as persisted."""
+    return await repository.save(
+        TaskList(user_id=user_id, name=name, icon=icon, archived_at=archived_at)
+    )
+
+
+async def set_position(
+    conn: AsyncConnection, task_list: TaskList, position: int
+) -> None:
+    """Move a list directly in the table; the repository has no reorder yet."""
+    await conn.execute(
+        text("UPDATE task_lists SET position = :position WHERE id = :list_id"),
+        {"position": position, "list_id": task_list.id},
+    )
+
+
+def ids(task_lists: list[TaskList]) -> list[int | None]:
+    return [task_list.id for task_list in task_lists]
+
+
+class TestInsert:
+    """Creating a list: what the database assigns, and where the list goes."""
+
+    async def test_insert_populates_id_and_timestamps(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+
+        assert saved.id is not None
+        assert saved.created_at is not None
+        assert saved.updated_at is not None
+        assert saved.archived_at is None
+
+    async def test_a_first_list_goes_to_the_top(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+
+        assert saved.position == 0
+
+    async def test_each_new_list_joins_the_bottom(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        first = await save_list(repository, "Groceries")
+        second = await save_list(repository, "Packing")
+        third = await save_list(repository, "Errands")
+
+        assert [first.position, second.position, third.position] == [0, 1, 2]
+
+    async def test_the_bottom_counts_archived_lists(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        """An archived list keeps its place, so unarchiving it returns it there
+        rather than onto a position a newer list has since taken."""
+        await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
+
+        saved = await save_list(repository, "Groceries")
+
+        assert saved.position == 1
+
+    async def test_the_bottom_is_the_owners_own(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        """Another user's lists neither push a new list down nor are pushed."""
+        await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        await save_list(repository, "Also theirs", user_id=OTHER_USER_ID)
+
+        mine = await save_list(repository, "Mine")
+        their_next = await save_list(repository, "Theirs again", user_id=OTHER_USER_ID)
+
+        assert mine.position == 0
+        assert their_next.position == 2
+
+    async def test_a_given_position_is_ignored_on_insert(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        """The repository places a new list; a caller cannot choose a slot."""
+        await save_list(repository, "Groceries")
+
+        saved = await repository.save(
+            TaskList(user_id=USER_ID, name="Packing", position=0)
+        )
+
+        assert saved.position == 1
+
+
+class TestFind:
+    """Reading one list back."""
+
+    async def test_find_by_id_round_trips_every_field(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(
+            repository,
+            "Packing",
+            icon=TaskIcon.LUGGAGE,
+            archived_at=ARCHIVED_EARLIER,
+        )
+        assert saved.id is not None
+
+        found = await repository.find_by_id(saved.id, USER_ID)
+
+        assert found == saved
+        assert found is not None
+        assert found.icon is TaskIcon.LUGGAGE
+        assert found.archived_at == ARCHIVED_EARLIER
+
+    async def test_a_list_without_an_icon_reads_back_without_one(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        found = await repository.find_by_id(saved.id, USER_ID)
+
+        assert found is not None
+        assert found.icon is None
+
+    async def test_a_missing_id_is_not_found(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        assert await repository.find_by_id(999_999, USER_ID) is None
+
+    async def test_another_users_list_is_not_found(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        theirs = await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+
+        assert await repository.find_by_id(theirs.id, USER_ID) is None
+
+    async def test_find_for_update_returns_the_owners_list(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        assert await repository.find_by_id_for_update(saved.id, USER_ID) == saved
+
+    async def test_find_for_update_does_not_find_another_users_list(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        theirs = await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+
+        assert await repository.find_by_id_for_update(theirs.id, USER_ID) is None
+
+    async def test_find_for_update_locks_the_row(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """``FOR NO KEY UPDATE``, as tasks use: it excludes other writers of the
+        list without blocking a foreign-key check against it."""
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        with recorded_statements(async_connection) as statements:
+            await repository.find_by_id_for_update(saved.id, USER_ID)
+
+        assert len(statements) == 1
+        assert "FOR NO KEY UPDATE" in statements[0]
+
+
+class TestUpdate:
+    """Saving a list that already has an id."""
+
+    async def test_update_changes_name_icon_and_archived_state(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+
+        updated = await repository.save(
+            replace(
+                saved,
+                name="Weekly shop",
+                icon=TaskIcon.SHOPPING_CART,
+                archived_at=ARCHIVED_LATER,
+            )
+        )
+
+        assert updated.id == saved.id
+        assert updated.name == "Weekly shop"
+        assert updated.icon is TaskIcon.SHOPPING_CART
+        assert updated.archived_at == ARCHIVED_LATER
+        assert updated.is_archived
+
+    async def test_update_can_clear_icon_and_unarchive(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(
+            repository, "Packing", icon=TaskIcon.LUGGAGE, archived_at=ARCHIVED_EARLIER
+        )
+
+        updated = await repository.save(replace(saved, icon=None, archived_at=None))
+
+        assert updated.icon is None
+        assert updated.archived_at is None
+        assert not updated.is_archived
+
+    async def test_update_moves_updated_at_and_keeps_created_at(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+        result = await async_connection.execute(_BACKDATE, {"list_id": saved.id})
+        created_at, backdated_updated_at = result.one()
+
+        updated = await repository.save(replace(saved, name="Weekly shop"))
+
+        assert updated.created_at == created_at
+        assert updated.updated_at is not None
+        assert updated.updated_at > backdated_updated_at
+
+    async def test_update_never_moves_the_list(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        """Only reordering moves a list, so a rename racing a reorder cannot
+        put the list back where the rename read it from."""
+        saved = await save_list(repository, "Groceries")
+        await save_list(repository, "Packing")
+
+        updated = await repository.save(replace(saved, name="Shop", position=1))
+
+        assert updated.position == 0
+
+    async def test_updating_another_users_list_is_refused(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        theirs = await save_list(
+            repository, "Theirs", user_id=OTHER_USER_ID, icon=TaskIcon.STAR
+        )
+        assert theirs.id is not None
+
+        with pytest.raises(TaskListNotFoundError) as raised:
+            await repository.save(replace(theirs, user_id=USER_ID, name="Mine now"))
+
+        assert raised.value.task_list_id == theirs.id
+        row = (
+            await async_connection.execute(_SELECT_ROW, {"list_id": theirs.id})
+        ).one()
+        assert (row.name, row.icon, row.position) == ("Theirs", "star", 0)
+
+    async def test_updating_a_missing_list_is_refused(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        with pytest.raises(TaskListNotFoundError):
+            await repository.save(TaskList(id=999_999, user_id=USER_ID, name="Gone"))
+
+
+class TestListForUser:
+    """Listing the owner's lists, in order, with the archived filter."""
+
+    async def test_active_lists_come_in_position_order(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Positions are set against creation order, so an order by id alone
+        would fail."""
+        first = await save_list(repository, "Groceries")
+        second = await save_list(repository, "Packing")
+        third = await save_list(repository, "Errands")
+        await set_position(async_connection, first, 2)
+        await set_position(async_connection, third, 0)
+
+        listed = await repository.list_for_user(USER_ID)
+
+        assert ids(listed) == ids([third, second, first])
+
+    async def test_a_shared_position_is_broken_by_id(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Positions are not unique — two concurrent creates can both take the
+        bottom — so the id makes the order total. Only the older list is
+        updated, so its row version is the newer one on disk and an order by
+        position alone would tend to return it last."""
+        first = await save_list(repository, "Groceries")
+        second = await save_list(repository, "Packing")
+        await set_position(async_connection, first, 1)
+
+        listed = await repository.list_for_user(USER_ID)
+
+        assert ids(listed) == ids([first, second])
+
+    async def test_active_is_the_default_and_leaves_archived_lists_out(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        active = await save_list(repository, "Groceries")
+        await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
+
+        assert ids(await repository.list_for_user(USER_ID)) == ids([active])
+        assert ids(
+            await repository.list_for_user(USER_ID, TaskListArchiveFilter.ACTIVE)
+        ) == ids([active])
+
+    async def test_archived_lists_come_most_recently_archived_first(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The archived page groups lists by the month they were archived, so
+        the most recent sits at the top. Ids and positions both put the earlier
+        archive first, so only the archived time gives this order."""
+        await save_list(repository, "Groceries")
+        later = await save_list(repository, "Last trip", archived_at=ARCHIVED_LATER)
+        earlier = await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
+        await set_position(async_connection, earlier, 1)
+        await set_position(async_connection, later, 2)
+
+        listed = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ARCHIVED)
+
+        assert ids(listed) == ids([later, earlier])
+
+    async def test_all_returns_both_in_position_order(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        archived = await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
+        active = await save_list(repository, "Groceries")
+        await set_position(async_connection, archived, 1)
+        await set_position(async_connection, active, 0)
+
+        listed = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ALL)
+
+        assert ids(listed) == ids([active, archived])
+
+    @pytest.mark.parametrize("archived", list(TaskListArchiveFilter))
+    async def test_another_users_lists_are_never_listed(
+        self,
+        repository: SqlTaskListRepository,
+        archived: TaskListArchiveFilter,
+    ) -> None:
+        await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        await save_list(
+            repository,
+            "Their old trip",
+            user_id=OTHER_USER_ID,
+            archived_at=ARCHIVED_EARLIER,
+        )
+
+        assert await repository.list_for_user(USER_ID, archived) == []
+
+
+class TestDelete:
+    """Hard-deleting a list."""
+
+    async def test_delete_removes_the_list(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        await repository.delete(saved.id, USER_ID)
+
+        assert await repository.find_by_id(saved.id, USER_ID) is None
+        count = await async_connection.execute(_COUNT_BY_ID, {"list_id": saved.id})
+        assert count.scalar_one() == 0
+
+    async def test_deleting_another_users_list_is_refused(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        theirs = await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+
+        with pytest.raises(TaskListNotFoundError):
+            await repository.delete(theirs.id, USER_ID)
+
+        count = await async_connection.execute(_COUNT_BY_ID, {"list_id": theirs.id})
+        assert count.scalar_one() == 1
+
+    async def test_deleting_a_missing_list_is_refused(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        with pytest.raises(TaskListNotFoundError):
+            await repository.delete(999_999, USER_ID)
+
+
+class TestDependencyInjection:
+    """The repository is reachable through the container, not just importable."""
+
+    async def test_task_provider_supplies_the_sql_adapter(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        container = make_task_container(async_connection)
+        try:
+            async with container() as request_container:
+                repository = await request_container.get(TaskListRepository)
+
+            assert isinstance(repository, SqlTaskListRepository)
+        finally:
+            await container.close()

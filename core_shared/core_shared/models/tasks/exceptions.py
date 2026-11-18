@@ -71,6 +71,19 @@ class TaskNotFoundError(TaskDomainError):
         self.task_id = task_id
 
 
+class TaskListNotFoundError(TaskDomainError):
+    """Exception raised when a task list is not found.
+
+    Like :class:`TaskNotFoundError`, every list read and write is scoped to the
+    acting user, so another user's list is reported exactly as a missing one
+    and the message says nothing about ownership.
+    """
+
+    def __init__(self, task_list_id: int):
+        super().__init__(f"Task list with ID {task_list_id} not found", 404)
+        self.task_list_id = task_list_id
+
+
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 

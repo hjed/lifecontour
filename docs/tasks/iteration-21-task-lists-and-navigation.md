@@ -1,6 +1,6 @@
 # Iteration 21: Task Lists and Navigation
 
-**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-001 Phase 1, ITER21-003 Phase 1.
+**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-001 Phases 1–2, ITER21-003 Phase 1.
 **Dependencies:** [Iteration 18](./iteration-18-home-dashboard-and-tasks.md) (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), [Iteration 20](./iteration-20-entity-ownership.md) (entity ownership: every new table carries `user_id`), journal series (migrations 0101 and 0121), MeiliSearch indexing through the transactional outbox, the design-system sync (`frontend/.design-sync/`).
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable: a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar. Journal-only tasks keep behaving exactly as today.
 
@@ -192,14 +192,59 @@ NOT NULLs, no accidental uniqueness across two owners). No E2E: no UI.
 - *ITER21-002 Phase 2:* the icon picker needs the key set in the frontend — take it from the API's
   published enum (OpenAPI/MCP schema) rather than hand-copying the 40 keys.
 
-#### Phase 2: Task list repository
+#### Phase 2: Task list repository ✅ DONE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~780 tracked** (×6)
+**Estimated diff:** ~130 production → **~780 tracked** (×6) · **Actual:** ~340 production → **~855
+tracked** (852 insertions, 3 deletions excluding this document: 339 production — adapter 205, port
+93, exceptions/filter/exports 30, DI and REST code map 11; 495 tests; 18 architecture docs). Production
+ran ×2.6 on the estimate, mostly docstrings carrying the contract; tracked lines landed within 10%
+because the ×6 multiplier was generous for a single port (measured ×2.5).
 
 **Acceptance Criteria:**
 
-- [ ] Port + SQL adapter: owner-scoped CRUD, positions, archived filter; second-user isolation tests.
+- [x] Port + SQL adapter: owner-scoped CRUD, positions, archived filter; second-user isolation tests.
+
+**Delivered:** `TaskListRepository` port (`app/core/tasks/models/repositories.py`);
+`SqlTaskListRepository` (`app/core/tasks/adapters/sql/task_list_repository.py`) provided at request
+scope by `TaskProvider`: `save` (insert at the bottom / update), `find_by_id`,
+`find_by_id_for_update` (`FOR NO KEY UPDATE`), `list_for_user(user_id, archived)`, `delete`.
+`TaskListArchiveFilter` (`ACTIVE`, `ARCHIVED`, `ALL`) and `TaskListNotFoundError` (404) in
+`core_shared.models.tasks`; `TaskListNotFoundError` mapped to `TASK_LIST_NOT_FOUND` in
+`app/api/error_handlers.py` (MCP reports it as "Not found" through the existing `TaskDomainError`
+branch).
+
+**Tests:** integration `tests/integration/tasks/test_task_list_repository_integration.py` (31: insert
+id/timestamps, bottom placement incl. archived lists and per owner, caller position ignored; find
+round trip and icon parsing; row lock statement; update of name/icon/archive state, `updated_at`
+moved and `created_at`/`position` kept; `(position, id)` order with positions set against id order
+and a tie; archived order against both id and position; each archived filter;
+second-user isolation on find, find-for-update, update, delete and every filter; DI resolution);
+unit cases in `tests/unit/tasks/test_task_validation_error_surfaces.py` (REST code and MCP surface
+for a missing list). No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **Open-task count moved from Phase 3 to Phase 15** (user decision). Tasks gain their list column
+  only in Phase 9, so Phase 3 cannot count them; Phase 14 builds the per-list counts and Phase 15,
+  which already exposes list fields on REST and MCP, adds the count to the list listing.
+- **Reordering is not in the repository yet.** Phase 5 owns whether a reorder index counts archived
+  lists, so it adds the move operation with its API.
+- **The bottom counts archived lists**, so unarchiving returns a list to its old place; **saving
+  never writes `position`**, so a rename cannot undo a concurrent reorder.
+- **Archived lists list most-recently-archived first** (`archived_at DESC, id DESC`), the order the
+  archived page groups by; `ACTIVE` and `ALL` use `(position, id)`.
+- asyncpg deduces one type per bind parameter, so the INSERT's bottom-position subquery casts
+  `:user_id` to `VARCHAR`; without it the statement fails with `AmbiguousParameterError`.
+
+**Notes for later phases:**
+- *Phase 3:* use `TaskListNotFoundError` for an unowned or missing list (already mapped); add
+  `TASK_LIST_NOT_FOUND` to `api-design.md` with the endpoint.
+- *Phase 4 / 6:* read with `find_by_id_for_update` inside the unit of work before writing.
+- *Phase 5:* add the move operation to the port; `save` deliberately ignores `position`.
+- *Phase 9:* the `tasks.task_list_id` foreign key must **not** `ON DELETE CASCADE` — Phase 29 keeps
+  tasks holding both journals.
+- *ITER21-002 Phase 12:* extend `list_for_user` (paging, name filter) for the archived page; add an
+  `archived_at` index there if needed.
 
 #### Phase 3: Create and read lists
 
@@ -208,7 +253,7 @@ NOT NULLs, no accidental uniqueness across two owners). No E2E: no UI.
 
 **Acceptance Criteria:**
 
-- [ ] Create; get one; list all with archived filter and open-task count.
+- [ ] Create; get one; list all with archived filter. (The open-task count moved to Phase 15: tasks cannot join a list before Phase 9.)
 - [ ] Emits list-created.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
@@ -271,6 +316,7 @@ NOT NULLs, no accidental uniqueness across two owners). No E2E: no UI.
 **Acceptance Criteria:**
 
 - [ ] Migration only: `task_list_id`, position, due date, flag, icon; both anchors nullable; database CHECKs for invariants 1, 2, 4 and 5 — a task with no list must hold both a creating and a due journal, so relaxing the columns never weakens the two-anchor guarantee for journal-only tasks.
+- [ ] `task_list_id` references `task_lists` with `ON DELETE RESTRICT`, never a cascade: deleting a list (Phase 29) must first keep its tasks that hold both journals.
 - [ ] Existing code untouched.
 
 #### Phase 10: Task entity and invariants
@@ -328,6 +374,7 @@ NOT NULLs, no accidental uniqueness across two owners). No E2E: no UI.
 **Acceptance Criteria:**
 
 - [ ] Get-task, journal tasks, upcoming, the dashboard payload and the contact task record (labelled with the list).
+- [ ] The list listing (Phase 3) returns each list's open-task count, using Phase 14's per-list counts.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 16: Journal delete with list tasks — backend
