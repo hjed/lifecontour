@@ -269,7 +269,7 @@ class TestContactDeletionDropsLinksOnly:
 
 @pytest.mark.integration
 class TestAnchorsAreMandatory:
-    """Core invariants 1-3 expressed in the schema."""
+    """Core invariants 1-3 expressed in the schema, for tasks on no list."""
 
     async def test_a_task_cannot_be_inserted_without_a_creating_journal(
         self,
@@ -284,7 +284,9 @@ class TestAnchorsAreMandatory:
                 {"user_id": USER_ID, "due_id": due_id},
             )
 
-        assert 'null value in column "creating_journal_id"' in str(exc_info.value)
+        # Since 0146 the anchors are nullable for list tasks; with no list the
+        # two-anchor CHECK refuses the row instead of NOT NULL.
+        assert "ck_tasks_journal_only_has_both_anchors" in str(exc_info.value)
 
     async def test_a_task_cannot_be_inserted_without_a_due_journal(
         self,
@@ -299,7 +301,9 @@ class TestAnchorsAreMandatory:
                 {"user_id": USER_ID, "creating_id": creating_id},
             )
 
-        assert 'null value in column "due_journal_id"' in str(exc_info.value)
+        # Since 0146 the anchors are nullable for list tasks; with no list the
+        # two-anchor CHECK refuses the row instead of NOT NULL.
+        assert "ck_tasks_journal_only_has_both_anchors" in str(exc_info.value)
 
     async def test_creating_and_due_may_be_the_same_journal(
         self,

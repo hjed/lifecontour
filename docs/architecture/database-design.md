@@ -548,7 +548,10 @@ Introduced by migration `0105` (create/drop round-trip).
 
 - `tasks` — `id` (serial pk), `user_id` (varchar 50), `text` (TEXT), `status` (varchar 20, default
   `'not_done'`), `creating_journal_id` / `due_journal_id` (int, FK → `journals.id`), `created_at` /
-  `updated_at`. Indexed by `user_id` and by each anchor.
+  `updated_at`. Indexed by `user_id` and by each anchor. Since migration `0146` (ITER21-001) also
+  `task_list_id` (int, nullable, FK → `task_lists.id`), `position` (int, nullable), `due_date`
+  (date, nullable — a calendar day in the user's timezone), `flagged` (boolean, default `false`) and
+  `icon` (varchar 50, nullable); indexed by `(task_list_id, position)`. See *Tasks on a list* below.
 - `task_intermediate_journals` — `task_id` (FK → `tasks.id`), `journal_id` (FK → `journals.id`),
   `created_at`; `PRIMARY KEY (task_id, journal_id)`, indexed by `journal_id`. Journals where the
   task was discussed, revisited, or previously due.
@@ -556,8 +559,10 @@ Introduced by migration `0105` (create/drop round-trip).
   `PRIMARY KEY (task_id, contact_id)`, indexed by `contact_id`. A **plain reference** — no
   relationship type, role or attendance status, unlike `journal_contact_relationships`.
 
-**Both anchors are `NOT NULL`.** This is core invariants 1–3 expressed in the schema: a task can
-never exist with only one anchor at any point in its life. Nothing forbids the two columns holding
+**A task on no list holds both anchors.** This is core invariants 1–3 expressed in the schema: a
+journal-only task can never exist with only one anchor at any point in its life. Migration `0105`
+made both columns `NOT NULL`; `0146` relaxed them for list tasks and moved the guarantee into
+`ck_tasks_journal_only_has_both_anchors` (see *Tasks on a list*). Nothing forbids the two columns holding
 the same journal (invariant 6). The remaining invariants — the due journal must exist, be owned by
 the acting user, and be future-dated *at the moment it is set* — need journal data and the user's
 timezone, so they live in the service layer where REST and MCP both inherit them.
@@ -567,6 +572,7 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 | From | To | Action | Why |
 |---|---|---|---|
 | `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a task is *blocked*, not cascaded. The explanatory failure that names the blocking tasks arrives with ITER18-002; until then the database refuses on its own rather than silently destroying tasks. **Merge is the exception** — it re-points the anchors onto the survivor first, so it is never blocked (see below). |
+| `tasks.task_list_id` | `task_lists.id` | **`RESTRICT`** | Deleting a list deletes some of its tasks and turns those holding both journals back into journal-only tasks, each with a domain event, so the list-delete service settles every task first and a raw delete can never destroy tasks silently. PostgreSQL reports the refusal as SQLSTATE `23001` (`restrict_violation`), not `23503`. |
 | `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. |
 | `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. **Merge is the exception** — it re-points the links onto the survivor first, because otherwise this cascade destroys them (see below). |
 | both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
@@ -763,6 +769,35 @@ When tasks gain their list column, its foreign key must **not** cascade on delet
 keeps tasks that hold both a creating and a due journal, so the service decides their fate first.
 
 Like `tasks`, the table has no SQLAlchemy `Table` object; the migration is the source of truth.
+
+#### Tasks on a list (ITER21-001)
+
+Migration `0146` lets a task live on a list (spec *Core invariants*). The list columns are listed
+with `tasks` above; both journal anchors became nullable, because a list task needs neither. The
+relaxation is safe only because the CHECKs below keep **journal-only** tasks exactly as strict as
+`NOT NULL` kept them:
+
+| Constraint | Expression | Invariants |
+|---|---|---|
+| `ck_tasks_journal_only_has_both_anchors` | `task_list_id IS NOT NULL OR (creating_journal_id IS NOT NULL AND due_journal_id IS NOT NULL)` | 1 and 2 — a task with no list holds both journals, which implies it has a list or a due journal |
+| `ck_tasks_due_date_only_on_list_without_due_journal` | `due_date IS NULL OR (task_list_id IS NOT NULL AND due_journal_id IS NULL)` | 4 and 5 — a due date only on a list task, never beside a due journal |
+| `ck_tasks_position_only_on_list` | `(task_list_id IS NULL) = (position IS NULL)` | a position exactly when on a list |
+| `ck_tasks_position_non_negative` | `position >= 0` | as `task_lists` |
+
+Invariants 1 and 5 share a CHECK with a sibling instead of having one of their own: 1 follows from
+2, and 5 from 2 and 4, so a CHECK of their own could never be the one that refuses a row, and the constraint tests
+(`tests/integration/tasks/test_task_list_columns_constraints.py`) name exactly one constraint per
+refused row.
+
+- **The CHECKs are row-level**, so a write that reshapes a task must change every related column in
+  one statement — a task leaving its list clears `task_list_id`, `position` and `due_date` together.
+- **Positions are not unique**, for the reason `task_lists` gives; a list's tasks order by
+  `(position, id)`.
+- **`icon` has no CHECK** and shares the add-only `TaskIcon` rule above.
+- **Whether a due date is today or later**, like whether a due journal is in the future, needs the
+  user's timezone and lives in the domain, not the table.
+- **The downgrade refuses** while any task holds a list, due date, flag or icon, rather than
+  discarding values `0145` has no column for.
 
 ### Photo Integration (Iteration 4)
 ```sql
