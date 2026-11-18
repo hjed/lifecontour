@@ -174,6 +174,31 @@ describe('JournalCreateForm', () => {
       ).toBeInTheDocument();
     });
 
+    it('labels its own date inputs when two forms are on screen', () => {
+      // The New dialog can open over /journals/new, mounting a second form.
+      renderWithClient(
+        <>
+          <div data-testid='page-form'>
+            <JournalCreateForm />
+          </div>
+          <div data-testid='dialog-form'>
+            <JournalCreateForm />
+          </div>
+        </>
+      );
+
+      for (const testId of ['page-form', 'dialog-form']) {
+        const container = screen.getByTestId(testId);
+        for (const text of ['Start Date', 'End Date']) {
+          const label = within(container)
+            .getByText(text)
+            .closest('label') as HTMLLabelElement;
+          expect(label.control).not.toBeNull();
+          expect(container).toContainElement(label.control as HTMLElement);
+        }
+      }
+    });
+
     it('renders type selector checkboxes', () => {
       renderWithClient(<JournalCreateForm />);
 
