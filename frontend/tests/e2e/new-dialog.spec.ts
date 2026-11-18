@@ -20,11 +20,17 @@ function contactFirstName(page: Page) {
     .getByRole('button', { name: 'First name' });
 }
 
+/**
+ * Assert a target is at least 44px each way. Retried, because the dialog
+ * zooms in from 95% scale: a box read mid-animation comes up a fraction short.
+ */
 async function expectTouchTarget(target: Locator) {
-  const box = await target.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-  expect(box!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+  await expect(async () => {
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(box!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+  }).toPass({ timeout: 5_000 });
 }
 
 /** The opened journal's title, shown as its inline-edit field. */
