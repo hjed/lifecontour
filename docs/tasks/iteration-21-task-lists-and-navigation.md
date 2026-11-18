@@ -1,6 +1,6 @@
 # Iteration 21: Task Lists and Navigation
 
-**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Complete: ITER21-001 Phases 1–2, ITER21-003 Phase 1.
+**Status:** 🚧 IN PROGRESS — 8 sub-iterations, **116 phases**, one PR each, with per-phase acceptance criteria and diff estimates calibrated against Iteration 18's recorded actuals. Each phase records its own status on its heading or **Status:** line below; there is deliberately no roll-up here, because phases land in parallel and a shared line conflicts on every merge.
 **Dependencies:** [Iteration 18](./iteration-18-home-dashboard-and-tasks.md) (tasks, journal anchoring, home dashboard, daily-summary task inputs, task history), [Iteration 20](./iteration-20-entity-ownership.md) (entity ownership: every new table carries `user_id`), journal series (migrations 0101 and 0121), MeiliSearch indexing through the transactional outbox, the design-system sync (`frontend/.design-sync/`).
 **Goal:** Give tasks a second home — Task Lists — with optional due dates, a flag, an icon, recurrence and reusable templates, and make them reachable: a Tasks sidebar section, a top-bar **New** button and a mobile bottom tab bar. Journal-only tasks keep behaving exactly as today.
 
@@ -755,7 +755,7 @@ for a missing list). No E2E: no UI.
 - [ ] A **New** control is in the top bar on every authenticated page at every viewport and opens one dialog (a top sheet on phones) with a Task / Journal / Contact switch that keeps what was typed in each.
 - [ ] Task requires a destination. *On a list*: an existing list or a new one named inline, with optional due date or due journal, flag, icon and contacts. *In a journal*: the existing create-task fields plus the creating journal, with no date field.
 - [ ] The destination is pre-filled from context: the list being viewed, or the journal being viewed as creating journal.
-- [ ] Journal and Contact hold the full existing create forms and behave as `/journals/new` and `/contacts/new` do today; the existing page-level create buttons keep working.
+- [x] Journal and Contact hold the full existing create forms and behave as `/journals/new` and `/contacts/new` do today; the existing page-level create buttons keep working.
 - [ ] The entity types offered come from one list, so a further type can be added without restructuring the dialog.
 
 **Acceptance Criteria — mobile navigation:**
@@ -783,12 +783,14 @@ for a missing list). No E2E: no UI.
 
 #### Phase 2: New → Journal
 
+**Status:** ✅ Complete.
 **Prerequisites:** Phase 1.
 **Estimated diff:** ~150 production → **~900 tracked** (×5)
+**Actual diff:** ~55 production → **~500 tracked**. Production came in well under the estimate because `JournalCreateForm` already took `onSuccess`/`onCancel` and already worked inside a dialog (`CalendarQuickCreateDialog`), so the panel is a 40-line wrapper. The one surprise was layout: `DialogContent` is a grid, so the journal form's min-content width stretched the column past the 390px sheet. `min-w-0` on each panel section fixes it, and the phone E2E now asserts the sheet's own `scrollWidth`. Phases 3 and 5 reuse the same shell and may land similarly under estimate.
 
 **Acceptance Criteria:**
 
-- [ ] `JournalCreateForm` inside the dialog, behaving as `/journals/new`; the page keeps working.
+- [x] `JournalCreateForm` inside the dialog, behaving as `/journals/new`; the page keeps working. `NewJournalPanel` wraps the unchanged form. Journal is ordered before Contact, following the spec's Task · Journal · Contact order, so the dialog opens on Journal. `new-dialog.spec.ts` creates a journal on Firefox and on Mobile Chrome, and `journal-creation-ui.spec.ts` still passes.
 
 #### Phase 3: New → Task on a list
 

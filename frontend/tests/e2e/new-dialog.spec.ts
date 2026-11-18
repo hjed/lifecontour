@@ -4,8 +4,11 @@ import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 import {
   createContactFromDialog,
+  createJournalFromDialog,
   newButton,
+  newTypeButton,
   openNewDialog,
+  selectNewType,
 } from './utils/new-dialog';
 
 const MIN_TOUCH_TARGET = 44;
@@ -22,6 +25,11 @@ async function expectTouchTarget(target: Locator) {
   expect(box).not.toBeNull();
   expect(box!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
   expect(box!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+}
+
+/** The opened journal's title, shown as its inline-edit field. */
+function journalTitle(page: Page) {
+  return page.getByTestId('journal-title-field');
 }
 
 function uniqueName(prefix: string): string {
@@ -54,17 +62,39 @@ test.describe('New dialog — desktop', () => {
 
     await page.goto('/journals');
     const dialog = await openNewDialog(page);
-    await expect(
-      dialog
-        .getByRole('group', { name: 'What to create' })
-        .getByRole('button', { name: 'Contact' })
-    ).toHaveAttribute('aria-pressed', 'true');
+    await selectNewType(dialog, 'Contact');
 
     const contactId = await createContactFromDialog(page, dialog, firstName);
     dataManager.trackContact(contactId);
 
     await expect(page).toHaveURL(new RegExp(`/contacts/${contactId}$`));
     await expect(contactFirstName(page)).toHaveText(firstName);
+    await expect(dialog).toBeHidden();
+  });
+
+  test('creates a journal from New', async ({
+    authenticatedPage: page,
+    isMobile,
+    testCleanup,
+  }) => {
+    if (isMobile) test.skip();
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const title = uniqueName('Newdialog journal ');
+
+    await page.goto('/contacts');
+    const dialog = await openNewDialog(page);
+    // Journal is the first type, so every opening starts on it.
+    await expect(newTypeButton(dialog, 'Journal')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+
+    const journalId = await createJournalFromDialog(page, dialog, title);
+    dataManager.trackJournal(journalId);
+
+    await expect(page).toHaveURL(new RegExp(`/journals/${journalId}$`));
+    await expect(journalTitle(page)).toContainText(title);
     await expect(dialog).toBeHidden();
   });
 
@@ -117,11 +147,8 @@ test.describe('New dialog — phone', () => {
     }).toPass();
     expect(await noHorizontalScroll()).toBe(true);
 
-    await expectTouchTarget(
-      dialog
-        .getByRole('group', { name: 'What to create' })
-        .getByRole('button', { name: 'Contact' })
-    );
+    await expectTouchTarget(newTypeButton(dialog, 'Journal'));
+    await expectTouchTarget(newTypeButton(dialog, 'Contact'));
     await expectTouchTarget(dialog.getByRole('button', { name: 'Close' }));
   });
 
@@ -137,11 +164,52 @@ test.describe('New dialog — phone', () => {
 
     await page.goto('/contacts');
     const dialog = await openNewDialog(page);
+    await selectNewType(dialog, 'Contact');
     const contactId = await createContactFromDialog(page, dialog, firstName);
     dataManager.trackContact(contactId);
 
     await expect(page).toHaveURL(new RegExp(`/contacts/${contactId}$`));
     await expect(contactFirstName(page)).toHaveText(firstName);
+    await expect(dialog).toBeHidden();
+  });
+
+  test('creates a journal from the New sheet', async ({
+    authenticatedPage: page,
+    isMobile,
+    testCleanup,
+  }) => {
+    if (!isMobile) test.skip();
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const title = uniqueName('Newsheet journal ');
+
+    await page.goto('/journals');
+    const dialog = await openNewDialog(page);
+    await expect(newTypeButton(dialog, 'Journal')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    // The whole journal form fits the 390px sheet without sideways scroll.
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth
+      )
+    ).toBe(true);
+    await expect(async () => {
+      const box = await dialog.boundingBox();
+      expect(box).not.toBeNull();
+      expect(Math.round(box!.width)).toBe(390);
+    }).toPass();
+    // The sheet scrolls itself, so overflow inside it never widens the page.
+    expect(
+      await dialog.evaluate(sheet => sheet.scrollWidth <= sheet.clientWidth)
+    ).toBe(true);
+
+    const journalId = await createJournalFromDialog(page, dialog, title);
+    dataManager.trackJournal(journalId);
+
+    await expect(page).toHaveURL(new RegExp(`/journals/${journalId}$`));
+    await expect(journalTitle(page)).toContainText(title);
     await expect(dialog).toBeHidden();
   });
 });

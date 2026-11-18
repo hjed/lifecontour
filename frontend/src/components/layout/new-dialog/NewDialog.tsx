@@ -150,6 +150,9 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
           id={panelId(id)}
           aria-label={label}
           hidden={id !== selected}
+          // A grid item defaults to its content's min width, so a wide form
+          // (the journal's) would stretch the column past the sheet's edge.
+          className='min-w-0'
         >
           <Panel onCreated={onClose} onCancel={onClose} />
         </section>

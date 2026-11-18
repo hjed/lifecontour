@@ -10,7 +10,7 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
 /** The entity types the New dialog can create. */
-export type NewEntityId = 'contact';
+export type NewEntityId = 'journal' | 'contact';
 
 /** What the dialog hands every panel. */
 export interface NewEntityPanelProps {

@@ -7,6 +7,9 @@ import { NEW_ENTITY_TYPES } from '../registry';
 jest.mock('@/lib/api/contacts', () => ({
   useCreateContact: jest.fn(),
 }));
+jest.mock('@/components/journals/NewJournalPanel', () => ({
+  NewJournalPanel: () => null,
+}));
 
 describe('NEW_ENTITY_TYPES', () => {
   it('gives every type a unique id', () => {
@@ -23,7 +26,10 @@ describe('NEW_ENTITY_TYPES', () => {
     }
   });
 
-  it('offers Contact', () => {
-    expect(NEW_ENTITY_TYPES.map(type => type.id)).toContain('contact');
+  it('offers Journal then Contact, in the specification order', () => {
+    expect(NEW_ENTITY_TYPES.map(type => type.id)).toEqual([
+      'journal',
+      'contact',
+    ]);
   });
 });
