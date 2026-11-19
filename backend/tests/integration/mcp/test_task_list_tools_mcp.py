@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.integration.mcp.http_helpers import (
@@ -165,6 +166,141 @@ class TestGetTaskListTool:
             "message"
         ].replace("999999", "X")
         assert "Theirs" not in str(refused)
+
+
+async def _row(conn: AsyncConnection, task_list_id: int) -> dict[str, Any]:
+    row = (
+        await conn.execute(
+            text("SELECT * FROM task_lists WHERE id = :id"), {"id": task_list_id}
+        )
+    ).one()
+    return dict(row._mapping)
+
+
+class TestUpdateTaskListTool:
+    async def test_renames_a_list_and_answers_with_it(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing", icon=TaskIcon.LUGGAGE)
+
+        async with authenticated_lifespan_client() as client:
+            updated = await _call(
+                client, "update_task_list", task_list_id=seeded.id, name="Trip"
+            )
+
+        assert updated["id"] == seeded.id
+        assert (updated["name"], updated["icon"], updated["archived"]) == (
+            "Trip",
+            "luggage",
+            False,
+        )
+
+    async def test_sets_an_icon_attributed_to_the_assistant(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            updated = await _call(
+                client, "update_task_list", task_list_id=seeded.id, icon="luggage"
+            )
+
+        assert (updated["name"], updated["icon"]) == ("Packing", "luggage")
+        (event,) = await task_list_events(clean_database, task_list_id=seeded.id)
+        assert event.event_type == "TaskListUpdated"
+        assert event.payload["changed_fields"] == {"icon": [None, "luggage"]}
+        assert (event.payload["source"], event.payload["changed_by"]) == (
+            "mcp",
+            "mcp",
+        )
+
+    async def test_clear_icon_clears_it(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing", icon=TaskIcon.LUGGAGE)
+        assert seeded.id is not None
+
+        async with authenticated_lifespan_client() as client:
+            updated = await _call(
+                client, "update_task_list", task_list_id=seeded.id, clear_icon=True
+            )
+
+        assert updated["icon"] is None
+        assert (await _row(clean_database, seeded.id))["icon"] is None
+
+    @pytest.mark.parametrize(
+        ("arguments", "field"),
+        [
+            pytest.param({"icon": "luggage", "clear_icon": True}, "icon", id="both"),
+            pytest.param({}, "name", id="nothing-named"),
+            pytest.param({"name": "   "}, "name", id="blank-name"),
+            pytest.param(
+                {"name": "x" * (MAX_TASK_LIST_NAME_LENGTH + 1)}, "name", id="long-name"
+            ),
+        ],
+    )
+    async def test_a_refused_update_names_the_field_and_writes_nothing(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+        field: str,
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing", icon=TaskIcon.LUGGAGE)
+        assert seeded.id is not None
+        before = await _row(clean_database, seeded.id)
+
+        async with authenticated_lifespan_client() as client:
+            refusal = await _refused(
+                client, "update_task_list", task_list_id=seeded.id, **arguments
+            )
+
+        assert refusal["error"] == "Task error"
+        assert field in refusal["message"]
+        assert await _row(clean_database, seeded.id) == before
+        assert await task_list_events(clean_database) == []
+
+    async def test_an_icon_outside_the_fixed_set_is_refused(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing")
+        assert seeded.id is not None
+        before = await _row(clean_database, seeded.id)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "update_task_list",
+                {"task_list_id": seeded.id, "icon": "unicorn"},
+            )
+
+        # Refused by argument validation, before the tool runs.
+        assert '"isError":true' in response.text
+        assert "icon" in response.text
+        assert await _row(clean_database, seeded.id) == before
+
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert foreign.id is not None
+        before = await _row(clean_database, foreign.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "update_task_list", task_list_id=foreign.id, name="Mine"
+            )
+            missing = await _refused(
+                client, "update_task_list", task_list_id=999_999, name="Mine"
+            )
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert await _row(clean_database, foreign.id) == before
+        assert await task_list_events(clean_database) == []
 
 
 class TestListTaskListsTool:

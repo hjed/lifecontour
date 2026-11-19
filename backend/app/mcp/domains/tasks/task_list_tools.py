@@ -1,8 +1,9 @@
-"""Task list MCP tools: create a list, read one, list the user's lists.
+"""Task list MCP tools: create a list, update one, read one, list the user's lists.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
-no domain error. ``create_task_list`` calls the ``@transactional``
-``TaskListService``, which commits the list and its event together; the reads
+no domain error. ``create_task_list`` and ``update_task_list`` call the
+``@transactional`` ``TaskListService``, which commits the list and its event
+together; the reads
 go through ``TaskListReadService``, which can change nothing. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
 found", exactly as a missing one.
@@ -11,16 +12,23 @@ found", exactly as a missing one.
 from typing import Annotated
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskIcon, TaskList, TaskListArchiveFilter
+from core_shared.models.tasks import (
+    TaskIcon,
+    TaskList,
+    TaskListArchiveFilter,
+    TaskListValidationError,
+)
 from fastmcp.tools import tool
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
 from app.mcp.domains.tasks.task_list_schemas import TaskListMCP, TaskListsMCP
-from app.mcp.shared.annotations import ADDITIVE_WRITE, READ_ONLY
+from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
+from app.mcp.shared.arguments import JsonBool
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -29,6 +37,7 @@ from app.mcp.shared.dependencies import (
     get_task_list_service,
     mcp_depends,
 )
+from app.shared.patch import UNSET, Unset
 
 
 def _task_list_fields(task_list: TaskList) -> TaskListMCP:
@@ -66,8 +75,8 @@ async def create_task_list(
     """
     Create a task list: a named home for tasks, added below the user's lists.
 
-    Lists can be created, read and listed; tasks cannot be placed on a list yet,
-    so a new list is empty. A blank or overlong name is refused naming the field.
+    Lists can be created, renamed, given or cleared an icon, read and listed;
+    tasks cannot be placed on a list yet, so a new list is empty. A blank or overlong name is refused naming the field.
     """
     user_id = await get_current_user_id()
 
@@ -82,6 +91,69 @@ async def create_task_list(
         changed_by="mcp",
     )
     return _task_list_fields(created)
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("update_task_list", "task list")
+async def update_task_list(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to change."),
+    ],
+    name: Annotated[
+        str | None,
+        Field(description="The list's new name, as plain text. Omit to keep it."),
+    ] = None,
+    icon: Annotated[
+        TaskIcon | None,
+        Field(description="A new icon from the fixed set of keys. Omit to keep it."),
+    ] = None,
+    clear_icon: Annotated[
+        JsonBool,
+        Field(description="Remove the list's icon. Cannot be combined with icon."),
+    ] = False,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_list_service: TaskListService = mcp_depends(get_task_list_service),
+) -> TaskListMCP:
+    """
+    Rename one of the user's task lists, change its icon, or remove its icon.
+
+    Only the arguments you supply are changed. To remove the icon pass
+    clear_icon=true rather than a null icon, since an omitted icon means "keep
+    it". Name at least one change; values the list already has change nothing.
+    A blank or overlong name is refused naming the field, and a list that does
+    not exist or belongs to someone else is reported as not found.
+    """
+    # Argument shape, not a domain rule: the clear flag exists only because a
+    # tool cannot tell a null argument from an omitted one.
+    if clear_icon and icon is not None:
+        raise TaskListValidationError(
+            "icon", "Pass either an icon or clear_icon=true, not both"
+        )
+    if name is None and icon is None and not clear_icon:
+        raise TaskListValidationError(
+            "name", "Name a change: a new name, a new icon, or clear_icon=true"
+        )
+
+    user_id = await get_current_user_id()
+    icon_change: TaskIcon | None | Unset = UNSET
+    if clear_icon:
+        icon_change = None
+    elif icon is not None:
+        icon_change = icon
+    patch = TaskListPatch(
+        name=name if name is not None else UNSET,
+        icon=icon_change,
+    )
+    updated = await task_list_service.update_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        patch=patch,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return _task_list_fields(updated)
 
 
 @tool(annotations=READ_ONLY)

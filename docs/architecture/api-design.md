@@ -1232,6 +1232,7 @@ is `task-lists`.
 |---|---|---|
 | `POST /api/task-lists` | Create a list at the bottom of your lists. Body type `task-lists`, attributes: `name`, optional `icon` | 201; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), an icon outside the fixed set, an unknown attribute or another resource type (`VALIDATION_ERROR`) |
 | `GET /api/task-lists/{list_id}` | Read one list: `name`, `icon`, `position`, `archived`, `archived_at`, timestamps | 200; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
+| `PATCH /api/task-lists/{list_id}` | Rename a list, set or clear its icon, or both. Body type `task-lists` with `id` matching the path; attributes: optional `name`, optional `icon` (`null` clears it) | 200 with the list; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), a body id that disagrees with the path (`TASK_VALIDATION_ERROR`, `meta.field` = `id`), a null name, an icon outside the fixed set, an unknown attribute, a body naming no change or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `GET /api/task-lists` | Your lists by archived state. Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
 
 Conventions this surface pins down:
@@ -1248,9 +1249,21 @@ Conventions this surface pins down:
   on create (`extra="forbid"`), and a new list is never archived.
 - **The listing is unpaginated** — the lists a user keeps are a sidebar-sized
   set; paging arrives with the archived lists page.
-- Creating a list publishes `TaskListCreated` with `source=ui` (REST) or `mcp`.
-- The matching MCP tools are `create_task_list`, `get_task_list` and
-  `list_task_lists`, documented in their docstrings and parameter schemas.
+- **On update, `null` and absent differ**: `"icon": null` clears the icon,
+  while an absent `icon` leaves it alone. A list must have a name, so
+  `"name": null` is refused. `position` and the archive state are not
+  attributes of this update; they are their own operations.
+- **An update that changes nothing records nothing**: values the list already
+  has write no row and publish no event. A body naming no attribute at all is
+  refused, so a client never reads a 200 as an edit that was applied.
+- Creating a list publishes `TaskListCreated`; changing its name or icon
+  publishes one `TaskListUpdated` per write, carrying `changed_fields` as
+  `{field: [old, new]}` for exactly the fields that moved. Both record
+  `source=ui` (REST) or `mcp`.
+- The matching MCP tools are `create_task_list`, `update_task_list`,
+  `get_task_list` and `list_task_lists`, documented in their docstrings and
+  parameter schemas. `update_task_list` clears the icon with `clear_icon=true`,
+  because a tool cannot tell a null argument from an omitted one.
 
 ## Contact Important Date Endpoints
 

@@ -1,4 +1,4 @@
-"""Integration tests for the task list endpoints: create, read one, list.
+"""Integration tests for the task list endpoints: create, read, list, update.
 
 The rules themselves (bottom placement, owner scoping, the event) are proven
 against ``TaskListService`` and ``TaskListReadService`` in
@@ -9,10 +9,12 @@ user's list is answered exactly as a missing one.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
@@ -205,6 +207,212 @@ class TestGetTaskListEndpoint:
         self, authenticated_client: AsyncClient, list_id: str
     ) -> None:
         response = await authenticated_client.get(f"/api/task-lists/{list_id}")
+
+        assert response.status_code == 400
+
+
+def _patch_body(list_id: object, **attributes: object) -> dict[str, object]:
+    return {
+        "data": {"type": "task-lists", "id": str(list_id), "attributes": attributes}
+    }
+
+
+async def _row(conn: AsyncConnection, list_id: int) -> dict[str, Any]:
+    row = (
+        await conn.execute(
+            text("SELECT * FROM task_lists WHERE id = :id"), {"id": list_id}
+        )
+    ).one()
+    return dict(row._mapping)
+
+
+class TestUpdateTaskListEndpoint:
+    async def test_renames_a_list_and_answers_with_the_resource(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, name="Trip packing"),
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert (data["type"], data["id"]) == ("task-lists", str(seeded.id))
+        # An absent icon is left alone.
+        assert (data["attributes"]["name"], data["attributes"]["icon"]) == (
+            "Trip packing",
+            "luggage",
+        )
+        assert data["links"]["self"].endswith(f"/api/task-lists/{seeded.id}")
+
+    async def test_sets_the_icon_and_keeps_the_name(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, icon="shopping-cart"),
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert (attributes["name"], attributes["icon"]) == ("Packing", "shopping-cart")
+
+    async def test_a_null_icon_clears_it(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_patch_body(seeded.id, icon=None)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["icon"] is None
+        assert (await _row(async_connection, seeded.id))["icon"] is None
+
+    async def test_name_and_icon_together_are_one_event_attributed_to_the_browser(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, name="Trip", icon="luggage"),
+        )
+
+        assert response.status_code == 200
+        (event,) = await task_list_events(async_connection, task_list_id=seeded.id)
+        assert event.event_type == "TaskListUpdated"
+        assert event.payload["changed_fields"] == {
+            "name": ["Packing", "Trip"],
+            "icon": [None, "luggage"],
+        }
+        assert (event.payload["source"], event.payload["changed_by"]) == ("ui", "ui")
+
+    @pytest.mark.parametrize("name", ["", "   ", "x" * (MAX_TASK_LIST_NAME_LENGTH + 1)])
+    async def test_a_blank_or_too_long_name_is_refused_naming_the_field(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        name: str,
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_patch_body(seeded.id, name=name)
+        )
+
+        assert response.status_code == 400
+        error = _error(response.json())
+        assert error["code"] == "TASK_VALIDATION_ERROR"
+        assert error["meta"] == {"field": "name"}
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    async def test_a_body_id_that_disagrees_with_the_path_is_refused(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        other = await seed_task_list(async_connection, "Errands")
+        assert seeded.id is not None and other.id is not None
+        before = await _row(async_connection, other.id)
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_patch_body(other.id, name="Trip")
+        )
+
+        assert response.status_code == 400
+        error = _error(response.json())
+        assert error["code"] == "TASK_VALIDATION_ERROR"
+        assert error["meta"] == {"field": "id"}
+        assert (await _row(async_connection, seeded.id))["name"] == "Packing"
+        assert await _row(async_connection, other.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.parametrize(
+        "attributes",
+        [
+            pytest.param({}, id="names-no-change"),
+            pytest.param({"name": None}, id="null-name"),
+            pytest.param({"icon": "not-an-icon"}, id="unknown-icon"),
+            pytest.param({"position": 3}, id="position"),
+            pytest.param({"archived_at": None}, id="archived-at"),
+        ],
+    )
+    async def test_a_malformed_attribute_set_is_refused_and_nothing_is_written(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        attributes: dict[str, object],
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_patch_body(seeded.id, **attributes)
+        )
+
+        assert response.status_code == 400
+        assert response.json()["errors"][0]["code"] == "VALIDATION_ERROR"
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    async def test_another_resource_type_or_a_missing_id_is_refused(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        wrong_type = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json={
+                "data": {
+                    "type": "tasks",
+                    "id": str(seeded.id),
+                    "attributes": {"name": "Trip"},
+                }
+            },
+        )
+        no_id = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_body(name="Trip")
+        )
+
+        assert wrong_type.status_code == 400
+        assert no_id.status_code == 400
+        assert await task_list_events(async_connection) == []
+
+    async def test_a_missing_list_is_not_found(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{INT32_MAX}", json=_patch_body(INT32_MAX, name="Trip")
+        )
+
+        assert response.status_code == 404
+        error = _error(response.json())
+        assert error["code"] == "TASK_LIST_NOT_FOUND"
+        assert error["detail"] == f"Task list with ID {INT32_MAX} not found"
+
+    @pytest.mark.parametrize("list_id", ["0", str(INT32_MAX + 1), "abc"])
+    async def test_an_out_of_range_id_is_a_bad_request(
+        self, authenticated_client: AsyncClient, list_id: str
+    ) -> None:
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{list_id}", json=_patch_body(list_id, name="Trip")
+        )
 
         assert response.status_code == 400
 

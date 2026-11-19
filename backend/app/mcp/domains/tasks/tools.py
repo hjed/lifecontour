@@ -64,6 +64,7 @@ from app.mcp.domains.tasks.task_list_tools import (
     create_task_list,
     get_task_list,
     list_task_lists,
+    update_task_list,
 )
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
@@ -961,5 +962,6 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_upcoming_tasks)
     mcp.add_tool(get_task_history)
     mcp.add_tool(create_task_list)
+    mcp.add_tool(update_task_list)
     mcp.add_tool(get_task_list)
     mcp.add_tool(list_task_lists)

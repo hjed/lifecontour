@@ -1,7 +1,7 @@
-"""Task list API endpoints: create a list, read one, list yours.
+"""Task list API endpoints: create a list, read one, list yours, update one.
 
 Thin by design, like the task controller: every rule lives in
-``TaskListService`` (the ``@transactional`` create and its event) and
+``TaskListService`` (the ``@transactional`` writes and their events) and
 ``TaskListReadService`` (owner-scoped reads). This module opens no transaction
 and catches no domain error — the registered ``DomainError`` handler renders
 ``TaskListValidationError`` as 400 ``TASK_VALIDATION_ERROR`` with the field, and
@@ -15,7 +15,7 @@ Another user's list is answered exactly as a missing one, and every
 from typing import Annotated
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskListArchiveFilter
+from core_shared.models.tasks import TaskListArchiveFilter, TaskListValidationError
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
@@ -27,6 +27,7 @@ from app.api.tasks.task_list_schemas import (
     TaskListCollectionResponse,
     TaskListCreateRequest,
     TaskListResponse,
+    TaskListUpdateRequest,
     to_task_list_resource,
 )
 from app.core.tasks.services.task_list_read_service import TaskListReadService
@@ -116,4 +117,48 @@ async def get_task_list(
     )
     return TaskListResponse(
         data=to_task_list_resource(task_list, get_request_base_url(request))
+    )
+
+
+@router.patch("/task-lists/{list_id}")
+@inject
+async def update_task_list(
+    list_id: DatabaseIdPath,
+    task_list_request: TaskListUpdateRequest,
+    request: Request,
+    task_list_service: FromDishka[TaskListService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskListResponse:
+    """Rename one of your task lists, set or clear its icon, or both at once.
+
+    ``"icon": null`` clears the icon; an absent ``icon`` leaves it alone. Both
+    attributes arriving are one change, applied under one locked read and one
+    write. Values the list already has change nothing and record nothing.
+
+    Raises:
+        400: A blank, too-long or null name, an icon outside the fixed set, an
+             unknown attribute, a body naming no change, another resource type,
+             or a body id that disagrees with the path.
+        404: No such list, or it is not yours — indistinguishably.
+    """
+    # A transport concern — which of two places names the resource — so it
+    # lives here, as on the task PATCH, and has no MCP counterpart.
+    if task_list_request.data.id != str(list_id):
+        raise TaskListValidationError(
+            "id",
+            f"The body's task list id ({task_list_request.data.id}) must match "
+            f"the path ({list_id})",
+        )
+
+    updated = await task_list_service.update_task_list(
+        user_id=user.id,
+        task_list_id=list_id,
+        patch=task_list_request.data.attributes.to_patch(),
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return TaskListResponse(
+        data=to_task_list_resource(updated, get_request_base_url(request))
     )

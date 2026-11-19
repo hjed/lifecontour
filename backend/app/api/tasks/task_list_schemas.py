@@ -11,19 +11,23 @@ frontend icon picker takes the keys from there rather than a hand copy.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
 from core_shared.models.tasks import TaskIcon, TaskList
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
     JsonApiCreateRequest,
     JsonApiLinks,
     JsonApiResponse,
+    JsonApiUpdateRequest,
 )
+from app.core.tasks.services.task_list_patch import TaskListPatch
+from app.shared.patch import UNSET
 
 TASK_LIST_RESOURCE_TYPE: Literal["task-lists"] = "task-lists"
+RESOURCE_TYPE_DESC = "Resource type"
 
 
 class TaskListAttributes(BaseModel):
@@ -50,7 +54,7 @@ class TaskListResource(BaseModel):
     """Task list resource following the JSON:API specification."""
 
     type: Literal["task-lists"] = Field(
-        default=TASK_LIST_RESOURCE_TYPE, description="Resource type"
+        default=TASK_LIST_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
     )
     id: str = Field(..., description="Task list ID")
     attributes: TaskListAttributes = Field(..., description="Task list attributes")
@@ -90,7 +94,7 @@ class TaskListCreateData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["task-lists"] = Field(
-        default=TASK_LIST_RESOURCE_TYPE, description="Resource type"
+        default=TASK_LIST_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
     )
     attributes: TaskListCreateAttributes = Field(
         ..., description="Task list attributes to create"
@@ -99,6 +103,76 @@ class TaskListCreateData(BaseModel):
 
 class TaskListCreateRequest(JsonApiCreateRequest[TaskListCreateData]):
     """Request model for creating a task list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TaskListUpdateAttributes(BaseModel):
+    """Attributes a client may send to update a task list: its name, its icon.
+
+    JSON:API sends the attributes that changed, so both are optional — but the
+    two differ on ``null``. ``"icon": null`` **clears** the icon, while leaving
+    ``icon`` out leaves it alone; the controller tells them apart with
+    ``model_fields_set``. A list must have a name, so ``"name": null`` is
+    refused rather than read as "not sent".
+
+    A body naming neither is refused: down in the service it is simply nothing
+    to do, but out here it is a client that built a request wrong, and a 200
+    would tell it an edit it thinks it made was applied. ``extra="forbid"``
+    refuses ``position`` and the archive state, which are their own operations.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(
+        default=None,
+        description="The list's new name, non-blank. Omit to leave it unchanged.",
+    )
+    icon: TaskIcon | None = Field(
+        default=None,
+        description=(
+            "Icon key from the fixed set, or null to clear the icon. Omit to "
+            "leave it unchanged."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _must_name_a_change(self) -> Self:
+        if "name" in self.model_fields_set and self.name is None:
+            raise ValueError("'name' cannot be null: a task list must have a name.")
+        if not self.model_fields_set:
+            raise ValueError("An update must name at least one of 'name' or 'icon'.")
+        return self
+
+    def to_patch(self) -> TaskListPatch:
+        """The fields this body names, as the service takes them."""
+        return TaskListPatch(
+            name=self.name if self.name is not None else UNSET,
+            icon=self.icon if "icon" in self.model_fields_set else UNSET,
+        )
+
+
+class TaskListUpdateData(BaseModel):
+    """Data for updating a task list; the type is pinned and the id required.
+
+    JSON:API identifies the resource in the body as well as in the path, and
+    the controller refuses a body whose id disagrees with the path rather than
+    quietly preferring one of them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["task-lists"] = Field(
+        default=TASK_LIST_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="Task list ID to update; must match the path")
+    attributes: TaskListUpdateAttributes = Field(
+        ..., description="Task list attributes to update"
+    )
+
+
+class TaskListUpdateRequest(JsonApiUpdateRequest[TaskListUpdateData]):
+    """Request model for updating a task list."""
 
     model_config = ConfigDict(extra="forbid")
 

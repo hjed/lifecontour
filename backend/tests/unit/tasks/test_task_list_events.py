@@ -15,6 +15,7 @@ from core_shared.models.tasks import TaskIcon
 from app.core.tasks.models.task_list_events import (
     TASK_LIST_EVENT_TYPES,
     TaskListCreated,
+    TaskListUpdated,
 )
 
 LIST_ID = 7
@@ -92,3 +93,83 @@ class TestTaskListCreated:
         event = make_created()
 
         assert json.loads(json.dumps(event.event_data)) == event.event_data
+
+
+def make_updated(
+    changed_fields: dict[str, tuple[str | None, str | None]] | None = None,
+    *,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
+) -> TaskListUpdated:
+    fields: dict[str, tuple[str | None, str | None]] = (
+        changed_fields if changed_fields is not None else {"name": ("Old", "New")}
+    )
+    if source is None or changed_by is None:
+        return TaskListUpdated(
+            task_list_id=LIST_ID, user_id=USER_ID, changed_fields=fields
+        )
+    return TaskListUpdated(
+        task_list_id=LIST_ID,
+        user_id=USER_ID,
+        changed_fields=fields,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+class TestTaskListUpdated:
+    def test_identifies_itself_as_a_task_list_updated_event(self) -> None:
+        event = make_updated()
+
+        assert event.event_type == "TaskListUpdated"
+        assert event.event_id.startswith(f"task_list_updated_{LIST_ID}_")
+
+    def test_its_type_is_in_the_published_set(self) -> None:
+        assert make_updated().event_type in TASK_LIST_EVENT_TYPES
+
+    def test_aggregate_id_is_the_integer_list_id(self) -> None:
+        event = make_updated()
+
+        assert event.aggregate_id == LIST_ID
+        assert isinstance(event.aggregate_id, int)
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """Whole-key: the changes as ``{field: (old, new)}`` and the actor."""
+        event = make_updated(
+            {"name": ("Old", "New"), "icon": (None, TaskIcon.LUGGAGE.value)}
+        )
+
+        assert event.event_data == {
+            "task_list_id": LIST_ID,
+            "user_id": USER_ID,
+            "changed_fields": {
+                "name": ("Old", "New"),
+                "icon": (None, TaskIcon.LUGGAGE.value),
+            },
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_cleared_icon_carries_null_as_the_new_value(self) -> None:
+        event = make_updated({"icon": (TaskIcon.LUGGAGE.value, None)})
+
+        assert event.event_data["changed_fields"] == {
+            "icon": (TaskIcon.LUGGAGE.value, None)
+        }
+
+    def test_provenance_and_actor_are_carried(self) -> None:
+        event = make_updated(source=Provenance.UI, changed_by="ui")
+
+        assert event.event_data["source"] == "ui"
+        assert event.event_data["changed_by"] == "ui"
+
+    def test_the_payload_survives_a_json_round_trip(self) -> None:
+        """The pairs arrive as lists, which is what the history projection reads."""
+        event = make_updated(
+            {"name": ("Old", "New"), "icon": (TaskIcon.LUGGAGE.value, None)}
+        )
+
+        assert json.loads(json.dumps(event.event_data))["changed_fields"] == {
+            "name": ["Old", "New"],
+            "icon": [TaskIcon.LUGGAGE.value, None],
+        }
