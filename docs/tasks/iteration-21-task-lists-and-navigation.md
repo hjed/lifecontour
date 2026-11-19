@@ -902,12 +902,14 @@ backend integration suite (all green). No unit tests added (no domain change) an
 
 #### Phase 4: Lift the create-task fields out of their dialog
 
+**Status:** ✅ Complete.
 **Prerequisites:** None.
 **Estimated diff:** ~120 production → **~800 tracked** (×5)
+**Actual diff:** ~80 net production → **~1,180 tracked** (~780 added, ~400 removed). Most of it is a move: 425 lines of `CreateTaskForm` came out of a 458-line dialog, docstrings included, and the dialog is now about 115 lines. The tracked total counts both sides of that move, plus 250 lines of new form tests.
 
 **Acceptance Criteria:**
 
-- [ ] Refactor only: `CreateTaskDialog` keeps working on the journal page with the same tests.
+- [x] Refactor only: `CreateTaskDialog` keeps working on the journal page with the same tests. The schema, form, mutation, refusal-to-field mapping, fields and buttons moved to `CreateTaskForm` (`components/tasks/`). It takes `journalId`, `onCreated`, `onCancel`, `onBusyChange` and an opt-in `autoFocusText`. `CreateTaskDialog` keeps the trigger, the open state and the rule against closing over a write. The 37 existing dialog tests pass unmodified. One test is appended: the next opening can still close after a held write settles. `CreateTaskForm.test.tsx` covers what a host relies on.
 
 #### Phase 5: New → Task in a journal
 
@@ -917,6 +919,8 @@ backend integration suite (all green). No unit tests added (no domain change) an
 **Acceptance Criteria:**
 
 - [ ] The lifted fields plus a creating-journal search; journal pre-filled when viewing one.
+
+**Note from Phase 4:** `CreateTaskForm` still takes the creating journal as a fixed `journalId` prop. This phase moves it into the form's state, so the search gets schema validation, a `FormMessage` and refusals mapped to it. Pass `autoFocusText` only to the panel shown on open, because New-dialog panels stay mounted while hidden. Also decide whether the panel keeps the journal page's rule against closing over a running save; `NewDialog` does not enforce it today.
 
 #### Phase 6: Bottom tab bar
 
