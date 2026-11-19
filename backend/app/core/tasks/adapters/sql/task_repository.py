@@ -17,7 +17,7 @@ and never "was that your task".
 from datetime import datetime
 from typing import Any
 
-from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
+from core_shared.models.tasks import Task, TaskIcon, TaskNotFoundError, TaskStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -31,6 +31,11 @@ _TASK_COLUMN_NAMES = (
     "status",
     "creating_journal_id",
     "due_journal_id",
+    "task_list_id",
+    "position",
+    "due_date",
+    "flagged",
+    "icon",
     "created_at",
     "updated_at",
 )
@@ -83,9 +88,19 @@ def _row_to_task(row: Any) -> Task:
         status=TaskStatus(row.status),
         creating_journal_id=row.creating_journal_id,
         due_journal_id=row.due_journal_id,
+        task_list_id=row.task_list_id,
+        position=row.position,
+        due_date=row.due_date,
+        flagged=row.flagged,
+        icon=None if row.icon is None else TaskIcon(row.icon),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _icon_value(task: Task) -> str | None:
+    """The stored form of a task's icon: its stable key."""
+    return None if task.icon is None else task.icon.value
 
 
 class SqlTaskRepository(TaskRepository):
@@ -96,20 +111,44 @@ class SqlTaskRepository(TaskRepository):
         self.conn = conn
 
     async def save(self, task: Task) -> Task:
-        """Insert a new task or update an existing one."""
+        """Insert a new task or update an existing one.
+
+        Writes the task's own values — text, status, anchors, due date, flag and
+        icon — but never its **list membership** (``task_list_id``,
+        ``position``). Joining, leaving, moving and reordering are operations of
+        their own, as ``TaskList.position`` is, so an edit carrying a stale
+        position cannot undo a reorder that landed after the caller's read.
+
+        Raises:
+            ValueError: When inserting a task on a list. A list task is placed at
+                the bottom of its list by the list-task creation path; inserting
+                one here would store it as a journal-only task or fail a CHECK.
+        """
         if task.id is None:
             return await self._insert(task)
         return await self._update(task, task.id)
 
     async def _insert(self, task: Task) -> Task:
-        """Insert a new task, letting the database assign id and timestamps."""
+        """Insert a new task, letting the database assign id and timestamps.
+
+        Only a journal-only task reaches the INSERT. The entity allows a
+        position or a due date only on a list task, so refusing list tasks
+        refuses those too.
+        """
+        if task.task_list_id is not None:
+            raise ValueError(
+                "save() cannot insert a task on a list; list membership is "
+                "written by the list-task operations"
+            )
         query = text(
             f"""
             INSERT INTO tasks (
-                user_id, text, status, creating_journal_id, due_journal_id
+                user_id, text, status, creating_journal_id, due_journal_id,
+                flagged, icon
             )
             VALUES (
-                :user_id, :text, :status, :creating_journal_id, :due_journal_id
+                :user_id, :text, :status, :creating_journal_id, :due_journal_id,
+                :flagged, :icon
             )
             RETURNING {_TASK_COLUMNS}
             """
@@ -122,6 +161,8 @@ class SqlTaskRepository(TaskRepository):
                 "status": task.status.value,
                 "creating_journal_id": task.creating_journal_id,
                 "due_journal_id": task.due_journal_id,
+                "flagged": task.flagged,
+                "icon": _icon_value(task),
             },
         )
         return _row_to_task(result.fetchone())
@@ -135,6 +176,13 @@ class SqlTaskRepository(TaskRepository):
         anyway so that a caller cannot silently disagree with the stored row —
         the service layer is what refuses to change it.
 
+        ``task_list_id`` and ``position`` are not in the SET list either, for the
+        reason ``save`` gives. The due date, flag and icon are: their CHECKs are
+        row-level, and the entity guarantees them against *its* view of the
+        task's list — so callers save a row they read under lock, and a stale
+        entity whose task has since left its list fails a CHECK rather than
+        writing a shape the table forbids.
+
         The id is passed alongside the task because ``save`` has already
         established it is not ``None``.
         """
@@ -145,6 +193,9 @@ class SqlTaskRepository(TaskRepository):
                 status = :status,
                 creating_journal_id = :creating_journal_id,
                 due_journal_id = :due_journal_id,
+                due_date = :due_date,
+                flagged = :flagged,
+                icon = :icon,
                 updated_at = now()
             WHERE id = :id AND user_id = :user_id
             RETURNING {_TASK_COLUMNS}
@@ -159,6 +210,9 @@ class SqlTaskRepository(TaskRepository):
                 "status": task.status.value,
                 "creating_journal_id": task.creating_journal_id,
                 "due_journal_id": task.due_journal_id,
+                "due_date": task.due_date,
+                "flagged": task.flagged,
+                "icon": _icon_value(task),
             },
         )
         row = result.fetchone()

@@ -136,7 +136,8 @@ def _refuse_anchor_role(task: Task, task_id: int, journal_id: int) -> None:
     the task up by that id, so it is known to be an ``int`` there and would need
     a redundant narrowing check here.
     """
-    roles: tuple[tuple[TaskJournalAnchor, int], ...] = (
+    # ``None`` for a list task's missing anchor, which equals no journal id.
+    roles: tuple[tuple[TaskJournalAnchor, int | None], ...] = (
         ("creating", task.creating_journal_id),
         ("due", task.due_journal_id),
     )
@@ -275,8 +276,9 @@ class TaskService:
                 user_id=created.user_id,
                 text=created.text,
                 status=created.status,
-                creating_journal_id=created.creating_journal_id,
-                due_journal_id=created.due_journal_id,
+                # Creation only ever makes a journal-only task, so both are set.
+                creating_journal_id=created.require_anchor("creating"),
+                due_journal_id=created.require_anchor("due"),
                 contact_ids=linked,
                 source=source,
                 changed_by=changed_by,
@@ -1083,8 +1085,10 @@ class TaskService:
         if peeked.due_journal_id == due_journal_id:
             return peeked
 
+        # Retargeting is the journal-only operation: a list task with no due
+        # journal cannot exist yet, and gets its own rules when one can.
         journals = await self._lock_retarget_journals(
-            user_id, peeked.due_journal_id, due_journal_id
+            user_id, peeked.require_anchor("due"), due_journal_id
         )
 
         # Only now the task row, and every rule below is decided from *this*
@@ -1096,7 +1100,7 @@ class TaskService:
         # The journal actually being left, which is the one linked and announced
         # below. It comes from here rather than from the peek even though they
         # almost always agree — see the docstring's third read.
-        previous_due_journal_id = task.due_journal_id
+        previous_due_journal_id = task.require_anchor("due")
         if previous_due_journal_id == due_journal_id:
             return task
 
@@ -1153,7 +1157,7 @@ class TaskService:
                 due_journal_id=due_journal_id,
                 status=TaskStatus.NOT_DONE,
             ),
-            task.creating_journal_id,
+            task.require_anchor("creating"),
             due_journal_id,
         )
 

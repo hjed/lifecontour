@@ -30,6 +30,7 @@ from core_shared.models.tasks import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
     JournalTaskGroups,
     TaskContactRef,
+    TaskJournalAnchor,
     TaskJournalRef,
     TaskNotFoundError,
     TaskReadModel,
@@ -574,6 +575,8 @@ class TaskReadService:
                             task.due_journal_id,
                             *mentions.get(task.id or 0, []),
                         )
+                        # A list task may lack either anchor.
+                        if journal_id is not None
                     ),
                 ]
             ),
@@ -657,7 +660,9 @@ class TaskReadService:
 
     @staticmethod
     def _require_ref(
-        journal_refs: dict[int, TaskJournalRef], task: Task, anchor: str
+        journal_refs: dict[int, TaskJournalRef],
+        task: Task,
+        anchor: TaskJournalAnchor,
     ) -> TaskJournalRef:
         """An anchor's ref, or the journal domain's 404.
 
@@ -666,10 +671,12 @@ class TaskReadService:
         broken underneath us rather than that the caller asked for something
         reasonable. Failing beats inventing a lapse verdict for a journal
         nobody can see.
+
+        The read model still promises both anchors, so a task without one —
+        a list task, which nothing can create yet — fails here rather than
+        rendering half a task.
         """
-        journal_id = (
-            task.creating_journal_id if anchor == "creating" else task.due_journal_id
-        )
+        journal_id = task.require_anchor(anchor)
         ref = journal_refs.get(journal_id)
         if ref is None:
             raise JournalNotFoundError(journal_id)

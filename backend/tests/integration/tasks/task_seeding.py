@@ -21,7 +21,7 @@ import json
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -69,6 +69,19 @@ COUNT_INTERMEDIATE_JOURNALS = "SELECT COUNT(*) FROM task_intermediate_journals"
 _INSERT_TASK = text("""
     INSERT INTO tasks (user_id, text, status, creating_journal_id, due_journal_id)
     VALUES (:user_id, :text, :status, :creating_journal_id, :due_journal_id)
+    RETURNING id
+""")
+# A list task is seeded as a row for the reason ``create_task`` gives, and
+# because no write path can put a task on a list yet.
+_INSERT_LIST_TASK = text("""
+    INSERT INTO tasks (
+        user_id, text, status, task_list_id, position,
+        creating_journal_id, due_journal_id, due_date, flagged, icon
+    )
+    VALUES (
+        :user_id, :text, :status, :task_list_id, :position,
+        :creating_journal_id, :due_journal_id, :due_date, :flagged, :icon
+    )
     RETURNING id
 """)
 _INSERT_INTERMEDIATE = text("""
@@ -167,6 +180,47 @@ async def create_task(
                 "status": status.value,
                 "creating_journal_id": creating_journal_id,
                 "due_journal_id": due_journal_id,
+            },
+        )
+    ).scalar_one()
+    return int(task_id)
+
+
+async def create_list_task(
+    conn: AsyncConnection,
+    *,
+    task_list_id: int,
+    position: int = 0,
+    creating_journal_id: int | None = None,
+    due_journal_id: int | None = None,
+    due_date: date | None = None,
+    flagged: bool = False,
+    icon: TaskIcon | None = None,
+    text: str = "pack the head torch",
+    status: TaskStatus = TaskStatus.NOT_DONE,
+    user_id: str = USER_ID,
+) -> int:
+    """Insert a task on a list directly and return its id.
+
+    A row rather than a service call: until a list task can be created through
+    the product, this is the only way to put one in front of the readers and
+    guards that must cope with it. The table's CHECKs still apply, so only a
+    shape the product allows can be seeded.
+    """
+    task_id = (
+        await conn.execute(
+            _INSERT_LIST_TASK,
+            {
+                "user_id": user_id,
+                "text": text,
+                "status": status.value,
+                "task_list_id": task_list_id,
+                "position": position,
+                "creating_journal_id": creating_journal_id,
+                "due_journal_id": due_journal_id,
+                "due_date": due_date,
+                "flagged": flagged,
+                "icon": None if icon is None else icon.value,
             },
         )
     ).scalar_one()

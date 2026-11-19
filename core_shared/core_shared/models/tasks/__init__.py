@@ -4,6 +4,7 @@ from .contact_repointing import TaskContactRepointing
 from .entities import Task
 from .exceptions import (
     TaskAnchorJournalNotFoundError,
+    TaskAnchorMissingError,
     TaskDomainError,
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
@@ -48,6 +49,7 @@ __all__ = [
     "LapseReason",
     "Task",
     "TaskAnchorJournalNotFoundError",
+    "TaskAnchorMissingError",
     "TaskContactRef",
     "TaskContactRepointing",
     "TaskDomainError",

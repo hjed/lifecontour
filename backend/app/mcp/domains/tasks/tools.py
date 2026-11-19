@@ -137,8 +137,9 @@ def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
         id=task.id,
         text=task.text,
         status=task.status,
-        creating_journal_id=task.creating_journal_id,
-        due_journal_id=task.due_journal_id,
+        # The tool schema promises both anchors until it learns list tasks.
+        creating_journal_id=task.require_anchor("creating"),
+        due_journal_id=task.require_anchor("due"),
         intermediate_journal_ids=intermediate_journal_ids,
         created_at=task.created_at.isoformat() if task.created_at else None,
         updated_at=task.updated_at.isoformat() if task.updated_at else None,

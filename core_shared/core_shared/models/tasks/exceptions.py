@@ -255,3 +255,24 @@ class TaskDueJournalNotFutureError(TaskDomainError):
         self.journal_id = journal_id
         self.journal_date = journal_date
         self.today = today
+
+
+class TaskAnchorMissingError(RuntimeError):
+    """A task reached code that needs a journal anchor it does not have.
+
+    Deliberately **not** a :class:`TaskDomainError`. Since a task may live on a
+    list, both anchors are optional on the entity, but several existing contracts
+    (an event payload, the REST and MCP task schemas, retargeting) still promise
+    an ``int``. They narrow through :meth:`Task.require_anchor`, and reaching
+    this error there means a list task got somewhere no list task can yet go — a
+    broken invariant, not a request a client could correct — so it surfaces as
+    the ordinary 500 rather than as a refusal with its own code. Each of those
+    call sites is replaced by the phase that teaches it about list tasks.
+
+    A ``RuntimeError`` rather than an ``assert``: asserts vanish under ``-O``.
+    """
+
+    def __init__(self, task_id: int | None, anchor: TaskJournalAnchor):
+        super().__init__(f"Task {task_id} has no {anchor} journal")
+        self.task_id = task_id
+        self.anchor = anchor
