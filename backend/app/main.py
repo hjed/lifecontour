@@ -415,6 +415,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.settings.controllers import router as user_settings_router
     from app.api.tags.controllers import router as tags_router
     from app.api.tasks.controllers import router as tasks_router
+    from app.api.tasks.task_list_controllers import router as task_lists_router
 
     # Session middleware (must be added before other middleware that uses sessions)
     # Using standard Starlette SessionMiddleware
@@ -469,6 +470,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tasks hang off a journal path (/journals/{journal_id}/tasks) but are their
     # own domain, so they get their own router rather than the journals one.
     app.include_router(tasks_router, prefix="/api", tags=["tasks"])
+    app.include_router(task_lists_router, prefix="/api", tags=["tasks"])
     # The home dashboard is a top-level singleton, not journal-scoped like the
     # outdoor one: it reads across journals, tasks, contacts and the summary.
     app.include_router(home_dashboard_router, prefix="/api", tags=["dashboard"])

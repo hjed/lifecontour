@@ -62,6 +62,8 @@ from app.core.journal.services.outdoor_dashboard_service import (
 )
 from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
+from app.core.tasks.services.task_list_read_service import TaskListReadService
+from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.auth.immich_token_service import ImmichTokenService
@@ -392,6 +394,20 @@ async def get_task_read_service() -> TaskReadService:
     to change a task, which is the same split ``TaskProvider`` makes.
     """
     return cast(TaskReadService, await _resolve_dependency(TaskReadService))
+
+
+async def get_task_list_service() -> TaskListService:
+    """Resolve the task list write service for the current MCP request."""
+    return cast(TaskListService, await _resolve_dependency(TaskListService))
+
+
+async def get_task_list_read_service() -> TaskListReadService:
+    """Resolve the task list read service for the current MCP request.
+
+    Separate from the write service so a read tool is never handed the ability
+    to change a list.
+    """
+    return cast(TaskListReadService, await _resolve_dependency(TaskListReadService))
 
 
 async def get_integration_registry_service() -> Any:

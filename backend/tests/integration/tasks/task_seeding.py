@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskList, TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -38,7 +38,9 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.models.task_list_events import TASK_LIST_EVENT_TYPES
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.di.contacts import ContactProvider
 from app.infrastructure.di.infrastructure import InfrastructureProvider
@@ -48,6 +50,7 @@ from app.infrastructure.di.settings import SettingsProvider
 from app.infrastructure.di.tasks import TaskProvider
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.contact_seeding import TEST_USER_ID, seed_contact
+from tests.task_event_inventory import task_event_types
 
 USER_ID = TEST_USER_ID
 # A second, unrelated owner. Owner scoping is only worth asserting against real
@@ -268,15 +271,28 @@ class TaskEventRow:
     occurred_at: datetime
 
 
-# Matched on the type prefix rather than an enumerated list, so the phases that
-# add the remaining seven event types inherit these assertions instead of having
-# to remember to widen a tuple. No other domain's event type begins "Task".
+# Matched against the inventory of the tasks events module rather than a type
+# prefix: list events (``TaskListCreated``) also begin "Task", and a list's id
+# can equal a task's, so a prefix match would hand task assertions list rows.
 _SELECT_TASK_EVENTS = text("""
     SELECT event_id, event_type, aggregate_id, event_data, occurred_at
     FROM outbox_events
-    WHERE event_type LIKE 'Task%'
+    WHERE event_type = ANY(:event_types)
     ORDER BY occurred_at, id
 """)
+
+
+def _decode_events(rows: Any) -> list[TaskEventRow]:
+    return [
+        TaskEventRow(
+            event_id=str(row.event_id),
+            event_type=str(row.event_type),
+            aggregate_id=int(row.aggregate_id),
+            payload=json.loads(row.event_data),
+            occurred_at=row.occurred_at,
+        )
+        for row in rows
+    ]
 
 
 async def task_events(
@@ -292,20 +308,30 @@ async def task_events(
     reaches its consumers as JSON, and a test that compared Python objects would
     not be testing what the projection will actually see.
     """
-    rows = await conn.execute(_SELECT_TASK_EVENTS)
-    events = [
-        TaskEventRow(
-            event_id=str(row.event_id),
-            event_type=str(row.event_type),
-            aggregate_id=int(row.aggregate_id),
-            payload=json.loads(row.event_data),
-            occurred_at=row.occurred_at,
-        )
-        for row in rows
-    ]
+    rows = await conn.execute(
+        _SELECT_TASK_EVENTS, {"event_types": sorted(task_event_types())}
+    )
+    events = _decode_events(rows)
     if task_id is None:
         return events
     return [event for event in events if event.aggregate_id == task_id]
+
+
+async def task_list_events(
+    conn: AsyncConnection, *, task_list_id: int | None = None
+) -> list[TaskEventRow]:
+    """Every task list domain event in the outbox, oldest first.
+
+    The list counterpart of :func:`task_events`, read the same way and for the
+    same reasons.
+    """
+    rows = await conn.execute(
+        _SELECT_TASK_EVENTS, {"event_types": sorted(TASK_LIST_EVENT_TYPES)}
+    )
+    events = _decode_events(rows)
+    if task_list_id is None:
+        return events
+    return [event for event in events if event.aggregate_id == task_list_id]
 
 
 async def stored_status(conn: AsyncConnection, task_id: int) -> str:
@@ -571,4 +597,23 @@ def make_task_container(connection: AsyncConnection) -> AsyncContainer:
         JournalProvider(),
         SettingsProvider(),
         TaskProvider(),
+    )
+
+
+async def seed_task_list(
+    conn: AsyncConnection,
+    name: str = "Seeded list",
+    *,
+    user_id: str = USER_ID,
+    icon: TaskIcon | None = None,
+    archived_at: datetime | None = None,
+) -> TaskList:
+    """Insert a task list through the repository and return it as persisted.
+
+    For tests whose subject is something *other* than creating a list — a read,
+    a cross-user refusal — so they publish no event and owe nothing to the
+    service under test. A second owner's list is seeded with ``user_id``.
+    """
+    return await SqlTaskListRepository(conn).save(
+        TaskList(user_id=user_id, name=name, icon=icon, archived_at=archived_at)
     )
