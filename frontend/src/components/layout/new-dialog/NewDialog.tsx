@@ -36,6 +36,26 @@ export interface NewDialogProps {
 const panelId = (id: NewEntityId) => `new-dialog-panel-${id}`;
 const noop = () => {};
 
+/**
+ * Whether an Escape was pressed in a search whose results popup is open.
+ *
+ * The panels' searches (a task's journals and contacts, a journal's parent)
+ * close their own results on Escape and let the key carry on, and Radix's
+ * dismissable layer listens on `document` in the capture phase, before them.
+ * One press would dismiss a popup and the dialog with it, discarding every
+ * draft. A popup search says so with `aria-haspopup` and `aria-expanded`; the
+ * due-journal picker, whose list is inline rather than a popup, does not, so
+ * Escape there still closes the dialog.
+ */
+function escapesAnOpenPopup(event: KeyboardEvent): boolean {
+  const target = event.target;
+  return (
+    target instanceof HTMLElement &&
+    target.hasAttribute('aria-haspopup') &&
+    target.getAttribute('aria-expanded') === 'true'
+  );
+}
+
 export function NewDialog({ types = NEW_ENTITY_TYPES }: NewDialogProps) {
   const [open, setOpen] = useState(false);
   // A new key per opening resets the selected type; Radix unmounts the
@@ -125,6 +145,10 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
       onOpenAutoFocus={
         opensOn?.focusesOnOpen ? event => event.preventDefault() : undefined
       }
+      // The press is the popup's; a second one, with nothing open, closes.
+      onEscapeKeyDown={event => {
+        if (escapesAnOpenPopup(event)) event.preventDefault();
+      }}
       className={cn(
         // Phones: a sheet across the top of the screen.
         'top-0 left-0 max-h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 gap-4 overflow-y-auto rounded-none rounded-b-xl border-x-0 border-t-0 p-4 sm:max-w-none',

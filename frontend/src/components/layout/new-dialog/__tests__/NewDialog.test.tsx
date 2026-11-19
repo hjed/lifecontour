@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { useState } from 'react';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BookOpen, User } from 'lucide-react';
@@ -371,5 +372,60 @@ describe('NewDialog focus on open', () => {
     const dialog = await screen.findByRole('dialog');
 
     expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
+  });
+});
+
+/**
+ * A panel with a search whose results sit in a popup, as the Task panel's
+ * journal and contact searches and the Journal panel's parent search do. The
+ * test sets whether the popup is open; the search closes it on Escape.
+ */
+function PopupSearchPanel() {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <input
+        aria-label='Popup search'
+        role='combobox'
+        aria-haspopup='listbox'
+        aria-expanded={open}
+        aria-controls='popup-search-results'
+        onKeyDown={event => {
+          if (event.key === 'Escape') setOpen(false);
+        }}
+      />
+      {open && (
+        <ul id='popup-search-results' role='listbox' aria-label='Results'>
+          <li role='option' aria-selected='false'>
+            A result
+          </li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
+describe('NewDialog and Escape', () => {
+  const POPUP_TYPES: readonly NewEntityType[] = [
+    { id: 'contact', label: 'Alpha', icon: User, Panel: PopupSearchPanel },
+  ];
+
+  it('leaves an Escape meant for an open search popup to the popup', async () => {
+    const user = userEvent.setup();
+    render(<NewDialog types={POPUP_TYPES} />);
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const dialog = await screen.findByRole('dialog');
+    const search = within(dialog).getByLabelText('Popup search');
+
+    await user.click(search);
+    await user.keyboard('{Escape}');
+
+    expect(search).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // With nothing open, the next Escape is the dialog's, as a keyboard user
+    // expects.
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
