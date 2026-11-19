@@ -506,15 +506,78 @@ skips) and pre-commit.
 
 - [ ] Task types allow missing journals; `JournalTaskRow`, `AttachTaskDialog`, `RetargetTaskDialog` and `DashboardTaskRow` guarded.
 
-#### Phase 13: List-task date rules
+#### Phase 13: List-task date rules ✅ DONE
 
 **Prerequisites:** Phase 10.
-**Estimated diff:** ~110 production → **~660 tracked** (×6)
+**Estimated diff:** ~110 production → **~660 tracked** (×6) · **Actual:** ~290 production → **~1,000
+tracked** (about 1,010 insertions, 2 deletions excluding this document: 291 production — the rule module
+227, the error and exports 44, `journal_last_day` 18, the code map 2; about 660 tests; 59
+architecture docs). Production ran ×2.6 on the estimate, almost all of it docstrings carrying each rule's reason
+in the style of `lapse.py`; executable code is about 90 lines. Tracked landed at ×3.4 production,
+under the ×6 multiplier, because the rules are pure and need no fixtures.
 
 **Acceptance Criteria:**
 
-- [ ] Pure, in the user's timezone: due date today or later; never lapses; overdue after its date or after a multi-day journal's last day; cancelled due journal → undated.
-- [ ] Tested across day boundaries.
+- [x] Pure, in the user's timezone: due date today or later; never lapses; overdue after its date or after a multi-day journal's last day; cancelled due journal → undated.
+- [x] Tested across day boundaries.
+
+**Delivered:** `core_shared/core_shared/models/tasks/list_dates.py`, pure and taking dates already
+resolved in the user's timezone: `DueJournalDays(first_day, last_day, cancelled)`;
+`list_task_due(due_date, due_journal)` → `ListTaskDue(day, overdue_after)`, or `None` when undated
+or the due journal is cancelled (refuses both a due date and a due journal);
+`is_list_task_overdue(status, due, today)` (not done and `overdue_after` strictly before today);
+`is_due_date_allowed` / `ensure_due_date_allowed` (today or later; raises the new
+`TaskDueDateInPastError`, 400, mapped to REST `TASK_DUE_DATE_IN_PAST`); and
+`derive_task_date_state(task, due_journal, today)` → `TaskDateState(lapse_reason, overdue)`, the one
+answer for any task: a list task never lapses, a journal-only task keeps `derive_lapse_reason`
+unchanged and is never overdue. `journal_last_day(journal, tz)` joins `journal_date` in
+`journal_date_resolver.py`. Nothing calls the rules yet; no REST, MCP, DB or UI behaviour changed.
+
+**Tests:** unit `tests/unit/tasks/test_list_task_dates.py` (every rule at its edges: yesterday,
+today and tomorrow; a multi-day journal's first, middle and last day and the day after; cancelled
+and un-cancelled; closed statuses; invariant-4 refusal; journal-only lapse unchanged; a journal-only
+task added to a list stops lapsing; caller-bug refusals), `test_list_task_dates_day_boundaries.py`
+(driven from UTC instants through `today_in`/`journal_date`/`journal_last_day`: Sydney and New York
+either side of local midnight, a 14–16 Aug trip stored as local midnights, a trip across Sydney's
+4 Oct spring-forward, and a due date allowed at 23:59 and refused one minute later),
+`tests/unit/journal/test_journal_date_resolver.py::TestJournalLastDay` and
+`tests/unit/api/test_task_error_mapping.py` (the new code). No integration tests added: nothing
+touches the database; Phase 15 exercises the rules through real reads. No E2E: no UI. No existing
+test's assertions changed. Gates run locally: ruff format/check and mypy (backend, core_shared),
+backend unit suite (5,472 passed), core_shared (868), the full backend integration suite (4,391
+passed, 7 pre-existing skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **A journal's last day is the local date of `event_date_range.end`**, which is stored inclusive
+  (the journal form and the Google sync both store an all-day journal's end at local midnight *of*
+  its last day) — the same reading as `day_span_of`. A timed event ending exactly at local midnight
+  therefore ends on the following day, so a task due in it turns overdue a day later: without an
+  all-day flag it cannot be told apart from an all-day journal's end.
+- **A task's date for a due journal is the journal's first day**; only overdue waits for the last
+  day. `ListTaskDue` carries both so neither can be read for the other.
+- **The error code is mapped now**, ahead of any endpoint that can raise it, so Phase 19 cannot
+  ship it as a generic `DOMAIN_ERROR`. Its own code rather than `TASK_VALIDATION_ERROR`, beside
+  `TASK_DUE_JOURNAL_NOT_FUTURE`.
+- **`derive_task_date_state` takes the `Task`**, so readers ask one question rather than branching on
+  "on a list?" (the one-answer pattern); a `due_journal` argument that does not match the task's
+  `due_journal_id` is a `ValueError` (a caller's bug, not a refusal).
+
+**Notes for later phases:**
+- *Phase 15:* build `DueJournalDays` from `journal_date`, `journal_last_day` and the batched
+  `find_cancelled_journal_ids`, take `today_in` once per request, and read lapse and overdue from
+  `derive_task_date_state` for every task — it replaces direct `derive_lapse_reason` calls on task
+  reads. `TaskReadService._lapses_its_tasks` (the journal list's tasks-due indicator) judges a
+  journal rather than a task, so it needs its own look once list tasks can be due in a journal.
+- *Phase 19 and Phase 22 (change a due date):* call `ensure_due_date_allowed(due_date, today_in(tz))` in the
+  service, before the write; the REST code is already mapped, and the MCP tool's refusal test must
+  name it. The rule is write-time only.
+- *Phase 20:* a due journal on a list reuses `is_future_dated` (strictly future) unchanged.
+- *ITER21-004:* the dashboard places a dated list task by `ListTaskDue.day` and keeps an overdue one
+  for seven days; the spec says "after its date" — count from `overdue_after` so a multi-day trip's
+  list is not dropped early (confirm when planning that phase).
+- *Journal create over REST/MCP* stores `end` as given; an agent sending an exclusive all-day end
+  (next-day midnight) pushes a journal's last day one day late. The MCP schema's description of
+  `end` could say it is inclusive.
 
 #### Phase 14: Task repository: list queries
 

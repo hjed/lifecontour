@@ -14,6 +14,7 @@ from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDomainError,
+    TaskDueDateInPastError,
     TaskDueJournalNotFutureError,
     TaskJournalIsAnchorError,
     TaskNotFoundError,
@@ -52,6 +53,17 @@ class TestTaskErrorMapping:
         error = response.errors[0]
         assert error.code == "TASK_DUE_JOURNAL_NOT_FUTURE"
         assert error.status == "400"
+
+    def test_due_date_in_past_maps_to_its_own_code(self) -> None:
+        """A past due date is a 400 with a code apart from the journal rule's."""
+        response = create_domain_error_response(
+            TaskDueDateInPastError(datetime.date(2026, 8, 4), datetime.date(2026, 8, 5))
+        )
+
+        error = response.errors[0]
+        assert error.code == "TASK_DUE_DATE_IN_PAST"
+        assert error.status == "400"
+        assert "2026-08-04" in (error.detail or "")
 
     def test_the_two_creation_failures_are_told_apart(self) -> None:
         """Distinct invariants get distinct codes, not one shared task error."""

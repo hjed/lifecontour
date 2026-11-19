@@ -257,6 +257,30 @@ class TaskDueJournalNotFutureError(TaskDomainError):
         self.today = today
 
 
+class TaskDueDateInPastError(TaskDomainError):
+    """Exception raised when a list task's due date is before today.
+
+    The due-date counterpart of :class:`TaskDueJournalNotFutureError`, with one
+    deliberate difference: **today is allowed**. A due date names a day of its
+    own, and "do it today" is the commonest date there is; a due journal must be
+    strictly future because a journal earlier today has already begun.
+
+    Like the journal rule it is checked only when the date is **set**. A task
+    whose due date has since passed is *overdue*, not invalid. Both dates travel
+    with the error so the refusal is actionable: the day chosen and the day the
+    product thinks it is, in the user's timezone.
+    """
+
+    def __init__(self, due_date: date, today: date):
+        super().__init__(
+            f"The due date {due_date} is before today ({today}) in your timezone. "
+            f"A task's due date must be today or later.",
+            400,
+        )
+        self.due_date = due_date
+        self.today = today
+
+
 class TaskAnchorMissingError(RuntimeError):
     """A task reached code that needs a journal anchor it does not have.
 

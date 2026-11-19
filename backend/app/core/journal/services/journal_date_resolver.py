@@ -62,6 +62,24 @@ def journal_date(journal: Journal, tz: ZoneInfo) -> datetime.date:
     return local_date(journal.event_date_range.start, tz)
 
 
+def journal_last_day(journal: Journal, tz: ZoneInfo) -> datetime.date:
+    """The journal's last day: the local date its event date range **ends** on.
+
+    The journal's date is still its first day for every task purpose; this is
+    the day a behaviour waits out when it needs the journal to be *over* — a
+    list task due in it turns overdue only once this day has ended.
+
+    The end is stored **inclusive**: an all-day journal ends at local midnight
+    *of* its last day (the journal form, and the Google sync, which steps
+    Google's exclusive end back a day), so the end's local date is the last day
+    itself. A single-day or point-in-time journal's last day is its date. A
+    timed event ending exactly at local midnight therefore ends on the
+    following day — it cannot be told apart from an all-day journal's end. The
+    daily summary reads a journal's days the same way (``day_span_of``).
+    """
+    return local_date(journal.event_date_range.end, tz)
+
+
 def today_in(tz: ZoneInfo, now: datetime.datetime | None = None) -> datetime.date:
     """Today's date in ``tz`` — never UTC's date."""
     return local_date(now, tz) if now else datetime.datetime.now(tz).date()

@@ -498,7 +498,10 @@ name is in the message too — these read `"{field}: ..."` — but a form decidi
 which input to mark from an English prefix breaks silently the first time the
 wording changes. One code covering several fields is what makes this necessary:
 a refusal a client can place from the code alone (`TASK_DUE_JOURNAL_NOT_FUTURE`,
-`TASK_JOURNAL_IS_ANCHOR`) needs no meta and has none.
+`TASK_DUE_DATE_IN_PAST`, `TASK_JOURNAL_IS_ANCHOR`) needs no meta and has none.
+`TASK_DUE_DATE_IN_PAST` (400) refuses a list task's due date before today in the
+user's timezone; it is mapped ahead of the first endpoint that can set a due date
+(see *[List-task dates and overdue derivation](./domain-architecture.md#list-task-dates-and-overdue-derivation)*).
 
 ### FastAPI Exception Handling
 
