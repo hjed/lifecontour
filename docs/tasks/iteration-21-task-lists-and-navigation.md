@@ -1083,12 +1083,27 @@ passed, 7 pre-existing skips) and pre-commit.
 
 #### Phase 5: New → Task in a journal
 
+**Status:** ✅ Complete. The design-sync card text is updated, but the card is not republished: run `/design-sync`.
 **Prerequisites:** Phase 1, Phase 4.
 **Estimated diff:** ~130 production → **~650 tracked**
+**Actual diff:** ~390 production → **~1,630 tracked** (~1,570 added, ~65 removed; about 1,000 of it tests). Over for three reasons the estimate did not price. The refusal of a chosen creating journal had to name its field, so `TaskAnchorJournalNotFoundError` gained `error_meta() → {"anchor": …}` on REST and MCP, with its tests. `JournalSearchCombobox` needed `aria-invalid`/`aria-describedby` and a per-instance listbox id, because the New dialog mounts two at once. The dialog also needed a focus rule. Production lines are mostly docblocks, as in Phases 1 and 4.
 
 **Acceptance Criteria:**
 
-- [ ] The lifted fields plus a creating-journal search; journal pre-filled when viewing one.
+- [x] The lifted fields plus a creating-journal search; journal pre-filled when viewing one.
+  - **Task is the first type in the registry,** so New opens on Task (Task · Journal · Contact).
+  - **`NewTaskPanel` reuses `CreateTaskForm`.** The form now takes `creatingJournal: { kind: 'fixed', id } | { kind: 'choose', initial? }`. The journal page's `CreateTaskDialog` passes `fixed` and is unchanged: its 37 tests pass unmodified.
+  - **`choose` makes the creating journal a field** (`CreatingJournalField`, over the all-journals `JournalSearchCombobox`). It has schema validation and a `FormMessage`. A 404 `TASK_ANCHOR_JOURNAL_NOT_FOUND` is mapped to whichever field its `meta.anchor` names.
+  - **The pre-fill comes from the route.** `journalIdFromPath` matches only `/journals/{id}`, and `useJournal` supplies the title. A read that lands late is applied only to a field the user has not touched.
+  - **There is no date field.**
+  - **E2E in `new-dialog.spec.ts`:** a task from the journal being viewed (desktop), a task in a journal chosen from `/contacts` (desktop), and a task from the phone sheet (Mobile Chrome, no sideways scroll, a 44px Create button).
+
+**Decisions (from the Phase 4 note):**
+- **Focus on open:** only the panel shown on open gets `shownOnOpen`, which the Task panel turns into `autoFocusText`. A registry entry with `focusesOnOpen` keeps Radix from moving focus to Close. The Journal and Contact panels keep their focus behaviour.
+- **Closing over a running save:** the panel keeps `NewDialog`'s existing rule rather than the journal page's. The switch locks and Cancel is disabled, but Escape and X still close, as for Journal and Contact. The write completes, the toast is truthful, and the form ignores a create that settles after it has gone. A dialog-wide close guard would change the other two types and was left out.
+- **After a create:** the dialog closes and the user stays on the page.
+
+**Note for Phase 3:** add the *On a list | In a journal* destination switch inside `NewTaskPanel`; the registry entry does not change. The journal half stays `CreateTaskForm` with `{ kind: 'choose' }`. The design-sync `NewDialog` preview and `NOTES.md` now say the card opens on Task. `prepare.mjs` needs the `.ds-sync/` toolchain from a `/design-sync` run, so re-run the sync before relying on the card.
 
 **Note from Phase 4:** `CreateTaskForm` still takes the creating journal as a fixed `journalId` prop. This phase moves it into the form's state, so the search gets schema validation, a `FormMessage` and refusals mapped to it. Pass `autoFocusText` only to the panel shown on open, because New-dialog panels stay mounted while hidden. Also decide whether the panel keeps the journal page's rule against closing over a running save; `NewDialog` does not enforce it today.
 

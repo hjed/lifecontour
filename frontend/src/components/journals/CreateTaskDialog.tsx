@@ -102,7 +102,7 @@ export function CreateTaskDialog({ journalId }: CreateTaskDialogProps) {
 
         <CreateTaskForm
           key={opening}
-          journalId={journalId}
+          creatingJournal={{ kind: 'fixed', id: journalId }}
           onCreated={closeCreated}
           onCancel={() => handleOpenChange(false)}
           onBusyChange={reportBusy}

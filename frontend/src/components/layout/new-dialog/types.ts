@@ -10,7 +10,7 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
 /** The entity types the New dialog can create. */
-export type NewEntityId = 'journal' | 'contact';
+export type NewEntityId = 'task' | 'journal' | 'contact';
 
 /** What the dialog hands every panel. */
 export interface NewEntityPanelProps {
@@ -24,6 +24,12 @@ export interface NewEntityPanelProps {
    * the dialog and navigates cannot discard a draft in another type.
    */
   readonly onBusyChange: (busy: boolean) => void;
+  /**
+   * This panel is the one shown as the dialog opens. Panels stay mounted while
+   * hidden, so only this one may take focus; see `NewEntityType.focusesOnOpen`.
+   * The dialog always says; a host rendering a panel on its own may leave it.
+   */
+  readonly shownOnOpen?: boolean;
 }
 
 export interface NewEntityType {
@@ -33,4 +39,10 @@ export interface NewEntityType {
   readonly icon: LucideIcon;
   /** The create form for this type. */
   readonly Panel: ComponentType<NewEntityPanelProps>;
+  /**
+   * The panel puts the cursor in its own first field when shown on open, so
+   * the dialog must not move it to its first tabbable control afterwards.
+   * Without it the dialog keeps its default open focus.
+   */
+  readonly focusesOnOpen?: boolean;
 }

@@ -17,6 +17,9 @@ jest.mock('@/lib/api/contacts', () => ({
 jest.mock('@/components/journals/NewJournalPanel', () => ({
   NewJournalPanel: () => null,
 }));
+jest.mock('@/components/tasks/NewTaskPanel', () => ({
+  NewTaskPanel: () => null,
+}));
 
 const mockPush = jest.fn();
 const mockRouter = { ...createMockAppRouter(), push: mockPush };

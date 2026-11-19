@@ -10,6 +10,9 @@ jest.mock('@/lib/api/contacts', () => ({
 jest.mock('@/components/journals/NewJournalPanel', () => ({
   NewJournalPanel: () => null,
 }));
+jest.mock('@/components/tasks/NewTaskPanel', () => ({
+  NewTaskPanel: () => null,
+}));
 
 describe('NEW_ENTITY_TYPES', () => {
   it('gives every type a unique id', () => {
@@ -26,10 +29,17 @@ describe('NEW_ENTITY_TYPES', () => {
     }
   });
 
-  it('offers Journal then Contact, in the specification order', () => {
+  it('offers Task, Journal then Contact, in the specification order', () => {
     expect(NEW_ENTITY_TYPES.map(type => type.id)).toEqual([
+      'task',
       'journal',
       'contact',
     ]);
+  });
+
+  it('lets only the Task panel, which the dialog opens on, take focus', () => {
+    expect(
+      NEW_ENTITY_TYPES.filter(type => type.focusesOnOpen).map(type => type.id)
+    ).toEqual(['task']);
   });
 });

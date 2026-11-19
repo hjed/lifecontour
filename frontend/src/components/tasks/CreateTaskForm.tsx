@@ -2,16 +2,20 @@
  * Creates a task in the journal it arose in.
  *
  * The form on its own, so any host can mount it: `CreateTaskDialog` on the
- * journal page today, the New dialog next. A host supplies the creating
- * journal and hears back through `onCreated`, `onCancel` and `onBusyChange`.
+ * journal page and the New dialog's Task panel. A host says where the
+ * creating journal comes from and hears back through `onCreated`, `onCancel`
+ * and `onBusyChange`.
  *
  * The specification's *Creating a task* is four sentences and every one of
  * them is a rule this form keeps:
  *
- * - **The creating journal is the journal being viewed** and "is never chosen
- *   separately". It is not a field here because it is not a field on the wire
- *   either — `POST /api/journals/{id}/tasks` takes it from the path — so the
- *   only place the rule can be checked is the request.
+ * - **The creating journal is the journal being viewed.** On the journal page
+ *   it "is never chosen separately", so the host fixes it (`kind: 'fixed'`)
+ *   and there is no field for it. The New dialog has no journal around it, and
+ *   the navigation specification has it *ask* — pre-filled with the journal
+ *   being viewed, "otherwise the user must choose" — so there the host asks
+ *   for a field (`kind: 'choose'`). Either way it travels in the path of
+ *   `POST /api/journals/{id}/tasks`, never in the body.
  * - **The due journal is picked from the user's future journals.** Invariant 5
  *   is the heart of the model: a task must name a real moment the user has
  *   already planned, so there is no bare date picker here and no journal is
@@ -60,11 +64,16 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { ContactSearchCombobox } from '@/components/contacts/ContactSearchCombobox';
+import {
+  CreatingJournalField,
+  type ChosenJournal,
+} from '@/components/tasks/CreatingJournalField';
 import { DueJournalFormField } from '@/components/journals/FutureJournalPicker';
 import {
   CONTACT_NOT_FOUND,
   TASK_DUE_JOURNAL_NOT_FUTURE,
   TaskApiError,
+  taskAnchorField,
   taskValidationField,
   useCreateTask,
 } from '@/lib/api/tasks';
@@ -81,6 +90,12 @@ const dueJournalSchema = z.object({
   date: z.string(),
   startsAt: z.string(),
   cancelled: z.boolean(),
+});
+
+/** A chosen creating journal, as `CreatingJournalField` yields it. */
+const creatingJournalSchema = z.object({
+  id: z.string(),
+  title: z.string(),
 });
 
 /** A chosen contact: the id the request needs, and the name the badge shows. */
@@ -104,6 +119,21 @@ const createTaskSchema = z.object({
       });
     }
   }),
+  /**
+   * Always present in the values. In `fixed` mode it holds the host's journal
+   * from the start and has no input, so the rule below can only fail where
+   * the user is the one choosing.
+   */
+  creatingJournal: creatingJournalSchema
+    .nullable()
+    .superRefine((journal, ctx) => {
+      if (journal === null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Choose the journal this task arose in.',
+        });
+      }
+    }),
   contacts: z.array(contactSchema),
 });
 
@@ -126,13 +156,21 @@ const FIELD_FOR_VALIDATION_ERROR = new Map<string, keyof CreateTaskFormValues>([
   ['due_journal_id', 'dueJournal'],
 ]);
 
+/**
+ * Where the task's **creating** journal comes from.
+ *
+ * - `fixed`: the journal page — the journal being viewed, never offered as a
+ *   choice. A refusal of it has no field to land on and is left to the toast.
+ * - `choose`: the New dialog — a required search, starting from `initial`
+ *   (the journal being viewed, when there is one).
+ */
+export type CreatingJournalSource =
+  | { readonly kind: 'fixed'; readonly id: string }
+  | { readonly kind: 'choose'; readonly initial?: ChosenJournal };
+
 export interface CreateTaskFormProps {
-  /**
-   * The journal being viewed, which becomes the task's **creating** journal.
-   * Never offered as a choice, and never sent in the body: the endpoint takes
-   * it from its path.
-   */
-  readonly journalId: string;
+  /** Where the creating journal comes from; see `CreatingJournalSource`. */
+  readonly creatingJournal: CreatingJournalSource;
   /** The task exists. Not called if the form has gone by the time it does. */
   readonly onCreated: () => void;
   /** The user abandoned the form. Nothing has been written. */
@@ -195,8 +233,16 @@ function ContactsField({
   );
 }
 
+/** The creating journal a source starts the form with. */
+function initialCreatingJournal(
+  source: CreatingJournalSource
+): ChosenJournal | null {
+  if (source.kind === 'fixed') return { id: source.id, title: '' };
+  return source.initial ?? null;
+}
+
 export function CreateTaskForm({
-  journalId,
+  creatingJournal,
   onCreated,
   onCancel,
   onBusyChange,
@@ -204,6 +250,8 @@ export function CreateTaskForm({
 }: CreateTaskFormProps) {
   const fieldIdPrefix = useId();
   const textInputId = `${fieldIdPrefix}-text`;
+  const creatingJournalInputId = `${fieldIdPrefix}-creating-journal`;
+  const choosesCreatingJournal = creatingJournal.kind === 'choose';
   const dueJournalInputId = `${fieldIdPrefix}-due-journal`;
   const contactsInputId = `${fieldIdPrefix}-contacts`;
 
@@ -211,8 +259,28 @@ export function CreateTaskForm({
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskSchema),
-    defaultValues: { text: '', dueJournal: null, contacts: [] },
+    defaultValues: {
+      text: '',
+      creatingJournal: initialCreatingJournal(creatingJournal),
+      dueJournal: null,
+      contacts: [],
+    },
   });
+
+  // A `choose` host may learn the journal being viewed after the form mounted
+  // (its read still in flight). It is applied then — but only to a field the
+  // user has not touched, so a slow read never overwrites their choice, nor
+  // what they have typed towards one.
+  const lateInitial =
+    creatingJournal.kind === 'choose' ? creatingJournal.initial : undefined;
+  const applyLateInitial = useEffectEvent((journal: ChosenJournal) => {
+    if (form.getFieldState('creatingJournal').isTouched) return;
+    if (form.getValues('creatingJournal')?.id === journal.id) return;
+    form.setValue('creatingJournal', journal);
+  });
+  useEffect(() => {
+    if (lateInitial) applyLateInitial(lateInitial);
+  }, [lateInitial]);
   // `useWatch` rather than `form.watch`: the subscription form is the one the
   // React Compiler can follow, and `watch` makes it skip this component
   // wholesale.
@@ -234,12 +302,12 @@ export function CreateTaskForm({
   useEffect(() => focusTextOnMount(), []);
 
   const onSubmit = (values: CreateTaskFormValues) => {
-    if (!values.dueJournal) return;
+    if (!values.dueJournal || !values.creatingJournal) return;
 
     onBusyChange?.(true);
     create.mutate(
       {
-        journalId,
+        journalId: values.creatingJournal.id,
         text: values.text,
         due_journal_id: Number(values.dueJournal.id),
         // Omitted rather than sent empty — see the module docstring.
@@ -277,6 +345,21 @@ export function CreateTaskForm({
             return;
           }
 
+          // An unreachable journal names its anchor. The creating journal has
+          // a field only when the user chose it; a fixed one is the page's
+          // own journal, and its refusal stays with the toast.
+          const anchor = taskAnchorField(error);
+          if (anchor === 'due') {
+            reject('dueJournal', dueJournalInputId);
+            return;
+          }
+          if (anchor === 'creating') {
+            if (choosesCreatingJournal) {
+              reject('creatingJournal', creatingJournalInputId);
+            }
+            return;
+          }
+
           const field = FIELD_FOR_VALIDATION_ERROR.get(
             taskValidationField(error) ?? ''
           );
@@ -292,9 +375,11 @@ export function CreateTaskForm({
     );
   };
 
-  // The text is checked by the schema so its message can name the field; the
-  // journal gates the button, because a form that cannot be sent should not
-  // look ready to send.
+  // The text and a chosen creating journal are checked by the schema, so their
+  // messages can name the field. The due journal gates the button, because a
+  // form that cannot be sent should not look ready to send. The creating
+  // journal does not: when it is pre-filled the user never touches it, and when
+  // it is not, the message on submit says what is missing where it is missing.
   const canSubmit = chosen != null && !busy;
 
   return (
@@ -325,6 +410,35 @@ export function CreateTaskForm({
             </FormItem>
           )}
         />
+
+        {choosesCreatingJournal && (
+          <FormField
+            control={form.control}
+            name='creatingJournal'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel htmlFor={creatingJournalInputId}>
+                  Journal this task arose in
+                </FormLabel>
+                <CreatingJournalField
+                  inputId={creatingJournalInputId}
+                  value={field.value}
+                  onChange={journal => {
+                    field.onChange(journal);
+                    // Every edit marks the field touched, which is what keeps
+                    // a late pre-fill off it.
+                    field.onBlur();
+                  }}
+                  disabled={busy}
+                />
+                <FormDescription>
+                  Where the commitment was made. Any of your journals.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <FormField
           control={form.control}
@@ -407,6 +521,8 @@ export function CreateTaskForm({
             variant='outline'
             onClick={onCancel}
             disabled={busy}
+            // A full touch target on phones, where the New sheet shows it.
+            className='min-h-11 md:min-h-9'
             data-testid='create-task-dialog-cancel'
           >
             Cancel
@@ -414,6 +530,7 @@ export function CreateTaskForm({
           <Button
             type='submit'
             disabled={!canSubmit}
+            className='min-h-11 md:min-h-9'
             data-testid='create-task-dialog-submit'
           >
             Create task

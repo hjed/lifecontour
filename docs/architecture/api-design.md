@@ -503,6 +503,14 @@ a refusal a client can place from the code alone (`TASK_DUE_JOURNAL_NOT_FUTURE`,
 user's timezone; it is mapped ahead of the first endpoint that can set a due date
 (see *[List-task dates and overdue derivation](./domain-architecture.md#list-task-dates-and-overdue-derivation)*).
 
+`TaskAnchorJournalNotFoundError` names **which journal anchor was refused**:
+a create or retarget can answer 404 with code `TASK_ANCHOR_JOURNAL_NOT_FOUND`
+and `meta.anchor` (`"creating"` or `"due"`), so a form that lets the user pick
+both journals can mark the right one. The journal id is deliberately not in the
+meta: the role is the same whether the journal is absent or another user's, so
+the two stay indistinguishable. MCP carries the same `anchor` beside its
+`"Not found"` message.
+
 ### FastAPI Exception Handling
 
 - Create custom exception handlers for common errors

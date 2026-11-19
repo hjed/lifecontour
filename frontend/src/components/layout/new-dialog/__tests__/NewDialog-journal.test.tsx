@@ -28,6 +28,11 @@ jest.mock('@/lib/api/settings', () => ({
   useUserTimezone: () => 'Australia/Sydney',
 }));
 
+// The Task panel shares the dialog but is covered by its own tests.
+jest.mock('@/components/tasks/NewTaskPanel', () => ({
+  NewTaskPanel: () => null,
+}));
+
 jest.mock('@/lib/api/contacts', () => ({
   useCreateContact: () => ({ mutateAsync: jest.fn(), isPending: false }),
 }));
@@ -48,15 +53,18 @@ function renderDialog(ui: ReactElement) {
   );
 }
 
-async function openDialog(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'New' }));
-  return screen.findByRole('dialog', { name: 'New' });
-}
-
 function typeButton(dialog: HTMLElement, name: string) {
   return within(
     within(dialog).getByRole('group', { name: 'What to create' })
   ).getByRole('button', { name });
+}
+
+/** Open the dialog and switch to Journal: it opens on Task. */
+async function openDialog(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'New' }));
+  const dialog = await screen.findByRole('dialog', { name: 'New' });
+  await user.click(typeButton(dialog, 'Journal'));
+  return dialog;
 }
 
 describe('NewDialog with the app registry: Journal', () => {
@@ -64,12 +72,15 @@ describe('NewDialog with the app registry: Journal', () => {
     jest.clearAllMocks();
   });
 
-  it('opens on Journal, holding the journal create form', async () => {
+  it('opens on Task, and Journal holds the journal create form', async () => {
     const user = userEvent.setup();
     renderDialog(<NewDialog />);
 
-    const dialog = await openDialog(user);
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New' });
+    expect(typeButton(dialog, 'Task')).toHaveAttribute('aria-pressed', 'true');
 
+    await user.click(typeButton(dialog, 'Journal'));
     expect(typeButton(dialog, 'Journal')).toHaveAttribute(
       'aria-pressed',
       'true'

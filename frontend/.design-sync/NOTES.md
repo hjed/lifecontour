@@ -62,10 +62,12 @@ Repo-specific gotchas for future syncs. Read this before re-running.
   the API and React Query, not design-system parts.
 - `auth/AuthGuard` is excluded on purpose: a redirect gate that renders nothing.
 - Exception by import, not by listing: `NewDialog`'s registry renders the
-  app's own create forms as its panels, so `JournalCreateForm` (with the
-  Tiptap editor) and `ContactForm` reach the bundle through it. They are not
-  exported or carded. The NewDialog card opens on Journal, the first type, and
-  its API reads fail offline; the form falls back to its empty defaults.
+  app's own create forms as its panels, so `CreateTaskForm`,
+  `JournalCreateForm` (with the Tiptap editor) and `ContactForm` reach the
+  bundle through it. They are not exported or carded. The NewDialog card opens
+  on Task, the first type, and its API reads fail offline; the forms fall back
+  to their empty defaults. `NewTaskPanel` reads `usePathname`, which the
+  preview providers' mock router supplies.
 - The 41 in-scope files export **159** components (shadcn compounds ship all
   their parts). All 159 are in the bundle and importable from `window.Lifecontour`; only
   the 48 primaries get cards and `.d.ts` contracts, with parts composed into

@@ -2,14 +2,20 @@ import type { Locator, Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
+import type { TestJournal } from './fixtures';
 import {
+  chooseCreatingJournal,
   createContactFromDialog,
   createJournalFromDialog,
+  creatingJournalField,
   newButton,
   newTypeButton,
   openNewDialog,
   selectNewType,
+  submitTaskFromDialog,
+  taskPanel,
 } from './utils/new-dialog';
+import { chooseDueJournal } from './utils/retarget-dialog';
 
 const MIN_TOUCH_TARGET = 44;
 
@@ -40,6 +46,37 @@ function journalTitle(page: Page) {
 
 function uniqueName(prefix: string): string {
   return `${prefix}${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Open a journal and wait for its tasks card: it renders nothing while the
+ * listing is in flight, so its presence means the journal's tasks have loaded.
+ */
+async function openJournal(page: Page, journal: TestJournal): Promise<Locator> {
+  await page.goto(`/journals/${journal.id}`);
+  const section = page.getByTestId('journal-tasks-section');
+  await expect(section).toBeVisible();
+  return section;
+}
+
+/** The text of the tasks a journal shows as created in it. */
+function createdHere(page: Page): Locator {
+  return page
+    .getByTestId('journal-tasks-group-created')
+    .getByTestId('journal-task-text');
+}
+
+/** Two journals for a task: today's, where it arises, and a future one. */
+async function taskJournals(dataManager: TestDataManager) {
+  const creating = await dataManager.createRelativeJournal({
+    title: uniqueName('Newdialog arose '),
+    dayOffset: 0,
+  });
+  const due = await dataManager.createFutureJournal({
+    title: uniqueName('Newdialog due '),
+    daysAhead: 2,
+  });
+  return { creating, due };
 }
 
 test.describe('New dialog — desktop', () => {
@@ -90,11 +127,12 @@ test.describe('New dialog — desktop', () => {
 
     await page.goto('/contacts');
     const dialog = await openNewDialog(page);
-    // Journal is the first type, so every opening starts on it.
-    await expect(newTypeButton(dialog, 'Journal')).toHaveAttribute(
+    // Task is the first type, so every opening starts on it.
+    await expect(newTypeButton(dialog, 'Task')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
+    await selectNewType(dialog, 'Journal');
 
     const journalId = await createJournalFromDialog(page, dialog, title);
     dataManager.trackJournal(journalId);
@@ -102,6 +140,79 @@ test.describe('New dialog — desktop', () => {
     await expect(page).toHaveURL(new RegExp(`/journals/${journalId}$`));
     await expect(journalTitle(page)).toContainText(title);
     await expect(dialog).toBeHidden();
+  });
+
+  test('creates a task in the journal being viewed from New', async ({
+    authenticatedPage: page,
+    isMobile,
+    testCleanup,
+  }) => {
+    if (isMobile) test.skip();
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const { creating, due } = await taskJournals(dataManager);
+    const text = uniqueName('Print the permit ');
+
+    await openJournal(page, creating);
+    const dialog = await openNewDialog(page);
+
+    // New opens on Task, ready to type, with the journal being viewed as the
+    // place the task arose.
+    await expect(newTypeButton(dialog, 'Task')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    const panel = taskPanel(dialog);
+    await expect(panel.getByTestId('create-task-text')).toBeFocused();
+    await expect(creatingJournalField(dialog)).toHaveValue(creating.title);
+
+    await panel.getByTestId('create-task-text').fill(text);
+    await chooseDueJournal(panel, due);
+    const journalId = await submitTaskFromDialog(page, dialog);
+
+    expect(journalId).toBe(String(creating.id));
+    // Quick capture: the user stays where they were, and the page they are on
+    // shows the new task.
+    await expect(page).toHaveURL(new RegExp(`/journals/${creating.id}$`));
+    await expect(createdHere(page)).toHaveText(text);
+  });
+
+  test('creates a task in a journal chosen from New', async ({
+    authenticatedPage: page,
+    isMobile,
+    testCleanup,
+  }) => {
+    if (isMobile) test.skip();
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const { creating, due } = await taskJournals(dataManager);
+    const text = uniqueName('Book the hut ');
+
+    await page.goto('/contacts');
+    const dialog = await openNewDialog(page);
+    const panel = taskPanel(dialog);
+
+    // Away from a journal there is nothing to pre-fill, and nothing is sent
+    // until the user chooses.
+    await expect(creatingJournalField(dialog)).toHaveValue('');
+    await panel.getByTestId('create-task-text').fill(text);
+    await chooseDueJournal(panel, due);
+    await panel.getByTestId('create-task-dialog-submit').click();
+    await expect(
+      panel.getByText('Choose the journal this task arose in.')
+    ).toBeVisible();
+    await expect(creatingJournalField(dialog)).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    );
+
+    await chooseCreatingJournal(dialog, creating);
+    const journalId = await submitTaskFromDialog(page, dialog);
+
+    expect(journalId).toBe(String(creating.id));
+    await expect(page).toHaveURL(/\/contacts$/);
+    await openJournal(page, creating);
+    await expect(createdHere(page)).toHaveText(text);
   });
 
   test('closes from Cancel and Escape without navigating', async ({
@@ -153,6 +264,7 @@ test.describe('New dialog — phone', () => {
     }).toPass();
     expect(await noHorizontalScroll()).toBe(true);
 
+    await expectTouchTarget(newTypeButton(dialog, 'Task'));
     await expectTouchTarget(newTypeButton(dialog, 'Journal'));
     await expectTouchTarget(newTypeButton(dialog, 'Contact'));
     await expectTouchTarget(dialog.getByRole('button', { name: 'Close' }));
@@ -191,10 +303,7 @@ test.describe('New dialog — phone', () => {
 
     await page.goto('/journals');
     const dialog = await openNewDialog(page);
-    await expect(newTypeButton(dialog, 'Journal')).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    await selectNewType(dialog, 'Journal');
     // The whole journal form fits the 390px sheet without sideways scroll.
     expect(
       await page.evaluate(
@@ -217,5 +326,47 @@ test.describe('New dialog — phone', () => {
     await expect(page).toHaveURL(new RegExp(`/journals/${journalId}$`));
     await expect(journalTitle(page)).toContainText(title);
     await expect(dialog).toBeHidden();
+  });
+
+  test('creates a task in a journal from the New sheet', async ({
+    authenticatedPage: page,
+    isMobile,
+    testCleanup,
+  }) => {
+    if (!isMobile) test.skip();
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const { creating, due } = await taskJournals(dataManager);
+    const text = uniqueName('Pack the stove ');
+
+    await page.goto('/journals');
+    const dialog = await openNewDialog(page);
+    const panel = taskPanel(dialog);
+    await expect(newTypeButton(dialog, 'Task')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+
+    await panel.getByTestId('create-task-text').fill(text);
+    await chooseCreatingJournal(dialog, creating);
+    await chooseDueJournal(panel, due);
+
+    // The task form fits the 390px sheet: nothing widens it sideways, and its
+    // primary action is a full touch target.
+    expect(
+      await dialog.evaluate(sheet => sheet.scrollWidth <= sheet.clientWidth)
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth
+      )
+    ).toBe(true);
+    await expectTouchTarget(panel.getByTestId('create-task-dialog-submit'));
+
+    const journalId = await submitTaskFromDialog(page, dialog);
+
+    expect(journalId).toBe(String(creating.id));
+    await openJournal(page, creating);
+    await expect(createdHere(page)).toHaveText(text);
   });
 });

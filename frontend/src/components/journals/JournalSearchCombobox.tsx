@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Book } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -32,6 +32,10 @@ interface JournalSearchComboboxProps {
   readonly value?: string; // Currently selected title (optional)
   readonly className?: string;
   readonly disabled?: boolean;
+  /** Mark the input invalid, for a form field holding a refusal. */
+  readonly invalid?: boolean;
+  /** Ids of the elements describing the input (a field's description, message). */
+  readonly describedById?: string;
 }
 
 // Debounce hook
@@ -85,7 +89,11 @@ export function JournalSearchCombobox({
   value = '',
   className,
   disabled = false,
+  invalid = false,
+  describedById,
 }: JournalSearchComboboxProps) {
+  // Per instance: the New dialog mounts more than one of these at once.
+  const listboxId = `${useId()}-journal-search-results`;
   const [searchQuery, setSearchQuery] = useState(value);
   const [prevValue, setPrevValue] = useState(value);
   const [showResults, setShowResults] = useState(false);
@@ -203,7 +211,9 @@ export function JournalSearchCombobox({
           role='combobox'
           aria-expanded={showResults}
           aria-haspopup='listbox'
-          aria-controls={showResults ? 'journal-search-results' : undefined}
+          aria-controls={showResults ? listboxId : undefined}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedById || undefined}
         />
       </div>
 
@@ -233,11 +243,7 @@ export function JournalSearchCombobox({
               )}
 
             {!isLoading && !error && filteredJournals.length > 0 && (
-              <ul
-                id='journal-search-results'
-                role='listbox'
-                className='m-0 list-none p-0'
-              >
+              <ul id={listboxId} role='listbox' className='m-0 list-none p-0'>
                 {filteredJournals.map(
                   (journal: JournalResource, index: number) => {
                     const isSelected = index === selectedIndex;

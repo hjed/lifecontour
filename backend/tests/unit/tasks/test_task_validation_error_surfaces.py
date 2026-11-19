@@ -21,10 +21,11 @@ project's existing opt-in hook, whose one previous user is
 
 import json
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from core_shared.models.tasks import (
+    TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskListNotFoundError,
     TaskListValidationError,
@@ -235,3 +236,71 @@ class TestSurfaceParity:
 
         assert payload["error"] == "Not found"
         assert payload["message"] == "Task list with ID 7 not found"
+
+
+class TestAnchorNotFoundSurfaces:
+    """Which anchor an unreachable-journal refusal is about, as data.
+
+    The message already names the anchor ("The creating journal ... was not
+    found"), but a create form that lets the user *choose* the creating journal
+    has two journal fields to put the refusal against, and must not pick one by
+    reading English. The role travels as ``meta.anchor`` on REST and as the
+    failure context on MCP. The journal id deliberately does not: the role is
+    the same whether the journal is absent or somebody else's, so the meta keeps
+    the two indistinguishable exactly as the message does.
+    """
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    def test_it_names_the_anchor(self, anchor: Literal["creating", "due"]) -> None:
+        meta = TaskAnchorJournalNotFoundError(anchor, 4).error_meta()
+
+        assert meta == {"anchor": anchor}
+
+    def test_the_message_is_unchanged(self) -> None:
+        error = TaskAnchorJournalNotFoundError("creating", 4)
+
+        assert error.message == (
+            "The creating journal (ID 4) was not found. A task must be "
+            "anchored to journals that exist and belong to you."
+        )
+
+    def test_rest_puts_the_anchor_on_the_error_meta(self) -> None:
+        response = create_domain_error_response(
+            TaskAnchorJournalNotFoundError("creating", 4)
+        )
+
+        body = response.model_dump(exclude_none=True)["errors"][0]
+        assert body["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
+        assert body["status"] == "404"
+        assert body["meta"] == {"anchor": "creating"}
+
+    @pytest.mark.asyncio
+    async def test_mcp_carries_the_anchor_beside_the_message(self) -> None:
+        """The decorator's 404 branch forwards the context as the general
+        branch does, so an agent is told the same thing a browser is."""
+        error = TaskAnchorJournalNotFoundError("due", 4)
+
+        payload = await call_tool_raising(error)
+
+        assert payload["error"] == "Not found"
+        assert payload["message"] == error.message
+        assert payload["anchor"] == "due"
+
+    @pytest.mark.asyncio
+    async def test_rest_and_mcp_report_the_same_anchor(self) -> None:
+        error = TaskAnchorJournalNotFoundError("creating", 4)
+
+        rest = create_domain_error_response(error).errors[0]
+        mcp = await call_tool_raising(error)
+
+        assert rest.meta is not None
+        assert rest.meta["anchor"] == mcp["anchor"] == "creating"
+
+    @pytest.mark.asyncio
+    async def test_a_missing_task_still_carries_nothing_extra(self) -> None:
+        """Forwarding the context on the 404 branch adds nothing to an error
+        that opted into nothing."""
+        payload = await call_tool_raising(TaskNotFoundError(7))
+
+        assert payload["error"] == "Not found"
+        assert "anchor" not in payload
