@@ -249,7 +249,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   (`core_shared.models.tasks`): `ACTIVE` (default) and `ALL` in `(position, id)` order, `ARCHIVED`
   most-recently-archived first. Whether a list may be written while archived is a service rule.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
-  *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below — and the
+  *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below; the
+  date rules a task on a list follows instead — due date, overdue, never lapsing — see
+  *[List-task dates and overdue derivation](#list-task-dates-and-overdue-derivation)*; and the
   link-role grouping a journal's task list is built on, see
   *[A journal's tasks, by link role](#a-journals-tasks-by-link-role)*; the per-page count behind the
   journal list's indicator, see
@@ -1061,6 +1063,58 @@ A missing **anchor** journal raises `JournalNotFoundError` rather than being pap
 journal is what the rule reads, so losing it would make the verdict a guess. A missing **mention** is
 skipped, because a task the user cannot open is worse than one showing one fewer journal. Both
 anchors are `ON DELETE RESTRICT`, so neither branch is reachable in practice.
+
+### List-task dates and overdue derivation
+
+A task **on a list** follows date rules of its own
+([spec](../product-specifications/task-lists-and-navigation-product-specification.md#dates-overdue-and-lapse),
+*Core invariants* 4, 5 and 7). They live in one pure module,
+`core_shared/models/tasks/list_dates.py`, beside the lapse rule and on the same terms: **derived on
+every read, never stored**, and taking **dates already resolved in the user's timezone** rather than
+journals or a zone, so a caller judging many tasks resolves the timezone once.
+
+| A list task with… | Its date | Overdue when | Lapses |
+|---|---|---|---|
+| a **due date** | the due date | the due date is before today | never |
+| a **due journal** | the journal's **first** day | the journal's **last** day is before today | never |
+| a **cancelled** due journal | none — undated while cancelled | never | never |
+| **no date** | none | never | never |
+
+The pieces:
+
+- **`DueJournalDays(first_day, last_day, cancelled)`** — a due journal's days, resolved by the caller
+  through `journal_date` and `journal_last_day`
+  (`app/core/journal/services/journal_date_resolver.py`) and the batched cancellation lookup.
+- **`list_task_due(due_date, due_journal)` → `ListTaskDue(day, overdue_after)` or `None`.** Two days,
+  because they differ for a multi-day journal: the task's **date** (the week it belongs in) is the day
+  the journal starts — a journal's date for every task purpose — while it is only **overdue** once the
+  journal is over, so a trip's packing list is not overdue on day two. `None` means undated, which a
+  cancelled due journal is; un-cancelling restores the date because nothing was stored.
+- **`is_list_task_overdue(status, due, today)`** — not done, and `overdue_after` strictly before
+  today. A task due today is outstanding, the same boundary as lapse; a done or cancelled task is
+  never overdue, and re-dating clears the marker because it is re-derived.
+- **`is_due_date_allowed` / `ensure_due_date_allowed`** — a due date, when **set**, must be today or
+  later; today is allowed, unlike a due journal, which must be strictly future (a journal earlier
+  today has begun). `ensure_` raises `TaskDueDateInPastError` (REST `TASK_DUE_DATE_IN_PAST`, 400). It
+  is a write-time rule only: a due date that has since passed is overdue, not invalid. The services
+  that set a due date call it.
+- **`derive_task_date_state(task, due_journal, today)` → `TaskDateState(lapse_reason, overdue)`** —
+  the single answer for *any* task, so no reader branches on "is it on a list?". On a list:
+  `lapse_reason` is always `None` (invariant 7) and `overdue` follows the rule above. Journal-only:
+  the unchanged `derive_lapse_reason`, and never overdue. A journal-only task added to a list stops
+  lapsing from that moment.
+
+**A journal's last day is the local date of its `event_date_range.end`.** The end is stored
+inclusive — an all-day journal ends at local midnight *of* its last day, from the journal form and
+from the Google sync, which steps Google's exclusive end back a day — the same reading
+`day_span_of` gives the daily summary. A single-day journal's last day is its date. A timed event
+ending exactly at local midnight ends on the following day: without an all-day flag it cannot be
+told apart from an all-day journal's end, and reading those as a day earlier would break every
+all-day journal.
+
+Day boundaries are pinned in `tests/unit/tasks/test_list_task_dates_day_boundaries.py`, which drives
+the rules from UTC instants through `today_in`, `journal_date` and `journal_last_day` in Sydney, New
+York and across a daylight-saving change; the rules alone are in `test_list_task_dates.py`.
 
 ### A journal's tasks, by link role
 

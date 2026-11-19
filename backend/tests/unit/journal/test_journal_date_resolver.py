@@ -26,6 +26,7 @@ from app.core.journal.services.journal_date_resolver import (
     JournalDateResolver,
     is_future_dated,
     journal_date,
+    journal_last_day,
     local_date,
     local_day_window,
     local_window,
@@ -114,6 +115,46 @@ class TestJournalDate:
         journal = make_journal(utc(2026, 4, 5, 13, 30))  # 23:30 AEST 5 Apr
 
         assert journal_date(journal, SYDNEY) == datetime.date(2026, 4, 5)
+
+
+@pytest.mark.unit
+class TestJournalLastDay:
+    """A journal's last day is its end, read in the user's timezone.
+
+    The day a list task due in the journal waits out before it is overdue. The
+    end is stored inclusive — an all-day journal ends at local midnight *of* its
+    last day — so the end's local date is the last day itself.
+    """
+
+    def test_a_single_day_journal_ends_on_its_own_date(self) -> None:
+        """A point-in-time journal's last day is its date."""
+        journal = make_journal(utc(2026, 8, 13, 14))  # 00:00 AEST 14 Aug
+
+        assert journal_last_day(journal, SYDNEY) == journal_date(journal, SYDNEY)
+
+    def test_a_multi_day_journal_ends_on_the_local_date_of_its_end(self) -> None:
+        """A 14–16 Aug trip stored as Sydney local midnights ends on the 16th.
+
+        Its end, 00:00 AEST on the 16th, is the 15th in UTC: a UTC reading
+        would call the trip over a day early.
+        """
+        journal = make_journal(utc(2026, 8, 13, 14), utc(2026, 8, 15, 14))
+
+        assert journal_date(journal, SYDNEY) == datetime.date(2026, 8, 14)
+        assert journal_last_day(journal, SYDNEY) == datetime.date(2026, 8, 16)
+
+    def test_a_timed_event_running_past_midnight_ends_the_next_day(self) -> None:
+        """22:00 to 01:30 Sydney ends on the following local day."""
+        journal = make_journal(utc(2026, 8, 13, 12), utc(2026, 8, 13, 15, 30))
+
+        assert journal_date(journal, SYDNEY) == datetime.date(2026, 8, 13)
+        assert journal_last_day(journal, SYDNEY) == datetime.date(2026, 8, 14)
+
+    def test_west_of_utc_the_end_resolves_to_the_previous_utc_date(self) -> None:
+        """An end at 01:00 UTC is still the previous evening in New York."""
+        journal = make_journal(utc(2026, 7, 28, 14), utc(2026, 7, 30, 1))
+
+        assert journal_last_day(journal, NEW_YORK) == datetime.date(2026, 7, 29)
 
 
 @pytest.mark.unit
