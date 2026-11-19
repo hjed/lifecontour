@@ -121,6 +121,17 @@ export const TASK_VALIDATION_ERROR = 'TASK_VALIDATION_ERROR';
 export const CONTACT_NOT_FOUND = 'CONTACT_NOT_FOUND';
 
 /**
+ * The refusal a journal anchor draws when it does not exist or is not the
+ * user's — the same answer for either, by design.
+ *
+ * Which anchor it was arrives as `meta.anchor`, read by `taskAnchorField`.
+ */
+export const TASK_ANCHOR_JOURNAL_NOT_FOUND = 'TASK_ANCHOR_JOURNAL_NOT_FOUND';
+
+/** The journal roles an anchor refusal can name. */
+export type TaskAnchor = 'creating' | 'due';
+
+/**
  * Which field a `TASK_VALIDATION_ERROR` is about, or `null` for anything else.
  *
  * The name is in the message too — every one of these reads `"{field}: ..."` —
@@ -137,6 +148,23 @@ export function taskValidationField(error: unknown): string | null {
 
   const field = error.meta?.field;
   return typeof field === 'string' ? field : null;
+}
+
+/**
+ * Which anchor a `TASK_ANCHOR_JOURNAL_NOT_FOUND` is about, or `null` for
+ * anything else.
+ *
+ * A form that lets the user pick both journals has two fields the refusal
+ * could belong to, and the backend sends the role as `meta.anchor` so the form
+ * need not read it out of the message. Anything that is not one of the two
+ * roles is `null`, leaving the refusal to the toast.
+ */
+export function taskAnchorField(error: unknown): TaskAnchor | null {
+  if (!(error instanceof TaskApiError)) return null;
+  if (error.code !== TASK_ANCHOR_JOURNAL_NOT_FOUND) return null;
+
+  const anchor = error.meta?.anchor;
+  return anchor === 'creating' || anchor === 'due' ? anchor : null;
 }
 
 /**

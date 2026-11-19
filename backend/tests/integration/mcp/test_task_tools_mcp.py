@@ -230,6 +230,7 @@ class TestUnreachableAnchors:
         assert payload["error"] == "Not found"
         assert "due journal (ID 999999)" in payload["message"]
         assert "exist and belong to you" in payload["message"]
+        assert payload["anchor"] == "due"
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_due_journal_reads_as_an_absent_one(
@@ -293,6 +294,7 @@ class TestUnreachableAnchors:
 
         assert payload["error"] == "Not found"
         assert f"creating journal (ID {foreign_id})" in payload["message"]
+        assert payload["anchor"] == "creating"
         assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
 

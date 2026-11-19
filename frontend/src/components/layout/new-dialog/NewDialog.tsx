@@ -85,8 +85,11 @@ interface NewDialogContentProps {
 }
 
 function NewDialogContent({ types, onClose }: NewDialogContentProps) {
+  // Content mounts once per opening, so the first entry is the one shown as
+  // the dialog opens.
+  const opensOn = types[0];
   const [selected, setSelected] = useState<NewEntityId | undefined>(
-    types[0]?.id
+    opensOn?.id
   );
   // Types whose panel has a save in flight. Any entry locks the switch.
   const [busy, setBusy] = useState<ReadonlySet<NewEntityId>>(new Set());
@@ -116,6 +119,12 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
     <DialogContent
       showCloseButton={false}
       data-testid='new-dialog'
+      // A panel that focuses its own first field on open has done so by now
+      // (children's effects run first); Radix would otherwise move focus on to
+      // the Close button.
+      onOpenAutoFocus={
+        opensOn?.focusesOnOpen ? event => event.preventDefault() : undefined
+      }
       className={cn(
         // Phones: a sheet across the top of the screen.
         'top-0 left-0 max-h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 gap-4 overflow-y-auto rounded-none rounded-b-xl border-x-0 border-t-0 p-4 sm:max-w-none',
@@ -187,6 +196,7 @@ function NewDialogContent({ types, onClose }: NewDialogContentProps) {
             onCreated={onClose}
             onCancel={onClose}
             onBusyChange={busyHandlers.get(id) ?? noop}
+            shownOnOpen={id === opensOn?.id}
           />
         </section>
       ))}

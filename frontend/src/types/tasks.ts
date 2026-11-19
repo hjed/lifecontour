@@ -170,7 +170,10 @@ export interface JournalTasksResponse {
 
 /** Creating a task in the journal it arose from, which the path names. */
 export interface TaskCreateInput {
-  /** The creating journal — the one being viewed. Never chosen separately. */
+  /**
+   * The creating journal: the one being viewed on a journal page, or the one
+   * chosen in the New dialog. Sent in the path, never in the body.
+   */
   journalId: string;
   text: string;
   /** An existing future-dated journal of the user's. Never a bare date. */

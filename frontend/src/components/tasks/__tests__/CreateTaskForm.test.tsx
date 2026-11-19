@@ -109,7 +109,7 @@ function setup({ createResponse, autoFocusText }: Setup = {}) {
     <QueryClientProvider client={createTestQueryClient()}>
       <button type='button'>elsewhere</button>
       <CreateTaskForm
-        journalId={CREATING_JOURNAL}
+        creatingJournal={{ kind: 'fixed', id: CREATING_JOURNAL }}
         onCreated={onCreated}
         onCancel={onCancel}
         onBusyChange={onBusyChange}

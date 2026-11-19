@@ -193,6 +193,9 @@ def mcp_unified_error_handler(
                     raise MCPErrors.error(
                         error_type="Not found",
                         message=e.message,
+                        # Which anchor an unreachable-journal refusal is about;
+                        # ``None`` (merging nothing) for every other 404.
+                        context=e.error_meta(),
                     ) from e
                 raise MCPErrors.error(
                     error_type="Journal error",
@@ -212,6 +215,9 @@ def mcp_unified_error_handler(
                     raise MCPErrors.error(
                         error_type="Not found",
                         message=e.message,
+                        # Which anchor an unreachable-journal refusal is about;
+                        # ``None`` (merging nothing) for every other 404.
+                        context=e.error_meta(),
                     ) from e
                 raise MCPErrors.error(
                     error_type="Task error",

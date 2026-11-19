@@ -218,6 +218,7 @@ class TestUnreachableAnchorsAnswer404:
         assert error["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
         assert "due journal (ID 999999)" in str(error["detail"])
         assert str(creating_id) not in str(error["detail"])
+        assert error["meta"] == {"anchor": "due"}
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
 
     async def test_another_users_due_journal_reads_as_an_absent_one(
@@ -281,7 +282,41 @@ class TestUnreachableAnchorsAnswer404:
         error = _error(response.json())
         assert error["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
         assert f"creating journal (ID {foreign_id})" in str(error["detail"])
+        assert error["meta"] == {"anchor": "creating"}
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_an_absent_path_journal_reads_as_another_users(
+        self,
+        authenticated_client: AsyncClient,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """The New dialog lets the user *choose* the creating journal, so the
+        path journal is now a picked value that can be refused. Its refusal
+        names the creating anchor as data, and says nothing that tells a
+        foreign journal from a missing one."""
+        _, due_id = task_anchors
+        foreign_id = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            user_id=OTHER_USER_ID,
+        )
+
+        foreign = await authenticated_client.post(
+            f"/api/journals/{foreign_id}/tasks",
+            json=_body(text="print the permit", due_journal_id=due_id),
+        )
+        absent = await authenticated_client.post(
+            "/api/journals/999999/tasks",
+            json=_body(text="print the permit", due_journal_id=due_id),
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        foreign_error, absent_error = _error(foreign.json()), _error(absent.json())
+        assert foreign_error["meta"] == absent_error["meta"] == {"anchor": "creating"}
+        assert str(foreign_error["detail"]).replace(str(foreign_id), "X") == str(
+            absent_error["detail"]
+        ).replace("999999", "X")
 
 
 @pytest.mark.integration

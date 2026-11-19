@@ -314,3 +314,62 @@ describe('NewDialog while a panel is saving', () => {
     ).toBeEnabled();
   });
 });
+
+/**
+ * A panel that, like the Task panel, puts the cursor in its own first field
+ * when told it is the one shown on open.
+ */
+function makeFocusingPanel(label: string) {
+  function FocusingPanel({ shownOnOpen }: NewEntityPanelProps) {
+    return (
+      <label>
+        {label} text
+        {/* eslint-disable-next-line jsx-a11y/no-autofocus -- the behaviour under test */}
+        <input autoFocus={shownOnOpen} />
+      </label>
+    );
+  }
+  return FocusingPanel;
+}
+
+describe('NewDialog focus on open', () => {
+  it('tells only the panel shown on open to take focus, and lets it keep it', async () => {
+    const user = userEvent.setup();
+    render(
+      <NewDialog
+        types={[
+          {
+            id: 'contact',
+            label: 'Alpha',
+            icon: User,
+            Panel: makeFocusingPanel('Alpha'),
+            focusesOnOpen: true,
+          },
+          {
+            id: 'beta' as NewEntityType['id'],
+            label: 'Beta',
+            icon: BookOpen,
+            Panel: makeFocusingPanel('Beta'),
+          },
+        ]}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const dialog = await screen.findByRole('dialog');
+
+    // Radix would otherwise move focus to the first tabbable node, the Close
+    // button, after the panel had already taken it.
+    expect(within(dialog).getByLabelText('Alpha text')).toHaveFocus();
+  });
+
+  it('leaves focus to the dialog when the first type does not take it', async () => {
+    const user = userEvent.setup();
+    render(<NewDialog types={TWO_TYPES} />);
+
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
+  });
+});

@@ -168,6 +168,17 @@ class TaskAnchorJournalNotFoundError(TaskDomainError):
         self.anchor = anchor
         self.journal_id = journal_id
 
+    def error_meta(self) -> dict[str, Any]:
+        """Which anchor was refused, so a form need not read it from the prose.
+
+        A surface letting the user pick both journals — the New dialog's
+        creating-journal search beside its due-journal picker — has two fields
+        the refusal could belong to. The role is the same whether the journal
+        is absent or somebody else's, so carrying it keeps the guarantee above;
+        the id is deliberately left out of it for the same reason.
+        """
+        return {"anchor": self.anchor}
+
 
 class TaskJournalIsAnchorError(TaskDomainError):
     """Exception raised when an anchor journal is treated as an intermediate link.

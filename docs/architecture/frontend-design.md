@@ -111,12 +111,14 @@ depends on are therefore asserted in
 The top bar's **New** button (`components/layout/new-dialog/`) opens one dialog for creating any entity. `Header` renders it for signed-in users on every page.
 
 - **One registry.** The dialog lists the entries of `NEW_ENTITY_TYPES` (`registry.ts`), in order, as a `role="group"` "What to create" of `aria-pressed` buttons. Each entry is a `NewEntityType`: an `id` from the `NewEntityId` union, a label, a Lucide icon and a `Panel`. The dialog never names a type itself.
-- **Adding a type** is a new `NewEntityId` member, one registry entry, and a panel component taking `NewEntityPanelProps` (`onCreated`, `onCancel`). The panel owns its form and mutation, and calls `onCreated` only after the create succeeds; the dialog closes on either callback. Context pre-fill (the list or journal being viewed) belongs inside the panel, for example via `usePathname`.
-- **Order follows the specification.** Entries are listed as the specification orders them (Task, Journal, Contact; Journal and Contact so far), and each opening starts on the first.
+- **Adding a type** is a new `NewEntityId` member, one registry entry, and a panel component taking `NewEntityPanelProps` (`onCreated`, `onCancel`, `onBusyChange`, `shownOnOpen`). The panel owns its form and mutation, and calls `onCreated` only after the create succeeds; the dialog closes on either callback. Context pre-fill (the list or journal being viewed) belongs inside the panel, for example via `usePathname`.
+- **Order follows the specification.** Entries are listed as the specification orders them (Task, Journal, Contact), and each opening starts on the first, Task.
+- **Focus on open belongs to one panel.** The panel shown as the dialog opens gets `shownOnOpen`; hidden panels never take focus. An entry with `focusesOnOpen: true` (Task) puts the cursor in its own first field, so the dialog prevents Radix's open-autofocus, which would otherwise move it on to the Close button. Without it the dialog keeps its default focus.
 - **Input survives switching, not closing.** Every panel stays mounted while the dialog is open, inactive ones `hidden`, so what was typed in one type is still there after switching away and back. Closing the dialog unmounts the panels and discards it; each opening starts on the first type. Each panel's `<section>` is `min-w-0`, because `DialogContent` is a grid and a wide form (the journal's) would otherwise stretch its column past the phone sheet's edge.
 - **The switch locks while a save runs.** `NewEntityPanelProps` also carries `onBusyChange(busy)`; a panel reports its save starting and settling (`CreateContactForm` from `useCreateContact`'s `isPending`, the Journal panel from `JournalCreateForm`'s `onPendingChange`, which follows react-hook-form's `isSubmitting` and so covers GPX uploads too). While any panel is busy the other switch buttons are `disabled` and a polite sr-only status says so. Without the lock, a save that finished while the user had moved to another type would close the dialog and navigate away, discarding that type's draft.
 - **One component at every width.** Below `md` the dialog is a sheet pinned to the top of the screen, full width, with a 44px New trigger, type switch and close button (the panel's own form keeps its usual control sizes); from `md` up it is the centred dialog. The switch is CSS only (mobile-first base classes with `md:` overrides on `DialogContent`), with no JavaScript media query.
 - **Panels reuse the page forms.** The Contact panel is `CreateContactForm`, which `/contacts/new` also renders: it runs `useCreateContact`, then on success calls `onCreated` and opens the new contact, but only while it is still mounted: a create that settles after the dialog was closed (or the page left) does not navigate. A failed create leaves the form as it was and the mutation's toast explains why. The Journal panel is `NewJournalPanel` (`components/journals/`), which renders `JournalCreateForm` unchanged. The form runs the create itself (journal, then any GPX tracks) and hands the new id to `onSuccess`, which replaces its own navigation. The panel then calls `onCreated` and opens `/journals/<id>`, again only while still mounted. `/journals/new` renders the form directly and is unaffected. In both panels a create the user abandons by closing the dialog mid-save still creates the entity; it just does not navigate to it.
+- **The Task panel is a task in a journal.** `NewTaskPanel` (`components/tasks/`) renders `CreateTaskForm` with the creating journal as a choice (`creatingJournal: { kind: 'choose' }`), pre-filled with the journal being viewed: `journalIdFromPath(usePathname())` (`lib/viewed-journal.ts`) matches only `/journals/{id}`, and the title comes from `useJournal`. A read that lands after the form mounted is applied only to a field the user has not touched. After a create the dialog closes and the user stays where they were. *On a list* is the other destination and arrives as a switch inside this panel.
 - `NewDialog` accepts a `types` prop, defaulting to the registry, so tests can drive the shell with several fake types.
 
 ### State Management
@@ -636,17 +638,27 @@ component unchanged.
 
 `CreateTaskForm` (`components/tasks/CreateTaskForm.tsx`) is the
 specification's *Creating a task*, which is four sentences and four rules. It
-runs without a dialog, so more than one surface can host it. Today the host is
+runs without a dialog, so more than one surface can host it:
 `CreateTaskDialog` (`components/journals/CreateTaskDialog.tsx`), triggered from
 the `Tasks` card header beside *Attach task*, as the primary action to that
-one's outline. Next is the top bar's New dialog. The form's test ids keep their
-historical `create-task-dialog-*` names.
+one's outline, and the top bar's New dialog (`NewTaskPanel`). The form's test
+ids keep their historical `create-task-dialog-*` names.
 
-- **The creating journal is not a field, because it is not a field on the wire
-  either.** `POST /api/journals/{id}/tasks` takes it from the path, so the
-  form receives `journalId` as a prop from its host and the rule — "the journal
-  the user creates the task from becomes its creating journal; it is never
-  chosen separately" — can only be checked on the **request**. The dialog's
+- **Where the creating journal comes from is the host's to say**
+  (`creatingJournal: CreatingJournalSource`). `POST /api/journals/{id}/tasks`
+  takes it from the path either way.
+  - `{ kind: 'fixed', id }` — the journal page. The rule "the journal the user
+    creates the task from becomes its creating journal; it is never chosen
+    separately" holds, so there is no field and it can only be checked on the
+    **request**.
+  - `{ kind: 'choose', initial? }` — the New dialog, which has no journal
+    around it. The navigation specification has it ask, pre-filled with the
+    journal being viewed. `CreatingJournalField` wraps the all-journals
+    `JournalSearchCombobox` (any of the user's journals can be where a task
+    arose) and is a required, schema-validated field with its own
+    `FormMessage`. A 404 `TASK_ANCHOR_JOURNAL_NOT_FOUND` lands on the field its
+    `meta.anchor` names; a `creating` refusal in fixed mode has no field and is
+    left to the toast. The dialog's
   tests assert the URL, and that it holds exactly three inputs, so a fourth
   fails.
 - **Offered even when the tasks listing has failed**, unlike the attach
