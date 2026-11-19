@@ -312,16 +312,63 @@ route-coverage guard, both directions), 401 cases in `test_authentication_requir
   position, archived, archived_at, created_at, updated_at}, links.self}`; take the icon keys from
   the OpenAPI `TaskIcon` schema.
 
-#### Phase 4: Rename and icon
+#### Phase 4: Rename and icon ✅ DONE
 
 **Prerequisites:** Phase 3.
-**Estimated diff:** ~120 production → **~1,200 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~120 production → **~1,200 tracked** · one capability on REST and MCP together · **Actual:** ~365 production → **~1,100 tracked**
+(~1,085 insertions, ~30 deletions excluding this document: 365 production — REST schemas and controller
+124, service and patch 114, MCP tool and registration 77, event 50; 703 tests; 16 architecture docs).
+Tracked lines landed ×0.9 of the estimate, production ×3 again (docstrings). A single-operation
+capability phase lands near ~1,100; Phase 5's ~900 and Phase 6's ~1,700 stand.
 
 **Acceptance Criteria:**
 
-- [ ] One update capability; icon validated against the fixed set.
-- [ ] Emits list-updated.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] One update capability; icon validated against the fixed set.
+- [x] Emits list-updated.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `TaskListUpdated` (`app/core/tasks/models/task_list_events.py`, in
+`TASK_LIST_EVENT_TYPES`); `TaskListPatch` (`app/core/tasks/services/task_list_patch.py`, a
+`FieldPatch`: `UNSET` keeps a field, `icon=None` clears it); `TaskListService.update_task_list`
+(`@transactional`, locked read, one `applied_to`, no-op when nothing differs). REST:
+`PATCH /api/task-lists/{list_id}` (`TaskListUpdateRequest`). MCP: `update_task_list` (`IDEMPOTENT_WRITE`).
+Server instructions and `api-design.md` *Task List Endpoints* updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_events.py` (whole-key payload, JSON round trip),
+`tests/unit/mcp/domains/test_task_list_tools_schema.py` (icon enum, `clear_icon` boolean, id
+bounds, output shape); the subscriptions test covers the new type through `TASK_LIST_EVENT_TYPES`;
+integration `test_task_list_service_integration.py` (`TestUpdateTaskList`: rename, set/replace/clear
+icon, both in one event, no-op cases, refused names, missing and foreign lists),
+`test_task_list_endpoints.py` (`TestUpdateTaskListEndpoint`), the PATCH entry in
+`test_task_list_ownership.py`'s `CROSS_USER_REQUESTS`, a 401 case, and `TestUpdateTaskListTool` in
+`test_task_list_tools_mcp.py`. No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **One update capability on each surface**: a PATCH carrying `name` and/or `icon`, and one
+  `update_task_list` tool — not separate rename and icon operations.
+- **`null` clears, absent keeps** on REST (`model_fields_set`); `"name": null` and a body naming
+  nothing are refused (400 `VALIDATION_ERROR`). MCP clears with `clear_icon=true` (a tool cannot tell
+  a null argument from an omitted one); `icon` with `clear_icon`, or no change named, is a
+  `TaskListValidationError`.
+- **The service treats an unchanged value or an empty patch as a no-op**: nothing written, no event.
+  `changed_fields` names only what moved, as `{field: (old, new)}` with icon keys as plain strings.
+- **A body id that disagrees with the path** is refused (`TASK_VALIDATION_ERROR`, `meta.field=id`),
+  as on the task PATCH.
+- **No archived-list guard yet** — no API can archive a list before Phase 6, which adds it.
+- **No `ETag`/`If-Match`**: lists are not a conditional-write route; the locked read serialises
+  concurrent patches field-safely.
+- Tests cannot assert `updated_at` moving: the fixture shares one transaction, so `now()` is one
+  instant. They assert stored fields and the outbox instead.
+
+**Notes for later phases:**
+- *Phase 6:* add `archived` to `changed_fields` of `TaskListUpdated` (publish it from the archive
+  write), and put the archived refusal right after the locked read in `update_task_list` so a rename
+  or icon change of an archived list is refused too. Add its route to `CROSS_USER_REQUESTS` and the
+  401 cases.
+- *Phase 7:* project `TaskListUpdated`'s `name` and `icon` keys as "renamed" and "icon" lines; a
+  cleared icon arrives as `[old, null]`.
+- *ITER21-002:* rename and icon actions send `PATCH /api/task-lists/{id}` with `data.id`; send
+  `"icon": null` to clear.
 
 #### Phase 5: Reorder lists
 

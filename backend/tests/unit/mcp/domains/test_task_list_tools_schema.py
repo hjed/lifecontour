@@ -10,6 +10,7 @@ from typing import Any
 from core_shared.models.tasks import TaskIcon, TaskListArchiveFilter
 from fastmcp import Client, FastMCP
 
+from app.api.common.identifiers import INT32_MAX
 from app.mcp.domains.tasks.tools import register_task_tools
 
 _LIST_FIELDS = {
@@ -64,6 +65,22 @@ class TestTheInputsAreTyped:
         ]
         assert "required" not in schema or schema["required"] == []
 
+    async def test_update_offers_the_fixed_icon_set_and_a_clear_flag(self) -> None:
+        schema = (await _tools())["update_task_list"].input_schema
+        properties = schema["properties"]
+
+        assert set(properties) == {"task_list_id", "name", "icon", "clear_icon"}
+        assert schema["required"] == ["task_list_id"]
+        assert _enum_values(schema, properties["icon"]) == [
+            icon.value for icon in TaskIcon
+        ]
+        assert properties["clear_icon"]["type"] == "boolean"
+        assert properties["clear_icon"]["default"] is False
+        assert (
+            properties["task_list_id"]["minimum"],
+            properties["task_list_id"]["maximum"],
+        ) == (1, INT32_MAX)
+
     async def test_get_takes_only_the_list_id(self) -> None:
         schema = (await _tools())["get_task_list"].input_schema
 
@@ -71,10 +88,10 @@ class TestTheInputsAreTyped:
 
 
 class TestTheResultShapeIsPublished:
-    async def test_create_and_get_answer_with_one_list(self) -> None:
+    async def test_create_get_and_update_answer_with_one_list(self) -> None:
         tools = await _tools()
 
-        for name in ("create_task_list", "get_task_list"):
+        for name in ("create_task_list", "get_task_list", "update_task_list"):
             schema = tools[name].output_schema
             assert schema is not None, f"{name} publishes no outputSchema"
             assert set(schema["properties"]) == _LIST_FIELDS

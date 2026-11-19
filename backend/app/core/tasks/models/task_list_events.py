@@ -27,11 +27,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.tasks.models.events import DomainEvent
 
 TASK_LIST_CREATED = "TaskListCreated"
+TASK_LIST_UPDATED = "TaskListUpdated"
 
 #: Every event type a task list publishes. Extended by each class added here, so
 #: a consumer that comes to subscribe to list events — the list history
 #: projection first — has one definition to read rather than its own copy.
-TASK_LIST_EVENT_TYPES: frozenset[str] = frozenset({TASK_LIST_CREATED})
+TASK_LIST_EVENT_TYPES: frozenset[str] = frozenset(
+    {TASK_LIST_CREATED, TASK_LIST_UPDATED}
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,52 @@ class TaskListCreated(DomainEvent):
                 "user_id": user_id,
                 "name": name,
                 "icon": icon.value if icon is not None else None,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+#: One field's change, ``(old, new)`` positionally, as JSON-ready scalars.
+type TaskListFieldChange = tuple[str | None, str | None]
+
+
+@dataclass(frozen=True)
+class TaskListUpdated(DomainEvent):
+    """Event raised when a list's own fields change: its name or its icon.
+
+    **One event for one write**, carrying ``changed_fields`` in the
+    ``{field: (old, new)}`` shape every updated-event in this codebase uses, so
+    a request that renames a list and changes its icon announces one change.
+    Archiving joins this type as another key rather than a type of its own.
+
+    **Only what actually moved is named**: the service compares each requested
+    value with the stored one, and a write that changes nothing publishes
+    nothing. The pairs are positional — the history projection reads
+    ``change[0]`` as old and ``change[1]`` as new — and hold plain strings
+    (``TaskIcon.value``) or ``None``, because the payload is a wire format.
+    """
+
+    def __init__(
+        self,
+        task_list_id: int,
+        user_id: str,
+        changed_fields: dict[str, TaskListFieldChange],
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_list_updated_{task_list_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_list_id,
+            event_type=TASK_LIST_UPDATED,
+            event_data={
+                "task_list_id": task_list_id,
+                "user_id": user_id,
+                "changed_fields": changed_fields,
                 "source": source.value,
                 "changed_by": changed_by,
             },

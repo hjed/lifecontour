@@ -59,6 +59,17 @@ class CrossUserRequest:
 
 CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     CrossUserRequest("GET", LIST_ROUTE),
+    CrossUserRequest(
+        "PATCH",
+        LIST_ROUTE,
+        {
+            "data": {
+                "type": "task-lists",
+                "id": "{list_id}",
+                "attributes": {"name": "Hijacked", "icon": None},
+            }
+        },
+    ),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.

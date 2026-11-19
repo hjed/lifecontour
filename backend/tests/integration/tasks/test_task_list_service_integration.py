@@ -1,8 +1,9 @@
 """Integration tests for creating and reading task lists, against real PostgreSQL.
 
-``TaskListService`` owns the one write this phase adds — create — and holds it to
-two promises: the list and its ``TaskListCreated`` event are written together,
-and a refused create writes neither. ``TaskListReadService`` owns the reads and
+``TaskListService`` owns the list writes — create and the field update — and
+holds each to two promises: the list and its event are written together, and a
+refused write leaves neither. The update adds a third: a patch that changes
+nothing writes nothing and announces nothing. ``TaskListReadService`` owns the reads and
 holds them to owner scoping: another user's list is reported exactly as a
 missing one, and never listed.
 
@@ -11,18 +12,22 @@ repository tests give: an absent id cannot catch a missing ``user_id`` filter.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
+    MAX_TASK_LIST_NAME_LENGTH,
     TaskIcon,
     TaskListArchiveFilter,
     TaskListNotFoundError,
     TaskListValidationError,
 )
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -121,13 +126,239 @@ class TestCreateTaskList:
     async def test_a_refused_create_writes_no_list_and_no_event(
         self, async_connection: AsyncConnection
     ) -> None:
+        service = make_service(async_connection)
+
         with pytest.raises(TaskListValidationError) as refused:
-            await make_service(async_connection).create_task_list(
+            await service.create_task_list(
                 user_id=USER_ID, name="   ", icon=None, transaction=async_connection
             )
 
         assert refused.value.field == "name"
         assert await count(async_connection, _COUNT_LISTS, {"user_id": USER_ID}) == 0
+        assert await task_list_events(async_connection) == []
+
+
+async def _row(conn: AsyncConnection, task_list_id: int) -> dict[str, Any]:
+    """The list's row exactly as stored, bypassing every layer above."""
+    row = (
+        await conn.execute(
+            text("SELECT * FROM task_lists WHERE id = :id"), {"id": task_list_id}
+        )
+    ).one()
+    return dict(row._mapping)
+
+
+class TestUpdateTaskList:
+    """Rename and icon: one patch, one locked read, one write, one event.
+
+    ``updated_at`` is not asserted either way: the fixture runs every statement
+    in one transaction, so ``now()`` is the same instant for the seed and the
+    update and the timestamp cannot tell a write from a no-op. The stored
+    fields and the outbox can.
+    """
+
+    @staticmethod
+    async def _update(
+        conn: AsyncConnection,
+        task_list_id: int,
+        patch: TaskListPatch,
+        *,
+        user_id: str = USER_ID,
+    ) -> Any:
+        return await make_service(conn).update_task_list(
+            user_id=user_id,
+            task_list_id=task_list_id,
+            patch=patch,
+            transaction=conn,
+        )
+
+    @pytest.mark.asyncio
+    async def test_renames_a_list_and_keeps_its_icon(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+
+        updated = await self._update(
+            async_connection, seeded.id, TaskListPatch(name="Trip packing")
+        )
+
+        assert (updated.name, updated.icon) == ("Trip packing", TaskIcon.LUGGAGE)
+        stored = await make_read_service(async_connection).get_task_list(
+            user_id=USER_ID, task_list_id=seeded.id
+        )
+        assert stored == updated
+        (event,) = await task_list_events(async_connection, task_list_id=seeded.id)
+        assert event.event_type == "TaskListUpdated"
+        assert event.payload["changed_fields"] == {"name": ["Packing", "Trip packing"]}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            (None, TaskIcon.LUGGAGE),
+            (TaskIcon.LUGGAGE, TaskIcon.SHOPPING_CART),
+            (TaskIcon.LUGGAGE, None),
+        ],
+        ids=["set", "replace", "clear"],
+    )
+    async def test_sets_replaces_or_clears_the_icon_and_keeps_the_name(
+        self,
+        async_connection: AsyncConnection,
+        before: TaskIcon | None,
+        after: TaskIcon | None,
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing", icon=before)
+        assert seeded.id is not None
+
+        updated = await self._update(
+            async_connection, seeded.id, TaskListPatch(icon=after)
+        )
+
+        assert (updated.name, updated.icon) == ("Packing", after)
+        assert (await _row(async_connection, seeded.id))["icon"] == (
+            after.value if after is not None else None
+        )
+        (event,) = await task_list_events(async_connection, task_list_id=seeded.id)
+        assert event.payload["changed_fields"] == {
+            "icon": [
+                before.value if before is not None else None,
+                after.value if after is not None else None,
+            ]
+        }
+
+    @pytest.mark.asyncio
+    async def test_name_and_icon_together_are_one_write_and_one_event(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        await make_service(async_connection).update_task_list(
+            user_id=USER_ID,
+            task_list_id=seeded.id,
+            patch=TaskListPatch(name="Trip", icon=TaskIcon.LUGGAGE),
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = await task_list_events(async_connection)
+        assert event.aggregate_id == seeded.id
+        assert event.payload == {
+            "task_list_id": seeded.id,
+            "user_id": USER_ID,
+            "changed_fields": {
+                "name": ["Packing", "Trip"],
+                "icon": [None, "luggage"],
+            },
+            "source": "ui",
+            "changed_by": "ui",
+        }
+
+    @pytest.mark.asyncio
+    async def test_provenance_defaults_to_system(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        await self._update(async_connection, seeded.id, TaskListPatch(name="Trip"))
+
+        (event,) = await task_list_events(async_connection)
+        assert (event.payload["source"], event.payload["changed_by"]) == (
+            Provenance.SYSTEM.value,
+            "system",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "patch",
+        [
+            TaskListPatch(),
+            TaskListPatch(name="Packing"),
+            TaskListPatch(icon=TaskIcon.LUGGAGE),
+            TaskListPatch(name="Packing", icon=TaskIcon.LUGGAGE),
+        ],
+        ids=["empty", "same-name", "same-icon", "same-both"],
+    )
+    async def test_a_patch_that_changes_nothing_publishes_nothing(
+        self, async_connection: AsyncConnection, patch: TaskListPatch
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        unchanged = await self._update(async_connection, seeded.id, patch)
+
+        assert unchanged == seeded
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_clearing_an_icon_that_is_not_set_publishes_nothing(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        await self._update(async_connection, seeded.id, TaskListPatch(icon=None))
+
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", ["", "   ", "x" * (MAX_TASK_LIST_NAME_LENGTH + 1)])
+    async def test_a_refused_name_writes_nothing(
+        self, async_connection: AsyncConnection, name: str
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        with pytest.raises(TaskListValidationError) as refused:
+            await self._update(
+                async_connection,
+                seeded.id,
+                TaskListPatch(name=name, icon=TaskIcon.SHOPPING_CART),
+            )
+
+        assert refused.value.field == "name"
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_a_missing_list_is_not_found(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        with pytest.raises(TaskListNotFoundError) as missing:
+            await self._update(async_connection, 999_999, TaskListPatch(name="X"))
+
+        assert str(missing.value) == "Task list with ID 999999 not found"
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_list_is_refused_as_missing_and_left_alone(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID, icon=TaskIcon.LUGGAGE
+        )
+        assert foreign.id is not None
+        before = await _row(async_connection, foreign.id)
+
+        with pytest.raises(TaskListNotFoundError) as refused:
+            await self._update(
+                async_connection, foreign.id, TaskListPatch(name="Mine", icon=None)
+            )
+
+        assert str(refused.value) == f"Task list with ID {foreign.id} not found"
+        assert await _row(async_connection, foreign.id) == before
         assert await task_list_events(async_connection) == []
 
 
@@ -151,10 +382,10 @@ class TestGetTaskList:
     async def test_a_missing_list_is_not_found(
         self, async_connection: AsyncConnection
     ) -> None:
+        read_service = make_read_service(async_connection)
+
         with pytest.raises(TaskListNotFoundError) as missing:
-            await make_read_service(async_connection).get_task_list(
-                user_id=USER_ID, task_list_id=999_999
-            )
+            await read_service.get_task_list(user_id=USER_ID, task_list_id=999_999)
 
         assert missing.value.task_list_id == 999_999
 
@@ -167,10 +398,10 @@ class TestGetTaskList:
         )
         assert foreign.id is not None
 
+        read_service = make_read_service(async_connection)
+
         with pytest.raises(TaskListNotFoundError) as refused:
-            await make_read_service(async_connection).get_task_list(
-                user_id=USER_ID, task_list_id=foreign.id
-            )
+            await read_service.get_task_list(user_id=USER_ID, task_list_id=foreign.id)
 
         # The same words a missing id gets: nothing says the list exists.
         assert str(refused.value) == f"Task list with ID {foreign.id} not found"

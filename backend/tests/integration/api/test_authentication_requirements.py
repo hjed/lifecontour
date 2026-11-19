@@ -140,15 +140,26 @@ class TestAuthenticationRequirements:
             ("GET", "/api/task-lists"),
             ("GET", "/api/task-lists/1"),
             ("POST", "/api/task-lists"),
+            ("PATCH", "/api/task-lists/1"),
         ],
     )
     def test_task_list_endpoints_require_auth(self, client, method, path):
-        """Listing, reading and creating task lists all require a session."""
-        body = {"data": {"type": "task-lists", "attributes": {"name": "Packing"}}}
+        """Listing, reading, creating and updating task lists require a session."""
+        # The body is valid for its method, so a 401 cannot be a 400 in disguise.
+        bodies = {
+            "POST": {"data": {"type": "task-lists", "attributes": {"name": "Packing"}}},
+            "PATCH": {
+                "data": {
+                    "type": "task-lists",
+                    "id": "1",
+                    "attributes": {"name": "Packing"},
+                }
+            },
+        }
         response = client.request(
             method,
             path,
-            json=body if method == "POST" else None,
+            json=bodies.get(method),
             headers={"Host": "localhost"},
         )
         assert response.status_code == 401
