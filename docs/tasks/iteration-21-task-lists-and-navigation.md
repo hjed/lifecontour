@@ -246,16 +246,71 @@ for a missing list). No E2E: no UI.
 - *ITER21-002 Phase 12:* extend `list_for_user` (paging, name filter) for the archived page; add an
   `archived_at` index there if needed.
 
-#### Phase 3: Create and read lists
+#### Phase 3: Create and read lists ✅ DONE
 
 **Prerequisites:** Phase 2.
-**Estimated diff:** ~200 production → **~1,500 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~200 production → **~1,500 tracked** · one capability on REST and MCP together · **Actual:** ~670 production → **~1,950 tracked**
+(1,952 insertions, 21 deletions excluding this document: 671 production — REST controller and schemas
+251, MCP tools and schemas 173, services 116, event 74, DI and wiring 62; 1,239 tests; 42 architecture
+docs). Tracked lines ran ×1.3 over the estimate, production ×3.4: docstrings again, and three
+read/write surfaces (create, get, list) each needing its own REST and MCP refusal and isolation tests.
+Kept whole by user decision rather than split by capability. Re-estimate Phases 4–6 at ×1.3
+(~1,550, ~1,150 and ~1,700 tracked); each is a single capability, so they should land nearer their
+estimates than this three-operation phase did.
 
 **Acceptance Criteria:**
 
-- [ ] Create; get one; list all with archived filter. (The open-task count moved to Phase 15: tasks cannot join a list before Phase 9.)
-- [ ] Emits list-created.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Create; get one; list all with archived filter. (The open-task count moved to Phase 15: tasks cannot join a list before Phase 9.)
+- [x] Emits list-created.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `TaskListCreated` (`app/core/tasks/models/task_list_events.py`, with
+`TASK_LIST_EVENT_TYPES`); `TaskListService.create_task_list` (`@transactional`, publishes the event)
+and `TaskListReadService.get_task_list` / `list_task_lists`, both provided by `TaskProvider`. REST:
+`POST /api/task-lists`, `GET /api/task-lists/{list_id}`, `GET /api/task-lists?archived=` (JSON:API
+type `task-lists`; `app/api/tasks/task_list_controllers.py`, `task_list_schemas.py`). MCP:
+`create_task_list`, `get_task_list`, `list_task_lists` (`app/mcp/domains/tasks/task_list_tools.py`).
+Server instructions gain a *Task lists* line and no longer say "there is no separate task list";
+"no due date" stays until the due-date phases. `api-design.md` *Task List Endpoints* documents
+`TASK_LIST_NOT_FOUND`.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_events.py` (whole-key payload),
+`tests/unit/infrastructure/events/test_task_list_event_subscriptions.py` (no consumer matches a list
+event), `tests/unit/mcp/domains/test_task_list_tools_schema.py` (icon and archived enums, output
+shapes); integration `tests/integration/tasks/test_task_list_service_integration.py`,
+`tests/integration/api/test_task_list_endpoints.py`, `test_task_list_ownership.py` (the `{list_id}`
+route-coverage guard, both directions), 401 cases in `test_authentication_requirements.py`, and
+`tests/integration/mcp/test_task_list_tools_mcp.py`. No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **List events live in their own module.** `tests/task_event_inventory.py` requires every event in
+  `tasks/models/events.py` to be projected as *task* history (filed under a task id), so a list
+  event there would be mis-filed or fail the inventory. A list is its own aggregate.
+- **Payload:** `task_list_id`, `user_id`, `name`, `icon`, `source`, `changed_by` — no position
+  (reorders publish nothing, so it would go stale), no archive state (a new list never is).
+- **Write and read services are split**, as `TaskService` / `TaskReadService` are.
+- **`?archived=` is a plain query param**, default `active`; the listing is unpaginated.
+- **`icon` is typed `TaskIcon` on every request and response**, so OpenAPI publishes a `TaskIcon`
+  schema and the MCP schemas carry the enum (pinned by tests).
+- **`task_events()` (test seeding) is matched on the task event inventory**, not the `Task%`
+  prefix, which also matches `TaskListCreated` — and a list id can equal a task id.
+- **Kept whole despite running over budget** (user decision): see the actual above.
+
+**Notes for later phases:**
+- *Phase 4 / 5 / 6:* extend `TaskListService`; read with `find_by_id_for_update` in the unit of
+  work; add each new `{list_id}` route to `CROSS_USER_REQUESTS` in `test_task_list_ownership.py`
+  (the guard fails until you do) and to the 401 cases; add each event type to
+  `TASK_LIST_EVENT_TYPES`.
+- *Phase 7:* subscribe the history projection to `TASK_LIST_EVENT_TYPES` under its own
+  `entity_type` (never `task`); flip `test_task_list_event_subscriptions.py` for history; widen the
+  event inventory (or add a list inventory) — `_SAMPLE_ARGUMENTS` needs a `TaskIcon | None` sample —
+  and adjust the `Task*`-prefix guards in `tests/unit/history/test_history_service.py` and
+  `tests/unit/infrastructure/events/test_history_projection_consumer.py`, which assume every
+  `Task*` handler is a task event. Decide whether lists created before Phase 7 get a backfilled
+  "created" row.
+- *ITER21-002 Phase 1:* the resource is `{type: "task-lists", id, attributes: {name, icon,
+  position, archived, archived_at, created_at, updated_at}, links.self}`; take the icon keys from
+  the OpenAPI `TaskIcon` schema.
 
 #### Phase 4: Rename and icon
 

@@ -14,6 +14,8 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
+from app.core.tasks.services.task_list_read_service import TaskListReadService
+from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -57,6 +59,29 @@ class TaskProvider(Provider):
     def task_list_repository(self, connection: AsyncConnection) -> TaskListRepository:
         """Provide a TaskListRepository instance on the request connection."""
         return SqlTaskListRepository(connection)
+
+    @provide(scope=Scope.REQUEST)
+    def task_list_service(
+        self,
+        task_list_repo: TaskListRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> TaskListService:
+        """Provide the task list write service.
+
+        Its publisher is bound to the request connection the repository holds,
+        as ``TaskService``'s is, so a list write and its event share one unit
+        of work.
+        """
+        return TaskListService(
+            task_list_repo=task_list_repo, event_publisher=event_publisher
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def task_list_read_service(
+        self, task_list_repo: TaskListRepository
+    ) -> TaskListReadService:
+        """Provide the task list read service, which writes nothing."""
+        return TaskListReadService(task_list_repo=task_list_repo)
 
     @provide(scope=Scope.REQUEST)
     def task_service(

@@ -416,6 +416,18 @@ the *creating* journal where it arose and the *due* journal where it matters.
   immediately, so a task event is discarded rather than left pending, and nothing dead-letters. Both
   halves are pinned by tests, because a guarantee that holds by construction is one a pattern-list
   change can quietly remove.
+  **Task lists publish their own events, from their own module.** `TaskListService`
+  (`backend/app/core/tasks/services/task_list_service.py`) creates a list and publishes
+  `TaskListCreated` (`backend/app/core/tasks/models/task_list_events.py`) in the same unit of work,
+  with `source`/`changed_by` threaded the way task writes thread them; `TaskListReadService` reads
+  and publishes nothing. A list is its **own aggregate** — the event's aggregate id is the list id —
+  so its events are kept out of `events.py`, whose classes the task event inventory requires to be
+  projected as *task* history. The payload is the list as persisted (`task_list_id`, `user_id`,
+  `name`, `icon`) plus provenance; position is left out because reordering announces nothing.
+  **No consumer subscribes to a list event yet** — pinned by
+  `tests/unit/infrastructure/events/test_task_list_event_subscriptions.py` — so the list history
+  projection (ITER21-001 Phase 7) adds the subscription deliberately, under an `entity_type` of its
+  own, and lists created before it lands have no "created" row unless that phase backfills one.
   **A task's history is readable, and the deleted case is what shapes the read.** `TaskHistoryService`
   mirrors `JournalHistoryService` — a paginated read through the registered `"task"` aggregation
   strategy, served by `GET /api/tasks/{id}/history` and the `get_task_history` MCP tool — with one

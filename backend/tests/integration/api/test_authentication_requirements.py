@@ -133,3 +133,23 @@ class TestAuthenticationRequirements:
 
         response = client.get("/api/auth/status", headers={"Host": "localhost"})
         assert response.status_code != 401
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/task-lists"),
+            ("GET", "/api/task-lists/1"),
+            ("POST", "/api/task-lists"),
+        ],
+    )
+    def test_task_list_endpoints_require_auth(self, client, method, path):
+        """Listing, reading and creating task lists all require a session."""
+        body = {"data": {"type": "task-lists", "attributes": {"name": "Packing"}}}
+        response = client.request(
+            method,
+            path,
+            json=body if method == "POST" else None,
+            headers={"Host": "localhost"},
+        )
+        assert response.status_code == 401
+        assert "Authentication required" in response.json()["errors"][0]["detail"]

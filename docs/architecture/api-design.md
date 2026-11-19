@@ -1222,6 +1222,36 @@ Conventions this surface pins down:
   (`__created__`, `__deleted__`, `journal:{id}`, `contact:{id}`), and that this
   is a record rather than a way to browse tasks.
 
+## Task List Endpoints
+
+A task list is a user's named home for tasks (ITER21-001). Lists are part of the
+tasks domain, so their refusals use the task error codes, and the JSON:API type
+is `task-lists`.
+
+| Verb + path | Purpose | Status |
+|---|---|---|
+| `POST /api/task-lists` | Create a list at the bottom of your lists. Body type `task-lists`, attributes: `name`, optional `icon` | 201; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), an icon outside the fixed set, an unknown attribute or another resource type (`VALIDATION_ERROR`) |
+| `GET /api/task-lists/{list_id}` | Read one list: `name`, `icon`, `position`, `archived`, `archived_at`, timestamps | 200; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
+| `GET /api/task-lists` | Your lists by archived state. Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
+
+Conventions this surface pins down:
+
+- **`icon` is the `TaskIcon` enum on the request and the response**, so the
+  fixed key set is published as a named schema in the OpenAPI document (and in
+  the MCP tools' schemas). Clients take the keys from there; the set is
+  add-only.
+- **Another user's list is a missing list.** `TaskListNotFoundError` carries the
+  same message for both, and every `{list_id}` route is held to it by the
+  route-coverage guard in `backend/tests/integration/api/test_task_list_ownership.py`,
+  which fails when a `{list_id}` route is mounted without an ownership test.
+- **A new list's place is not the client's to choose**: `position` is refused
+  on create (`extra="forbid"`), and a new list is never archived.
+- **The listing is unpaginated** — the lists a user keeps are a sidebar-sized
+  set; paging arrives with the archived lists page.
+- Creating a list publishes `TaskListCreated` with `source=ui` (REST) or `mcp`.
+- The matching MCP tools are `create_task_list`, `get_task_list` and
+  `list_task_lists`, documented in their docstrings and parameter schemas.
+
 ## Contact Important Date Endpoints
 
 ```

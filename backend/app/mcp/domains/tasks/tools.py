@@ -60,6 +60,11 @@ from app.mcp.domains.tasks.schemas import (
     UpcomingTasksResponse,
     UpcomingWindowMCP,
 )
+from app.mcp.domains.tasks.task_list_tools import (
+    create_task_list,
+    get_task_list,
+    list_task_lists,
+)
 from app.mcp.shared.annotations import (
     ADDITIVE_WRITE,
     DESTRUCTIVE_WRITE,
@@ -185,10 +190,10 @@ async def create_task(
     """
     Create a task: something to do, anchored to the journal it is due in.
 
-    Tasks are always attached to journals — there is no separate task list and
-    no due *date*. To make a task due on a particular day, that day's journal
-    must already exist; name it as due_journal_id. The creating and due journal
-    may be the same one.
+    Tasks created here are attached to journals, and there is no due *date*;
+    task lists exist but cannot hold tasks yet. To make a task due on a
+    particular day, that day's journal must already exist; name it as
+    due_journal_id. The creating and due journal may be the same one.
 
     Rejections are actionable rather than generic: a journal that does not exist
     or is not yours is reported as not found naming which anchor it was, and a
@@ -954,3 +959,6 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(list_journal_tasks)
     mcp.add_tool(list_upcoming_tasks)
     mcp.add_tool(get_task_history)
+    mcp.add_tool(create_task_list)
+    mcp.add_tool(get_task_list)
+    mcp.add_tool(list_task_lists)
