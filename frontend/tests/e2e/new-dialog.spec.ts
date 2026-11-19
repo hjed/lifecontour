@@ -205,6 +205,8 @@ test.describe('New dialog — desktop', () => {
       'aria-invalid',
       'true'
     );
+    // Focus moves to the field, so its message is announced.
+    await expect(creatingJournalField(dialog)).toBeFocused();
 
     await chooseCreatingJournal(dialog, creating);
     const journalId = await submitTaskFromDialog(page, dialog);

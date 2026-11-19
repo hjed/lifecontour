@@ -190,6 +190,9 @@ describe('CreateTaskForm — choosing the creating journal', () => {
     expect(description(field)).toContain(
       'Choose the journal this task arose in.'
     );
+    // `FormMessage` is not a live region: moving into the described input is
+    // how a screen-reader user hears why Create did nothing.
+    expect(field).toHaveFocus();
     expect(posts).toHaveLength(0);
   });
 

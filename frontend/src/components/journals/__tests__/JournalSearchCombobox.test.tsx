@@ -8,7 +8,7 @@
  * Focuses on the onClear callback behaviour when the user clears the input.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalSearchCombobox } from '../JournalSearchCombobox';
@@ -277,8 +277,10 @@ describe('JournalSearchCombobox inside a form field', () => {
     fireEvent.change(first, { target: { value: 'Trip' } });
     fireEvent.change(second, { target: { value: 'Trip' } });
 
-    const listboxes = await screen.findAllByRole('listbox');
-    expect(listboxes).toHaveLength(2);
+    // Each search debounces on its own timer, so wait for both lists rather
+    // than the first one to render.
+    await waitFor(() => expect(screen.getAllByRole('listbox')).toHaveLength(2));
+    const listboxes = screen.getAllByRole('listbox');
     const [firstList, secondList] = listboxes;
     expect(firstList.id).not.toBe(secondList.id);
     expect(first).toHaveAttribute('aria-controls', firstList.id);

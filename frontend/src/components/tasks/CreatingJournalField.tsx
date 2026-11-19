@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, type Ref } from 'react';
 
 import { useFormField } from '@/components/ui/form';
 import { JournalSearchCombobox } from '@/components/journals/JournalSearchCombobox';
@@ -37,6 +37,11 @@ export interface CreatingJournalFieldProps {
    */
   readonly onChange: (journal: ChosenJournal | null) => void;
   readonly disabled: boolean;
+  /**
+   * The field's ref, so a submit the schema refuses moves focus here: the
+   * message is not a live region, and focus is how it gets announced.
+   */
+  readonly inputRef?: Ref<HTMLInputElement>;
 }
 
 export function CreatingJournalField({
@@ -44,6 +49,7 @@ export function CreatingJournalField({
   value,
   onChange,
   disabled,
+  inputRef,
 }: CreatingJournalFieldProps) {
   const { error, formDescriptionId, formMessageId } = useFormField();
   const [query, setQuery] = useState(value?.title ?? '');
@@ -72,6 +78,7 @@ export function CreatingJournalField({
   return (
     <JournalSearchCombobox
       inputId={inputId}
+      inputRef={inputRef}
       placeholder='Search your journals…'
       value={query}
       disabled={disabled}

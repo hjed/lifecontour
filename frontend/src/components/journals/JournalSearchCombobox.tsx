@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect, useId, useRef } from 'react';
+import { useState, useEffect, useId, useRef, type Ref } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Book } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -36,6 +36,11 @@ interface JournalSearchComboboxProps {
   readonly invalid?: boolean;
   /** Ids of the elements describing the input (a field's description, message). */
   readonly describedById?: string;
+  /**
+   * The input element, for a form library that focuses a field it rejects
+   * (react-hook-form's `field.ref`).
+   */
+  readonly inputRef?: Ref<HTMLInputElement>;
 }
 
 // Debounce hook
@@ -91,6 +96,7 @@ export function JournalSearchCombobox({
   disabled = false,
   invalid = false,
   describedById,
+  inputRef,
 }: JournalSearchComboboxProps) {
   // Per instance: the New dialog mounts more than one of these at once.
   const listboxId = `${useId()}-journal-search-results`;
@@ -187,6 +193,7 @@ export function JournalSearchCombobox({
       <div className='relative'>
         <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
         <Input
+          ref={inputRef}
           id={inputId}
           type='text'
           placeholder={placeholder}
