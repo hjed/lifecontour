@@ -422,6 +422,7 @@ export function CreateTaskForm({
                 </FormLabel>
                 <CreatingJournalField
                   inputId={creatingJournalInputId}
+                  inputRef={field.ref}
                   value={field.value}
                   onChange={journal => {
                     field.onChange(journal);
