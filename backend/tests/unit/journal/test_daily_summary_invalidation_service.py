@@ -663,6 +663,26 @@ class TestATaskChangeFollowsItsDueJournal:
         summary_repo.invalidate_for_range.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_a_task_with_no_due_journal_makes_nothing_stale(
+        self,
+        service: DailySummaryInvalidationService,
+        task_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """An undated list task has no journal day for its change to touch."""
+        task_repo.find_by_id.return_value = Task(
+            id=5, user_id=USER_ID, text="pack the tent", task_list_id=3, position=0
+        )
+
+        await service.invalidate_for_event(
+            "TaskUpdated", {"task_id": 5, "user_id": USER_ID, "changed_fields": {}}
+        )
+
+        journal_repo.find_by_id.assert_not_awaited()
+        summary_repo.invalidate_for_range.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_the_day_is_the_users_not_utcs(
         self,
         service: DailySummaryInvalidationService,

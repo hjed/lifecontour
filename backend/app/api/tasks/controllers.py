@@ -118,8 +118,9 @@ def _to_resource(
         attributes=TaskAttributes(
             text=task.text,
             status=task.status,
-            creating_journal_id=task.creating_journal_id,
-            due_journal_id=task.due_journal_id,
+            # The resource promises both anchors until it learns list tasks.
+            creating_journal_id=task.require_anchor("creating"),
+            due_journal_id=task.require_anchor("due"),
             intermediate_journal_ids=intermediate_journal_ids,
             created_at=task.created_at,
             updated_at=task.updated_at,

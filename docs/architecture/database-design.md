@@ -798,6 +798,13 @@ refused row.
   user's timezone and lives in the domain, not the table.
 - **The downgrade refuses** while any task holds a list, due date, flag or icon, rather than
   discarding values `0145` has no column for.
+- **The `Task` entity mirrors these CHECKs** (ITER21-001 Phase 10), so a task that constructs is
+  a row the table accepts — except an unplaced list task's `position`, which the insert assigns. `SqlTaskRepository` reads every column through `_TASK_COLUMN_NAMES`.
+  `save()` writes the due date, flag and icon, but **never list membership** (`task_list_id`,
+  `position`) — joining, leaving, moving and reordering are operations of their own, as
+  `task_lists.position` is, so an edit with a stale position cannot undo a reorder. Until the
+  list-task creation path exists, `save()` refuses to insert a task on a list rather than store it
+  as a journal-only task.
 
 ### Photo Integration (Iteration 4)
 ```sql

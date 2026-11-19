@@ -6,11 +6,20 @@ due journal exists, belongs to the user, or is future-dated needs journal data
 and a timezone, so those invariants live in the service layer.
 """
 
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
-from core_shared.models.tasks import Task, TaskStatus, TaskValidationError
+from core_shared.models.tasks import (
+    Task,
+    TaskAnchorMissingError,
+    TaskDomainError,
+    TaskIcon,
+    TaskJournalAnchor,
+    TaskStatus,
+    TaskValidationError,
+)
 
 USER_ID = "test-user-123"
 CREATING_JOURNAL_ID = 11
@@ -167,3 +176,250 @@ class TestTaskValidationErrorShape:
 
         assert exc_info.value.field == "text"
         assert exc_info.value.status_code == 400
+
+
+# --- Tasks on a list ---------------------------------------------------------
+#
+# Spec *Core invariants* 1-5, mirroring migration 0146's CHECKs. Every test
+# above is about journal-only tasks and is deliberately untouched: those rules
+# do not change when a task can also live on a list.
+
+LIST_ID = 5
+
+
+def _list_task(**overrides: Any) -> Task:
+    """Build a valid list task with no journal, overriding fields per test."""
+    kwargs: dict[str, Any] = {
+        "user_id": USER_ID,
+        "text": "Pack the head torch",
+        "task_list_id": LIST_ID,
+        "position": 0,
+    }
+    kwargs.update(overrides)
+    return Task(**kwargs)
+
+
+@pytest.mark.unit
+class TestListTaskShapes:
+    """Every shape a list task may take (invariants 1, 4 and 5)."""
+
+    def test_a_list_task_needs_no_journal(self) -> None:
+        """Invariant 1 — a list is enough; neither anchor is required."""
+        task = _list_task()
+
+        assert task.task_list_id == LIST_ID
+        assert task.creating_journal_id is None
+        assert task.due_journal_id is None
+        assert task.due_date is None
+
+    def test_a_list_task_may_have_only_a_creating_journal(self) -> None:
+        """A list task may remember where it arose without being due anywhere."""
+        task = _list_task(creating_journal_id=CREATING_JOURNAL_ID)
+
+        assert task.creating_journal_id == CREATING_JOURNAL_ID
+        assert task.due_journal_id is None
+
+    def test_a_list_task_may_have_only_a_due_journal(self) -> None:
+        """Invariant 4 — a due journal alone dates a list task."""
+        task = _list_task(due_journal_id=DUE_JOURNAL_ID)
+
+        assert task.due_journal_id == DUE_JOURNAL_ID
+        assert task.creating_journal_id is None
+
+    def test_a_list_task_may_hold_both_journals(self) -> None:
+        """A journal-only task added to a list keeps both of its journals."""
+        task = _list_task(
+            creating_journal_id=CREATING_JOURNAL_ID, due_journal_id=DUE_JOURNAL_ID
+        )
+
+        assert task.creating_journal_id == CREATING_JOURNAL_ID
+        assert task.due_journal_id == DUE_JOURNAL_ID
+
+    def test_a_list_task_may_have_a_due_date(self) -> None:
+        """Invariant 5 — a due date is allowed on a list task."""
+        task = _list_task(due_date=date(2026, 12, 1))
+
+        assert task.due_date == date(2026, 12, 1)
+
+    def test_a_list_task_may_have_a_creating_journal_and_a_due_date(self) -> None:
+        """Invariant 4 forbids a due date beside a *due* journal, not a creating one."""
+        task = _list_task(
+            creating_journal_id=CREATING_JOURNAL_ID, due_date=date(2026, 12, 1)
+        )
+
+        assert task.creating_journal_id == CREATING_JOURNAL_ID
+        assert task.due_date == date(2026, 12, 1)
+
+    def test_an_unplaced_list_task_has_no_position_yet(self) -> None:
+        """Like ``TaskList.position``, the repository places a new task on insert."""
+        assert _list_task(position=None).position is None
+
+    def test_a_list_task_may_sit_at_the_top(self) -> None:
+        """Position 0 is the top of the list."""
+        assert _list_task(position=0).position == 0
+
+    def test_a_list_task_may_be_flagged_with_an_icon(self) -> None:
+        """Flag and icon apply to list tasks."""
+        task = _list_task(flagged=True, icon=TaskIcon.STAR)
+
+        assert task.flagged is True
+        assert task.icon is TaskIcon.STAR
+
+    def test_a_journal_only_task_may_be_flagged_with_an_icon(self) -> None:
+        """Flag and icon apply to every task, journal-only ones included."""
+        task = _task(flagged=True, icon=TaskIcon.STAR)
+
+        assert task.task_list_id is None
+        assert task.flagged is True
+        assert task.icon is TaskIcon.STAR
+
+    def test_a_journal_only_task_built_as_today_has_list_defaults(self) -> None:
+        """Existing construction needs no new arguments."""
+        task = _task()
+
+        assert task.task_list_id is None
+        assert task.position is None
+        assert task.due_date is None
+        assert task.flagged is False
+        assert task.icon is None
+
+
+@pytest.mark.unit
+class TestListTaskRefusals:
+    """Each shape the invariants refuse, naming the field it is about."""
+
+    def test_no_list_and_no_journal_is_refused(self) -> None:
+        """Invariant 1 — a task with neither a list nor a due journal."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            Task(user_id=USER_ID, text="Somewhere, someday")
+
+        # The creating anchor is validated first, so it is the one named.
+        assert exc_info.value.field == "creating_journal_id"
+
+    def test_no_list_and_only_a_due_journal_is_refused(self) -> None:
+        """Invariant 2 — a journal-only task still needs its creating journal."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            Task(user_id=USER_ID, text="Bring chairs", due_journal_id=DUE_JOURNAL_ID)
+
+        assert exc_info.value.field == "creating_journal_id"
+
+    def test_no_list_and_only_a_creating_journal_is_refused(self) -> None:
+        """Invariant 2 — a journal-only task still needs its due journal."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            Task(
+                user_id=USER_ID,
+                text="Bring chairs",
+                creating_journal_id=CREATING_JOURNAL_ID,
+            )
+
+        assert exc_info.value.field == "due_journal_id"
+
+    def test_a_due_date_beside_a_due_journal_is_refused(self) -> None:
+        """Invariant 4 — a date comes from one place only."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(due_journal_id=DUE_JOURNAL_ID, due_date=date(2026, 12, 1))
+
+        assert exc_info.value.field == "due_date"
+
+    def test_a_due_date_off_a_list_is_refused(self) -> None:
+        """Invariant 5 — journal-only tasks never carry a bare date.
+
+        A journal-only task always has a due journal, so invariant 4 would
+        refuse this too; the test pins that the refusal names the due date.
+        """
+        with pytest.raises(TaskValidationError) as exc_info:
+            _task(due_date=date(2026, 12, 1))
+
+        assert exc_info.value.field == "due_date"
+
+    def test_a_datetime_is_not_a_due_date(self) -> None:
+        """A due date is a calendar day with no time of day.
+
+        ``datetime`` subclasses ``date``, so the type alone would let one in.
+        """
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(due_date=datetime(2026, 12, 1, 9, 0, tzinfo=UTC))
+
+        assert exc_info.value.field == "due_date"
+
+    def test_a_position_off_a_list_is_refused(self) -> None:
+        """A task has a position only on a list (``ck_tasks_position_only_on_list``)."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _task(position=0)
+
+        assert exc_info.value.field == "position"
+
+    def test_a_negative_position_is_refused(self) -> None:
+        """Positions start at 0 (``ck_tasks_position_non_negative``)."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(position=-1)
+
+        assert exc_info.value.field == "position"
+
+    @pytest.mark.parametrize("invalid_id", [0, -1])
+    def test_a_non_positive_list_id_is_refused(self, invalid_id: int) -> None:
+        """A list id is a positive integer."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(task_list_id=invalid_id)
+
+        assert exc_info.value.field == "task_list_id"
+
+    @pytest.mark.parametrize("invalid_id", [0, -1])
+    def test_a_list_tasks_anchor_ids_are_still_positive(self, invalid_id: int) -> None:
+        """An optional anchor, when set, is still a real journal id."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(due_journal_id=invalid_id)
+
+        assert exc_info.value.field == "due_journal_id"
+
+    def test_a_bare_string_icon_is_refused(self) -> None:
+        """Surfaces parse into ``TaskIcon`` first, as for lists."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _task(icon="star")
+
+        assert exc_info.value.field == "icon"
+
+    def test_a_non_bool_flag_is_refused(self) -> None:
+        """The flag is on or off; a truthy value is not a flag."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _task(flagged=1)
+
+        assert exc_info.value.field == "flagged"
+
+    def test_replace_revalidates(self) -> None:
+        """A copy with a new shape passes the same rules as a new task."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            replace(_task(), due_date=date(2026, 12, 1))
+
+        assert exc_info.value.field == "due_date"
+
+    def test_fields_are_keyword_only(self) -> None:
+        """Positional construction would break silently as columns are added."""
+        with pytest.raises(TypeError):
+            Task(USER_ID, "text", CREATING_JOURNAL_ID, DUE_JOURNAL_ID)  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+class TestRequireAnchor:
+    """The narrowing used where an existing contract still needs a journal."""
+
+    def test_it_returns_each_anchor(self) -> None:
+        """A journal-only task always has both."""
+        task = _task()
+
+        assert task.require_anchor("creating") == CREATING_JOURNAL_ID
+        assert task.require_anchor("due") == DUE_JOURNAL_ID
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    def test_a_missing_anchor_raises_naming_the_task_and_anchor(
+        self, anchor: TaskJournalAnchor
+    ) -> None:
+        """An internal invariant breach, not a client refusal."""
+        task = _list_task(id=42)
+
+        with pytest.raises(TaskAnchorMissingError) as exc_info:
+            task.require_anchor(anchor)
+
+        assert exc_info.value.task_id == 42
+        assert exc_info.value.anchor == anchor
+        assert not isinstance(exc_info.value, TaskDomainError)

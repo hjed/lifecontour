@@ -7,11 +7,11 @@ piece of pure logic in the repository, so it is unit-tested here against a row
 stub; everything else needs a real database and lives in the integration suite.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
-from core_shared.models.tasks import Task, TaskStatus
+from core_shared.models.tasks import Task, TaskIcon, TaskStatus
 
 from app.core.tasks.adapters.sql.task_repository import _TASK_COLUMN_NAMES, _row_to_task
 
@@ -25,6 +25,11 @@ def _row(**overrides: object) -> SimpleNamespace:
         "status": "not_done",
         "creating_journal_id": 11,
         "due_journal_id": 12,
+        "task_list_id": None,
+        "position": None,
+        "due_date": None,
+        "flagged": False,
+        "icon": None,
         "created_at": datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
         "updated_at": datetime(2026, 8, 2, 10, 30, tzinfo=UTC),
     }
@@ -79,3 +84,46 @@ class TestRowToTask:
         )
 
         assert _row_to_task(declared_only).id == 7
+
+
+@pytest.mark.unit
+class TestRowToListTask:
+    """The list columns of migration 0146 reach the entity."""
+
+    def test_maps_a_list_tasks_columns(self) -> None:
+        """A list task with no journal maps its list, position, date, flag and icon."""
+        task = _row_to_task(
+            _row(
+                creating_journal_id=None,
+                due_journal_id=None,
+                task_list_id=5,
+                position=3,
+                due_date=date(2026, 12, 1),
+                flagged=True,
+                icon="star",
+            )
+        )
+
+        assert task.creating_journal_id is None
+        assert task.due_journal_id is None
+        assert task.task_list_id == 5
+        assert task.position == 3
+        assert task.due_date == date(2026, 12, 1)
+        assert task.flagged is True
+        assert task.icon is TaskIcon.STAR
+
+    def test_a_journal_only_row_maps_the_defaults(self) -> None:
+        """Existing rows read back on no list, unflagged and with no icon."""
+        task = _row_to_task(_row())
+
+        assert task.task_list_id is None
+        assert task.position is None
+        assert task.due_date is None
+        assert task.flagged is False
+        assert task.icon is None
+
+    def test_the_list_columns_are_declared(self) -> None:
+        """Every query selects the new columns through the one declared list."""
+        assert {"task_list_id", "position", "due_date", "flagged", "icon"} <= set(
+            _TASK_COLUMN_NAMES
+        )

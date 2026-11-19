@@ -381,7 +381,8 @@ class DailySummaryInvalidationService:
                 # deletion event is what speaks for it.
                 logger.debug("Task no longer exists", task_id=task_id)
                 return frozenset()
-            journal_ids = [task.due_journal_id]
+            # An undated list task has no journal day for the change to touch.
+            journal_ids = [] if task.due_journal_id is None else [task.due_journal_id]
 
         now = _utc_now()
         tz = await self.date_resolver.timezone_for(str(user_id))

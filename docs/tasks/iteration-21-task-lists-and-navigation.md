@@ -418,14 +418,74 @@ backend integration suite (all green). No unit tests added (no domain change) an
   decision), so the repository's membership writes must be owner-scoped on **both** the task and the
   list, and proven with a second user (Delivery Rule 9).
 
-#### Phase 10: Task entity and invariants
+#### Phase 10: Task entity and invariants ✅ DONE
 
 **Prerequisites:** Phase 9.
-**Estimated diff:** ~110 production → **~660 tracked** (×6)
+**Estimated diff:** ~110 production → **~660 tracked** (×6) · **Actual:** ~245 production → **~1,050
+tracked** (1,049 insertions, 48 deletions excluding this document: 243 production — entity 154,
+repository 61, the anchor sites 44 across five files, the internal error and exports 23; 781 tests;
+24 architecture docs). Production ran ×2.2 on the estimate: about half of it is the 16 mypy sites the
+optional anchors opened in five files, which the estimate did not price, plus docstrings carrying
+each narrowing's reason. Tracked landed at ×4.3 production, under the ×6 multiplier.
 
 **Acceptance Criteria:**
 
-- [ ] Optional anchors, list membership, due date xor due journal; journal-only rules unchanged.
+- [x] Optional anchors, list membership, due date xor due journal; journal-only rules unchanged.
+
+**Delivered:** `Task` (`core_shared/core_shared/models/tasks/entities.py`) is keyword-only and
+gains `task_list_id`, `position`, `due_date`, `flagged` (default false) and `icon`; both anchors
+are `int | None`. The entity enforces spec invariants 1–5 and the position rules, mirroring 0146:
+no list → both anchors (same field names as before); a due date only on a list and never beside a
+due journal, and a `date`, never a `datetime`; a position only on a list, never negative;
+`icon` a `TaskIcon`, `flagged` a `bool`. `Task.require_anchor(anchor)` narrows to a journal id or
+raises `TaskAnchorMissingError` (internal, a `RuntimeError`). `SqlTaskRepository` reads every new
+column; `save()` writes due date, flag and icon but never `task_list_id`/`position`, and refuses
+(`ValueError`) to insert a task on a list. No REST, MCP, event or UI contract changed.
+
+**Tests:** unit `tests/unit/tasks/test_task_entity.py` (each accepted list-task shape; each refused
+shape naming its field; journal-only defaults; `replace` re-validates; keyword-only;
+`require_anchor`), `test_task_row_mapping.py` (list and default columns),
+`tests/unit/journal/test_daily_summary_invalidation_service.py` (a task with no due journal makes
+nothing stale); integration `tests/integration/tasks/test_task_repository_list_columns_integration.py`
+(15: each seeded list-task shape through `find_by_id` and `find_by_id_for_update`; a status edit
+keeps list columns; flag/icon/due date written and cleared; journal-only flag and icon on insert
+and update; membership never written by `save`; list-task insert refused with nothing written;
+second-user read and update isolation), with `create_list_task` added to `task_seeding.py`
+(beside Phase 3's `seed_task_list`) for later phases. No existing test's assertions changed (only imports). No E2E:
+no UI. Gates run locally: ruff format/check and mypy (backend, core_shared), backend unit suite
+(5,401 passed), core_shared (868), the full backend integration suite (4,331 passed, 7 pre-existing
+skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **Narrow, don't widen, at the contract sites** (user decision). `TaskCreated`, REST
+  `TaskAttributes`, MCP `TaskMCP`, the read model's anchor refs and retargeting still promise both
+  anchors and narrow through `require_anchor`; only internal pass-throughs were widened
+  (`_refuse_anchor_role`, the read service's journal-id batching, summary invalidation skipping a
+  task with no due journal).
+- **The narrowing error is internal.** No list task can exist yet, so `TaskAnchorMissingError` is a
+  broken invariant (a 500), not a refusal with a REST code: a pinned 409 would encode behaviour
+  Phases 11 and 23 must reverse (the spec allows retargeting an undated list task).
+- **`position` may be `None` on an unplaced list task**, as `TaskList.position` is, so Phase 19 can
+  place it in the INSERT; the CHECK still guarantees every stored list task has one.
+- **`save()` never writes list membership**, so a stale position cannot undo a reorder; the scalars
+  it can write (due date, flag, icon) it does write, so nothing is silently dropped.
+
+**Notes for later phases:**
+- *Phase 11:* replace the `require_anchor` narrowings at `TaskReadService._require_ref`, the REST
+  `_to_resource`/`TaskAttributes`, MCP `TaskMCP`, and widen those schemas. Readers that type-check
+  but still assume both anchors: `api/tasks/schemas.py` `_read_attributes`,
+  `SqlTaskRepository.find_tasks_for_journal` (no join), `link_role.py`, `upcoming.py`,
+  `read_model.py`. Seed list tasks with `task_seeding.create_list_task`.
+- *Phase 13:* the entity does not check a due date against today; that is the date rules' service.
+- *Phase 14:* membership writes (`task_list_id`, `position`) are yours — `save()` ignores them.
+  `save()` still writes `due_date` from the entity's own view of its list, so a membership write
+  that can race an edit must lock the task row, or the stale edit fails a CHECK (a 500).
+- *Phase 16:* the delete guard's inner joins (`task_anchor_repository.py` `_FIND_ANCHORED`) still
+  hide one-anchor tasks.
+- *Phase 19:* replace `_insert`'s list-task refusal with the bottom-of-list insert, and the
+  `require_anchor` calls on the `TaskCreated` payload.
+- *Phase 23:* retargeting narrows on both anchors; a list task with no due (or creating) journal
+  needs its own path there.
 
 #### Phase 11: Readers cope with a task that has no journal
 

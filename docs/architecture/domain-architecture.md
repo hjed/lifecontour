@@ -167,12 +167,27 @@ the *creating* journal where it arose and the *due* journal where it matters.
   [Database Design → Task lists](database-design.md#task-lists-iter21-001)), so a renamed or removed key would leave
   unreadable rows
 - **Business Rules**:
-  - Both journal anchors are mandatory and can never be absent at any point in a task's life; the
-    entity validates their presence, and the schema enforces it (see
+  - A **journal-only task** (one with no list) has both journal anchors, which can never be absent
+    at any point in its life; the entity validates their presence, and the schema enforces it (see
     [Database Design](database-design.md))
+  - **A task may live on a list** (ITER21-001). `Task` carries `task_list_id`, `position`,
+    `due_date`, `flagged` and `icon`, and both anchors are optional — but the entity enforces the
+    spec's *Core invariants* 1–5, mirroring the CHECKs of migration `0146`: a list or both journals;
+    a due date only on a list and never beside a due journal; a position only on a list, never
+    negative. `due_date` is a `date`, never a `datetime`; `icon` a `TaskIcon`; `flagged` a `bool`.
+    Like `TaskList`, the entity is keyword-only and a new list task's `position` is `None` until the
+    repository places it. Whether a due date is today or later needs the user's timezone and is a
+    service rule
+  - **Narrowing to a journal-only task.** Several existing contracts still promise both anchors as
+    `int`s — the `TaskCreated` payload, the REST `TaskAttributes` and MCP `TaskMCP` schemas, the
+    read model's anchor refs and retargeting. They narrow through `Task.require_anchor(anchor)`,
+    which raises `TaskAnchorMissingError` — a `RuntimeError`, deliberately not a `DomainError`, since
+    reaching it means a list task got somewhere none can yet go (a broken invariant, surfacing as a
+    500), not a request a client could correct. The phase that teaches each surface about list
+    tasks replaces its narrowing
   - The creating and due journals may be the same journal
   - Validation is split by what each layer can know: the entity checks the owner, the text and the
-    presence of both anchors; whether the due journal exists, is owned by the acting user and is
+    anchors a task with no list requires; whether the due journal exists, is owned by the acting user and is
     future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
     enforced in the service layer where REST and MCP both inherit it
   - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
