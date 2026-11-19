@@ -634,17 +634,21 @@ component unchanged.
 
 #### Creating a task
 
-`CreateTaskDialog` (`components/journals/CreateTaskDialog.tsx`) is the
-specification's *Creating a task*, which is four sentences and four rules. It is
-triggered from the `Tasks` card header beside *Attach task*, as the primary
-action to that one's outline.
+`CreateTaskForm` (`components/tasks/CreateTaskForm.tsx`) is the
+specification's *Creating a task*, which is four sentences and four rules. It
+runs without a dialog, so more than one surface can host it. Today the host is
+`CreateTaskDialog` (`components/journals/CreateTaskDialog.tsx`), triggered from
+the `Tasks` card header beside *Attach task*, as the primary action to that
+one's outline. Next is the top bar's New dialog. The form's test ids keep their
+historical `create-task-dialog-*` names.
 
 - **The creating journal is not a field, because it is not a field on the wire
   either.** `POST /api/journals/{id}/tasks` takes it from the path, so the
-  dialog receives `journalId` as a prop and the rule — "the journal the user
-  creates the task from becomes its creating journal; it is never chosen
-  separately" — can only be checked on the **request**. Its tests assert the
-  URL, and that the dialog holds exactly three inputs, so a fourth fails.
+  form receives `journalId` as a prop from its host and the rule — "the journal
+  the user creates the task from becomes its creating journal; it is never
+  chosen separately" — can only be checked on the **request**. The dialog's
+  tests assert the URL, and that it holds exactly three inputs, so a fourth
+  fails.
 - **Offered even when the tasks listing has failed**, unlike the attach
   affordance beside it. Attach is withheld there because it must exclude tasks
   already linked here and reads that set from the listing; creating depends on
@@ -686,11 +690,23 @@ action to that one's outline.
 - **The field lookup is a `Map`.** `meta.field` is a string the *server* chose,
   and an object literal answers `['constructor']` through its prototype with
   something truthy — which `form.setError` would then take as a field name.
-- **Every close resets, and nothing closes over the write.** Both are the
-  retarget dialog's rules, adopted deliberately rather than rediscovered: Radix
-  fires `onOpenChange` for Escape, the overlay and the close button but not for
-  a controlled `open` set false from inside, which is how Cancel and a
-  successful create both work.
+- **Every opening starts empty, and nothing closes over the write.** Both are
+  the retarget dialog's rules, adopted deliberately rather than rediscovered.
+  - The dialog resets by remounting. Radix unmounts the content on close, and
+    the form is keyed per opening too, so a reopen during the exit animation is
+    fresh as well.
+  - The form tells its host it is busy through `onBusyChange` **before** the
+    request leaves. A report from an effect would come a render late, which
+    leaves time for an Escape to close over a write already sent. The dialog's
+    guard reads a ref for the same reason.
+  - A successful create closes without going through that guard, because its
+    `onSuccess` arrives before `onSettled` clears busy.
+  - Unmounting reports idle, so a host is never left locked by a form it no
+    longer shows.
+- **Focus on the text field is opt-in** (`autoFocusText`). A host that keeps
+  the form mounted while hidden, as the New dialog keeps its panels, must not
+  have it take focus. `CreateTaskForm.test.tsx` covers what a host relies on,
+  and `CreateTaskDialog.test.tsx` covers the rules through the dialog.
 
 #### Attaching a mention
 

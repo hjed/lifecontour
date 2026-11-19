@@ -1000,5 +1000,26 @@ describe('CreateTaskDialog', () => {
 
       expect(screen.getByTestId('create-task-text')).toHaveFocus();
     });
+
+    /**
+     * The busy lock lives in the dialog while the write it guards lives in the
+     * form, which each opening mounts afresh. A lock left set by the last
+     * opening would leave this one with no X and an Escape that does nothing.
+     */
+    it('lets the next opening close once a held write has settled', async () => {
+      const held = heldResponse();
+      const { harness, user } = renderDialog();
+      harness.createResponses.push(held.response);
+
+      await open(user);
+      await fillAndSubmit(user);
+      held.release();
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+      await open(user);
+      expect(screen.getByRole('button', { name: /close/i })).toBeVisible();
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
   });
 });
