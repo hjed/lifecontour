@@ -208,6 +208,21 @@ test.describe('New dialog — desktop', () => {
     // Focus moves to the field, so its message is announced.
     await expect(creatingJournalField(dialog)).toBeFocused();
 
+    // Escape in the open search closes its results, not the dialog and the
+    // draft with it.
+    await creatingJournalField(dialog).fill(creating.title);
+    await expect(creatingJournalField(dialog)).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    await page.keyboard.press('Escape');
+    await expect(creatingJournalField(dialog)).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    await expect(dialog).toBeVisible();
+    await expect(panel.getByTestId('create-task-text')).toHaveValue(text);
+
     await chooseCreatingJournal(dialog, creating);
     const journalId = await submitTaskFromDialog(page, dialog);
 
