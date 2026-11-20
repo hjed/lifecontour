@@ -1,5 +1,8 @@
 """Integration tests for the task list MCP tools, over the real MCP endpoint.
 
+Covers ``create_task_list``, ``get_task_list``, ``list_task_lists`` and
+``move_task_list``.
+
 The rules are proven against the services in
 ``tests/integration/tasks/test_task_list_service_integration.py``. These tests
 hold the MCP surface to its own promises: the typed results, the refusals an
@@ -355,3 +358,168 @@ class TestListTaskListsTool:
 
         assert '"isError":true' in response.text
         assert "archived" in response.text
+
+
+_COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"
+
+
+def _ids(result: dict[str, Any]) -> list[int]:
+    return [task_list["id"] for task_list in result["lists"]]
+
+
+class TestMoveTaskListTool:
+    async def test_moves_the_list_and_answers_the_new_order(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(clean_database, "A")).id
+        b = (await seed_task_list(clean_database, "B")).id
+        c = (await seed_task_list(clean_database, "C")).id
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "move_task_list", task_list_id=c, index=0)
+            listed = await _call(client, "list_task_lists")
+
+        assert _ids(result) == [c, a, b]
+        assert [each["position"] for each in result["lists"]] == [0, 1, 2]
+        assert _ids(listed) == [c, a, b]
+        assert await count(clean_database, _COUNT_OUTBOX, {}) == 0
+
+    async def test_an_index_past_the_end_moves_the_list_to_the_bottom(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(clean_database, "A")).id
+        b = (await seed_task_list(clean_database, "B")).id
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "move_task_list", task_list_id=a, index=50)
+
+        assert _ids(result) == [b, a]
+
+    async def test_a_negative_index_is_refused(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(clean_database, "A")).id
+        b = (await seed_task_list(clean_database, "B")).id
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client, "move_task_list", {"task_list_id": b, "index": -1}
+            )
+            listed = await _call(client, "list_task_lists")
+
+        assert '"isError":true' in response.text
+        assert "index" in response.text
+        assert _ids(listed) == [a, b]
+
+    async def test_an_archived_list_is_refused_naming_the_way_out(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(clean_database, "A")).id
+        archived = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "move_task_list", task_list_id=archived.id, index=0
+            )
+            listed = await _call(client, "list_task_lists", archived="all")
+
+        assert refused["error"] == "Task error"
+        assert "unarchive" in refused["message"].lower()
+        assert _ids(listed) == [a, archived.id]
+
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        await seed_task_list(clean_database, "Theirs first", user_id=OTHER_USER_ID)
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        mine = (await seed_task_list(clean_database, "Mine")).id
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "move_task_list", task_list_id=foreign.id, index=0
+            )
+            missing = await _refused(
+                client, "move_task_list", task_list_id=999_999, index=0
+            )
+            listed = await _call(client, "list_task_lists")
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert _ids(listed) == [mine]
+        their_order = await clean_database.execute(
+            text(
+                "SELECT position FROM task_lists WHERE user_id = :user_id "
+                "ORDER BY position, id"
+            ),
+            {"user_id": OTHER_USER_ID},
+        )
+        assert [row.position for row in their_order] == [0, 1]
+
+
+class TestIntegerArgumentsAreNotCoerced:
+    """fastmcp validates leniently, so without a guard ``true`` would arrive as
+    ``1`` and ``"0"`` as ``0`` — acting on a list, or a place, nobody named. The
+    REST surface refuses both; so must every task-list tool."""
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"index": True},
+            {"index": False},
+            {"index": "0"},
+            {"index": 1.0},
+            {"task_list_id": True, "index": 0},
+        ],
+        ids=repr,
+    )
+    async def test_a_move_with_a_non_integer_is_refused_and_moves_nothing(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+    ) -> None:
+        a = (await seed_task_list(clean_database, "A")).id
+        b = (await seed_task_list(clean_database, "B")).id
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client, "move_task_list", {"task_list_id": b, **arguments}
+            )
+            listed = await _call(client, "list_task_lists")
+
+        assert '"isError":true' in response.text
+        # The guard's own message: a refusal that only came from list 1 not
+        # existing would pass the line above without proving anything.
+        assert "must be a JSON integer" in response.text
+        assert _ids(listed) == [a, b]
+
+    @pytest.mark.parametrize(
+        ("tool", "arguments"),
+        [
+            ("get_task_list", {"task_list_id": True}),
+            ("get_task_list", {"task_list_id": "1"}),
+            ("update_task_list", {"task_list_id": True, "name": "Renamed"}),
+        ],
+        ids=repr,
+    )
+    async def test_a_non_integer_list_id_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        tool: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Groceries")
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, tool, arguments)
+            listed = await _call(client, "list_task_lists")
+
+        assert '"isError":true' in response.text
+        assert "must be a JSON integer" in response.text
+        assert _names(listed) == [seeded.name]

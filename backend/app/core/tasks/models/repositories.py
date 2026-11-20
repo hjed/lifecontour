@@ -24,6 +24,7 @@ both inherit them.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import datetime
 
 from core_shared.models.journals import BlockingTask
@@ -680,8 +681,9 @@ class TaskListRepository(ABC):
     **Positions.** The repository, not the caller, places a new list: at the
     bottom of *all* the owner's lists, archived ones included, so unarchiving a
     list returns it to its old place. Positions are not unique; lists order by
-    ``(position, id)``. Moving a list is a separate operation (reordering), so
-    saving a list never changes its position.
+    ``(position, id)``. Moving a list is a separate operation — reordering, through
+    :meth:`list_for_user_for_update` and :meth:`reposition` — so saving a list
+    never changes its position.
 
     Whether a list may be written while archived is a service-layer rule; the
     repository persists whatever state it is given.
@@ -694,7 +696,9 @@ class TaskListRepository(ABC):
         Args:
             task_list: The list to persist. A list without an ``id`` is inserted
                 at the bottom of its owner's lists, whatever ``position`` it
-                carries. One with an ``id`` has its name, icon and archived
+                carries, after taking the same locks a move takes — so a create
+                and a move run one after the other, and the bottom is computed
+                after the move has renumbered. One with an ``id`` has its name, icon and archived
                 state updated in place; its ``position`` and ``created_at`` are
                 left as stored.
 
@@ -744,6 +748,35 @@ class TaskListRepository(ABC):
 
         Returns:
             The matching lists, possibly empty.
+        """
+
+    @abstractmethod
+    async def list_for_user_for_update(self, user_id: str) -> list[TaskList]:
+        """Every one of the user's lists, locked against other writers.
+
+        For a move, which renumbers every list the owner has: the locks hold
+        each list's position until the unit of work commits, so two concurrent
+        moves — or a move and a create — run one after the other, and the lists
+        are read after the locks are held, so a list created by the writer
+        waited on is included. Archived lists are included. Callers must
+        already be inside their unit of work, or the locks are released at once.
+
+        Returns:
+            The lists in ``(position, id)`` order, possibly empty.
+        """
+
+    @abstractmethod
+    async def reposition(self, user_id: str, ordered_ids: Sequence[int]) -> None:
+        """Number the user's lists ``0, 1, 2…`` in the given order.
+
+        Only the user's own lists are written — an id belonging to someone else
+        is ignored — and a list already at its new position is not written at
+        all. ``updated_at`` is left as stored: a reorder is not an edit of the
+        list itself.
+
+        Args:
+            user_id: The acting user.
+            ordered_ids: Every list id of the user's, top to bottom.
         """
 
     @abstractmethod

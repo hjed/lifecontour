@@ -84,6 +84,24 @@ class TaskListNotFoundError(TaskDomainError):
         self.task_list_id = task_list_id
 
 
+class TaskListArchivedError(TaskDomainError):
+    """Exception raised when an archived task list is written to.
+
+    An archived list is read-only until it is unarchived. It exists and it is
+    the caller's, so this is neither a 404 nor a 400 but a 409: the request is
+    well formed, and what it conflicts with is the list's archived state. The
+    message names the way out, so an agent unarchives rather than retries.
+    """
+
+    def __init__(self, task_list_id: int):
+        super().__init__(
+            f"Task list with ID {task_list_id} is archived and read-only; "
+            "unarchive it to change it",
+            409,
+        )
+        self.task_list_id = task_list_id
+
+
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 

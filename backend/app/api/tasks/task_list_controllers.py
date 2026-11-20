@@ -1,12 +1,12 @@
-"""Task list API endpoints: create a list, read one, list yours, update one.
+"""Task list API endpoints: create, read, list, update and move task lists.
 
 Thin by design, like the task controller: every rule lives in
-``TaskListService`` (the ``@transactional`` writes and their events) and
-``TaskListReadService`` (owner-scoped reads). This module opens no transaction
-and catches no domain error — the registered ``DomainError`` handler renders
-``TaskListValidationError`` as 400 ``TASK_VALIDATION_ERROR`` with the field, and
-``TaskListNotFoundError`` as 404 ``TASK_LIST_NOT_FOUND``, so the MCP tools
-inherit the same answers.
+``TaskListService`` (the ``@transactional`` writes and their events; the move
+publishes none) and ``TaskListReadService`` (owner-scoped reads). This module
+opens no transaction and catches no domain error — the registered ``DomainError``
+handler renders ``TaskListValidationError`` as 400 ``TASK_VALIDATION_ERROR`` with
+the field, and ``TaskListNotFoundError`` as 404 ``TASK_LIST_NOT_FOUND``, so the
+MCP tools inherit the same answers.
 
 Another user's list is answered exactly as a missing one, and every
 ``{list_id}`` route is held to that by ``test_task_list_ownership.py``.
@@ -26,6 +26,7 @@ from app.api.common.schemas import get_request_base_url
 from app.api.tasks.task_list_schemas import (
     TaskListCollectionResponse,
     TaskListCreateRequest,
+    TaskListMoveRequest,
     TaskListResponse,
     TaskListUpdateRequest,
     to_task_list_resource,
@@ -161,4 +162,39 @@ async def update_task_list(
     )
     return TaskListResponse(
         data=to_task_list_resource(updated, get_request_base_url(request))
+    )
+
+
+@router.post("/task-lists/{list_id}/move")
+@inject
+async def move_task_list(
+    list_id: DatabaseIdPath,
+    move_request: TaskListMoveRequest,
+    request: Request,
+    task_list_service: FromDishka[TaskListService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskListCollectionResponse:
+    """Move one of your lists to a new place among your active lists.
+
+    ``index`` counts active lists only, 0 at the top; an index past the end
+    moves the list to the bottom. Archived lists keep their place among the
+    others. A move changes other lists' positions too, so the answer is your
+    active lists in their new order. Reordering records no history.
+
+    Raises:
+        400: An out-of-range id, a negative or non-integer index, an unknown
+             attribute, or another resource type.
+        404: No such list, or it is not yours — indistinguishably.
+        409: The list is archived, and read-only until unarchived.
+    """
+    task_lists = await task_list_service.move_task_list(
+        user_id=user.id,
+        task_list_id=list_id,
+        index=move_request.data.attributes.index,
+        transaction=connection,
+    )
+    base_url = get_request_base_url(request)
+    return TaskListCollectionResponse(
+        data=[to_task_list_resource(task_list, base_url) for task_list in task_lists]
     )

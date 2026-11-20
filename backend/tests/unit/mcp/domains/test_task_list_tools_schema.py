@@ -86,6 +86,15 @@ class TestTheInputsAreTyped:
 
         assert set(schema["properties"]) == {"task_list_id"}
 
+    async def test_move_takes_the_list_and_a_bounded_index(self) -> None:
+        schema = (await _tools())["move_task_list"].input_schema
+
+        assert set(schema["properties"]) == {"task_list_id", "index"}
+        assert sorted(schema["required"]) == ["index", "task_list_id"]
+        index = schema["properties"]["index"]
+        assert (index["type"], index["minimum"]) == ("integer", 0)
+        assert schema["properties"]["task_list_id"]["minimum"] == 1
+
 
 class TestTheResultShapeIsPublished:
     async def test_create_get_and_update_answer_with_one_list(self) -> None:
@@ -99,8 +108,12 @@ class TestTheResultShapeIsPublished:
                 icon.value for icon in TaskIcon
             ]
 
-    async def test_list_answers_with_lists(self) -> None:
-        schema = (await _tools())["list_task_lists"].output_schema
+    async def test_list_and_move_answer_with_lists(self) -> None:
+        tools = await _tools()
 
-        assert schema is not None
-        assert set(schema["properties"]) == {"lists"}
+        for name in ("list_task_lists", "move_task_list"):
+            schema = tools[name].output_schema
+            assert schema is not None, f"{name} publishes no outputSchema"
+            assert set(schema["properties"]) == {"lists"}
+            item = schema["properties"]["lists"]["items"]
+            assert set(item["properties"]) == _LIST_FIELDS

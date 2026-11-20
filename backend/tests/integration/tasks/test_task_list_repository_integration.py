@@ -78,7 +78,7 @@ async def save_list(
 async def set_position(
     conn: AsyncConnection, task_list: TaskList, position: int
 ) -> None:
-    """Move a list directly in the table; the repository has no reorder yet."""
+    """Move a list directly in the table, bypassing ``reposition``."""
     await conn.execute(
         text("UPDATE task_lists SET position = :position WHERE id = :list_id"),
         {"position": position, "list_id": task_list.id},
@@ -455,6 +455,195 @@ class TestDelete:
     ) -> None:
         with pytest.raises(TaskListNotFoundError):
             await repository.delete(999_999, USER_ID)
+
+
+_SELECT_CTID = text("SELECT ctid::text FROM task_lists WHERE id = :list_id")
+_SELECT_POSITION_AND_UPDATED_AT = text(
+    "SELECT position, updated_at FROM task_lists WHERE id = :list_id"
+)
+
+
+class TestListForUserForUpdate:
+    """Every one of the owner's lists, locked, for a move to renumber."""
+
+    async def test_returns_every_list_archived_included_in_stored_order(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        first = await save_list(repository, "First")
+        archived = await save_list(repository, "Archived", archived_at=ARCHIVED_EARLIER)
+        last = await save_list(repository, "Last")
+        # Stored order deliberately against id order: last, archived, first.
+        await set_position(async_connection, first, 2)
+        await set_position(async_connection, last, 0)
+
+        locked = await repository.list_for_user_for_update(USER_ID)
+
+        assert ids(locked) == [last.id, archived.id, first.id]
+        assert [each.is_archived for each in locked] == [False, True, False]
+
+    async def test_locks_the_rows_in_id_order(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Locked in ``id`` order, which no move changes, so two movers always
+        take the locks in the same order and cannot deadlock — and read in a
+        statement of its own afterwards, whose snapshot postdates the wait, so
+        it sees what the writer it waited on committed."""
+        await save_list(repository, "Groceries")
+
+        with recorded_statements(async_connection) as statements:
+            await repository.list_for_user_for_update(USER_ID)
+
+        lock, read = statements
+        assert "FOR NO KEY UPDATE" in lock
+        assert "ORDER BY id" in lock
+        assert "FOR NO KEY UPDATE" not in read
+
+    async def test_a_new_list_takes_the_same_locks_before_its_insert(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """So a create and a move serialize, and the bottom the insert computes
+        is the one the move left — not one read before it renumbered."""
+        await save_list(repository, "Groceries")
+
+        with recorded_statements(async_connection) as statements:
+            await save_list(repository, "Packing")
+
+        lock, insert = statements
+        assert "FOR NO KEY UPDATE" in lock
+        assert "ORDER BY id" in lock
+        assert insert.lstrip().startswith("INSERT INTO task_lists")
+
+    async def test_never_returns_another_users_lists(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        mine = await save_list(repository, "Mine")
+        await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+
+        assert ids(await repository.list_for_user_for_update(USER_ID)) == [mine.id]
+
+    async def test_a_user_with_no_lists_gets_none(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+
+        assert await repository.list_for_user_for_update(USER_ID) == []
+
+
+class TestReposition:
+    """Writing a new order: dense positions, the owner's rows only."""
+
+    async def test_numbers_the_lists_densely_in_the_given_order(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        a = await save_list(repository, "A")
+        b = await save_list(repository, "B", archived_at=ARCHIVED_EARLIER)
+        c = await save_list(repository, "C")
+        assert a.id is not None and b.id is not None and c.id is not None
+
+        await repository.reposition(USER_ID, [c.id, a.id, b.id])
+
+        lists = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ALL)
+        assert ids(lists) == [c.id, a.id, b.id]
+        assert [each.position for each in lists] == [0, 1, 2]
+
+    async def test_heals_tied_positions(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        a = await save_list(repository, "A")
+        b = await save_list(repository, "B")
+        assert a.id is not None and b.id is not None
+        await set_position(async_connection, b, 0)
+
+        await repository.reposition(USER_ID, [b.id, a.id])
+
+        lists = await repository.list_for_user(USER_ID)
+        assert [(each.id, each.position) for each in lists] == [(b.id, 0), (a.id, 1)]
+
+    async def test_leaves_updated_at_alone(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """A reorder is not an edit of the list, so it is not "last changed"."""
+        a = await save_list(repository, "A")
+        b = await save_list(repository, "B")
+        assert a.id is not None and b.id is not None
+        result = await async_connection.execute(_BACKDATE, {"list_id": a.id})
+        _, backdated_updated_at = result.one()
+
+        await repository.reposition(USER_ID, [b.id, a.id])
+
+        row = await async_connection.execute(
+            _SELECT_POSITION_AND_UPDATED_AT, {"list_id": a.id}
+        )
+        position, updated_at = row.one()
+        assert position == 1
+        assert updated_at == backdated_updated_at
+
+    async def test_writes_nothing_to_a_list_already_in_place(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Every UPDATE writes a new row version (a new ``ctid``) even when it
+        changes nothing, so an unchanged ``ctid`` proves the row was skipped."""
+        a = await save_list(repository, "A")
+        b = await save_list(repository, "B")
+        c = await save_list(repository, "C")
+        assert a.id is not None and b.id is not None and c.id is not None
+        before = {
+            each.id: (
+                await async_connection.execute(_SELECT_CTID, {"list_id": each.id})
+            ).scalar_one()
+            for each in (a, b, c)
+        }
+
+        await repository.reposition(USER_ID, [a.id, c.id, b.id])
+
+        after = {
+            list_id: (
+                await async_connection.execute(_SELECT_CTID, {"list_id": list_id})
+            ).scalar_one()
+            for list_id in before
+        }
+        assert after[a.id] == before[a.id]
+        assert after[b.id] != before[b.id]
+        assert after[c.id] != before[c.id]
+
+    async def test_never_moves_another_users_list(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Even handed a foreign id, the write is scoped to the acting owner."""
+        await save_list(repository, "Their first", user_id=OTHER_USER_ID)
+        theirs = await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        mine = await save_list(repository, "Mine")
+        assert theirs.id is not None and mine.id is not None
+
+        await repository.reposition(USER_ID, [theirs.id, mine.id])
+
+        theirs_row = await async_connection.execute(_SELECT_ROW, {"list_id": theirs.id})
+        assert theirs_row.one().position == 1
+        mine_row = await async_connection.execute(_SELECT_ROW, {"list_id": mine.id})
+        assert mine_row.one().position == 1
+
+    async def test_an_empty_order_writes_nothing(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        mine = await save_list(repository, "Mine")
+
+        await repository.reposition(USER_ID, [])
+
+        assert ids(await repository.list_for_user(USER_ID)) == [mine.id]
 
 
 class TestDependencyInjection:

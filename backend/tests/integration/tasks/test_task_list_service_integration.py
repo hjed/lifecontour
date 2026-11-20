@@ -1,16 +1,20 @@
 """Integration tests for creating and reading task lists, against real PostgreSQL.
 
-``TaskListService`` owns the list writes — create and the field update — and
-holds each to two promises: the list and its event are written together, and a
-refused write leaves neither. The update adds a third: a patch that changes
-nothing writes nothing and announces nothing. ``TaskListReadService`` owns the reads and
-holds them to owner scoping: another user's list is reported exactly as a
+``TaskListService`` owns the list writes — create, the field update and the
+move. Create and the update are held to two promises: the list and its event are
+written together, and a refused write leaves neither. The update adds a third: a
+patch that changes nothing writes nothing and announces nothing. The move
+publishes no event at all, and concurrent moves serialize on the owner's lists.
+``TaskListReadService`` owns the reads and holds them to owner scoping: another user's list is reported exactly as a
 missing one, and never listed.
 
 Owner scoping is asserted against a second owner's real rows, for the reason the
 repository tests give: an absent id cannot catch a missing ``user_id`` filter.
 """
 
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,18 +23,22 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     MAX_TASK_LIST_NAME_LENGTH,
     TaskIcon,
+    TaskList,
+    TaskListArchivedError,
     TaskListArchiveFilter,
     TaskListNotFoundError,
     TaskListValidationError,
 )
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.unit_of_work import unit_of_work
+from tests.integration.concurrency_helpers import overlap
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
@@ -360,6 +368,336 @@ class TestUpdateTaskList:
         assert str(refused.value) == f"Task list with ID {foreign.id} not found"
         assert await _row(async_connection, foreign.id) == before
         assert await task_list_events(async_connection) == []
+
+
+_COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"
+_STORED_ORDER = text(
+    "SELECT id, position FROM task_lists WHERE user_id = :user_id ORDER BY position, id"
+)
+
+
+async def stored_order(conn: AsyncConnection, user_id: str = USER_ID) -> list[int]:
+    rows = await conn.execute(_STORED_ORDER, {"user_id": user_id})
+    return [row.id for row in rows]
+
+
+async def stored_positions(
+    conn: AsyncConnection, user_id: str = USER_ID
+) -> list[tuple[int, int]]:
+    rows = await conn.execute(_STORED_ORDER, {"user_id": user_id})
+    return [(row.id, row.position) for row in rows]
+
+
+def list_ids(task_lists: list[TaskList]) -> list[int | None]:
+    return [task_list.id for task_list in task_lists]
+
+
+async def seed_lists(conn: AsyncConnection, *names: str) -> list[int]:
+    seeded = [await seed_task_list(conn, name) for name in names]
+    return [each.id for each in seeded if each.id is not None]
+
+
+class TestMoveTaskList:
+    @pytest.mark.asyncio
+    async def test_moves_the_list_and_answers_the_active_lists_in_their_new_order(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        a, b, c = await seed_lists(async_connection, "A", "B", "C")
+
+        moved = await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=a, index=2, transaction=async_connection
+        )
+
+        assert list_ids(moved) == [b, c, a]
+        assert [each.position for each in moved] == [0, 1, 2]
+        assert await stored_positions(async_connection) == [(b, 0), (c, 1), (a, 2)]
+
+    @pytest.mark.asyncio
+    async def test_archived_lists_keep_their_place_and_are_not_answered(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(async_connection, "A")).id
+        archived = (
+            await seed_task_list(async_connection, "Gone", archived_at=ARCHIVED_AT)
+        ).id
+        b, c = await seed_lists(async_connection, "B", "C")
+
+        moved = await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=c, index=1, transaction=async_connection
+        )
+
+        # Index 1 counts active lists only: C lands before B, after the archived.
+        assert list_ids(moved) == [a, c, b]
+        assert await stored_order(async_connection) == [a, archived, c, b]
+
+    @pytest.mark.asyncio
+    async def test_an_index_past_the_end_moves_the_list_to_the_bottom(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        a, b, c = await seed_lists(async_connection, "A", "B", "C")
+
+        moved = await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=a, index=1_000, transaction=async_connection
+        )
+
+        assert list_ids(moved) == [b, c, a]
+
+    @pytest.mark.asyncio
+    async def test_moving_a_list_to_its_own_place_changes_nothing(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        a, b, c = await seed_lists(async_connection, "A", "B", "C")
+
+        moved = await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=b, index=1, transaction=async_connection
+        )
+
+        assert list_ids(moved) == [a, b, c]
+        assert await stored_positions(async_connection) == [(a, 0), (b, 1), (c, 2)]
+
+    @pytest.mark.asyncio
+    async def test_a_move_publishes_no_event(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        """The spec keeps reordering out of history, so nothing is announced."""
+        a, _, _ = await seed_lists(async_connection, "A", "B", "C")
+
+        await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=a, index=2, transaction=async_connection
+        )
+
+        assert await count(async_connection, _COUNT_OUTBOX, {}) == 0
+
+    @pytest.mark.asyncio
+    async def test_another_users_lists_are_not_renumbered(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        theirs_first = await seed_task_list(
+            async_connection, "Theirs 1", user_id=OTHER_USER_ID
+        )
+        theirs_second = await seed_task_list(
+            async_connection, "Theirs 2", user_id=OTHER_USER_ID
+        )
+        a, _ = await seed_lists(async_connection, "A", "B")
+        before = await stored_positions(async_connection, OTHER_USER_ID)
+
+        await make_service(async_connection).move_task_list(
+            user_id=USER_ID, task_list_id=a, index=1, transaction=async_connection
+        )
+
+        assert before == [(theirs_first.id, 0), (theirs_second.id, 1)]
+        assert await stored_positions(async_connection, OTHER_USER_ID) == before
+
+    @pytest.mark.asyncio
+    async def test_a_missing_list_is_not_found(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        await seed_lists(async_connection, "A")
+
+        with pytest.raises(TaskListNotFoundError) as missing:
+            await make_service(async_connection).move_task_list(
+                user_id=USER_ID,
+                task_list_id=999_999,
+                index=0,
+                transaction=async_connection,
+            )
+
+        assert missing.value.task_list_id == 999_999
+
+    @pytest.mark.asyncio
+    async def test_another_users_list_is_not_found_and_not_moved(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        await seed_task_list(async_connection, "Theirs 1", user_id=OTHER_USER_ID)
+        theirs = await seed_task_list(
+            async_connection, "Theirs 2", user_id=OTHER_USER_ID
+        )
+        assert theirs.id is not None
+        mine = await seed_lists(async_connection, "A", "B")
+        their_positions = await stored_positions(async_connection, OTHER_USER_ID)
+        my_positions = await stored_positions(async_connection)
+
+        with pytest.raises(TaskListNotFoundError) as refused:
+            await make_service(async_connection).move_task_list(
+                user_id=USER_ID,
+                task_list_id=theirs.id,
+                index=0,
+                transaction=async_connection,
+            )
+
+        assert str(refused.value) == f"Task list with ID {theirs.id} not found"
+        assert await stored_positions(async_connection, OTHER_USER_ID) == (
+            their_positions
+        )
+        assert await stored_order(async_connection) == mine
+        assert await stored_positions(async_connection) == my_positions
+
+    @pytest.mark.asyncio
+    async def test_an_archived_list_cannot_be_moved(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(async_connection, "A")).id
+        archived = await seed_task_list(
+            async_connection, "Gone", archived_at=ARCHIVED_AT
+        )
+        assert archived.id is not None
+        before = await stored_positions(async_connection)
+
+        with pytest.raises(TaskListArchivedError) as refused:
+            await make_service(async_connection).move_task_list(
+                user_id=USER_ID,
+                task_list_id=archived.id,
+                index=0,
+                transaction=async_connection,
+            )
+
+        assert refused.value.task_list_id == archived.id
+        assert await stored_positions(async_connection) == before
+        assert before[0] == (a, 0)
+
+
+_RACE_LISTS = text(
+    "SELECT id FROM task_lists WHERE user_id = :user_id ORDER BY position, id"
+)
+
+
+@asynccontextmanager
+async def committed_lists(
+    async_engine: AsyncEngine, *names: str
+) -> AsyncIterator[tuple[str, list[int]]]:
+    """Commit lists for a one-off owner, and delete them afterwards.
+
+    Two transactions can only overlap on rows both can see, which the savepoint
+    fixture's rows are not.
+    """
+    owner = f"reorder-race-{uuid.uuid4()}"
+    async with async_engine.begin() as setup:
+        repo = SqlTaskListRepository(setup)
+        saved = [await repo.save(TaskList(user_id=owner, name=n)) for n in names]
+    try:
+        yield owner, [each.id for each in saved if each.id is not None]
+    finally:
+        async with async_engine.begin() as cleanup:
+            await cleanup.execute(
+                text("DELETE FROM task_lists WHERE user_id = :user_id"),
+                {"user_id": owner},
+            )
+
+
+@pytest.mark.integration
+class TestConcurrentMoves:
+    @pytest.mark.asyncio
+    async def test_a_move_during_another_waits_for_it_and_builds_on_its_order(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Without the lock the second move reads the order from before the
+        first and writes it back, undoing the first move."""
+        async with committed_lists(async_engine, "A", "B", "C") as (owner, ids):
+            a, b, c = ids
+
+            async def move(list_id: int, index: int) -> Any:
+                async def run(connection: AsyncConnection) -> None:
+                    await make_service(connection).move_task_list(
+                        user_id=owner,
+                        task_list_id=list_id,
+                        index=index,
+                        transaction=connection,
+                    )
+
+                return run
+
+            # First: A to the bottom → B, C, A. Second: C to the top → C, B, A.
+            await overlap(async_engine, await move(a, 2), await move(c, 0))
+
+            async with async_engine.connect() as check:
+                rows = await check.execute(_RACE_LISTS, {"user_id": owner})
+                assert [row.id for row in rows] == [c, b, a]
+
+
+@pytest.mark.integration
+class TestMovesAndCreatesSerialize:
+    """A create racing a move must still land at the bottom, and the move must
+    still put its list at the index asked for.
+
+    Both start from tied positions — which concurrent creates have always been
+    allowed to leave — because a move then lowers the highest position: from
+    ``A=0, B=0, C=0`` it writes ``B=0, C=1, A=2``. A create that read the old
+    highest (0) would insert ``D=1`` beside ``C``, and a move that read the
+    lists before the create committed would renumber around ``D``; either way
+    the order comes out ``B, C, D, A`` instead of ``B, C, A, D``.
+    """
+
+    @staticmethod
+    async def _tie_positions(async_engine: AsyncEngine, owner: str) -> None:
+        async with async_engine.begin() as setup:
+            await setup.execute(
+                text("UPDATE task_lists SET position = 0 WHERE user_id = :user_id"),
+                {"user_id": owner},
+            )
+
+    @staticmethod
+    def _move(owner: str, list_id: int, index: int) -> Any:
+        async def run(connection: AsyncConnection) -> None:
+            await make_service(connection).move_task_list(
+                user_id=owner,
+                task_list_id=list_id,
+                index=index,
+                transaction=connection,
+            )
+
+        return run
+
+    @staticmethod
+    def _create(owner: str, name: str) -> Any:
+        async def run(connection: AsyncConnection) -> None:
+            async with unit_of_work(connection):
+                await SqlTaskListRepository(connection).save(
+                    TaskList(user_id=owner, name=name)
+                )
+
+        return run
+
+    @staticmethod
+    async def _order(async_engine: AsyncEngine, owner: str) -> list[str]:
+        async with async_engine.connect() as check:
+            rows = await check.execute(
+                text(
+                    "SELECT name FROM task_lists WHERE user_id = :user_id "
+                    "ORDER BY position, id"
+                ),
+                {"user_id": owner},
+            )
+            return [row.name for row in rows]
+
+    @pytest.mark.asyncio
+    async def test_a_create_during_a_move_waits_and_lands_after_the_moved_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        async with committed_lists(async_engine, "A", "B", "C") as (owner, ids):
+            await self._tie_positions(async_engine, owner)
+
+            await overlap(
+                async_engine,
+                self._move(owner, ids[0], 2),
+                self._create(owner, "D"),
+            )
+
+            assert await self._order(async_engine, owner) == ["B", "C", "A", "D"]
+
+    @pytest.mark.asyncio
+    async def test_a_move_during_a_create_waits_and_counts_the_new_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        async with committed_lists(async_engine, "A", "B", "C") as (owner, ids):
+            await self._tie_positions(async_engine, owner)
+
+            await overlap(
+                async_engine,
+                self._create(owner, "D"),
+                self._move(owner, ids[0], 2),
+            )
+
+            assert await self._order(async_engine, owner) == ["B", "C", "A", "D"]
 
 
 class TestGetTaskList:

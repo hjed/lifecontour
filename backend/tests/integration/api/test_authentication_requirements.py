@@ -135,31 +135,42 @@ class TestAuthenticationRequirements:
         assert response.status_code != 401
 
     @pytest.mark.parametrize(
-        ("method", "path"),
+        ("method", "path", "body"),
         [
-            ("GET", "/api/task-lists"),
-            ("GET", "/api/task-lists/1"),
-            ("POST", "/api/task-lists"),
-            ("PATCH", "/api/task-lists/1"),
+            ("GET", "/api/task-lists", None),
+            ("GET", "/api/task-lists/1", None),
+            (
+                "POST",
+                "/api/task-lists",
+                {"data": {"type": "task-lists", "attributes": {"name": "Packing"}}},
+            ),
+            (
+                "PATCH",
+                "/api/task-lists/1",
+                {
+                    "data": {
+                        "type": "task-lists",
+                        "id": "1",
+                        "attributes": {"name": "Packing"},
+                    }
+                },
+            ),
+            (
+                "POST",
+                "/api/task-lists/1/move",
+                {"data": {"type": "task-list-moves", "attributes": {"index": 0}}},
+            ),
         ],
     )
-    def test_task_list_endpoints_require_auth(self, client, method, path):
-        """Listing, reading, creating and updating task lists require a session."""
-        # The body is valid for its method, so a 401 cannot be a 400 in disguise.
-        bodies = {
-            "POST": {"data": {"type": "task-lists", "attributes": {"name": "Packing"}}},
-            "PATCH": {
-                "data": {
-                    "type": "task-lists",
-                    "id": "1",
-                    "attributes": {"name": "Packing"},
-                }
-            },
-        }
+    def test_task_list_endpoints_require_auth(self, client, method, path, body):
+        """Listing, reading, creating, updating and moving task lists need a session.
+
+        Each body is valid for its method, so a 401 cannot be a 400 in disguise.
+        """
         response = client.request(
             method,
             path,
-            json=bodies.get(method),
+            json=body,
             headers={"Host": "localhost"},
         )
         assert response.status_code == 401

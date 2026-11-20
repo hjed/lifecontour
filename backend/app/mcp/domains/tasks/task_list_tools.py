@@ -1,10 +1,10 @@
-"""Task list MCP tools: create a list, update one, read one, list the user's lists.
+"""Task list MCP tools: create, update, read, list and move the user's lists.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
-no domain error. ``create_task_list`` and ``update_task_list`` call the
-``@transactional`` ``TaskListService``, which commits the list and its event
-together; the reads
-go through ``TaskListReadService``, which can change nothing. A refused name
+no domain error. The writes (``create_task_list``, ``update_task_list`` and
+``move_task_list``) call the ``@transactional`` ``TaskListService``, which
+commits each list and its event together (a move publishes none); the reads go
+through ``TaskListReadService``, which can change nothing. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
 found", exactly as a missing one.
 """
@@ -28,7 +28,7 @@ from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
 from app.mcp.domains.tasks.task_list_schemas import TaskListMCP, TaskListsMCP
 from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
-from app.mcp.shared.arguments import JsonBool
+from app.mcp.shared.arguments import JsonBool, JsonIntOnly
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -99,6 +99,7 @@ async def update_task_list(
     task_list_id: Annotated[
         int,
         Field(ge=1, le=INT32_MAX, description="The id of the task list to change."),
+        JsonIntOnly,
     ],
     name: Annotated[
         str | None,
@@ -162,6 +163,7 @@ async def get_task_list(
     task_list_id: Annotated[
         int,
         Field(ge=1, le=INT32_MAX, description="The id of the task list to read."),
+        JsonIntOnly,
     ],
     task_list_read_service: TaskListReadService = mcp_depends(
         get_task_list_read_service
@@ -207,5 +209,47 @@ async def list_task_lists(
     user_id = await get_current_user_id()
     task_lists = await task_list_read_service.list_task_lists(
         user_id=user_id, archived=archived
+    )
+    return TaskListsMCP(lists=[_task_list_fields(each) for each in task_lists])
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("move_task_list", "task list")
+async def move_task_list(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to move."),
+        JsonIntOnly,
+    ],
+    index: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=INT32_MAX,
+            description=(
+                "Its new place among the user's active lists, 0 at the top — "
+                "the order list_task_lists returns. An index past the end moves "
+                "it to the bottom."
+            ),
+        ),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_list_service: TaskListService = mcp_depends(get_task_list_service),
+) -> TaskListsMCP:
+    """
+    Move one of the user's task lists to a new place in their order, and answer
+    with all their active lists in the new order.
+
+    Archived lists are not counted by the index and keep their place; an
+    archived list cannot be moved until it is unarchived. Reordering is not
+    recorded in history.
+    """
+    user_id = await get_current_user_id()
+    task_lists = await task_list_service.move_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        index=index,
+        transaction=db_connection,
     )
     return TaskListsMCP(lists=[_task_list_fields(each) for each in task_lists])

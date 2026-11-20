@@ -18,6 +18,7 @@ from core_shared.exceptions import DomainError
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
+    TaskListArchivedError,
     TaskNotFoundError,
     TaskStatus,
     TaskStatusTransitionError,
@@ -97,6 +98,16 @@ class TestTaskErrorsReachTheClient:
         )
 
         assert "retarget" in response["message"].lower()
+
+    async def test_an_archived_list_is_a_task_error_not_a_missing_list(
+        self,
+    ) -> None:
+        """The list is there; telling a model "not found" would send it looking."""
+        response = await _render(TaskListArchivedError(12))
+
+        assert response["error"] == "Task error"
+        assert "archived" in response["message"]
+        assert "unarchive" in response["message"].lower()
 
 
 class TestTheBranchIsNotTooBroad:

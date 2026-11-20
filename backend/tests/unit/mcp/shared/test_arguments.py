@@ -12,7 +12,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from pydantic import Field
 
-from app.mcp.shared.arguments import JsonBool
+from app.mcp.shared.arguments import JsonBool, JsonIntOnly
 
 
 @pytest.fixture
@@ -67,4 +67,60 @@ async def test_the_schema_still_advertises_a_plain_boolean(
         "type": "boolean",
         "default": False,
         "description": "Confirms it.",
+    }
+
+
+@pytest.fixture
+def int_server() -> FastMCP[None]:
+    mcp: FastMCP[None] = FastMCP("int-arguments")
+
+    @mcp.tool
+    async def place(
+        index: Annotated[int, Field(ge=0, le=10, description="Where."), JsonIntOnly],
+    ) -> str:
+        return repr(index)
+
+    return mcp
+
+
+@pytest.mark.parametrize("value", [True, False, "1", 1.0, 1.5, None], ids=repr)
+async def test_a_non_integer_is_refused_rather_than_coerced(
+    int_server: FastMCP[None], value: Any
+) -> None:
+    """``True`` would otherwise arrive as ``1`` and ``"1"`` as ``1`` — the REST
+    surface refuses both, and so must the tool."""
+    async with Client(int_server) as client:
+        result = await client.call_tool("place", {"index": value}, raise_on_error=False)
+
+    assert result.is_error is True
+
+
+@pytest.mark.parametrize("value", [0, 7])
+async def test_a_json_integer_is_accepted_as_itself(
+    int_server: FastMCP[None], value: int
+) -> None:
+    async with Client(int_server) as client:
+        result = await client.call_tool("place", {"index": value})
+
+    assert result.data == repr(value)
+
+
+async def test_the_field_bounds_still_apply(int_server: FastMCP[None]) -> None:
+    async with Client(int_server) as client:
+        result = await client.call_tool("place", {"index": 11}, raise_on_error=False)
+
+    assert result.is_error is True
+
+
+async def test_the_schema_still_advertises_a_bounded_integer(
+    int_server: FastMCP[None],
+) -> None:
+    async with Client(int_server) as client:
+        (tool,) = await client.list_tools()
+
+    assert tool.input_schema["properties"]["index"] == {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10,
+        "description": "Where.",
     }

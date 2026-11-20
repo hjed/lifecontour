@@ -17,6 +17,7 @@ from core_shared.models.tasks import (
     TaskDueDateInPastError,
     TaskDueJournalNotFutureError,
     TaskJournalIsAnchorError,
+    TaskListArchivedError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -198,3 +199,21 @@ class TestTheUnacknowledgedReopenIsTellableApart:
 
         assert "7" in (detail or "")
         assert "acknowledge" in (detail or "").lower()
+
+
+@pytest.mark.unit
+class TestAnArchivedListRefusalIsTellableApart:
+    """An archived list exists and is the caller's; what it refuses is writing.
+
+    So it is neither a 404 nor a 400 but a 409 of its own, which lets a surface
+    say *"unarchive it first"* rather than *"not found"*.
+    """
+
+    def test_it_has_its_own_code_and_a_conflict_status(self) -> None:
+        response = create_domain_error_response(TaskListArchivedError(12))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_ARCHIVED"
+        assert error.status == "409"
+        assert "12" in (error.detail or "")
+        assert "unarchive" in (error.detail or "").lower()

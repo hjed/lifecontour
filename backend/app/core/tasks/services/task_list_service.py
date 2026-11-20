@@ -6,13 +6,22 @@ back together. Reads live in :class:`TaskListReadService`, which takes no event
 publisher and opens no unit of work — the same split ``TaskService`` and
 ``TaskReadService`` make.
 
-Creation and the field update (rename, set or clear the icon) exist so far.
-Reorder and archive extend this class, and every write reads with
-``find_by_id_for_update`` inside its unit of work before writing.
+Creation, the field update (rename, set or clear the icon) and reordering exist
+so far; archive extends this class. Every write locks what it reads inside its
+unit of work before writing: the field update its one list with
+``find_by_id_for_update``, a move all the owner's lists. Reordering is the one
+write that publishes no event: the specification keeps it out of history.
 """
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskIcon, TaskList, TaskListNotFoundError
+from core_shared.models.tasks import (
+    TaskIcon,
+    TaskList,
+    TaskListArchivedError,
+    TaskListArchiveFilter,
+    TaskListNotFoundError,
+    reorder_task_lists,
+)
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.models.repositories import TaskListRepository
@@ -27,7 +36,10 @@ from app.infrastructure.unit_of_work import transactional
 
 
 class TaskListService:
-    """Creates and changes task lists for their owner, announcing each write."""
+    """Creates, changes and reorders task lists for their owner.
+
+    Every write but a move announces itself.
+    """
 
     def __init__(
         self,
@@ -128,6 +140,47 @@ class TaskListService:
             )
         )
         return saved
+
+    @transactional
+    async def move_task_list(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        index: int,
+        transaction: AsyncConnection,
+    ) -> list[TaskList]:
+        """Move one of the owner's lists to a new place among their active lists.
+
+        Every one of the owner's lists is locked first, so a concurrent move
+        waits and then builds on this one's order rather than writing back the
+        order it read before. ``index`` counts active lists only, the view a
+        person reorders; archived lists keep their place relative to their
+        neighbours, and an index past the end moves the list to the bottom (see
+        :func:`reorder_task_lists`). Every list is then renumbered densely.
+
+        Publishes no event: reordering is not part of a list's history.
+
+        Returns:
+            The owner's active lists in their new order.
+
+        Raises:
+            TaskListNotFoundError: No such list, or it belongs to someone else.
+            TaskListArchivedError: The list is archived, and so read-only.
+        """
+        locked = await self.task_list_repo.list_for_user_for_update(user_id)
+        moved = next((each for each in locked if each.id == task_list_id), None)
+        if moved is None:
+            raise TaskListNotFoundError(task_list_id)
+        if moved.is_archived:
+            raise TaskListArchivedError(task_list_id)
+
+        await self.task_list_repo.reposition(
+            user_id, reorder_task_lists(locked, task_list_id, index)
+        )
+        return await self.task_list_repo.list_for_user(
+            user_id, TaskListArchiveFilter.ACTIVE
+        )
 
 
 def _wire(value: object) -> str | None:

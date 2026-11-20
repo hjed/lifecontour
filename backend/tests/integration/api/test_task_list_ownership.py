@@ -70,6 +70,12 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
             }
         },
     ),
+    # A valid index, so the refusal can only come from the ownership check.
+    CrossUserRequest(
+        "POST",
+        LIST_ROUTE + "/move",
+        body={"data": {"type": "task-list-moves", "attributes": {"index": 0}}},
+    ),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.
