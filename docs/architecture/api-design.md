@@ -1245,6 +1245,7 @@ is `task-lists`.
 | `GET /api/task-lists/{list_id}` | Read one list: `name`, `icon`, `position`, `archived`, `archived_at`, timestamps | 200; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `PATCH /api/task-lists/{list_id}` | Rename a list, set or clear its icon, or both. Body type `task-lists` with `id` matching the path; attributes: optional `name`, optional `icon` (`null` clears it) | 200 with the list; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), a body id that disagrees with the path (`TASK_VALIDATION_ERROR`, `meta.field` = `id`), a null name, an icon outside the fixed set, an unknown attribute, a body naming no change or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `GET /api/task-lists` | Your lists by archived state. Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
+| `POST /api/task-lists/{list_id}/move` | Move a list to a new place among your **active** lists. Body type `task-list-moves`, attributes: `index` (0 at the top; past the end → the bottom). Answers your active lists in their new order | 200 (a `task-lists` collection); 400 a negative, non-integer or out-of-range index, an unknown attribute or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND`; 409 `TASK_LIST_ARCHIVED` for an archived list |
 
 Conventions this surface pins down:
 
@@ -1267,14 +1268,28 @@ Conventions this surface pins down:
 - **An update that changes nothing records nothing**: values the list already
   has write no row and publish no event. A body naming no attribute at all is
   refused, so a client never reads a 200 as an edit that was applied.
+- **Reordering is a move, not an attribute edit.** `index` counts only the
+  active lists — the view a person reorders — so it is not the stored
+  `position`, which orders every list, archived ones included. Archived lists
+  keep their place relative to their neighbours (so unarchiving returns a list
+  near where it was), every list is then renumbered `0..N-1`, and the answer is
+  the whole active order, because one move changes several positions. All the
+  owner's lists are locked for the move — and by a create before it computes
+  the bottom — so concurrent moves and creates serialize.
+- **An archived list is read-only**: writing to one answers 409
+  `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message naming
+  unarchiving as the way out. Moving is the first write that checks it.
 - Creating a list publishes `TaskListCreated`; changing its name or icon
   publishes one `TaskListUpdated` per write, carrying `changed_fields` as
   `{field: [old, new]}` for exactly the fields that moved. Both record
-  `source=ui` (REST) or `mcp`.
+  `source=ui` (REST) or `mcp`. **Moving publishes nothing**: reordering is not
+  part of a list's history, and it leaves `updated_at` as it was.
 - The matching MCP tools are `create_task_list`, `update_task_list`,
-  `get_task_list` and `list_task_lists`, documented in their docstrings and
-  parameter schemas. `update_task_list` clears the icon with `clear_icon=true`,
-  because a tool cannot tell a null argument from an omitted one.
+  `get_task_list`, `list_task_lists` and `move_task_list`, documented in their
+  docstrings and parameter schemas. `update_task_list` clears the icon with
+  `clear_icon=true`, because a tool cannot tell a null argument from an omitted
+  one. Their integer arguments (`task_list_id`, `index`) take only JSON
+  integers, as REST does: `true` or `"1"` is refused rather than read as `1`.
 
 ## Contact Important Date Endpoints
 

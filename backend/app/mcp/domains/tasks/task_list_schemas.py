@@ -29,6 +29,7 @@ class TaskListMCP(BaseModel):
 
 
 class TaskListsMCP(BaseModel):
-    """The user's task lists for one archived filter, in their order."""
+    """The user's task lists in their order: one archived filter's, or the
+    active lists after a move."""
 
     lists: list[TaskListMCP]

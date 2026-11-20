@@ -5,6 +5,7 @@ Follows :mod:`.task_repository`'s conventions: every query selects
 every statement filters on ``user_id`` so another user's list is never reached.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from core_shared.models.tasks import (
@@ -34,7 +35,9 @@ _TASK_LIST_COLUMNS = ", ".join(
 
 # The new list's position is computed in the INSERT itself, over every list the
 # owner has — archived ones included, so an unarchived list returns to its old
-# place. Two concurrent inserts can take the same position; ``(position, id)``
+# place. ``save`` takes ``_LOCK_OWNER_LISTS`` first, so the INSERT's snapshot is
+# taken after any move holding them has committed. Two first-ever lists can
+# still share position 0 (there is nothing to lock yet); ``(position, id)``
 # keeps the order total, which is why positions are not unique.
 _INSERT = text(
     f"""
@@ -90,6 +93,53 @@ _FIND_FOR_UPDATE = text(
 )
 
 _IN_USER_ORDER = "ORDER BY position, id"
+
+# Locks every list the owner has against other position writers: a move, and
+# the create that appends below them. The rows are locked in ``id`` order —
+# which no move changes — rather than in ``(position, id)``, so two of them
+# always take the locks in the same order and cannot deadlock.
+#
+# It is a statement of its own, run before the positions are read, because
+# under READ COMMITTED a statement that waited on a lock still reads with the
+# snapshot it started with: it would miss the positions the holder committed,
+# and a list the holder created. The read that follows takes a fresh snapshot.
+_LOCK_OWNER_LISTS = text(
+    """
+    SELECT id
+    FROM task_lists
+    WHERE user_id = :user_id
+    ORDER BY id
+    FOR NO KEY UPDATE
+    """
+)
+
+# Every list the owner has, archived ones included — a move renumbers them too,
+# keeping each where it was relative to its neighbours.
+_LIST_ALL = text(
+    f"""
+    SELECT {_TASK_LIST_COLUMNS}
+    FROM task_lists
+    WHERE user_id = :user_id
+    {_IN_USER_ORDER}
+    """
+)
+
+# Positions from each id's place in the given order, 0 at the top. A row
+# already in place is skipped (``IS DISTINCT FROM``), so a no-op move writes
+# nothing. ``updated_at`` is left alone: a reorder is not an edit of the list.
+_REPOSITION = text(
+    """
+    UPDATE task_lists AS lists
+    SET position = ordered.new_position
+    FROM (
+        SELECT id, (ordinality - 1)::integer AS new_position
+        FROM unnest(CAST(:ordered_ids AS integer[])) WITH ORDINALITY AS t(id)
+    ) AS ordered
+    WHERE lists.id = ordered.id
+      AND lists.user_id = :user_id
+      AND lists.position IS DISTINCT FROM ordered.new_position
+    """
+)
 
 _LIST_QUERIES = {
     TaskListArchiveFilter.ACTIVE: text(
@@ -153,8 +203,13 @@ class SqlTaskListRepository(TaskListRepository):
         self.conn = conn
 
     async def save(self, task_list: TaskList) -> TaskList:
-        """Insert a new list at the bottom, or update an existing one."""
+        """Insert a new list at the bottom, or update an existing one.
+
+        An insert first locks the owner's lists, as a move does, so the bottom
+        it computes is the one a concurrent move leaves behind.
+        """
         if task_list.id is None:
+            await self._lock_owner_lists(task_list.user_id)
             result = await self.conn.execute(_INSERT, _write_params(task_list))
             return _row_to_task_list(result.one())
 
@@ -187,6 +242,21 @@ class SqlTaskListRepository(TaskListRepository):
         result = await self.conn.execute(_LIST_QUERIES[archived], {"user_id": user_id})
         return [_row_to_task_list(row) for row in result.fetchall()]
 
+    async def list_for_user_for_update(self, user_id: str) -> list[TaskList]:
+        """Every one of the user's lists, archived included, locked against
+        other writers, in ``(position, id)`` order."""
+        await self._lock_owner_lists(user_id)
+        result = await self.conn.execute(_LIST_ALL, {"user_id": user_id})
+        return [_row_to_task_list(row) for row in result.fetchall()]
+
+    async def reposition(self, user_id: str, ordered_ids: Sequence[int]) -> None:
+        """Number the user's lists densely in the given order."""
+        if not ordered_ids:
+            return
+        await self.conn.execute(
+            _REPOSITION, {"user_id": user_id, "ordered_ids": list(ordered_ids)}
+        )
+
     async def delete(self, task_list_id: int, user_id: str) -> None:
         """Hard-delete one of the user's lists."""
         result = await self.conn.execute(
@@ -194,6 +264,9 @@ class SqlTaskListRepository(TaskListRepository):
         )
         if result.rowcount == 0:
             raise TaskListNotFoundError(task_list_id)
+
+    async def _lock_owner_lists(self, user_id: str) -> None:
+        await self.conn.execute(_LOCK_OWNER_LISTS, {"user_id": user_id})
 
     async def _find_one(
         self, query: TextClause, task_list_id: int, user_id: str

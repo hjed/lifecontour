@@ -370,15 +370,101 @@ icon, both in one event, no-op cases, refused names, missing and foreign lists),
 - *ITER21-002:* rename and icon actions send `PATCH /api/task-lists/{id}` with `data.id`; send
   `"icon": null` to clear.
 
-#### Phase 5: Reorder lists
+#### Phase 5: Reorder lists ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 3.
-**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together ·
+re-estimated ~1,150 after Phase 3 · **Actual:** ~360 production → **~1,270 tracked** (1,267
+insertions, 30 deletions excluding this document: 362 production — service 53, repository adapter 53
+and port 31, MCP tool and schemas 46, REST controller and schemas 78, ordering rule 74, archived error
+and exports 22, code map and registration 5; 889 tests; 16 architecture docs). Tracked lines ran ×1.4
+on the original estimate and ×1.1 on the re-estimate; production ran ×3.6, docstrings again plus a
+pure ordering rule the estimate did not price.
 
 **Acceptance Criteria:**
 
-- [ ] Position among the user's lists; no event.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Position among the user's lists; no event.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `reorder_task_lists` (`core_shared/core_shared/models/tasks/task_list_order.py`), the
+pure placement rule; `TaskListArchivedError` (409, `TASK_LIST_ARCHIVED` in `app/api/error_handlers.py`;
+MCP "Task error"). `TaskListRepository.list_for_user_for_update` (every list, archived included,
+`FOR NO KEY UPDATE` locked in `id` order by one statement, then read in `(position, id)` order by a
+second whose snapshot postdates the wait; a new list's `save` takes the same locks before its
+`INSERT`) and
+`reposition` (dense `0..N-1` from an id order, owner-scoped, skipping rows already in place, never
+touching `updated_at`). `TaskListService.move_task_list` (`@transactional`, no event, answers the
+active lists in their new order). REST `POST /api/task-lists/{list_id}/move`, body type
+`task-list-moves` with `index` (all levels `extra="forbid"`, `index` strict int 0..INT32_MAX), 200
+with a `task-lists` collection. MCP `move_task_list` (`IDEMPOTENT_WRITE`, answers `TaskListsMCP`);
+the `JsonIntOnly` marker (`app/mcp/shared/arguments.py`) on every task-list tool's `task_list_id` and
+on `index`, so `true`, `"1"` and `1.0` are refused as REST refuses them.
+Server instructions say lists can be reordered; `api-design.md` *Task List Endpoints* documents the
+route, the error and the conventions.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_order.py` (19: up/down/top/last/own place,
+clamp, only active list, input vs stored order, ties by id, archived lists keeping their place at the
+top, middle and bottom and beside an own-place, upward or downward move, programming-error guards), `tests/unit/api/test_task_error_mapping.py` and
+`tests/unit/mcp/shared/test_task_error_handling.py` (archived refusal on both surfaces),
+`tests/unit/mcp/domains/test_task_list_tools_schema.py` (move input bounds; output shape),
+`tests/unit/mcp/shared/test_arguments.py` (`JsonIntOnly`: non-integers refused, bounds and the
+published `minimum`/`maximum` kept);
+integration `test_task_list_repository_integration.py` (11: stored order incl. archived, lock
+then fresh read, an insert locking first, second-user isolation on both methods, dense numbering, tie healing, `updated_at` kept,
+unchanged rows not rewritten — proven by `ctid`), `test_task_list_service_integration.py` (9 + a
+concurrency test: two overlapping moves via `concurrency_helpers.overlap` serialize and the second
+builds on the first; verified to fail without the lock — and two more, from tied positions, where a
+create and a move overlap in each order and the result is still the move's index with the new list
+at the bottom; both verified to fail without the create's lock), `tests/integration/api/test_task_list_endpoints.py`
+(17: order, archived left out, clamp, no event, 409, foreign = missing, 8 malformed bodies, bad ids),
+the move row in `test_task_list_ownership.py`, its 401 case in `test_authentication_requirements.py`,
+and `tests/integration/mcp/test_task_list_tools_mcp.py` (5: order, clamp, negative index, archived,
+foreign = missing and unmoved; plus 8 cases of a boolean, string or float id or index refused with
+the guard's own message and nothing changed). No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **The index counts active lists only** — the view the overview and sidebar show. Archived lists keep
+  their place relative to their neighbours, so unarchiving returns a list near where it was; every list
+  is then renumbered densely, which also heals ties left by concurrent creates.
+- **Placement:** the index is clamped to the last active place (**not refused**, so a stale client
+  view still lands sensibly); a move to its own place changes nothing; a move up lands directly above
+  its new lower neighbour, a move down directly below its new upper one, so no archived list is hopped
+  over. (The first cut always inserted "before the list at the index", which let an own-place move hop
+  an archived neighbour — found in review, pinned by unit tests.)
+- **Archived lists cannot be moved**: `TaskListArchivedError`, 409 `TASK_LIST_ARCHIVED`, whose message
+  names unarchiving as the way out. No API can archive yet; tests seed archived lists.
+- **A dedicated action route, `index` not `position`**: a move rewrites other lists' positions and
+  publishes nothing, so it is not an attribute edit (and stays clear of Phase 4's `PATCH`); stored
+  `position` orders all lists, archived included, so it need not equal the active index.
+- **The answer is the whole active order**, because one move changes several positions.
+- **No event, no `updated_at` bump**; a row already at its dense position is not written, so a
+  no-op move on densely numbered lists writes nothing.
+- **Every one of the owner's lists is locked**, in `id` order (which no move changes) so two movers
+  cannot deadlock, **and a create takes the same locks** before its `INSERT`. Found in PR review:
+  renumbering can lower the highest position (ties `A=0, B=0, C=0` become `B=0, C=1, A=2`), so a
+  create that read the old highest, or a move that read the lists before a create committed, left
+  the new list in the middle and the moved one off its index. The lock is a statement of its own and
+  the positions are read afterwards, because under READ COMMITTED a statement that waited on a lock
+  keeps the snapshot it started with. Only two first-ever lists can still tie (there is nothing to
+  lock); `(position, id)` keeps the order total and the next move renumbers.
+- **MCP integers are guarded like REST's** (found in PR review): fastmcp validates leniently, so
+  `index=true` arrived as `1` and moved a list. `JsonIntOnly` refuses non-integers on the task-list
+  tools. Other domains' MCP integer arguments (journal, contact and task ids) still coerce; they are
+  outside this iteration's list surface and want a sweep of their own.
+
+**Notes for later phases:**
+- *Phase 4* merged first; this phase was rebased onto it. The two sit side by side in
+  `TaskListService`, the controllers, the tools module and the ownership table without overlapping
+  behaviour; Phase 4's field update locks only its one row, so it cannot deadlock with a move.
+- *Phase 6:* reuse `TaskListArchivedError` for rename, icon and task writes on an archived list;
+  unarchiving needs no position work — the list kept its place.
+- *Phase 25 (reorder tasks):* the same shape fits — a pure placement rule, lock-all in `id` order
+  (in its own statement, taken by creates on the list too), dense reposition, no event.
+- *Every later phase adding a task-list MCP tool:* put `JsonIntOnly` after the bounds of each integer
+  argument.
+- *ITER21-002 Phase 9:* send the target index in the active view and replace the cached
+  `GET /api/task-lists` data with the response, rather than re-fetching.
 
 #### Phase 6: Archive and unarchive
 

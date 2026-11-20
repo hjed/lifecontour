@@ -10,6 +10,7 @@ from .exceptions import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
+    TaskListArchivedError,
     TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
@@ -42,6 +43,7 @@ from .read_model import (
 )
 from .task_icon import TaskIcon
 from .task_list import MAX_TASK_LIST_NAME_LENGTH, TaskList, TaskListArchiveFilter
+from .task_list_order import reorder_task_lists
 from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
@@ -77,6 +79,7 @@ __all__ = [
     "TaskLinkRole",
     "TaskList",
     "TaskListArchiveFilter",
+    "TaskListArchivedError",
     "TaskListNotFoundError",
     "TaskListValidationError",
     "TaskNotFoundError",
@@ -96,6 +99,7 @@ __all__ = [
     "is_list_task_overdue",
     "is_status_transition_allowed",
     "list_task_due",
+    "reorder_task_lists",
     "select_upcoming_tasks",
     "upcoming_window",
 ]

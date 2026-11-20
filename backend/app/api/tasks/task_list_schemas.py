@@ -16,6 +16,7 @@ from typing import Literal, Self
 from core_shared.models.tasks import TaskIcon, TaskList
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.api.common.identifiers import INT32_MAX
 from app.api.common.schemas import (
     JsonApiCollectionResponse,
     JsonApiCreateRequest,
@@ -28,6 +29,7 @@ from app.shared.patch import UNSET
 
 TASK_LIST_RESOURCE_TYPE: Literal["task-lists"] = "task-lists"
 RESOURCE_TYPE_DESC = "Resource type"
+TASK_LIST_MOVE_TYPE: Literal["task-list-moves"] = "task-list-moves"
 
 
 class TaskListAttributes(BaseModel):
@@ -173,6 +175,45 @@ class TaskListUpdateData(BaseModel):
 
 class TaskListUpdateRequest(JsonApiUpdateRequest[TaskListUpdateData]):
     """Request model for updating a task list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TaskListMoveAttributes(BaseModel):
+    """Where to move a list: its new place among your **active** lists.
+
+    Called ``index`` rather than ``position`` because the two differ: a list's
+    stored ``position`` orders all your lists, archived ones included, while
+    this counts only the lists you can see and reorder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(
+        ...,
+        ge=0,
+        le=INT32_MAX,
+        strict=True,
+        description=(
+            "New place among your active lists, 0 at the top. An index past the "
+            "end moves the list to the bottom."
+        ),
+    )
+
+
+class TaskListMoveData(BaseModel):
+    """Data for moving a task list; the resource type is pinned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["task-list-moves"] = Field(
+        default=TASK_LIST_MOVE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: TaskListMoveAttributes = Field(..., description="Where to move it")
+
+
+class TaskListMoveRequest(JsonApiCreateRequest[TaskListMoveData]):
+    """Request model for moving a task list among your lists."""
 
     model_config = ConfigDict(extra="forbid")
 

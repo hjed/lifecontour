@@ -1,4 +1,4 @@
-"""Integration tests for the task list endpoints: create, read, list, update.
+"""Integration tests for the task list endpoints: create, read, list, update, move.
 
 The rules themselves (bottom placement, owner scoping, the event) are proven
 against ``TaskListService`` and ``TaskListReadService`` in
@@ -496,6 +496,175 @@ class TestListTaskListsEndpoint:
 
         assert "Theirs" not in _names(response.json())
         assert "Theirs archived" not in _names(response.json())
+
+
+_COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"
+
+
+def _move(index: object) -> dict[str, object]:
+    return {"data": {"type": "task-list-moves", "attributes": {"index": index}}}
+
+
+def _ids(response_json: dict[str, object]) -> list[int]:
+    data = response_json["data"]
+    assert isinstance(data, list)
+    return [int(resource["id"]) for resource in data]
+
+
+async def _seed_ids(connection: AsyncConnection, *names: str) -> list[int]:
+    seeded = [await seed_task_list(connection, name) for name in names]
+    return [each.id for each in seeded if each.id is not None]
+
+
+class TestMoveTaskListEndpoint:
+    async def test_moves_the_list_and_answers_the_active_lists_in_order(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        a, b, c = await _seed_ids(async_connection, "A", "B", "C")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{a}/move", json=_move(2)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert _ids(body) == [b, c, a]
+        assert [r["attributes"]["position"] for r in body["data"]] == [0, 1, 2]
+        assert all(r["type"] == "task-lists" for r in body["data"])
+        assert body["data"][2]["links"]["self"].endswith(f"/api/task-lists/{a}")
+
+        listing = await authenticated_client.get("/api/task-lists")
+        assert _ids(listing.json()) == [b, c, a]
+
+    async def test_archived_lists_are_left_out_of_the_answer(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        a = (await seed_task_list(async_connection, "A")).id
+        await seed_task_list(async_connection, "Old trip", archived_at=ARCHIVED_AT)
+        (b,) = await _seed_ids(async_connection, "B")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{b}/move", json=_move(0)
+        )
+
+        assert _ids(response.json()) == [b, a]
+        assert "Old trip" not in _names(response.json())
+
+    async def test_an_index_past_the_end_moves_the_list_to_the_bottom(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        a, b = await _seed_ids(async_connection, "A", "B")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{a}/move", json=_move(INT32_MAX)
+        )
+
+        assert response.status_code == 200
+        assert _ids(response.json()) == [b, a]
+
+    async def test_a_move_records_no_event(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        a, _ = await _seed_ids(async_connection, "A", "B")
+
+        await authenticated_client.post(f"/api/task-lists/{a}/move", json=_move(1))
+
+        assert await count(async_connection, _COUNT_OUTBOX, {}) == 0
+
+    async def test_an_archived_list_is_refused_as_a_conflict(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        (a,) = await _seed_ids(async_connection, "A")
+        archived = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{archived.id}/move", json=_move(0)
+        )
+
+        assert response.status_code == 409
+        error = _error(response.json())
+        assert error["code"] == "TASK_LIST_ARCHIVED"
+        assert "unarchive" in str(error["detail"]).lower()
+        listing = await authenticated_client.get("/api/task-lists?archived=all")
+        assert _ids(listing.json()) == [a, archived.id]
+
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        await _seed_ids(async_connection, "A")
+
+        foreign_response = await authenticated_client.post(
+            f"/api/task-lists/{foreign.id}/move", json=_move(0)
+        )
+        missing_response = await authenticated_client.post(
+            f"/api/task-lists/{INT32_MAX}/move", json=_move(0)
+        )
+
+        assert foreign_response.status_code == missing_response.status_code == 404
+        foreign_error = _error(foreign_response.json())
+        assert foreign_error["code"] == "TASK_LIST_NOT_FOUND"
+        assert foreign_error["detail"] == f"Task list with ID {foreign.id} not found"
+        assert _error(missing_response.json())["code"] == "TASK_LIST_NOT_FOUND"
+        assert "Theirs" not in foreign_response.text
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(_move(-1), id="negative-index"),
+            pytest.param(_move(INT32_MAX + 1), id="index-out-of-range"),
+            pytest.param(_move("first"), id="non-integer-index"),
+            pytest.param(_move(1.5), id="fractional-index"),
+            pytest.param(
+                {"data": {"type": "task-list-moves", "attributes": {}}},
+                id="missing-index",
+            ),
+            pytest.param(
+                {
+                    "data": {
+                        "type": "task-list-moves",
+                        "attributes": {"index": 0, "position": 0},
+                    }
+                },
+                id="unknown-attribute",
+            ),
+            pytest.param(
+                {"data": {"type": "task-lists", "attributes": {"index": 0}}},
+                id="another-resource-type",
+            ),
+            pytest.param({**_move(0), "x": 1}, id="unknown-envelope-member"),
+        ],
+    )
+    async def test_a_malformed_body_is_refused_and_nothing_moves(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        body: dict[str, object],
+    ) -> None:
+        a, b = await _seed_ids(async_connection, "A", "B")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{a}/move", json=body
+        )
+
+        assert response.status_code == 400
+        assert response.json()["errors"][0]["code"] == "VALIDATION_ERROR"
+        listing = await authenticated_client.get("/api/task-lists")
+        assert _ids(listing.json()) == [a, b]
+
+    @pytest.mark.parametrize("list_id", ["0", str(INT32_MAX + 1), "abc"])
+    async def test_an_out_of_range_id_is_a_bad_request(
+        self, authenticated_client: AsyncClient, list_id: str
+    ) -> None:
+        response = await authenticated_client.post(
+            f"/api/task-lists/{list_id}/move", json=_move(0)
+        )
+
+        assert response.status_code == 400
 
 
 class TestPublishedSchema:
