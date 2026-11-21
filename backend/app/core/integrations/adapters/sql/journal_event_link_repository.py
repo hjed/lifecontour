@@ -335,6 +335,19 @@ class SqlJournalEventLinkRepository:
             {"key": f"cancelled_recurrence:{calendar_id}:{recurring_event_id}"},
         )
 
+    async def lock_journal(self, journal_id: int) -> None:
+        """Hold the journal row until commit, so no task can link to it meanwhile.
+
+        A task link's foreign key takes a key-share lock on the journal row,
+        which this blocks, so a link committed after the tidier has counted the
+        journal's list-task links waits — and then fails on the deleted row —
+        instead of being detached by a delete that decided it had none.
+        """
+        await self.conn.execute(
+            text("SELECT 1 FROM journals WHERE id = :journal_id FOR UPDATE"),
+            {"journal_id": journal_id},
+        )
+
     async def has_other_live_links(self, journal_id: int, calendar_id: UUID) -> bool:
         """Whether a calendar *other than this one* still holds the event.
 

@@ -116,3 +116,25 @@ class TestAListTaskKeepsAContinuation:
 
         assert deleted is True
         journal_service.delete_journal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_journal_is_locked_before_its_list_task_links_are_counted() -> None:
+    """Counted unlocked, a link committed before the delete would be detached by
+    a delete that had decided there were none to protect."""
+    link_repo = _unprotected_link_repo()
+    journal_service = AsyncMock()
+    journal_service.preview_delete.return_value = JournalDeletePreview(
+        list_tasks_losing_link=0
+    )
+    calls = MagicMock()
+    calls.attach_mock(link_repo.lock_journal, "lock")
+    calls.attach_mock(journal_service.preview_delete, "count")
+    calls.attach_mock(journal_service.delete_journal, "delete")
+    tidier = CancelledRecurrenceTidier(AsyncMock(), link_repo, journal_service)
+
+    await tidier._delete_unless_protected(
+        _continuation(), source=Provenance.GOOGLE_CALENDAR, changed_by="google"
+    )
+
+    assert [c[0] for c in calls.mock_calls] == ["lock", "count", "delete"]
