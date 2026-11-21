@@ -1,12 +1,13 @@
-"""Task list API endpoints: create, read, list, update and move task lists.
+"""Task list API endpoints: create, read, list, update, move, archive and unarchive.
 
 Thin by design, like the task controller: every rule lives in
 ``TaskListService`` (the ``@transactional`` writes and their events; the move
 publishes none) and ``TaskListReadService`` (owner-scoped reads). This module
 opens no transaction and catches no domain error — the registered ``DomainError``
 handler renders ``TaskListValidationError`` as 400 ``TASK_VALIDATION_ERROR`` with
-the field, and ``TaskListNotFoundError`` as 404 ``TASK_LIST_NOT_FOUND``, so the
-MCP tools inherit the same answers.
+the field, ``TaskListNotFoundError`` as 404 ``TASK_LIST_NOT_FOUND`` and
+``TaskListArchivedError`` as 409 ``TASK_LIST_ARCHIVED``, so the MCP tools inherit
+the same answers.
 
 Another user's list is answered exactly as a missing one, and every
 ``{list_id}`` route is held to that by ``test_task_list_ownership.py``.
@@ -142,6 +143,7 @@ async def update_task_list(
              unknown attribute, a body naming no change, another resource type,
              or a body id that disagrees with the path.
         404: No such list, or it is not yours — indistinguishably.
+        409: The list is archived, and read-only until unarchived.
     """
     # A transport concern — which of two places names the resource — so it
     # lives here, as on the task PATCH, and has no MCP counterpart.
@@ -197,4 +199,65 @@ async def move_task_list(
     base_url = get_request_base_url(request)
     return TaskListCollectionResponse(
         data=[to_task_list_resource(task_list, base_url) for task_list in task_lists]
+    )
+
+
+@router.post("/task-lists/{list_id}/archive")
+@inject
+async def archive_task_list(
+    list_id: DatabaseIdPath,
+    request: Request,
+    task_list_service: FromDishka[TaskListService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskListResponse:
+    """Archive one of your lists: read-only until unarchived.
+
+    Takes no body. Its tasks are left exactly as they are, open ones included,
+    and the list keeps its place for when it is unarchived. Archiving a list
+    that is already archived answers it unchanged and records nothing.
+
+    Raises:
+        400: An out-of-range id.
+        404: No such list, or it is not yours — indistinguishably.
+    """
+    archived = await task_list_service.archive_task_list(
+        user_id=user.id,
+        task_list_id=list_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return TaskListResponse(
+        data=to_task_list_resource(archived, get_request_base_url(request))
+    )
+
+
+@router.post("/task-lists/{list_id}/unarchive")
+@inject
+async def unarchive_task_list(
+    list_id: DatabaseIdPath,
+    request: Request,
+    task_list_service: FromDishka[TaskListService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskListResponse:
+    """Unarchive one of your lists, back in its old place and writable again.
+
+    Takes no body. Unarchiving a list that is not archived answers it unchanged
+    and records nothing.
+
+    Raises:
+        400: An out-of-range id.
+        404: No such list, or it is not yours — indistinguishably.
+    """
+    unarchived = await task_list_service.unarchive_task_list(
+        user_id=user.id,
+        task_list_id=list_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return TaskListResponse(
+        data=to_task_list_resource(unarchived, get_request_base_url(request))
     )

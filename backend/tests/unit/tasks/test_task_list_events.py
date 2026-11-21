@@ -173,3 +173,20 @@ class TestTaskListUpdated:
             "name": ["Old", "New"],
             "icon": [TaskIcon.LUGGAGE.value, None],
         }
+
+    def test_archiving_and_unarchiving_carry_archived_at_as_iso_or_null(
+        self,
+    ) -> None:
+        """Archive state travels as ``archived_at``: ``(null, ts)`` archives,
+        ``(ts, null)`` unarchives — plain strings the history projection reads."""
+        archived_at = "2026-11-21T09:30:00+00:00"
+
+        archived = make_updated({"archived_at": (None, archived_at)})
+        unarchived = make_updated({"archived_at": (archived_at, None)})
+
+        assert json.loads(json.dumps(archived.event_data))["changed_fields"] == {
+            "archived_at": [None, archived_at]
+        }
+        assert json.loads(json.dumps(unarchived.event_data))["changed_fields"] == {
+            "archived_at": [archived_at, None]
+        }

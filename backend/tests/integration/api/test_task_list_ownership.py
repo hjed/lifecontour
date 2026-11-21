@@ -76,6 +76,10 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         LIST_ROUTE + "/move",
         body={"data": {"type": "task-list-moves", "attributes": {"index": 0}}},
     ),
+    # The foreign list is active, so an unarchive that skipped the ownership
+    # check would answer 200 as a no-op rather than 404: still caught.
+    CrossUserRequest("POST", LIST_ROUTE + "/archive"),
+    CrossUserRequest("POST", LIST_ROUTE + "/unarchive"),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.

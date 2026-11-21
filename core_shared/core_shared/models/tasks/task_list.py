@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from .exceptions import TaskListValidationError
+from .exceptions import TaskListArchivedError, TaskListValidationError
 from .task_icon import TaskIcon
 
 # Mirrors the ``task_lists.name`` column bound.
@@ -29,8 +29,9 @@ class TaskList:
 
     A list has a name, an optional icon from the fixed set, a position among the
     user's lists, and an archived state. Only what the entity alone can know is
-    validated here; whether the acting user owns the list, and whether it may be
-    written while archived, are service-layer rules.
+    validated here, plus the read-only rule of an archived list
+    (:meth:`ensure_writable`); whether the acting user owns the list is a
+    service-layer rule.
 
     Fields are keyword-only: later phases add the associated journal and the
     template columns, and positional construction would break silently then.
@@ -70,6 +71,22 @@ class TaskList:
     def is_archived(self) -> bool:
         """Whether the list is archived (and so read-only until unarchived)."""
         return self.archived_at is not None
+
+    def ensure_writable(self) -> None:
+        """Refuse any write to an archived list, until it is unarchived.
+
+        The one definition of "archived means read-only" that every list write
+        consults — and that task writes on an archived list will consult too.
+        Unarchiving is the only write it does not guard, being the way out.
+
+        Raises:
+            TaskListArchivedError: The list is archived.
+        """
+        if self.is_archived:
+            # Only a persisted list can be archived through the service, so an
+            # id is always there when this refuses.
+            assert self.id is not None, "An archived list must be persisted"
+            raise TaskListArchivedError(self.id)
 
     def _validate_user_id(self) -> None:
         if not self.user_id or not self.user_id.strip():

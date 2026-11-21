@@ -1,7 +1,7 @@
 """Integration tests for creating and reading task lists, against real PostgreSQL.
 
-``TaskListService`` owns the list writes — create, the field update and the
-move. Create and the update are held to two promises: the list and its event are
+``TaskListService`` owns the list writes — create, the field update, the
+move, archive and unarchive. Create and the update are held to two promises: the list and its event are
 written together, and a refused write leaves neither. The update adds a third: a
 patch that changes nothing writes nothing and announces nothing. The move
 publishes no event at all, and concurrent moves serialize on the owner's lists.
@@ -12,6 +12,7 @@ Owner scoping is asserted against a second owner's real rows, for the reason the
 repository tests give: an absent id cannot catch a missing ``user_id`` filter.
 """
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -43,8 +44,11 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
+    create_list_task,
     make_task_container,
     seed_task_list,
+    stored_status,
+    task_events,
     task_list_events,
 )
 
@@ -369,6 +373,53 @@ class TestUpdateTaskList:
         assert await _row(async_connection, foreign.id) == before
         assert await task_list_events(async_connection) == []
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "patch",
+        [
+            TaskListPatch(name="Renamed"),
+            TaskListPatch(icon=TaskIcon.SHOPPING_CART),
+            TaskListPatch(icon=None),
+            TaskListPatch(name="Packing"),
+        ],
+        ids=["rename", "set-icon", "clear-icon", "no-op"],
+    )
+    async def test_an_archived_list_refuses_every_update_and_writes_nothing(
+        self, async_connection: AsyncConnection, patch: TaskListPatch
+    ) -> None:
+        """Even a patch that would change nothing is refused: an archived list
+        is read-only, not merely unchanged."""
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE, archived_at=ARCHIVED_AT
+        )
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        with pytest.raises(TaskListArchivedError) as refused:
+            await self._update(async_connection, seeded.id, patch)
+
+        assert refused.value.task_list_id == seeded.id
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unarchived_list_can_be_renamed_again(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", archived_at=ARCHIVED_AT
+        )
+        assert seeded.id is not None
+        await make_service(async_connection).unarchive_task_list(
+            user_id=USER_ID, task_list_id=seeded.id, transaction=async_connection
+        )
+
+        renamed = await self._update(
+            async_connection, seeded.id, TaskListPatch(name="Trip")
+        )
+
+        assert renamed.name == "Trip"
+
 
 _COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"
 _STORED_ORDER = text(
@@ -615,6 +666,60 @@ class TestConcurrentMoves:
 
 
 @pytest.mark.integration
+class TestConcurrentArchives:
+    @pytest.mark.asyncio
+    async def test_an_archive_during_another_waits_and_records_nothing(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Without the row lock both archives read the list as active, both
+        write, and the second overwrites the first instant and publishes a
+        second ``(null, ts)`` event."""
+        async with committed_lists(async_engine, "Packing") as (owner, ids):
+            (list_id,) = ids
+
+            def archive() -> Any:
+                async def run(connection: AsyncConnection) -> None:
+                    await make_service(connection).archive_task_list(
+                        user_id=owner, task_list_id=list_id, transaction=connection
+                    )
+
+                return run
+
+            try:
+                await overlap(async_engine, archive(), archive())
+
+                async with async_engine.connect() as check:
+                    events = (
+                        await check.execute(_OWNER_EVENTS, {"user_id": owner})
+                    ).all()
+                    archived_at = (
+                        await check.execute(
+                            text("SELECT archived_at FROM task_lists WHERE id = :id"),
+                            {"id": list_id},
+                        )
+                    ).scalar_one()
+                assert len(events) == 1
+                old, new = json.loads(events[0].event_data)["changed_fields"][
+                    "archived_at"
+                ]
+                assert old is None
+                assert new == archived_at.isoformat()
+            finally:
+                async with async_engine.begin() as cleanup:
+                    await cleanup.execute(_DELETE_OWNER_EVENTS, {"user_id": owner})
+
+
+_OWNER_EVENTS = text(
+    "SELECT event_data FROM outbox_events "
+    "WHERE event_type = 'TaskListUpdated' "
+    "AND CAST(event_data AS jsonb) ->> 'user_id' = :user_id"
+)
+_DELETE_OWNER_EVENTS = text(
+    "DELETE FROM outbox_events WHERE CAST(event_data AS jsonb) ->> 'user_id' = :user_id"
+)
+
+
+@pytest.mark.integration
 class TestMovesAndCreatesSerialize:
     """A create racing a move must still land at the bottom, and the move must
     still put its list at the index asked for.
@@ -698,6 +803,275 @@ class TestMovesAndCreatesSerialize:
             )
 
             assert await self._order(async_engine, owner) == ["B", "C", "A", "D"]
+
+
+async def _task_row(conn: AsyncConnection, task_id: int) -> dict[str, Any]:
+    """A task's row exactly as stored, to prove an archive leaves it alone."""
+    row = (
+        await conn.execute(text("SELECT * FROM tasks WHERE id = :id"), {"id": task_id})
+    ).one()
+    return dict(row._mapping)
+
+
+class TestArchiveTaskList:
+    """Archiving: one locked read, one write, one ``TaskListUpdated``.
+
+    The list's tasks are untouched — archiving changes the list, not its
+    contents — and archiving an archived list is a no-op that keeps the
+    instant it was first archived.
+    """
+
+    @staticmethod
+    async def _archive(
+        conn: AsyncConnection, task_list_id: int, *, user_id: str = USER_ID
+    ) -> TaskList:
+        return await make_service(conn).archive_task_list(
+            user_id=user_id, task_list_id=task_list_id, transaction=conn
+        )
+
+    @pytest.mark.asyncio
+    async def test_archives_the_list_and_keeps_its_name_icon_and_place(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        await seed_task_list(async_connection, "First")
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+        assert seeded.id is not None
+
+        archived = await self._archive(async_connection, seeded.id)
+
+        assert archived.is_archived
+        assert archived.archived_at is not None
+        assert archived.archived_at.tzinfo is not None
+        assert (archived.name, archived.icon, archived.position) == (
+            "Packing",
+            TaskIcon.LUGGAGE,
+            seeded.position,
+        )
+        stored = await _row(async_connection, seeded.id)
+        assert stored["archived_at"] == archived.archived_at
+        assert stored["position"] == seeded.position
+
+    @pytest.mark.asyncio
+    async def test_publishes_one_updated_event_carrying_archived_at(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        archived = await self._archive(async_connection, seeded.id)
+
+        assert archived.archived_at is not None
+        (event,) = await task_list_events(async_connection)
+        assert event.event_type == "TaskListUpdated"
+        assert event.aggregate_id == seeded.id
+        assert event.payload == {
+            "task_list_id": seeded.id,
+            "user_id": USER_ID,
+            "changed_fields": {"archived_at": [None, archived.archived_at.isoformat()]},
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_list_with_an_open_task_is_archived_and_the_task_untouched(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=seeded.id)
+        task_before = await _task_row(async_connection, task_id)
+
+        archived = await self._archive(async_connection, seeded.id)
+
+        assert archived.is_archived
+        assert await stored_status(async_connection, task_id) == "not_done"
+        assert await _task_row(async_connection, task_id) == task_before
+        assert await task_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_archiving_an_archived_list_keeps_its_instant_and_records_nothing(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", archived_at=ARCHIVED_AT
+        )
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        again = await self._archive(async_connection, seeded.id)
+
+        assert again.archived_at == ARCHIVED_AT
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_provenance_is_carried(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        await make_service(async_connection).archive_task_list(
+            user_id=USER_ID,
+            task_list_id=seeded.id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = await task_list_events(async_connection)
+        assert (event.payload["source"], event.payload["changed_by"]) == ("mcp", "mcp")
+
+    @pytest.mark.asyncio
+    async def test_a_missing_list_is_not_found(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        with pytest.raises(TaskListNotFoundError):
+            await self._archive(async_connection, 999_999)
+
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_list_is_refused_as_missing_and_left_alone(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        assert foreign.id is not None
+        before = await _row(async_connection, foreign.id)
+
+        with pytest.raises(TaskListNotFoundError) as refused:
+            await self._archive(async_connection, foreign.id)
+
+        assert str(refused.value) == f"Task list with ID {foreign.id} not found"
+        assert await _row(async_connection, foreign.id) == before
+        assert await task_list_events(async_connection) == []
+
+
+class TestUnarchiveTaskList:
+    """Unarchiving restores the list: back among the active lists, in its old
+    place, and writable again."""
+
+    @staticmethod
+    async def _unarchive(
+        conn: AsyncConnection, task_list_id: int, *, user_id: str = USER_ID
+    ) -> TaskList:
+        return await make_service(conn).unarchive_task_list(
+            user_id=user_id, task_list_id=task_list_id, transaction=conn
+        )
+
+    @pytest.mark.asyncio
+    async def test_unarchives_the_list_back_into_its_old_place(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        first = await seed_task_list(async_connection, "First")
+        middle = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE, archived_at=ARCHIVED_AT
+        )
+        last = await seed_task_list(async_connection, "Last")
+        assert middle.id is not None
+
+        restored = await self._unarchive(async_connection, middle.id)
+
+        assert not restored.is_archived
+        assert (restored.name, restored.icon, restored.position) == (
+            "Packing",
+            TaskIcon.LUGGAGE,
+            middle.position,
+        )
+        active = await make_read_service(async_connection).list_task_lists(
+            user_id=USER_ID, archived=TaskListArchiveFilter.ACTIVE
+        )
+        assert [each.id for each in active] == [first.id, middle.id, last.id]
+        assert (await _row(async_connection, middle.id))["archived_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_publishes_one_updated_event_clearing_archived_at(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", archived_at=ARCHIVED_AT
+        )
+        assert seeded.id is not None
+
+        await make_service(async_connection).unarchive_task_list(
+            user_id=USER_ID,
+            task_list_id=seeded.id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        (event,) = await task_list_events(async_connection)
+        assert event.event_type == "TaskListUpdated"
+        assert event.payload == {
+            "task_list_id": seeded.id,
+            "user_id": USER_ID,
+            "changed_fields": {"archived_at": [ARCHIVED_AT.isoformat(), None]},
+            "source": "ui",
+            "changed_by": "ui",
+        }
+
+    @pytest.mark.asyncio
+    async def test_unarchiving_an_active_list_records_nothing(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        before = await _row(async_connection, seeded.id)
+
+        unchanged = await self._unarchive(async_connection, seeded.id)
+
+        assert unchanged == seeded
+        assert await _row(async_connection, seeded.id) == before
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_archive_then_unarchive_round_trips(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        await TestArchiveTaskList._archive(async_connection, seeded.id)
+
+        restored = await self._unarchive(async_connection, seeded.id)
+
+        assert not restored.is_archived
+        assert restored.position == seeded.position
+        archived_event, unarchived_event = await task_list_events(async_connection)
+        archived_pair = archived_event.payload["changed_fields"]["archived_at"]
+        assert archived_pair[0] is None
+        assert unarchived_event.payload["changed_fields"] == {
+            "archived_at": [archived_pair[1], None]
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_missing_list_is_not_found(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        with pytest.raises(TaskListNotFoundError):
+            await self._unarchive(async_connection, 999_999)
+
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_list_is_refused_as_missing_and_left_archived(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID, archived_at=ARCHIVED_AT
+        )
+        assert foreign.id is not None
+        before = await _row(async_connection, foreign.id)
+
+        with pytest.raises(TaskListNotFoundError):
+            await self._unarchive(async_connection, foreign.id)
+
+        assert await _row(async_connection, foreign.id) == before
+        assert await task_list_events(async_connection) == []
 
 
 class TestGetTaskList:

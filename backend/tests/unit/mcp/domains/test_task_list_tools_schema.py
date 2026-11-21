@@ -95,12 +95,40 @@ class TestTheInputsAreTyped:
         assert (index["type"], index["minimum"]) == ("integer", 0)
         assert schema["properties"]["task_list_id"]["minimum"] == 1
 
+    async def test_archive_and_unarchive_take_only_a_bounded_list_id(self) -> None:
+        tools = await _tools()
+
+        for name in ("archive_task_list", "unarchive_task_list"):
+            schema = tools[name].input_schema
+            assert set(schema["properties"]) == {"task_list_id"}, name
+            assert schema["required"] == ["task_list_id"], name
+            list_id = schema["properties"]["task_list_id"]
+            assert (list_id["minimum"], list_id["maximum"]) == (1, INT32_MAX), name
+
+    async def test_archive_and_unarchive_are_idempotent_non_destructive_writes(
+        self,
+    ) -> None:
+        tools = await _tools()
+
+        for name in ("archive_task_list", "unarchive_task_list"):
+            annotations = tools[name].annotations
+            assert annotations is not None, name
+            assert annotations.read_only_hint is False, name
+            assert annotations.destructive_hint is False, name
+            assert annotations.idempotent_hint is True, name
+
 
 class TestTheResultShapeIsPublished:
     async def test_create_get_and_update_answer_with_one_list(self) -> None:
         tools = await _tools()
 
-        for name in ("create_task_list", "get_task_list", "update_task_list"):
+        for name in (
+            "create_task_list",
+            "get_task_list",
+            "update_task_list",
+            "archive_task_list",
+            "unarchive_task_list",
+        ):
             schema = tools[name].output_schema
             assert schema is not None, f"{name} publishes no outputSchema"
             assert set(schema["properties"]) == _LIST_FIELDS

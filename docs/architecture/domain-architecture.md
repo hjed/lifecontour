@@ -248,7 +248,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   lists, archived included, so unarchiving returns a list to its old place; saving never changes a
   list's position, which only reordering moves. `list_for_user` takes a `TaskListArchiveFilter`
   (`core_shared.models.tasks`): `ACTIVE` (default) and `ALL` in `(position, id)` order, `ARCHIVED`
-  most-recently-archived first. Whether a list may be written while archived is a service rule.
+  most-recently-archived first. Whether a list may be written while archived is decided by the
+  entity — `TaskList.ensure_writable()` raises `TaskListArchivedError` (409) for an archived list —
+  and every service write but unarchive calls it right after its locked read.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below; the
   date rules a task on a list follows instead — due date, overdue, never lapsing — see
@@ -442,6 +444,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   so its events are kept out of `events.py`, whose classes the task event inventory requires to be
   projected as *task* history. The payload is the list as persisted (`task_list_id`, `user_id`,
   `name`, `icon`) plus provenance; position is left out because reordering announces nothing.
+  Renaming, changing the icon, archiving and unarchiving all publish `TaskListUpdated`, whose
+  `changed_fields` is `{field: (old, new)}`: archive state travels as `archived_at`, an ISO instant
+  or `null` (`(null, ts)` archives, `(ts, null)` unarchives). Archive and unarchive are idempotent —
+  a list already in the asked-for state is answered unchanged and nothing is published.
   **No consumer subscribes to a list event yet** — pinned by
   `tests/unit/infrastructure/events/test_task_list_event_subscriptions.py` — so the list history
   projection (ITER21-001 Phase 7) adds the subscription deliberately, under an `entity_type` of its
