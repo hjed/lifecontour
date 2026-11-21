@@ -17,14 +17,20 @@
  * these tests exercise the real narrowing in `blockingTasksFrom` rather than a
  * hook standing in for it. The one exception is the router, which has no
  * jsdom implementation to exercise.
+ *
+ * Opening the dialog also asks `GET …/delete-preview` how many tasks on a list
+ * would lose their link, so `fetch` is answered by URL: the preview from
+ * `answerPreview` (no list tasks unless a test says otherwise), and each
+ * `DELETE` from the queue `queueDelete` fills, in order.
  */
 
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { DeleteJournalDialog } from '../DeleteJournalDialog';
 import { createMockJournal, createTestQueryClient } from '../test-helpers';
 import { SUCCESS_MESSAGES } from '@/lib/constants';
+import { mockApiResponse } from '@/test-utils';
 import { JournalType, type Journal } from '@/types/journals';
 
 globalThis.fetch = jest.fn();
@@ -101,6 +107,46 @@ function refusal(...blockers: ReturnType<typeof blocker>[]) {
 
 const deleted = () => ({ ok: true, json: async () => ({}) }) as Response;
 
+/** The body `GET /api/journals/{id}/delete-preview` really sends. */
+function preview(count: number) {
+  return mockApiResponse({
+    data: {
+      type: 'journal-delete-previews',
+      id: String(JOURNAL_ID),
+      attributes: { list_tasks_losing_link: count },
+    },
+  });
+}
+
+const PREVIEW_URL = `/api/journals/${JOURNAL_ID}/delete-preview`;
+
+let answerPreview: () => Promise<Response>;
+let deleteResponses: Response[];
+
+/** Answer the next `DELETE`s, in order. */
+function queueDelete(...responses: Response[]) {
+  deleteResponses.push(...responses);
+}
+
+/** Every `DELETE` the dialog has sent. */
+function deleteCalls() {
+  return mockFetch.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+}
+
+/** Every preview read the dialog has sent. */
+function previewCalls() {
+  return mockFetch.mock.calls.filter(([url]) => String(url) === PREVIEW_URL);
+}
+
+/** A response the test resolves when it chooses, to hold a read in flight. */
+function deferred() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>(r => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 function renderDialog(journal: Journal = journalFixture()) {
   return render(
     <QueryClientProvider client={createTestQueryClient()}>
@@ -109,15 +155,28 @@ function renderDialog(journal: Journal = journalFixture()) {
   );
 }
 
-/** Open the dialog and press the destructive confirm. */
+/** Open the dialog, wait for the preview to settle, press the confirm. */
 async function confirmDelete(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Delete journal' }));
-  await user.click(await screen.findByTestId('confirm-delete-journal'));
+  const confirm = await screen.findByTestId('confirm-delete-journal');
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockFetch.mockReset();
+  answerPreview = async () => preview(0);
+  deleteResponses = [];
+  mockFetch.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url === PREVIEW_URL) return answerPreview();
+    if (init?.method === 'DELETE') {
+      const next = deleteResponses.shift();
+      if (next) return next;
+    }
+    throw new Error(`Unexpected fetch: ${init?.method ?? 'GET'} ${url}`);
+  });
 });
 
 describe('DeleteJournalDialog', () => {
@@ -133,7 +192,7 @@ describe('DeleteJournalDialog', () => {
       expect(
         await screen.findByRole('alertdialog', { name: /delete this journal/i })
       ).toBeInTheDocument();
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(deleteCalls()).toHaveLength(0);
     });
 
     it('steers an event journal toward cancelling it instead', async () => {
@@ -170,14 +229,14 @@ describe('DeleteJournalDialog', () => {
       await waitFor(() => {
         expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       });
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(deleteCalls()).toHaveLength(0);
     });
   });
 
   describe('a delete that succeeds', () => {
     it('deletes, reports it and returns to the listing', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(deleted());
+      queueDelete(deleted());
       renderDialog();
 
       await confirmDelete(user);
@@ -201,7 +260,7 @@ describe('DeleteJournalDialog', () => {
   describe('a delete the anchored tasks refuse', () => {
     it('holds the dialog open and names the blocking task', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -217,7 +276,7 @@ describe('DeleteJournalDialog', () => {
 
     it('links each blocker to the journal it can be actioned from', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -233,7 +292,7 @@ describe('DeleteJournalDialog', () => {
       // proves it. Telling the user to complete or cancel the task would send
       // them through two actions that cannot succeed.
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -248,7 +307,7 @@ describe('DeleteJournalDialog', () => {
       // creating anchor cannot be moved at all — no service method other than
       // `create_task` accepts one — so deleting the task is the only way out.
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(
+      queueDelete(
         refusal(
           blocker({ task_id: 7, blocking_roles: ['due'] }),
           blocker({
@@ -287,7 +346,7 @@ describe('DeleteJournalDialog', () => {
       // link would target the current route, change nothing, and leave the
       // dialog covering the very controls it points at.
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(
+      queueDelete(
         refusal(
           blocker({
             blocking_roles: ['creating', 'due'],
@@ -315,7 +374,7 @@ describe('DeleteJournalDialog', () => {
 
     it('closes as it leaves, so no overlay outlives the page it was on', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -330,7 +389,7 @@ describe('DeleteJournalDialog', () => {
 
     it('says why each task blocks, including one holding both anchors', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(
+      queueDelete(
         refusal(
           blocker({ task_id: 7, blocking_roles: ['due'] }),
           blocker({
@@ -362,7 +421,7 @@ describe('DeleteJournalDialog', () => {
 
     it('names every blocker when there are several', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(
+      queueDelete(
         refusal(
           blocker({ task_id: 7 }),
           blocker({
@@ -401,7 +460,7 @@ describe('DeleteJournalDialog', () => {
 
     it('shows a blocker’s status, so a done task does not read as an oversight', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(
+      queueDelete(
         refusal(blocker({ status: 'done', blocking_roles: ['creating'] }))
       );
       renderDialog();
@@ -415,7 +474,7 @@ describe('DeleteJournalDialog', () => {
 
     it('keeps steering toward cancelling the journal instead', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -427,9 +486,7 @@ describe('DeleteJournalDialog', () => {
 
     it('retries the delete in place once the blockers are cleared', async () => {
       const user = userEvent.setup();
-      mockFetch
-        .mockResolvedValueOnce(refusal(blocker()))
-        .mockResolvedValueOnce(deleted());
+      queueDelete(refusal(blocker()), deleted());
       renderDialog();
 
       await confirmDelete(user);
@@ -438,12 +495,12 @@ describe('DeleteJournalDialog', () => {
       await waitFor(() => {
         expect(mockPush).toHaveBeenCalledWith('/journals');
       });
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(deleteCalls()).toHaveLength(2);
     });
 
     it('forgets the blockers when the dialog is closed and reopened', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce(refusal(blocker()));
+      queueDelete(refusal(blocker()));
       renderDialog();
 
       await confirmDelete(user);
@@ -463,10 +520,215 @@ describe('DeleteJournalDialog', () => {
     });
   });
 
+  describe('what the delete will do to tasks on a list', () => {
+    // A task on a list never blocks the delete: it loses its link to the
+    // journal instead, and one due here becomes undated. The specification
+    // asks the confirmation to say how many will, so the user decides knowing.
+
+    /** Open the dialog and wait for the preview read to settle. */
+    async function openSettled(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole('button', { name: 'Delete journal' }));
+      const confirm = await screen.findByTestId('confirm-delete-journal');
+      await waitFor(() => expect(confirm).toBeEnabled());
+      return confirm;
+    }
+
+    it('states that one list task will lose its link', async () => {
+      const user = userEvent.setup();
+      answerPreview = async () => preview(1);
+      renderDialog();
+
+      await openSettled(user);
+
+      expect(
+        await screen.findByTestId('delete-journal-list-tasks')
+      ).toHaveTextContent(
+        '1 task on a list links to this journal and will lose that link. If it’s due here, it will have no due date.'
+      );
+    });
+
+    it('states how many list tasks will lose their link', async () => {
+      const user = userEvent.setup();
+      answerPreview = async () => preview(3);
+      renderDialog();
+
+      await openSettled(user);
+
+      expect(
+        await screen.findByTestId('delete-journal-list-tasks')
+      ).toHaveTextContent(
+        '3 tasks on a list link to this journal and will lose that link. Any due here will have no due date.'
+      );
+    });
+
+    it('is announced with the confirmation, as part of its description', async () => {
+      const user = userEvent.setup();
+      answerPreview = async () => preview(3);
+      renderDialog();
+
+      await openSettled(user);
+      await screen.findByTestId('delete-journal-list-tasks');
+
+      expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(
+        /3 tasks on a list link to this journal/
+      );
+    });
+
+    it('says nothing about list tasks when none link to the journal', async () => {
+      const user = userEvent.setup();
+      renderDialog();
+
+      await openSettled(user);
+
+      expect(previewCalls()).toHaveLength(1);
+      expect(
+        screen.queryByTestId('delete-journal-list-tasks')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('delete-journal-preview-status')
+      ).not.toBeInTheDocument();
+    });
+
+    it('holds the confirm until it knows the count', async () => {
+      const user = userEvent.setup();
+      const pending = deferred();
+      answerPreview = () => pending.promise;
+      renderDialog();
+
+      await user.click(screen.getByRole('button', { name: 'Delete journal' }));
+
+      const confirm = await screen.findByTestId('confirm-delete-journal');
+      expect(confirm).toBeDisabled();
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Checking linked tasks…'
+      );
+
+      pending.resolve(preview(2));
+
+      await waitFor(() => expect(confirm).toBeEnabled());
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        /^2 tasks on a list/
+      );
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('holds the confirm while the read is paused offline', async () => {
+      // React Query pauses an offline read rather than failing it: neither
+      // fetching nor settled. That is not an answer, so the confirm waits.
+      const user = userEvent.setup();
+      answerPreview = async () => preview(2);
+      onlineManager.setOnline(false);
+      try {
+        renderDialog();
+
+        await user.click(
+          screen.getByRole('button', { name: 'Delete journal' })
+        );
+
+        const confirm = await screen.findByTestId('confirm-delete-journal');
+        expect(confirm).toBeDisabled();
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Checking linked tasks…'
+        );
+        expect(previewCalls()).toHaveLength(0);
+
+        onlineManager.setOnline(true);
+
+        await waitFor(() => expect(confirm).toBeEnabled());
+        expect(
+          screen.getByTestId('delete-journal-list-tasks')
+        ).toHaveTextContent(/^2 tasks/);
+      } finally {
+        onlineManager.setOnline(true);
+      }
+    });
+
+    it('lets the delete go ahead when the count cannot be read', async () => {
+      // The preview is information, not a gate: the delete itself is safe
+      // whatever links exist, so a failed read must not trap the user.
+      const user = userEvent.setup();
+      answerPreview = async () =>
+        mockApiResponse(
+          { errors: [{ status: '500', detail: 'Something broke' }] },
+          { status: 500 }
+        );
+      queueDelete(deleted());
+      renderDialog();
+
+      await openSettled(user);
+
+      expect(
+        screen.getByTestId('delete-journal-preview-status')
+      ).toHaveTextContent(
+        'Couldn’t check whether tasks on a list link to this journal.'
+      );
+      expect(
+        screen.queryByTestId('delete-journal-list-tasks')
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('confirm-delete-journal'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/journals');
+      });
+      expect(deleteCalls()).toHaveLength(1);
+    });
+
+    it('still states the count when journal-only tasks refuse the delete', async () => {
+      // A refused delete changes nothing, list tasks included; once the
+      // blockers are cleared the list tasks will still lose their link.
+      const user = userEvent.setup();
+      answerPreview = async () => preview(2);
+      queueDelete(refusal(blocker()));
+      renderDialog();
+
+      await confirmDelete(user);
+
+      await screen.findByTestId('journal-delete-blocker-7');
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        'Once these are cleared, 2 tasks on a list will also lose their link to this journal.'
+      );
+    });
+
+    it('reads the count afresh each time it opens, never showing the old one', async () => {
+      const user = userEvent.setup();
+      answerPreview = async () => preview(2);
+      renderDialog();
+
+      await openSettled(user);
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        /^2 tasks/
+      );
+
+      await user.click(screen.getByRole('button', { name: /keep/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+
+      const pending = deferred();
+      answerPreview = () => pending.promise;
+      await user.click(screen.getByRole('button', { name: 'Delete journal' }));
+
+      const confirm = await screen.findByTestId('confirm-delete-journal');
+      expect(confirm).toBeDisabled();
+      expect(
+        screen.queryByTestId('delete-journal-list-tasks')
+      ).not.toBeInTheDocument();
+
+      pending.resolve(preview(5));
+
+      await waitFor(() => expect(confirm).toBeEnabled());
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        /^5 tasks/
+      );
+      expect(previewCalls()).toHaveLength(2);
+    });
+  });
+
   describe('a failure that is not the anchored-tasks refusal', () => {
     it('is reported the ordinary way and closes the dialog', async () => {
       const user = userEvent.setup();
-      mockFetch.mockResolvedValueOnce({
+      queueDelete({
         ok: false,
         status: 500,
         json: async () => ({

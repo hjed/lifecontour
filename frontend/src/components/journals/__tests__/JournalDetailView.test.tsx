@@ -82,6 +82,14 @@ jest.mock('@/lib/api/journals', () => ({
   // mounted here, so the module mock owes it an implementation even though
   // this file never provokes a refusal.
   blockingTasksFrom: () => null,
+  // …and asks how many list tasks the delete would unlink. Settled at zero:
+  // this file never opens the confirmation.
+  useJournalDeletePreview: () => ({
+    data: 0,
+    isSuccess: true,
+    isError: false,
+    isFetching: false,
+  }),
   useAddContactRelationship: () => ({
     mutateAsync: mockAddContact,
   }),

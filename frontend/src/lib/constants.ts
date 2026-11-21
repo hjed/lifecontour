@@ -30,6 +30,7 @@ export const API_ENDPOINTS = {
   JOURNALS: {
     BASE: '/api/journals',
     BY_ID: (id: string) => `/api/journals/${id}`,
+    DELETE_PREVIEW: (id: string) => `/api/journals/${id}/delete-preview`,
     SEARCH: '/api/journals/search',
     EXPORT_OUTDOOR_LOGBOOK: '/api/journals/export/outdoor-logbook',
     INCOMPLETE_OUTDOOR_ACTIVITIES:

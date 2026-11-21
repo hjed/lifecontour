@@ -135,7 +135,7 @@ Search is last because its rules name things the earlier steps create (templates
 
 **Acceptance Criteria — journals, contacts, history:**
 - [ ] Deleting a journal is not blocked by list tasks: their link to it is removed and a task that was due in it becomes undated. Journal-only tasks still block deletion.
-- [ ] The journal delete confirmation states how many list tasks will lose their link.
+- [x] The journal delete confirmation states how many list tasks will lose their link. *(Phase 17)*
 - [ ] While a journal is cancelled, a list task due in it is treated as undated; un-cancelling restores the date. Merging journals re-points list-task links as today.
 - [ ] A contact's task record includes list tasks, labelled with their list.
 - [ ] List membership, due date, flag and icon changes emit domain events in the phase that makes them possible and appear in task history; reordering does not. Lists have their own history: created, renamed, archived, unarchived.
@@ -1310,14 +1310,79 @@ suite in chunks (~4,600 passed, 7 pre-existing skips) and pre-commit.
 - *ITER21-008 (search):* index on `TaskJournalLinksRemoved` (due-journal delete is a freshness
   trigger in the spec).
 
-#### Phase 17: Journal delete confirmation states the count
+#### Phase 17: Journal delete confirmation states the count ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 16.
-**Estimated diff:** ~90 production → **~450 tracked**
+**Estimated diff:** ~90 production → **~450 tracked** · **Actual:** ~163 production → **~700
+tracked** (703 insertions, 32 deletions excluding this document: production 163 — dialog 86,
+hook and fetcher 50, types 23, key and endpoint 4; tests 515 — dialog 284, E2E 139, hook 84,
+page-test stub 8; 25 architecture docs). Production ran ×1.8 on the estimate, mostly the dialog's
+docstring and the refusal-view and failed-read states. Tests ran ×3.2 production, because every
+existing dialog test moved onto URL-aware fetch mocks once opening the dialog started a request.
 
 **Acceptance Criteria:**
 
-- [ ] Existing delete dialog; E2E in the journal-tasks spec.
+- [x] Existing delete dialog; E2E in the journal-tasks spec.
+- [x] The confirmation states how many list tasks will lose their link (spec §*Journal changes*);
+  a delete refused by journal-only tasks shows the blockers and the count together (Phase 16 note).
+- [x] Checked on a phone: no horizontal scroll at 390px. It adds no controls, so there are no new
+  touch targets.
+
+**Delivered:** frontend only; the endpoint and MCP `preview_journal_delete` are Phase 16's.
+- `useJournalDeletePreview(id, { enabled })` in `frontend/src/lib/api/journals.ts` reads
+  `GET /api/journals/{id}/delete-preview` through `fetchJournalDeletePreview`, which throws on a
+  404 rather than answering zero. It uses `staleTime: 0`, `retry: false` and
+  `refetchOnWindowFocus: false`, under key
+  `journalKeys.deletePreview(id)`, with endpoint `API_ENDPOINTS.JOURNALS.DELETE_PREVIEW`. The
+  types `JournalDeletePreviewResponse`/`Resource`/`Attributes` live in `types/journals.ts`.
+- `DeleteJournalDialog` reads the count each time it opens. For N > 0 it says *"N tasks on a list
+  link to this journal and will lose that link. Any due here will have no due date."* (1 → *"…If
+  it's due here, it will have no due date."*). Zero says nothing. "Delete journal" waits for the
+  count, with a `role="status"` "Checking linked tasks…" line. A failed read says it couldn't
+  check and enables the confirm. The refusal view adds *"Once these are cleared, N tasks on a
+  list will also lose their link to this journal."*
+- The count is part of the dialog's accessible description (`AlertDialogDescription asChild`), so
+  it is announced on open.
+
+**Tests:**
+- Unit, `DeleteJournalDialog.test.tsx` (nothing mocked below `fetch`; the preview and each `DELETE`
+  are answered by URL): one / several, accessible description, zero says nothing, confirm held
+  until the count is read, the confirm held while the read is paused offline, a failed read lets
+  the delete go ahead, refusal plus count, and a reopen reads afresh without showing the old count.
+- Unit, `journals.test.ts` (`useJournalDeletePreview`): reads the count with credentials, does
+  not refetch on window focus, sends nothing while disabled, and fails on a 404. `JournalDetailView.test.tsx`'s module mock stubs the
+  new hook.
+- E2E, `journal-tasks.spec.ts` › *Journal delete confirmation and list tasks*:
+  - a real zero-count round trip: the preview is 200 with `journal-delete-previews` / 0, no
+    sentence is shown, and the delete returns 204;
+  - a typed `page.route` stub of N = 2 at 390px: the sentence and accessible description are
+    shown, there is no horizontal scroll in the page or the dialog, and declining keeps the
+    journal.
+- Gates run locally: `pnpm quality:check`, full jest (3,213 passed), and Playwright
+  `journal-tasks.spec.ts` + `journal-delete-blocked.spec.ts` on Firefox and Mobile Chrome (35
+  passed; the new tests also passed `--repeat-each 3`). Backend, as a regression check (no backend
+  change): ruff and mypy, unit (5,719 passed), and the journal-delete integration files (250
+  passed).
+
+**Decisions (recorded during implementation):**
+- **The non-zero E2E stubs the preview** (user decision). No REST or MCP path can put a task on a
+  list until Phase 19, so the real backend can only answer 0. The real zero-count round trip
+  proves the route and the wire shape. The stub's body is typed as `JournalDeletePreviewResponse`.
+- **Zero says nothing**, and **a failed preview does not block the delete**: the delete is safe
+  whatever links exist, so the count informs rather than gates.
+- **The count is shown only when settled**: not fetching, and succeeded or failed. The hook
+  lives in the dialog body, which outlives the Radix content, so a reopen would otherwise flash
+  the last visit's count. A read paused offline counts as unsettled, and window focus does not
+  refetch; both came from the phase's independent review.
+- **No client timeout on the preview read** (review finding, not taken): a hung request holds the
+  confirm until the browser gives up. Every other read in `lib/api` leaves timeouts to the browser
+  too.
+
+**Notes for later phases:**
+- *Phase 19:* replace the `page.route` stub in `journal-tasks.spec.ts` (*states how many list tasks
+  will lose their link*) with a real list task linked to the journal, and assert the count after a
+  real delete (the task becomes undated).
 
 #### Phase 18: Archived lists freeze their tasks ✅ DONE
 

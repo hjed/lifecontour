@@ -3,7 +3,11 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  QueryClient,
+  QueryClientProvider,
+  focusManager,
+} from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import {
   useJournals,
@@ -27,6 +31,7 @@ import {
   useRemoveContactRelationship,
   useUpdateJournal,
   useDeleteJournal,
+  useJournalDeletePreview,
   JournalApiError,
   blockingTasksFrom,
   useContactJournals,
@@ -63,6 +68,7 @@ jest.mock('@/lib/constants', () => ({
     JOURNALS: {
       BASE: '/api/journals',
       BY_ID: (id: string) => `/api/journals/${id}`,
+      DELETE_PREVIEW: (id: string) => `/api/journals/${id}/delete-preview`,
       SEARCH: '/api/journals/search',
     },
   },
@@ -1399,6 +1405,83 @@ describe('Journals API', () => {
           )
         )
       ).toBeNull();
+    });
+  });
+
+  describe('useJournalDeletePreview', () => {
+    /** The body `GET /api/journals/{id}/delete-preview` really sends. */
+    const preview = (count: number) => ({
+      data: {
+        type: 'journal-delete-previews',
+        id: '10',
+        attributes: { list_tasks_losing_link: count },
+      },
+    });
+
+    it('reads how many list tasks would lose their link', async () => {
+      mockFetch.mockResolvedValueOnce(mockApiResponse(preview(3)));
+
+      const { result } = renderHook(
+        () => useJournalDeletePreview('10', { enabled: true }),
+        { wrapper: createWrapper }
+      );
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data).toBe(3);
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/journals/10/delete-preview',
+        expect.objectContaining({ credentials: 'include' })
+      );
+    });
+
+    it('does not refetch on window focus while the dialog is open', async () => {
+      // A refetch would blank the count and hold the confirm mid-decision;
+      // the count is already read afresh on every open.
+      mockFetch.mockResolvedValue(mockApiResponse(preview(3)));
+
+      const { result } = renderHook(
+        () => useJournalDeletePreview('10', { enabled: true }),
+        { wrapper: createWrapper }
+      );
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      focusManager.setFocused(undefined);
+    });
+
+    it('asks nothing while it is not enabled', () => {
+      // The dialog enables it only while open: a closed dialog on every
+      // journal page must not cost a request.
+      renderHook(() => useJournalDeletePreview('10', { enabled: false }), {
+        wrapper: createWrapper,
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('fails on a 404 rather than answering zero', async () => {
+      // Missing or somebody else's journal. Reading that as "no list tasks"
+      // would tell the user nothing will be lost when nobody checked.
+      mockFetch.mockResolvedValueOnce(
+        mockApiResponse(
+          { errors: [{ status: '404', detail: 'Journal not found' }] },
+          { status: 404 }
+        )
+      );
+
+      const { result } = renderHook(
+        () => useJournalDeletePreview('10', { enabled: true }),
+        { wrapper: createWrapper }
+      );
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.data).toBeUndefined();
     });
   });
 

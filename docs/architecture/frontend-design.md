@@ -1017,6 +1017,31 @@ it, consistent with the other list-level indicators".
   and makes no lapse judgement of its own — the browser's clock is not the zone
   the verdict was reached in, and a second opinion here could only disagree.
 
+#### The journal delete confirmation and list tasks
+
+Tasks on a list never block a journal's deletion: each loses its link to the
+journal instead, and one due in it becomes undated. `DeleteJournalDialog`
+states how many, read from `GET /api/journals/{id}/delete-preview` through
+`useJournalDeletePreview` (key `journalKeys.deletePreview(id)`).
+
+- **Read on every open, shown only when settled.** The query is enabled only
+  while the dialog is open and has `staleTime: 0`. The hook sits in the dialog
+  body, which outlives the Radix content, so a reopen holds the previous count
+  while it refetches; the dialog shows a count only once the read is settled —
+  not fetching **and** succeeded or failed — never the last visit's answer. A
+  read paused offline is neither, so it keeps the confirm held. Window focus
+  does not refetch (`refetchOnWindowFocus: false`): that would blank the count
+  mid-decision.
+- **The confirm waits for the count**, with a `role="status"` "Checking linked
+  tasks…" line meanwhile. The count is part of the `AlertDialogDescription`
+  (rendered `asChild` as a `div`), so it is announced on open.
+- **Zero says nothing; a failed read lets the delete go ahead.** The delete is
+  safe whatever links exist, so the preview informs rather than gates: a
+  failure (`retry: false`) says it could not check and enables the confirm.
+- **The refusal repeats it.** A delete refused by journal-only tasks changes
+  nothing, so the blockers view adds how many list tasks will still lose their
+  link once the blockers are cleared.
+
 ### TypeScript Integration
 
 - Define interfaces for all component props

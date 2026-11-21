@@ -34,6 +34,9 @@ export const journalKeys = {
   ) => [...journalKeys.infiniteLists(), filters, options] as const,
   details: () => [...journalKeys.all, 'detail'] as const,
   detail: (id: string) => [...journalKeys.details(), id] as const,
+  /** What deleting one journal would do to tasks on a list. */
+  deletePreview: (id: string) =>
+    [...journalKeys.all, 'delete-preview', id] as const,
   search: (query: string) => [...journalKeys.all, 'search', query] as const,
   /**
    * The future-journal options behind a due-journal picker.

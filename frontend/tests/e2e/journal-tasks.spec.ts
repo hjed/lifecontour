@@ -20,6 +20,7 @@
 
 import type { Locator, Page } from '@playwright/test';
 
+import type { JournalDeletePreviewResponse } from '../../src/types/journals';
 import {
   TaskLinkRole,
   TaskStatus,
@@ -691,6 +692,144 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
 // A guard on the fixtures rather than on the product: every date in this file
 // comes from `utcDayOffset`, and the specs above only mean what they say while
 // it really is anchored to UTC days.
+/**
+ * The journal delete confirmation and tasks on a list.
+ *
+ * A task on a list never blocks a journal's deletion: it loses its link to the
+ * journal instead, and the confirmation says how many will. The count comes
+ * from `GET /api/journals/{id}/delete-preview`, read when the dialog opens.
+ *
+ * **No list task can exist yet.** Nothing on REST or MCP puts a task on a
+ * list until ITER21-001 Phase 19, so the real backend can only answer zero.
+ * The first test makes that real round trip, proving the route and its wire
+ * shape. The second stands a typed stub in for the preview to see the count
+ * rendered. Replace the stub with a real list task once Phase 19 lands.
+ */
+test.describe('Journal delete confirmation and list tasks', () => {
+  /** A phone-width viewport, for the no-horizontal-scroll check. */
+  const MOBILE = { width: 390, height: 844 };
+
+  test('deletes a journal no list task links to, without a list-task warning', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => await dataManager.cleanup());
+
+    const journal = await dataManager.createRelativeJournal({
+      title: taskText('Nothing on a list links here'),
+      dayOffset: 0,
+    });
+
+    await openJournal(page, journal);
+
+    const previewResponse = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/journals/${journal.id}/delete-preview`) &&
+        response.request().method() === 'GET'
+    );
+    await page.getByTestId('delete-journal-button').click();
+    const dialog = page.getByRole('alertdialog', {
+      name: 'Delete this journal?',
+    });
+    await expect(dialog).toBeVisible();
+
+    const preview = await previewResponse;
+    expect(preview.status()).toBe(200);
+    const body = (await preview.json()) as JournalDeletePreviewResponse;
+    expect(body.data.type).toBe('journal-delete-previews');
+    expect(body.data.attributes.list_tasks_losing_link).toBe(0);
+
+    const confirm = dialog.getByTestId('confirm-delete-journal');
+    await expect(confirm).toBeEnabled();
+    await expect(dialog.getByTestId('delete-journal-list-tasks')).toHaveCount(
+      0
+    );
+
+    const deleteResponse = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/journals/${journal.id}`) &&
+        response.request().method() === 'DELETE'
+    );
+    await confirm.click();
+    expect((await deleteResponse).status()).toBe(204);
+    await expect(page).toHaveURL(/\/journals$/);
+  });
+
+  test('states how many list tasks will lose their link', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await dataManager.cleanup();
+    });
+
+    const journal = await dataManager.createRelativeJournal({
+      title: taskText('Two list tasks link here'),
+      dayOffset: 0,
+    });
+
+    // Stands in for two list tasks until Phase 19 lets one exist. Typed
+    // against the same response the app reads, so a contract change fails
+    // to compile here rather than passing silently.
+    const stubbed: JournalDeletePreviewResponse = {
+      data: {
+        type: 'journal-delete-previews',
+        id: String(journal.id),
+        attributes: { list_tasks_losing_link: 2 },
+      },
+    };
+    await page.route(
+      `**/api/journals/${journal.id}/delete-preview`,
+      async route => {
+        await route.fulfill({ status: 200, json: stubbed });
+      }
+    );
+
+    await page.setViewportSize(MOBILE);
+    await openJournal(page, journal);
+    await page.getByTestId('delete-journal-button').click();
+    const dialog = page.getByRole('alertdialog', {
+      name: 'Delete this journal?',
+    });
+    await expect(dialog).toBeVisible();
+
+    const count = dialog.getByTestId('delete-journal-list-tasks');
+    await expect(count).toHaveText(
+      '2 tasks on a list link to this journal and will lose that link. Any due here will have no due date.'
+    );
+    // Part of the dialog's description, so it is announced on open.
+    await expect(dialog).toHaveAccessibleDescription(
+      /2 tasks on a list link to this journal/
+    );
+    await expect(dialog.getByTestId('confirm-delete-journal')).toBeEnabled();
+
+    // Nothing the dialog adds may push a phone into scrolling sideways.
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+    const dialogOverflow = await dialog.evaluate(element => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }));
+    expect(dialogOverflow.scrollWidth).toBeLessThanOrEqual(
+      dialogOverflow.clientWidth
+    );
+
+    // Declining keeps the journal: the count informs, it deletes nothing.
+    await dialog.getByRole('button', { name: 'Keep journal' }).click();
+    await expect(dialog).toBeHidden();
+    const kept = await page.request.get(`/api/journals/${journal.id}`);
+    expect(kept.status()).toBe(200);
+  });
+});
+
 test.describe('Task fixture dates', () => {
   test('are whole UTC days from today, not local wall-clock times', async () => {
     const today = new Date(utcDayOffset(0));

@@ -817,3 +817,26 @@ export interface JournalHasAnchoredTasksMeta {
   journal_id: number;
   blocking_tasks: BlockingTask[];
 }
+
+/** What deleting a journal would do to tasks on a task list. */
+export interface JournalDeletePreviewAttributes {
+  /**
+   * How many tasks on a list link to the journal — as their creating or due
+   * journal, or by mention — and would lose that link if it were deleted. A
+   * task due in it would become undated. Tasks with no list are not counted:
+   * they block the delete instead, and its 409 names them.
+   */
+  readonly list_tasks_losing_link: number;
+}
+
+/** JSON:API resource for a journal delete preview, keyed by the journal. */
+export interface JournalDeletePreviewResource {
+  readonly type: 'journal-delete-previews';
+  readonly id: string;
+  readonly attributes: JournalDeletePreviewAttributes;
+}
+
+/** Body of `GET /api/journals/{id}/delete-preview`. */
+export interface JournalDeletePreviewResponse {
+  readonly data: JournalDeletePreviewResource;
+}

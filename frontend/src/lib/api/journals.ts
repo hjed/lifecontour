@@ -34,6 +34,7 @@ import {
   AutoMergeResponse,
   BlockingTask,
   JournalHasAnchoredTasksMeta,
+  JournalDeletePreviewResponse,
   SeriesMergePair,
   SeriesMergePlan,
   SeriesMergePolicies,
@@ -409,6 +410,25 @@ async function deleteJournal(id: string): Promise<void> {
     code,
     meta
   );
+}
+
+/**
+ * How many tasks on a list would lose their link if this journal were deleted.
+ *
+ * A 404 — the journal is missing, or somebody else's — throws rather than
+ * answering zero: "nothing will be lost" is a claim, and nobody checked.
+ */
+async function fetchJournalDeletePreview(id: string): Promise<number> {
+  const response = await fetch(API_ENDPOINTS.JOURNALS.DELETE_PREVIEW(id), {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error(ERROR_MESSAGES.FETCH_FAILED);
+  }
+
+  const body: JournalDeletePreviewResponse = await response.json();
+  return body.data.attributes.list_tasks_losing_link;
 }
 
 async function mergeJournal(
@@ -1270,6 +1290,36 @@ export function useJournal(id: string) {
     select: unwrapResource,
     enabled: !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * The delete confirmation's count of list tasks that would lose their link.
+ *
+ * Enabled only while the confirmation is open, so a journal page with the
+ * dialog closed costs no request, and read fresh on every open
+ * (`staleTime: 0`): links change between visits, and the count is the user's
+ * basis for deciding. The observer outlives the dialog's content, so a reopen
+ * still holds the last answer while it refetches; a caller that must not show
+ * a stale count gates on `!isFetching` as well as `isSuccess`. A read paused
+ * offline is neither fetching nor settled, so "not fetching" alone is not an
+ * answer either.
+ */
+export function useJournalDeletePreview(
+  id: string,
+  options: { enabled: boolean }
+) {
+  return useQuery({
+    queryKey: journalKeys.deletePreview(id),
+    queryFn: () => fetchJournalDeletePreview(id),
+    enabled: options.enabled && !!id,
+    staleTime: 0,
+    // A refetch would blank the count and hold the confirm mid-decision, and
+    // the count is already read afresh on every open.
+    refetchOnWindowFocus: false,
+    // The confirm waits on this read, and a failure lets the delete go ahead
+    // anyway, so retrying would only hold the user up for the same outcome.
+    retry: false,
   });
 }
 
