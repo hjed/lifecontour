@@ -31,6 +31,7 @@ import { AttachTaskDialog } from '../AttachTaskDialog';
 import { createMockJournal, createTestQueryClient } from '../test-helpers';
 import {
   createMockJournalTask,
+  createMockListTask,
   createMockTaskJournalRef,
 } from '../test-helpers';
 import { TaskStatus } from '@/types/tasks';
@@ -73,6 +74,20 @@ const BOOK = createMockJournalTask({
   id: '2',
   text: "Return Sarah's book",
   status: TaskStatus.DONE,
+});
+
+/**
+ * A task on a list, created in the source journal with no due journal — the
+ * shape a journal's listing can hold once list tasks exist.
+ */
+const SUNSCREEN = createMockListTask({
+  id: '3',
+  text: 'Buy sunscreen',
+  creating_journal_id: Number(SOURCE_JOURNAL),
+  creating_journal: createMockTaskJournalRef({
+    id: Number(SOURCE_JOURNAL),
+    title: 'Trip planning',
+  }),
 });
 
 /** Already linked to the journal being viewed, so it must not be offered. */
@@ -518,6 +533,36 @@ describe('AttachTaskDialog', () => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       });
       expect(toast.success).toHaveBeenCalledWith('Journal linked successfully');
+    });
+
+    it('offers and attaches a task that has no due journal', async () => {
+      routeFetch({
+        tasks: { [SOURCE_JOURNAL]: jsonResponse(listing([SUNSCREEN, PERMIT])) },
+      });
+      const user = await openDialog();
+      await chooseSourceJournal(user);
+
+      const option = await screen.findByRole('radio', {
+        name: /Buy sunscreen/,
+      });
+      // The status alone: there is no due journal to name, and a dangling
+      // "due in" would be read out as one.
+      expect(option).toHaveAccessibleName('Buy sunscreen Not done');
+      expect(
+        screen.getByRole('radio', { name: /Print the permit/ })
+      ).toHaveAccessibleName(/due in Trip planning/);
+
+      await user.click(option);
+      await user.click(
+        screen.getByRole('button', { name: 'Attach to this journal' })
+      );
+
+      await waitFor(() => {
+        expect(writes()).toHaveLength(1);
+      });
+      expect(String(writes()[0][0])).toBe(
+        `/api/tasks/${SUNSCREEN.id}/relationships/intermediate-journals`
+      );
     });
 
     it('offers no way to submit until a task is chosen, and writes nothing', async () => {

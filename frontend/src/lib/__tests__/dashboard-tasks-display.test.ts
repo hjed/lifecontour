@@ -17,12 +17,12 @@ import {
   showAllDueLabel,
   taskTextId,
 } from '@/lib/dashboard-tasks-display';
-import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import type { HomeDashboardDueTask } from '@/lib/api/home-dashboard';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /** A row as the payload sends one, with only the two fields a chip reads. */
-function task(daysAway: number, dueDate: string): HomeDashboardTask {
+function task(daysAway: number, dueDate: string): HomeDashboardDueTask {
   return {
     task_id: 1,
     text: 'Send the deposit',

@@ -20,6 +20,12 @@
 
 import type { Locator, Page } from '@playwright/test';
 
+import {
+  TaskLinkRole,
+  TaskStatus,
+  type JournalTaskResource,
+  type JournalTasksResponse,
+} from '../../src/types/tasks';
 import { TestDataManager, utcDayOffset } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
 import { chooseDueJournal, submitRetarget } from './utils/retarget-dialog';
@@ -549,6 +555,136 @@ test.describe('Journal Task Surface', () => {
     await creatingHeading.scrollIntoViewIfNeeded();
     await expect(creatingHeading).toBeVisible();
     await expect(creatingHeading.getByTestId('tasks-due-badge')).toHaveCount(0);
+  });
+});
+
+/**
+ * A task on a list — one with no due journal — on a journal's page.
+ *
+ * No endpoint can create a list task until tasks can be created on a list, so
+ * this injects one into the journal's **real** task listing as the page reads
+ * it. The resource is built from the frontend's own types, so the shape the
+ * route claims is the one the compiler checks rather than an untyped literal.
+ */
+test.describe('Journal Task Surface — a task with no due journal', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('shows a list task created here without erroring, and offers it no retarget', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await dataManager.cleanup();
+    });
+
+    const journal = await dataManager.createFutureJournal({
+      title: 'Beach weekend',
+      daysAhead: 2,
+    });
+    const journalOnlyText = taskText('Book the campsite');
+    const journalOnly = await dataManager.createTask({
+      creatingJournalId: journal.id,
+      dueJournalId: journal.id,
+      text: journalOnlyText,
+    });
+
+    const listTaskId = 900_000_000 + Math.floor(Math.random() * 1_000_000);
+    const listTaskText = taskText('Buy sunscreen');
+    const listTask: JournalTaskResource = {
+      type: 'tasks',
+      id: String(listTaskId),
+      attributes: {
+        text: listTaskText,
+        status: TaskStatus.NOT_DONE,
+        creating_journal_id: Number(journal.id),
+        due_journal_id: null,
+        intermediate_journal_ids: [],
+        creating_journal: {
+          id: Number(journal.id),
+          title: journal.title,
+          date: utcDayOffset(2).slice(0, 10),
+          cancelled: false,
+        },
+        due_journal: null,
+        intermediate_journals: [],
+        contacts: [],
+        lapsed: false,
+        lapse_reason: null,
+        link_roles: [TaskLinkRole.CREATED],
+      },
+    };
+
+    // Matched on the path rather than a glob: the client may add `?role=`.
+    const listingPath = `/api/journals/${journal.id}/tasks`;
+    await page.route(
+      url => url.pathname === listingPath,
+      async route => {
+        const response = await route.fetch();
+        const body = (await response.json()) as JournalTasksResponse;
+        await route.fulfill({
+          response,
+          json: {
+            ...body,
+            data: [...body.data, listTask],
+            meta: {
+              ...body.meta,
+              groups: {
+                ...body.meta.groups,
+                created: [...body.meta.groups.created, listTaskId],
+              },
+            },
+          } satisfies JournalTasksResponse,
+        });
+      }
+    );
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', error => pageErrors.push(error));
+
+    await openJournal(page, journal);
+
+    const createdGroup = page.getByTestId('journal-tasks-group-created');
+    const listRow = createdGroup.getByTestId(`journal-task-${listTaskId}`);
+    await expect(listRow.getByTestId('journal-task-text')).toHaveText(
+      listTaskText
+    );
+    // Nothing about a due journal it does not have, and never lapsed.
+    await expect(listRow.getByText(/Due in/)).toHaveCount(0);
+    await expect(listRow.getByTestId('journal-task-lapsed')).toHaveCount(0);
+
+    // Its status actions stay; retargeting, still journal-only on the server,
+    // is not offered.
+    const listActions = listRow.getByRole('group', { name: 'Task actions' });
+    await expect(
+      listActions.getByRole('button', { name: 'Mark done' })
+    ).toBeVisible();
+    await expect(
+      listActions.getByTestId('journal-task-action-retarget')
+    ).toHaveCount(0);
+
+    // The journal-only task beside it is exactly as before.
+    const dueRow = page
+      .getByTestId('journal-tasks-group-due')
+      .getByTestId(`journal-task-${journalOnly.id}`);
+    await expect(dueRow.getByTestId('journal-task-text')).toHaveText(
+      journalOnlyText
+    );
+    await expect(
+      dueRow.getByTestId('journal-task-action-retarget')
+    ).toBeVisible();
+
+    // On a phone the page still fits: nothing widens it sideways.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true);
+    expect(pageErrors).toEqual([]);
   });
 });
 

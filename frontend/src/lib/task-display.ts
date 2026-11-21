@@ -13,6 +13,7 @@
  */
 
 import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
+import type { TaskAttributes } from '@/types/tasks';
 
 /** The two parts of a lapse marker: what it reads, and what it explains. */
 export interface LapseMarker {
@@ -242,6 +243,23 @@ export function retargetAction(
   if (status === TaskStatus.CANCELLED) return RESURRECT_CANCELLED;
   if (status === TaskStatus.DONE) return REOPEN;
   return lapsed ? RESURRECT_LAPSED : RESCHEDULE;
+}
+
+/**
+ * Whether a task can be offered the retarget dialog at all.
+ *
+ * Retargeting is still the **journal-only** operation: the service narrows on
+ * both anchors — the due journal it is leaving and the creating journal it
+ * re-validates — so a task on a list missing either would be answered with a
+ * server error rather than a refusal. Both, not just the due journal, for that
+ * reason. A rule rather than an inline check for the same reason as the offer
+ * tables beside it, and so the phase that lets a list task be given a due
+ * journal changes it in one place.
+ */
+export function canRetarget(
+  task: Pick<TaskAttributes, 'creating_journal_id' | 'due_journal_id'>
+): boolean {
+  return task.creating_journal_id !== null && task.due_journal_id !== null;
 }
 
 /**

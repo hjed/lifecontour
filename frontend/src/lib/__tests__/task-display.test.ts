@@ -9,6 +9,7 @@
  */
 
 import {
+  canRetarget,
   lapseWording,
   linkRemovable,
   retargetAction,
@@ -282,6 +283,27 @@ describe('retargetAction', () => {
       expect(offer.submitLabel.length).toBeGreaterThan(0);
     });
   });
+});
+
+/**
+ * Retargeting is the journal-only operation: the service narrows on both
+ * anchors, so a task missing either would be refused with a server error.
+ * Asserted over every combination, because the rule is "both", not "due".
+ */
+describe('canRetarget', () => {
+  it.each([
+    [1, 2, true],
+    [null, 2, false],
+    [1, null, false],
+    [null, null, false],
+  ])(
+    'creating journal %p and due journal %p → %p',
+    (creating_journal_id, due_journal_id, expected) => {
+      expect(canRetarget({ creating_journal_id, due_journal_id })).toBe(
+        expected
+      );
+    }
+  );
 });
 
 /**

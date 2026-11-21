@@ -13,7 +13,7 @@
  * midnight in any other zone.
  */
 
-import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import type { HomeDashboardDueTask } from '@/lib/api/home-dashboard';
 import { formatIsoShortWeekdayDate } from '@/lib/date-utils';
 
 /**
@@ -127,7 +127,7 @@ export function taskTextId(taskId: number): string {
  * ever *how far off* it is; a task is due on a day the user has a journal for,
  * and past tomorrow the day itself is the more useful thing to be told.
  */
-export function dueChipLabel(task: HomeDashboardTask): string {
+export function dueChipLabel(task: HomeDashboardDueTask): string {
   if (task.days_away === 0) return 'Today';
   if (task.days_away === 1) return 'Tomorrow';
   return formatIsoShortWeekdayDate(task.due_journal.date);

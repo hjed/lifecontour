@@ -205,6 +205,26 @@ export function createMockJournalTask(
 }
 
 /**
+ * Create a mock task on a list, as a journal's listing returns one.
+ *
+ * Defaults to a list task in no journal at all — no creating journal and no
+ * due journal — so each test names the one journal it reaches the listing
+ * through. A list task never lapses, so `lapsed` stays false.
+ */
+export function createMockListTask(
+  partial?: Partial<JournalTaskAttributes> & { id?: string }
+): JournalTaskResource {
+  return createMockJournalTask({
+    creating_journal_id: null,
+    due_journal_id: null,
+    creating_journal: null,
+    due_journal: null,
+    link_roles: [TaskLinkRole.CREATED],
+    ...partial,
+  });
+}
+
+/**
  * Transform JournalResource to DisplayJournal for testing.
  * Uses the shared transformation utility to maintain consistency.
  */

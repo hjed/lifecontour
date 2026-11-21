@@ -281,6 +281,13 @@ where tasks are worked with; there is no `/tasks` route.
   the due journal's type/calendar colour: a task's journal references carry only
   id, title, date and cancelled, so the bar is keyed to whether the commitment
   is still live. Revisit if the read model ever carries a colour.
+- **A task may hold no journal, or only one.** A task on a list has a nullable
+  `creating_journal`/`due_journal` (and their ids), and still reaches a
+  journal's listing through the role it does hold. Its row names no due journal
+  it does not have, and shows no lapsed marker because the payload's `lapsed`
+  is always `false` for a list task (the server's rule, not a client guard);
+  the attach picker describes it by its status alone. Readers narrow on `null`
+  rather than asserting, so a list task can never crash the page.
 - Accessibility: each group is a `<section aria-labelledby>` with an `h4` and a
   list, under the card's own `h3`, so a group is announced by name with its item
   count rather than as a flat run of text.
@@ -434,7 +441,11 @@ lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.
   offers; a retarget writes a journal link, forces the status to *not done*
   whatever it was, and is refused on grounds the status matrix knows nothing
   about. It is offered in **every** status, including cancelled, where it is the
-  only thing on the row besides delete.
+  only thing on the row besides delete — but only on a task holding **both**
+  journals (`canRetarget` in `lib/task-display.ts`). The service still
+  retargets journal-only tasks alone and narrows on both anchors, so on a task
+  on a list missing either the request could only fail; the rule changes when a
+  list task can be given a due journal.
 - **The reopen confirmation is the server's refusal, not a client-side
   prediction.** A done task's retarget is sent *without* the acknowledgement,
   refused with `TASK_REOPEN_NOT_ACKNOWLEDGED` — a 409 that writes nothing, and
@@ -1577,6 +1588,13 @@ elements are numbered **W1**–**W33**.
     and each linked contact as a `ContactAvatar` beside their `name` (**W27**;
     note `name`, not the journal surface's `display_name` — a known divergence
     recorded on the wire). Zero contacts renders nothing at all.
+  - **A row may have no due journal.** `HomeDashboardTask.due_journal` is
+    nullable for a task on a list with no due journal. Today's selection is
+    journal-only, so the server still sends one on every row; the type admits
+    the list task so the card cannot crash on the first one. Such a row keeps
+    its text, contacts and action, draws no chip and no *"Due in"* line, and
+    takes a neutral accent bar. `dueChipLabel` takes the narrowed
+    `HomeDashboardDueTask`, so a chip cannot be labelled for a row without one.
   - **The action arrives as a slot**, mounted by the card rather than by the
     row. It is the one thing here that writes, so keeping it outside is what
     lets the row stay pure and be asserted without a query client;

@@ -24,7 +24,9 @@
  * task it extends a deadline, on a lapsed or cancelled one it is the
  * resurrection the specification names, and on a done one it is a reopen the
  * dialog confirms first. It shares this group's in-flight guard, because it is
- * a write against the same task.
+ * a write against the same task. It is withheld from a task on a list that
+ * lacks either journal (`canRetarget`): the service still retargets only
+ * journal-only tasks, so the request could only fail.
  *
  * The remove-a-mention affordance is mounted here too, between the retarget
  * and the delete, and only on a row whose link role `linkRemovable` permits.
@@ -64,6 +66,7 @@ import {
   useUpdateTask,
 } from '@/lib/api/tasks';
 import {
+  canRetarget,
   linkRemovable,
   statusActions,
   type TaskStatusAction,
@@ -153,7 +156,9 @@ export function JournalTaskActions({
         );
       })}
 
-      <RetargetTaskDialog task={task} disabled={writing} />
+      {canRetarget(task.attributes) && (
+        <RetargetTaskDialog task={task} disabled={writing} />
+      )}
 
       {linkRemovable(role) && (
         <DetachMentionButton

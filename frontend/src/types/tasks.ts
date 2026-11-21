@@ -78,10 +78,17 @@ export interface TaskContactRef {
 export interface TaskAttributes {
   text: string;
   status: TaskStatus;
-  /** The journal the commitment arose in; never changes. */
-  creating_journal_id: number;
-  /** The journal it is due in; may be retargeted. */
-  due_journal_id: number;
+  /**
+   * The journal the commitment arose in; never changes. `null` for a task on
+   * a list that arose in no journal — a task with no list always has one.
+   */
+  creating_journal_id: number | null;
+  /**
+   * The journal it is due in; may be retargeted. `null` for a task on a list
+   * with no due journal (undated, or dated by a due date instead) — a task
+   * with no list always has one.
+   */
+  due_journal_id: number | null;
   /** Journals it has passed through, oldest link first. Neither anchor appears. */
   intermediate_journal_ids: number[];
   created_at?: string | null;
@@ -90,14 +97,17 @@ export interface TaskAttributes {
 
 /** A task as a read surface returns it: the written shape, resolved. */
 export interface TaskReadAttributes extends TaskAttributes {
-  creating_journal: TaskJournalRef;
-  due_journal: TaskJournalRef;
+  /** `creating_journal_id` resolved; `null` exactly when that is. */
+  creating_journal: TaskJournalRef | null;
+  /** `due_journal_id` resolved; `null` exactly when that is. */
+  due_journal: TaskJournalRef | null;
   /** Same order and membership as `intermediate_journal_ids`, resolved. */
   intermediate_journals: TaskJournalRef[];
   contacts: TaskContactRef[];
   /**
    * Still not done, and the due journal has either passed or been cancelled.
-   * Derived on every read and never stored.
+   * Derived on every read and never stored. Always `false` on a task on a
+   * list: a list task never lapses.
    */
   lapsed: boolean;
   lapse_reason?: LapseReason | null;
