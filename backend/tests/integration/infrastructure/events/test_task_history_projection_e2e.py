@@ -40,6 +40,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
@@ -72,6 +73,7 @@ def _task_service(conn: AsyncConnection) -> TaskService:
     """
     return TaskService(
         task_repo=SqlTaskRepository(conn),
+        task_list_repo=SqlTaskListRepository(conn),
         journal_repo=SqlJournalRepository(conn),
         contact_repo=SqlContactRepository(conn),
         date_resolver=JournalDateResolver(

@@ -92,6 +92,20 @@ _FIND_FOR_UPDATE = text(
     """
 )
 
+# ``FOR SHARE``, for a *task* write that must hold its list writable until it
+# commits. It conflicts with the ``FOR NO KEY UPDATE`` every list write takes —
+# so an archive waits for an in-flight task write, and a task write waits for an
+# in-flight archive and then reads the archived row — but not with another task
+# write's share lock, so writes to different tasks on one list never queue.
+_FIND_FOR_SHARE = text(
+    f"""
+    SELECT {_TASK_LIST_COLUMNS}
+    FROM task_lists
+    WHERE id = :id AND user_id = :user_id
+    FOR SHARE
+    """
+)
+
 _IN_USER_ORDER = "ORDER BY position, id"
 
 # Locks every list the owner has against other position writers: a move, and
@@ -232,6 +246,12 @@ class SqlTaskListRepository(TaskListRepository):
     ) -> TaskList | None:
         """Find one of the user's lists and lock its row against other writers."""
         return await self._find_one(_FIND_FOR_UPDATE, task_list_id, user_id)
+
+    async def find_by_id_for_share(
+        self, task_list_id: int, user_id: str
+    ) -> TaskList | None:
+        """Find one of the user's lists and hold it against list writers."""
+        return await self._find_one(_FIND_FOR_SHARE, task_list_id, user_id)
 
     async def list_for_user(
         self,

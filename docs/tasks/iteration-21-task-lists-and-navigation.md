@@ -1095,16 +1095,98 @@ entity. No REST, MCP, event or UI contract changed.
 
 - [ ] Existing delete dialog; E2E in the journal-tasks spec.
 
-#### Phase 18: Archived lists freeze their tasks
+#### Phase 18: Archived lists freeze their tasks ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 6, Phase 11.
-**Estimated diff:** ~90 production → **~800 tracked**
+**Estimated diff:** ~90 production → **~800 tracked** · **Actual:** ~180 production → **~1,720
+tracked** (1,689 insertions, 32 deletions excluding this document: 177 production — service 97,
+repositories 53, MCP tool docstrings and instructions 25, DI 2; 1,485 tests; 27 architecture
+docs). Production ran ×2 on the estimate, half of it docstrings; tests ran ×2.6 on the multiplier,
+because every write is covered at the service (unit and integration), REST and MCP layers, plus two
+real-connection concurrency tests.
 
 **Acceptance Criteria:**
 
-- [ ] Status, text, delete, retarget, contact-link and attach endpoints and tools refuse a task on an archived list.
-- [ ] Tests seed a list task directly.
-- [ ] Lands before any list task can be created, so an archived list is never editable; each later list-task write refuses an archived list in its own phase.
+- [x] Status, text, delete, retarget, contact-link and attach endpoints and tools refuse a task on an archived list.
+- [x] Tests seed a list task directly.
+- [x] Lands before any list task can be created, so an archived list is never editable; each later list-task write refuses an archived list in its own phase.
+
+**Delivered:** every `TaskService` task write refuses a task on an archived list with Phase 5's
+`TaskListArchivedError` (409 `TASK_LIST_ARCHIVED`, "…archived and read-only; unarchive it to change
+it"), on REST and MCP alike, through one helper, `TaskService._hold_list_writable`, which calls
+Phase 6's `TaskList.ensure_writable()` rather than re-deriving the rule.
+- `TaskListRepository.find_by_id_for_share` (`FOR SHARE`): the task write holds its list for the
+  unit of work. It conflicts with the `FOR NO KEY UPDATE` an archive takes but not with another
+  task write's share lock.
+- Wired into `update_task` (text and status, after the locked read, before the no-op comparison),
+  `retarget_due_journal` (an early refusal on a plain read of the list right after the peek,
+  before the same-journal no-op and any lock; then the share-locked guard after the task row lock),
+  `delete_task`, `link_contact` (after contact resolution), `unlink_contact`,
+  and `attach_`/`detach_intermediate_journal`. `TaskService` takes `task_list_repo`
+  (`app/infrastructure/di/tasks.py`).
+- `TaskRepository.delete` is `DELETE … RETURNING task_list_id` and returns it (`None` for a
+  journal-only task; a missing task still raises), so the delete keeps its "no read precedes it"
+  shape: it refuses after the statement, and raising rolls the unit of work back.
+- The eight MCP write tools' docstrings and the server instructions say an archived list's tasks
+  are read-only; `api-design.md` (*Task Endpoints* rows and the task-list read-only bullet) and
+  `domain-architecture.md` (the archived rule, lock order) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_service_archived_list.py` (each of the eight writes:
+refused naming the list, nothing written or published, the list read `for_share`; the delete reads
+the list its statement returned; no-ops refused — same status, same due journal, an already-linked
+contact; an unknown contact still 404s first; a missing task still 404s without reading a list; an
+unreadable list → not found; an active list lets each write through; a journal-only task never
+reaches the list repository). Integration, every list task seeded with `create_list_task` on a
+`seed_task_list(archived_at=…)` list via the new `seed_archived_list_task`/`task_state` helpers in
+`task_seeding.py`: `test_task_list_repository_integration.py` (`find_by_id_for_share` finds,
+owner-scoped, missing, takes `FOR SHARE`), `test_task_repository_integration.py` (delete returns
+the list id, or `None`), `test_task_service_archived_list_integration.py` (each write refused with
+row, links and outbox unchanged; a refused delete is rolled back; unarchiving restores each write;
+an active list writes; journal merge and contact merge still re-point an archived list's task
+links; `overlap` concurrency both ways — a status change during an archive waits and is refused, an
+archive during a status change waits for it), `api/test_task_archived_list_endpoints.py` (all
+seven routes, `PATCH` status and text separately → 409 with the task unchanged; `GET` still 200; a
+second user's archived-list task → 404), `mcp/test_task_tools_archived_list_mcp.py` (all eight
+tools → "Task error" naming unarchiving, task and outbox unchanged; `get_task` still answers). No
+E2E: no UI, and no list task can be created through the product yet. Existing suites only gained
+the new constructor argument and fixture return values; no assertion changed.
+Gates run locally: ruff format/check and mypy (backend), the backend unit suite (5,612 passed), the
+full backend integration suite in chunks (about 4,650 passed, 7 pre-existing skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **Lock order is the task, then its list** (the share lock is taken after the task is read or
+  locked). It keeps every pinned journal-only test as it was — the delete's "no read precedes it",
+  status and text's "only the locked read" — and it is the order a move needs, since the task names
+  its list. No list writer holds a task lock, so nothing can deadlock today. The retarget keeps it
+  too (journals → task → list): it refuses early on a *plain* read of the list — so the no-op and a
+  list task without a due journal are refused before anything is locked — and takes the share lock
+  after its task lock (found in review: the first cut took the share lock ahead of the task row).
+- **`FOR SHARE`, not `FOR NO KEY UPDATE`**, so writes to different tasks on one list never queue.
+- **No-ops are refused**, as Phase 6 refused a no-op patch of an archived list.
+- **Error precedence:** a missing task or contact still answers 404 first. After that the archived
+  refusal comes before the write's own rules — an unknown or past journal, an anchor-role conflict,
+  the reopen acknowledgement — as an archived list's own writes refuse before looking at the change:
+  nothing about an archived list's task can be fixed by correcting the request.
+- **Merges are not refused** (user decision). Journal and contact merges re-point an archived
+  list's task links "as today": they are the journal's and the contact's operations, and refusing them would block a
+  merge over a list the user is not touching. Pinned by integration tests.
+- **The delete refuses after its statement** and relies on the rollback, which holds while the
+  refusal propagates out of the outermost unit of work, as every caller lets it; the docstring says
+  so and an integration test proves the row survives.
+
+**Notes for later phases:**
+- *Phase 16:* journal delete removing a list task's links is a journal operation; like the merges,
+  it should not be refused by an archived list.
+- *Phase 19 and every later list-task write* (create on a list, due date, due journal, flag, icon,
+  move, reorder, recurrence): call `TaskService._hold_list_writable` with the task's list inside the
+  write's unit of work, after the task's own read or lock.
+- *Phases 25/26 (move):* lock the task, then the source and target lists in ascending id order
+  (`find_by_id_for_share`, or `FOR NO KEY UPDATE` if the list row itself changes). The link,
+  unlink, attach and detach writes read the task without a lock, so once a task can change lists
+  they must lock it (or re-read its list under the share lock) before trusting `task_list_id`.
+- *Phase 29 (list delete):* lock the list's tasks before the list, or a task write holding its task
+  lock and waiting for the list share lock will deadlock against it.
 
 #### Phase 19: Create a task on a list
 

@@ -122,7 +122,7 @@ class TaskRepository(ABC):
         """
 
     @abstractmethod
-    async def delete(self, task_id: int, user_id: str) -> None:
+    async def delete(self, task_id: int, user_id: str) -> int | None:
         """Hard-delete one of the user's tasks.
 
         Deleting a task removes its intermediate-journal and contact links with
@@ -131,6 +131,12 @@ class TaskRepository(ABC):
         Args:
             task_id: The task id to delete
             user_id: The acting user
+
+        Returns:
+            The list the task was on, or ``None`` for a journal-only task —
+            never for a missing one, which raises. Answered by the statement
+            itself, so a caller can refuse an archived list's task without a
+            read before the delete, and undo the delete by raising.
 
         Raises:
             TaskNotFoundError: When no such task belongs to the user.
@@ -898,6 +904,23 @@ class TaskListRepository(ABC):
         For check-then-write paths — refusing a write to an archived list, say —
         which must hold the state they checked until they commit. Callers must
         already be inside their unit of work, or the lock is released at once.
+
+        Returns:
+            The list, or ``None`` when it does not exist or is not the user's.
+        """
+
+    @abstractmethod
+    async def find_by_id_for_share(
+        self, task_list_id: int, user_id: str
+    ) -> TaskList | None:
+        """Find one of the user's lists and hold it against list writers.
+
+        For a *task* write on the list, which must keep the list writable — not
+        archived — from its check until it commits. The share lock conflicts
+        with :meth:`find_by_id_for_update`, which archiving takes, but not with
+        another task write's share lock, so writes to different tasks on one
+        list do not wait for each other. Callers must already be inside their
+        unit of work, or the lock is released at once.
 
         Returns:
             The list, or ``None`` when it does not exist or is not the user's.

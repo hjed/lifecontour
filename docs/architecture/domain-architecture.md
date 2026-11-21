@@ -251,6 +251,16 @@ the *creating* journal where it arose and the *due* journal where it matters.
   most-recently-archived first. Whether a list may be written while archived is decided by the
   entity — `TaskList.ensure_writable()` raises `TaskListArchivedError` (409) for an archived list —
   and every service write but unarchive calls it right after its locked read.
+  The rule reaches the list's **tasks** too: every `TaskService` write (status, text, delete,
+  retarget, contact link/unlink, intermediate-journal attach/detach) calls it on the task's list
+  through `TaskService._hold_list_writable`, which reads the list with
+  `TaskListRepository.find_by_id_for_share` (`FOR SHARE`) and keeps it for the unit of work. The
+  share lock conflicts with the `FOR NO KEY UPDATE` an archive takes, but not with another task
+  write's, so an archive and a task write serialise while task writes on one list do not. **Lock
+  order is the task, then its list**; no list writer holds a task lock, and one that will (deleting
+  a list) must lock the list's tasks first. The delete refuses after its `DELETE … RETURNING
+  task_list_id`, and raising rolls the unit of work back. Merges of journals and contacts still
+  re-point an archived list's task links: they are the journal's and the contact's operations.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below; the
   date rules a task on a list follows instead — due date, overdue, never lapsing — see

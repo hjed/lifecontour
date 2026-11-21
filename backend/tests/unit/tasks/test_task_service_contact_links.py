@@ -36,7 +36,7 @@ from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import published_events
+from tests.unit.tasks.task_doubles import make_task_list_repo, published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -75,8 +75,12 @@ def integrity_error(constraint: str) -> IntegrityError:
 
 @pytest.fixture
 def mock_task_repo() -> AsyncMock:
-    """A task repository that links and unlinks successfully."""
+    """A task repository that finds the task and links and unlinks successfully.
+
+    The task is journal-only, so the archived-list guard has no list to read.
+    """
     repo = AsyncMock()
+    repo.find_by_id.return_value = make_task()
     repo.add_contacts.return_value = [CONTACT_ID]
     repo.remove_contact.return_value = True
     return repo
@@ -126,6 +130,7 @@ def service(
     """
     return TaskService(
         task_repo=mock_task_repo,
+        task_list_repo=make_task_list_repo(),
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=JournalDateResolver(mock_settings_repo),
@@ -258,7 +263,11 @@ class TestLinkingAContact:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Links are editable in any status, so no status is consulted at all."""
+        """Links are editable in any status, so no status is consulted at all.
+
+        The task is read — the archived-list guard needs its list — but only
+        through the plain read, and nothing is decided from its status.
+        """
         await link(service, mock_transaction)
 
         mock_task_repo.save.assert_not_awaited()
@@ -351,6 +360,11 @@ class TestUnreachableTasks:
     through and adds no branch of its own** — it never re-wraps, softens or
     enriches the repository's answer, which is what would let a message start
     saying whether a task was absent or somebody else's.
+
+    The archived-list guard now reads the task before the write, through the
+    same owner-scoped repository and with the same ``TaskNotFoundError`` for a
+    task that is not found, so it adds no new answer either. Here that read
+    finds the task, so the write's own answer is what is under test.
     """
 
     @pytest.mark.asyncio

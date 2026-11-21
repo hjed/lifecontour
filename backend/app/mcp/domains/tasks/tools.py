@@ -256,6 +256,9 @@ async def set_task_status(
     so asking here for not_done or done on a cancelled task is refused and the
     message says what to do instead. Setting the status a task already has
     changes nothing.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -300,6 +303,9 @@ async def link_task_to_contact(
     Contact links can be changed in any status, including on a task that is
     already done or cancelled. Linking a contact that is already linked is
     accepted and changes nothing, so a retry is safe.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -339,6 +345,9 @@ async def unlink_task_from_contact(
     not linked is accepted rather than refused, so a retry is safe. Deleting the
     contact itself removes its task links automatically, so this is not needed
     for that.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -407,6 +416,9 @@ async def retarget_task(
     Asking for the journal the task is already due in changes nothing at all.
     The journal the task is *leaving* is never checked, so a task whose due
     journal has already passed can be moved onto a future one.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -451,6 +463,9 @@ async def update_task_text(
     No journal is involved and none is linked: rewording a task does not attach
     it to whatever journal the conversation happens to be about. Use the journal
     link tools for that.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -494,6 +509,9 @@ async def delete_task(
 
     Deleting a task that does not exist, or is not yours, reports not found —
     including a second delete of a task already deleted.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -547,6 +565,9 @@ async def attach_intermediate_journal_to_task(
     nothing, so a retry is safe. Retargeting a task keeps its previous due
     journal as an intermediate link automatically — this tool is for the links a
     person asks for, and nothing infers one from an ordinary edit.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 
@@ -599,6 +620,9 @@ async def detach_intermediate_journal_from_task(
     that is *both* an anchor and an intermediate journal — which happens when a
     task is retargeted onto a journal it already mentioned — keeps its
     intermediate link removable; only the anchor role is out of reach.
+
+    A task on an archived list is read-only, as the list is: this is refused,
+    even when it would change nothing, until the list is unarchived.
     """
     user_id = await get_current_user_id()
 

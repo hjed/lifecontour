@@ -119,7 +119,7 @@ def create_mcp_server(auth: AuthProvider | None = None) -> FastMCP[None]:
         - Contacts: Retrieve contact information, search contacts, manage relationships
         - Journals: Create, update, search, and manage journal entries with types, tags, and relationships
         - Tasks: Create commitments anchored to journals, reword them, mark them done, not done, or cancelled, and delete them (cancelling is the ordinary way to retire one) — a task is due in a journal, never on a bare date
-        - Task lists: Create named lists (with an optional icon from a fixed set), rename them or set or clear their icon, read one, list them by archived state, reorder them (move_task_list), and archive or unarchive them (an archived list is read-only until unarchived; its tasks are untouched) — tasks cannot be placed on a list yet
+        - Task lists: Create named lists (with an optional icon from a fixed set), rename them or set or clear their icon, read one, list them by archived state, reorder them (move_task_list), and archive or unarchive them (an archived list is read-only until unarchived; its tasks keep their state but are read-only too — every task write on them is refused) — tasks cannot be placed on a list yet
 
         All data is formatted for AI analysis and decision making. Use the tools to:
         - Get detailed contact information by ID

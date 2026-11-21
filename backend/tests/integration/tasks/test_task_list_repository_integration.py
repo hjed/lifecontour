@@ -232,6 +232,45 @@ class TestFind:
         assert len(statements) == 1
         assert "FOR NO KEY UPDATE" in statements[0]
 
+    async def test_find_for_share_returns_the_owners_list(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        saved = await save_list(repository, "Packing", archived_at=ARCHIVED_EARLIER)
+        assert saved.id is not None
+
+        assert await repository.find_by_id_for_share(saved.id, USER_ID) == saved
+
+    async def test_find_for_share_does_not_find_another_users_list(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        theirs = await save_list(repository, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+
+        assert await repository.find_by_id_for_share(theirs.id, USER_ID) is None
+
+    async def test_find_for_share_of_a_missing_id_is_not_found(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        assert await repository.find_by_id_for_share(999_999, USER_ID) is None
+
+    async def test_find_for_share_takes_the_share_lock(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """``FOR SHARE``: a task write holds its list against an archive, which
+        takes ``FOR NO KEY UPDATE``, without queueing behind another task write
+        on the same list. The lock's effect is proved by the overlap tests in
+        ``test_task_service_archived_list_integration.py``."""
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        with recorded_statements(async_connection) as statements:
+            await repository.find_by_id_for_share(saved.id, USER_ID)
+
+        assert len(statements) == 1
+        assert "FOR SHARE" in statements[0]
+
 
 class TestUpdate:
     """Saving a list that already has an id."""

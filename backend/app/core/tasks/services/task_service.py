@@ -74,7 +74,10 @@ if TYPE_CHECKING:
     from app.core.contacts.models.repositories import ContactRepository
     from app.core.journal.models.repositories import JournalRepository
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
-    from app.core.tasks.models.repositories import TaskRepository
+    from app.core.tasks.models.repositories import (
+        TaskListRepository,
+        TaskRepository,
+    )
     from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
 
@@ -162,17 +165,27 @@ class TaskService:
     does, and a rejected write publishes nothing. Provenance comes from the
     caller, so the UI, an AI agent over MCP and an internal caller stay
     distinguishable in a task's history.
+
+    **A task on an archived list is read-only**, as the list is: every write
+    below refuses one with ``TaskListArchivedError`` (409) through
+    :meth:`_hold_list_writable`, the one place it consults
+    :meth:`~core_shared.models.tasks.TaskList.ensure_writable`. The list is held
+    ``FOR SHARE`` after the task has been read or locked — **the task, then its
+    list** — so an archive cannot land between the check and the write, and
+    writes to different tasks on one list never wait for each other.
     """
 
     def __init__(
         self,
         task_repo: TaskRepository,
+        task_list_repo: TaskListRepository,
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         date_resolver: JournalDateResolver,
         event_publisher: OutboxEventPublisher,
     ) -> None:
         self.task_repo = task_repo
+        self.task_list_repo = task_list_repo
         self.journal_repo = journal_repo
         self.contact_repo = contact_repo
         self.date_resolver = date_resolver
@@ -357,10 +370,15 @@ class TaskService:
                 user's. The two are indistinguishable by design.
             TaskStatusTransitionError: When the transition is refused — that is,
                 when it would leave *cancelled*, which only retargeting does.
+            TaskListArchivedError: When the task is on an archived list —
+                setting a value it already has included.
         """
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)
+        # Before the no-op comparison: an archived list's task is not writable,
+        # which includes being "written" to the value it already has.
+        await self._hold_list_writable(task.task_list_id, task_id, user_id)
 
         updated = task
         # Built as the decisions are made rather than by diffing the two tasks
@@ -466,8 +484,12 @@ class TaskService:
                 user's. The two are indistinguishable by design.
             ContactNotFoundError: When the contact does not exist or is not the
                 acting user's. The two are indistinguishable by design.
+            TaskListArchivedError: When the task is on an archived list —
+                linking a contact it already has included.
         """
         contacts = await self._resolve_contacts([contact_id], user_id=user_id)
+        # After the contact, so a request that was already wrong keeps its 404.
+        await self._require_writable_task(task_id, user_id)
         created = await self._link_contacts(task_id, contacts, user_id, transaction)
         linked = contact_id in created
         if linked:
@@ -531,7 +553,9 @@ class TaskService:
         Raises:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's.
+            TaskListArchivedError: When the task is on an archived list.
         """
+        await self._require_writable_task(task_id, user_id)
         removed = await self.task_repo.remove_contact(task_id, contact_id, user_id)
         if removed:
             await self._publish_contact_change(
@@ -659,8 +683,9 @@ class TaskService:
                 which it is not.
             TaskJournalIsAnchorError: When the journal is already the task's
                 creating or due journal.
+            TaskListArchivedError: When the task is on an archived list.
         """
-        task = await self._require_task(task_id, user_id)
+        task = await self._require_writable_task(task_id, user_id)
         await self._require_owned_journal(user_id, journal_id)
         _refuse_anchor_role(task, task_id, journal_id)
 
@@ -782,8 +807,9 @@ class TaskService:
                 user's.
             TaskJournalIsAnchorError: When the journal is the task's creating or
                 due journal **and** there is no intermediate link to remove.
+            TaskListArchivedError: When the task is on an archived list.
         """
-        task = await self._require_task(task_id, user_id)
+        task = await self._require_writable_task(task_id, user_id)
 
         removed = await self.task_repo.remove_intermediate_journal(
             task_id, journal_id, user_id
@@ -889,7 +915,17 @@ class TaskService:
         **No read precedes it.** Unlike :meth:`update_task` this decides nothing
         from what it read: the single owner-scoped statement either removes a row
         or does not, and reports which. A locking read would add a round trip and
-        a second way for the two to disagree. The published event is a *marker*
+        a second way for the two to disagree.
+
+        **The archived-list refusal comes after the statement**, for the same
+        reason: the ``DELETE`` answers which list the task was on, and a task on
+        an archived list is refused *then*, by raising — which rolls the unit of
+        work back and puts the row and its links back with it. That holds while
+        the refusal propagates out of the outermost unit of work, as every
+        caller of this method lets it; a caller that caught it inside a wider
+        unit would commit the delete.
+
+        The published event is a *marker*
         for the same reason — naming the task's text in it would have bought
         exactly the read this method exists without.
 
@@ -913,8 +949,11 @@ class TaskService:
                 tell a caller a commitment is gone when it may still be sitting
                 on somebody's journal. A refused delete publishes nothing, so a
                 repeated one cannot write a second deletion into history.
+            TaskListArchivedError: When the task is on an archived list. The
+                statement has run by then; raising is what undoes it.
         """
-        await self.task_repo.delete(task_id, user_id)
+        task_list_id = await self.task_repo.delete(task_id, user_id)
+        await self._hold_list_writable(task_list_id, task_id, user_id)
 
         await self.event_publisher.publish(
             TaskDeleted(
@@ -1074,6 +1113,8 @@ class TaskService:
                 after today in the user's timezone.
             TaskReopenNotAcknowledgedError: When the task is *done* and the
                 caller has not acknowledged that retargeting reopens it.
+            TaskListArchivedError: When the task is on an archived list —
+                retargeting onto the journal it is already due in included.
         """
         # A read that takes no lock, and decides nothing. It is here to name the
         # journals — the one being left is not knowable any other way — and to
@@ -1082,6 +1123,12 @@ class TaskService:
         peeked = await self.task_repo.find_by_id(task_id, user_id)
         if peeked is None:
             raise TaskNotFoundError(task_id)
+        # Refused here, before the no-op answer and the anchor narrowing below,
+        # so an archived list's task is refused whatever it was asked to do. A
+        # plain read, not the share lock: taking that lock here would put the
+        # list ahead of the task row, against the order every other write keeps.
+        # The lock — the guard an archive cannot slip past — follows the task's.
+        await self._refuse_if_list_archived(peeked.task_list_id, task_id, user_id)
         if peeked.due_journal_id == due_journal_id:
             return peeked
 
@@ -1096,6 +1143,9 @@ class TaskService:
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)
+        # Journals, then the task, then its list: the list it is on *now*, held
+        # until the unit of work ends.
+        await self._hold_list_writable(task.task_list_id, task_id, user_id)
 
         # The journal actually being left, which is the one linked and announced
         # below. It comes from here rather than from the peek even though they
@@ -1427,6 +1477,66 @@ class TaskService:
         if task is None:
             raise TaskNotFoundError(task_id)
         return task
+
+    async def _require_writable_task(self, task_id: int, user_id: str) -> Task:
+        """:meth:`_require_task`, then :meth:`_hold_list_writable` on its list."""
+        task = await self._require_task(task_id, user_id)
+        await self._hold_list_writable(task.task_list_id, task_id, user_id)
+        return task
+
+    async def _hold_list_writable(
+        self, task_list_id: int | None, task_id: int, user_id: str
+    ) -> None:
+        """Refuse a write to a task on an archived list; hold the list otherwise.
+
+        The one place a task write consults the list's read-only rule, and the
+        rule itself is the entity's — ``TaskList.ensure_writable``, which the
+        list's own writes call — rather than a second reading of ``archived_at``.
+
+        A journal-only task (``task_list_id is None``) has no list to ask, so
+        nothing is read for it. Otherwise the list is read ``FOR SHARE`` and the
+        lock is kept until the unit of work ends: an archive takes
+        ``FOR NO KEY UPDATE``, so it waits for this write to commit, and a write
+        that started while an archive was in flight waits for it and then reads
+        the archived row. Two task writes on the same list share the lock.
+
+        **Lock order: the task, then its list.** Callers that lock the task row
+        do so before calling this. No list writer holds a task lock today, so
+        no order is unsafe yet; a later writer that locks a list and then its
+        tasks — deleting a list — must lock the tasks first.
+
+        Raises:
+            TaskListArchivedError: The list is archived, and so is the task.
+            TaskNotFoundError: The list cannot be read. Unreachable while the
+                list's foreign key restricts deletes; if it ever happens the
+                task is answered as gone rather than as writable.
+        """
+        if task_list_id is None:
+            return
+        task_list = await self.task_list_repo.find_by_id_for_share(
+            task_list_id, user_id
+        )
+        if task_list is None:
+            raise TaskNotFoundError(task_id)
+        task_list.ensure_writable()
+
+    async def _refuse_if_list_archived(
+        self, task_list_id: int | None, task_id: int, user_id: str
+    ) -> None:
+        """:meth:`_hold_list_writable`'s rule on a plain read, holding nothing.
+
+        For a refusal that has to come before the task row is locked — the
+        retarget's, which answers its no-op before taking any lock — where the
+        share lock would put the list ahead of the task in the lock order. It
+        decides only whether to refuse early; a write that goes on must still
+        take :meth:`_hold_list_writable` after its task lock.
+        """
+        if task_list_id is None:
+            return
+        task_list = await self.task_list_repo.find_by_id(task_list_id, user_id)
+        if task_list is None:
+            raise TaskNotFoundError(task_id)
+        task_list.ensure_writable()
 
     async def _require_owned_journal(self, user_id: str, journal_id: int) -> Journal:
         """Load a journal the acting user owns, on the anchors' terms.

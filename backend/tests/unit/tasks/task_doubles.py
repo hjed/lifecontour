@@ -19,9 +19,10 @@ produce a fixture whose default no test actually wants.
 import datetime
 from unittest.mock import AsyncMock
 
-from core_shared.models.tasks import Task, TaskStatus
+from core_shared.models.tasks import Task, TaskList, TaskStatus
 
 from app.core.tasks.models.events import DomainEvent
+from app.core.tasks.models.repositories import TaskListRepository
 
 USER_ID = "test-user-123"
 # A second, unrelated owner. Owner scoping is only worth asserting against a
@@ -118,6 +119,20 @@ def make_list_task(
         due_date=due_date,
         status=status,
     )
+
+
+def make_task_list_repo() -> AsyncMock:
+    """A list repository whose every list is active.
+
+    For the suites about journal-only tasks, which never reach it, and for any
+    list task whose list being writable is not the point. Spec'd on the port, so
+    a renamed method fails rather than being invented by the mock.
+    """
+    repo = AsyncMock(spec=TaskListRepository)
+    repo.find_by_id_for_share.return_value = TaskList(
+        id=TASK_LIST_ID, user_id=USER_ID, name="Packing", position=0
+    )
+    return repo
 
 
 def published_events(publisher: AsyncMock) -> list[DomainEvent]:

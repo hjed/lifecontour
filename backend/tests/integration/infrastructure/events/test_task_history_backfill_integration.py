@@ -71,6 +71,7 @@ def _task_service(conn: AsyncConnection) -> TaskService:
     """The real service over real adapters on the test's single connection."""
     return TaskService(
         task_repo=SqlTaskRepository(conn),
+        task_list_repo=SqlTaskListRepository(conn),
         journal_repo=SqlJournalRepository(conn),
         contact_repo=SqlContactRepository(conn),
         date_resolver=JournalDateResolver(

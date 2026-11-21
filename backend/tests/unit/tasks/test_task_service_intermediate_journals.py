@@ -32,7 +32,7 @@ from core_shared.models.tasks import Task, TaskNotFoundError, TaskStatus
 
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import published_events
+from tests.unit.tasks.task_doubles import make_task_list_repo, published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -87,6 +87,7 @@ def service(mock_task_repo: AsyncMock, mock_event_publisher: AsyncMock) -> TaskS
     """
     return TaskService(
         task_repo=mock_task_repo,
+        task_list_repo=make_task_list_repo(),
         journal_repo=AsyncMock(),
         contact_repo=AsyncMock(),
         date_resolver=JournalDateResolver(AsyncMock()),
@@ -126,6 +127,7 @@ def retargeting_service(
 
     return TaskService(
         task_repo=mock_task_repo,
+        task_list_repo=make_task_list_repo(),
         journal_repo=journal_repo,
         contact_repo=AsyncMock(),
         date_resolver=JournalDateResolver(settings_repo),
