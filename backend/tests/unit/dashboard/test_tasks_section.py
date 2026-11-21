@@ -24,12 +24,15 @@ What is genuinely this module's own, and is therefore asserted here:
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 
 import pytest
 from core_shared.models.tasks import (
     Task,
     TaskContactRef,
+    TaskIcon,
     TaskJournalRef,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     UpcomingTasks,
@@ -65,6 +68,7 @@ def make_model(
         id=900 + task_id,
         title=title if title is not None else f"journal {task_id}",
         date=due_date,
+        last_day=due_date,
         cancelled=False,
     )
     return build_task_read_model(
@@ -80,11 +84,13 @@ def make_model(
             id=CREATING_JOURNAL_ID,
             title="where it arose",
             date=TODAY - datetime.timedelta(days=30),
+            last_day=TODAY - datetime.timedelta(days=30),
             cancelled=False,
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=contacts if contacts is not None else [],
+        task_list=None,
         today=TODAY,
     )
 
@@ -170,6 +176,8 @@ class TestTheRowARowDraws:
             due_journal=model.due_journal,
             intermediate_journals=(),
             contacts=(),
+            task_list=None,
+            overdue=False,
             lapse_reason=None,
         )
 
@@ -177,6 +185,47 @@ class TestTheRowARowDraws:
             tasks_section_for(
                 UpcomingTasks(window=upcoming_window(TODAY), tasks=(unpersisted,))
             )
+
+
+class TestTheRowsFlagIconListAndOverdue:
+    """Carried straight from the read model, deciding nothing."""
+
+    def test_a_flagged_task_with_an_icon_carries_both(self) -> None:
+        model = make_model(12, due_date=TODAY)
+        flagged = replace(
+            model, task=replace(model.task, flagged=True, icon=TaskIcon.STAR)
+        )
+
+        (row,) = tasks_section_for(selected(flagged)).tasks
+
+        assert row.flagged is True
+        assert row.icon is TaskIcon.STAR
+
+    def test_a_journal_only_task_has_no_list_and_is_not_overdue(self) -> None:
+        (row,) = tasks_section_for(selected(make_model(12, due_date=TODAY))).tasks
+
+        assert row.flagged is False
+        assert row.icon is None
+        assert row.task_list is None
+        assert row.overdue is False
+
+    def test_the_list_and_overdue_are_the_models(self) -> None:
+        """Ready for ITER21-004, which lets list tasks onto the card."""
+        packing = TaskListRef(id=5, name="Packing", icon=None, archived=False)
+        journal_only = make_model(12, due_date=TODAY)
+        model = replace(
+            journal_only,
+            task=replace(journal_only.task, task_list_id=packing.id, position=0),
+            task_list=packing,
+            overdue=True,
+        )
+
+        (row,) = tasks_section_for(
+            UpcomingTasks(window=upcoming_window(TODAY), tasks=(model,))
+        ).tasks
+
+        assert row.task_list is packing
+        assert row.overdue is True
 
 
 class TestDaysAway:

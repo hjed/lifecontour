@@ -10,7 +10,7 @@ superset of the write shape (``TaskMCP``), so an agent that learned a task from
 import datetime
 from typing import Literal
 
-from core_shared.models.tasks import LapseReason, TaskLinkRole, TaskStatus
+from core_shared.models.tasks import LapseReason, TaskIcon, TaskLinkRole, TaskStatus
 from pydantic import BaseModel, Field
 
 from app.core.history.models import FieldHistoryEntry
@@ -37,6 +37,21 @@ class TaskMCP(BaseModel):
     intermediate_journal_ids: list[int] = Field(
         description="Journals the task has passed through since it was created"
     )
+    task_list_id: int | None = Field(
+        description=(
+            "The list the task is on, or null for a journal-only task. A task on "
+            "a list never lapses; past its date it is overdue instead, which the "
+            "read tools' overdue field reports."
+        )
+    )
+    due_date: datetime.date | None = Field(
+        description=(
+            "A plain due date in the user's timezone, or null. Only a task on a "
+            "list has one, and never beside a due journal."
+        )
+    )
+    flagged: bool = Field(description="Whether the task is flagged as one that matters")
+    icon: TaskIcon | None = Field(description="Icon key from the fixed set, or null")
     created_at: str | None = Field(description="ISO 8601 instant")
     updated_at: str | None = Field(description="ISO 8601 instant")
 
@@ -79,6 +94,17 @@ class TaskJournalRefMCP(BaseModel):
     cancelled: bool = Field(description="Whether the journal is a cancelled event")
 
 
+class TaskListRefMCP(BaseModel):
+    """The list a task is on."""
+
+    id: int
+    name: str
+    icon: TaskIcon | None = Field(description="Icon key from the fixed set, or null")
+    archived: bool = Field(
+        description="Whether the list is archived; its tasks are then read-only"
+    )
+
+
 class TaskContactMCP(BaseModel):
     """A contact linked to a task."""
 
@@ -114,6 +140,17 @@ class TaskReadMCP(TaskMCP):
     )
     lapse_reason: LapseReason | None = Field(
         description="Why the task lapsed, or null when it has not"
+    )
+    task_list: TaskListRefMCP | None = Field(
+        description="The list the task is on; null exactly when task_list_id is"
+    )
+    overdue: bool = Field(
+        description=(
+            "A task on a list that is still not done and past its date: after "
+            "its due date, or once its due journal's last day has ended. A "
+            "cancelled due journal leaves it undated. Always false for a task "
+            "with no list, which lapses instead."
+        )
     )
 
 

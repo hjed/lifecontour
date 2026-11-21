@@ -25,6 +25,7 @@ from app.core.contacts.models.exceptions import (
     DuplicateEmailError,
 )
 from app.core.contacts.services import ContactService
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from tests.integration.contact_seeding import TEST_USER_ID
 
 
@@ -58,7 +59,9 @@ class TestContactServiceIntegration:
         return SqlContactEventPublisher(clean_database)
 
     @pytest.fixture
-    def contact_service(self, contact_repo, tag_repo, history_repo, event_publisher):
+    def contact_service(
+        self, contact_repo, tag_repo, history_repo, event_publisher, clean_database
+    ):
         """Create ContactService instance with real dependencies."""
         from app.core.contacts.services import (
             AddressValidationService,
@@ -71,7 +74,9 @@ class TestContactServiceIntegration:
         # Create service dependencies
         address_validation_service = AddressValidationService()
         contact_validation_service = ContactValidationService(contact_repo)
-        history_service = ContactHistoryService(history_repo, contact_repo)
+        history_service = ContactHistoryService(
+            history_repo, contact_repo, SqlTaskListRepository(clean_database)
+        )
         tag_hierarchy_service = TagHierarchyService(tag_repo)
         tag_service = TagService(
             tag_repo=tag_repo,

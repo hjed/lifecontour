@@ -39,6 +39,8 @@ from app.mcp.domains.tasks.task_list_schemas import (
     TaskListHistoryResponse,
     TaskListMCP,
     TaskListsMCP,
+    TaskListSummariesMCP,
+    TaskListSummaryMCP,
 )
 from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
 from app.mcp.shared.arguments import JsonBool, JsonIntOnly
@@ -216,18 +218,27 @@ async def list_task_lists(
     task_list_read_service: TaskListReadService = mcp_depends(
         get_task_list_read_service
     ),
-) -> TaskListsMCP:
+) -> TaskListSummariesMCP:
     """
     List the user's task lists, filtered by archived state.
 
     Use this to find a list's id by its name before reading it. With no
     argument it returns the lists the user is working with, in their order.
+    Each list carries open_task_count: how many of its tasks are not done.
     """
     user_id = await get_current_user_id()
-    task_lists = await task_list_read_service.list_task_lists(
+    summaries = await task_list_read_service.list_task_lists(
         user_id=user_id, archived=archived
     )
-    return TaskListsMCP(lists=[_task_list_fields(each) for each in task_lists])
+    return TaskListSummariesMCP(
+        lists=[
+            TaskListSummaryMCP(
+                **_task_list_fields(each.task_list).model_dump(),
+                open_task_count=each.open_task_count,
+            )
+            for each in summaries
+        ]
+    )
 
 
 @tool(annotations=IDEMPOTENT_WRITE)

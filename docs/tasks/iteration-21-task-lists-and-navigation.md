@@ -1192,16 +1192,132 @@ entity. No REST, MCP, event or UI contract changed.
   `NAMED_EXCLUSIONS` entry** and add a `WritePath`.
 - *Phase 29:* lock the list, then its tasks in id order, before settling each task.
 
-#### Phase 15: Task reads carry list, due date, flag, icon, overdue
+#### Phase 15: Task reads carry list, due date, flag, icon, overdue ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 11, Phase 13, Phase 14.
-**Estimated diff:** ~130 production → **~1,100 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~130 production → **~1,100 tracked** · one capability on REST and MCP together ·
+**Actual:** ~530 production → **~3,050 tracked** (about 2,795 insertions, 255 deletions excluding this
+document: about 530 net production across 23 files — the REST and MCP schemas with their field
+descriptions about 200, the read model and read service about 150, the contact feed label and its
+wiring about 70, the listing count about 90, the two repository lookups about 70; about 1,980 net
+tests across 43 files; 30 net architecture docs). Production ran ×4 on the estimate: it priced the
+read fields but not the contact feed label (a second consumer of a new repository lookup, with
+three hand-built construction sites), the listing's own resource types on both surfaces, or the
+field descriptions. Tests ran at ×3.7 production, over the capability band, because each of five
+surfaces got its own REST and MCP field, rejection and isolation cases, and two constructor changes
+(`TaskJournalRef.last_day`, `TaskReadService`/`ContactHistoryService` collaborators) touched about 25
+existing test files mechanically.
 
 **Acceptance Criteria:**
 
-- [ ] Get-task, journal tasks, upcoming, the dashboard payload and the contact task record (labelled with the list).
-- [ ] The list listing (Phase 3) returns each list's open-task count, using Phase 14's per-list counts.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Get-task, journal tasks, upcoming, the dashboard payload and the contact task record (labelled with the list).
+- [x] The list listing (Phase 3) returns each list's open-task count, using Phase 14's per-list counts.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests (the contact task record is REST-only: no MCP tool lists a contact's history — see the decisions).
+
+**Delivered:** every task read carries the task's list, due date, flag, icon and overdue.
+- `core_shared.models.tasks.read_model`: `TaskJournalRef` gains a required `last_day` (internal,
+  never on the wire) and `days()` → `DueJournalDays`; new `TaskListRef(id, name, icon, archived)`;
+  `TaskReadModel` gains `task_list` and `overdue`; `build_task_read_model(..., task_list=...)`
+  reads lapse and overdue from `derive_task_date_state` and refuses (`ValueError`) a list ref that
+  is not the task's own. `task_lapse_reason` is removed: `derive_task_date_state` is the one gate.
+- `TaskListRepository.find_by_ids(ids, user_id)` (the lists a page of tasks names) and
+  `find_for_tasks(task_ids, user_id)` (task → its list, both owners checked).
+- `TaskReadService` (now taking `task_list_repo`) sets `last_day` via `journal_last_day` and reads
+  the lists in one batched statement, **skipped when no task is on a list**, so journal-only pages
+  keep their statement counts; a task naming a list its owner cannot read is
+  `TaskListNotFoundError` (404), as a missing anchor is.
+- REST: `TaskAttributes` (every task resource, write answers included, through one
+  `task_attribute_values` builder) gains `task_list_id`, `due_date`, `flagged`, `icon`;
+  `TaskReadAttributes` gains `task_list` (`TaskListRefSchema`) and `overdue`. The dashboard row
+  (`DashboardTask` / `DashboardTaskSchema`) gains `flagged`, `icon`, `task_list`, `overdue`.
+- MCP: `TaskMCP` and `TaskReadMCP` gain the same fields (`get_task`, `list_journal_tasks`,
+  `list_upcoming_tasks` and every write tool's answer); tool docstrings describe overdue.
+- Contact task record: `ContactHistoryService` (now taking `task_list_repo`) stamps
+  `FieldHistoryEntry.entity_list` on a page's task rows; REST `ContactHistoryAttributes.task_list`.
+- List listing: `TaskListReadService.list_task_lists` (now taking `task_repo`) returns
+  `TaskListSummary(task_list, open_task_count)` from `count_open_tasks_by_list(...).get(id, 0)`;
+  REST `GET /api/task-lists` answers `TaskListSummaryAttributes` with `open_task_count`, MCP
+  `list_task_lists` answers `TaskListSummaryMCP`.
+- `api-design.md` (*Task Endpoints* conventions, the dashboard tasks table, *Task List Endpoints*)
+  and `domain-architecture.md` (the gate, the read model, the read service) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_read_model.py` (`TestTheList`: carried, refused when
+mismatched, missing or on a journal-only task; `TestOverdueOnTheModel`: due date past/today, closed
+statuses, passed due journal, multi-day due journal on its last day and after, cancelled due journal,
+no date at all, journal-only never overdue and lapsing by its first day),
+`test_task_read_service.py::TestTheListAndOverdue` (owner-scoped list lookup, none for a journal-only
+task, missing list raises, past due date, a Sydney trip's last local day vs the same rows in UTC,
+cancelled due journal), `test_task_list_read_service.py` (counts, zero, one scoped read, none for no
+lists), `api/test_task_read_serialisation.py::TestTheListDueDateFlagIconAndOverdue`,
+`api/test_home_dashboard_serialisation.py` (the row's pinned key set updated deliberately, new fields),
+`dashboard/test_tasks_section.py::TestTheRowsFlagIconListAndOverdue`,
+`contacts/test_contact_history_service.py` (rows labelled, no lookup without task rows),
+`mcp/domains/test_task_tools_schema.py::TestTheListFieldsArePublished` and
+`test_task_list_tools_schema.py` (the listing's `open_task_count`). Integration:
+`tasks/test_task_list_batch_lookups_integration.py` (both lookups, owner scoping on real foreign
+rows in every direction), `tasks/test_task_read_model_integration.py`
+(`TestTheListDueDateFlagIconAndOverdue`, `TestTheListCostsOneStatement`: one list statement for many
+tasks on a journal, none for journal-only), REST
+`api/test_task_endpoints.py::TestTaskReadsCarryListDueDateFlagIconAndOverdue` (get, journal tasks,
+upcoming, PATCH answer, multi-day and cancelled due journals, archived list, unknown task 404,
+another user's list task 404 without its name), `api/test_home_dashboard_tasks.py` (flag and icon on a
+row), `api/test_history_endpoints.py` (list label with archived, journal-only null, another owner's
+list unnamed, another user's contact 404), `api/test_task_list_endpoints.py` and
+`mcp/test_task_list_tools_mcp.py` (counts per filter, done/cancelled not counted, another user's tasks
+never counted, unknown filter refused), MCP
+`mcp/test_task_tools_mcp.py::TestTaskToolsCarryListDueDateFlagIconAndOverdue`. Existing tests changed
+only their constructor plumbing (`last_day`, `task_list=None`, the new collaborators, `TaskAttributes`
+arguments, `.task_list.id` on listing items) and the dashboard key pin; the `task_lapse_reason` gate
+tests went with the function, their cases now covered by `derive_task_date_state` and the read-model
+tests. No E2E: no UI change (ITER21-002 renders the fields; Phase 30 the journal page's overdue
+marker). Gates run locally: ruff format/check and mypy (backend, core_shared), backend unit suite
+(5,741 passed), core_shared (868), the full backend integration suite in chunks (about 4,790 passed,
+7 pre-existing skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **The contact task record is the contact history feed, REST-only** (user decision: "Keep it,
+  labels on feed"). Tasks keep their own history unchanged; the contact page shows a task only as a
+  task row on `GET /api/contacts/{id}/history`, which now carries `task_list`. No MCP tool lists a
+  contact's history entries (`get_contact` reports a count), so there is no MCP half to extend.
+- **`open_task_count` is on the listing only** — not get-one or the write answers — so writes pay
+  no count query; a client refetches the listing. The listing has its own resource types
+  (`TaskListSummary*`) rather than a nullable count on every list resource.
+- **The dashboard row carries `task_list` and `overdue` now**, constant until ITER21-004 widens the
+  selection, so that phase changes only the selection.
+- **One rule for lapse and overdue**: `task_lapse_reason` is removed rather than kept beside
+  `derive_task_date_state`; `TaskJournalRef.last_day` is required so no caller treats a multi-day
+  journal as single-day by default.
+- **The contact label reads through the tasks domain's port** (`TaskListRepository`, injected into
+  `ContactHistoryService`) rather than SQL over `tasks`/`task_lists` in the history adapter. The
+  `ContactService` fallback that built its own `ContactHistoryService` was removed (the collaborator
+  was already required by type).
+- **A list the owner cannot read is a 404 on a task read, but only unlabelled on the contact feed**,
+  where the list is a label and the row must still render.
+- **Upcoming and the dashboard carry the fields, not yet list tasks.** Their selections stay
+  journal-only until ITER21-004, so there `task_list` is null and `overdue` false; flag and icon
+  already vary. The write answers carry the plain fields (`task_list_id`, `due_date`, `flagged`,
+  `icon`) but not `task_list` or `overdue`, which need the reads' lookups; the read shape is where
+  overdue is reported.
+
+**Notes for later phases:**
+- *Phase 19 onward:* write answers already carry `task_list_id`, `due_date`, `flagged` and `icon`
+  through `task_attribute_values`; nothing to add for a new list-task write's response.
+- *Phase 21 (read one list):* reuse `TaskListSummary` if the single read should carry its count;
+  `count_open_tasks_by_list([id], user_id).get(id, 0)`.
+- *Phase 30 / ITER21-002:* REST tasks carry `task_list: {id, name, icon, archived}` and `overdue`;
+  `lapsed` is never true on a list task, `overdue` never on a journal-only one. The contact feed's
+  task rows carry `task_list` the same shape.
+- *ITER21-004:* lift the journal-only selections; the dashboard row and `list_upcoming_tasks` already
+  carry `task_list` and `overdue`. `DashboardTask.due_journal` is still required — an undated or
+  due-date list task needs it widened.
+- `TaskReadService._lapses_its_tasks` (the journal list's tasks-due badge) is unchanged: it judges a
+  journal, under the Phase 11 user decision (list tasks counted, no time extension), so a passed
+  journal's overdue list task shows no badge. Revisit with ITER21-005 if the badge should follow the
+  overdue rule (found by the phase's independent review).
+- *Phase 29 (list delete):* task rows and their lists are read in separate statements, so a list
+  deleted between them turns that read into `TaskListNotFoundError` (404) rather than dropping the
+  task. Rare under the list lock order; consider reading the list in the task statement there.
 
 #### Phase 16: Journal delete with list tasks — backend ✅ DONE
 

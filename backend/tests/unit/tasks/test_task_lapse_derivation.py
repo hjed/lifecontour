@@ -23,13 +23,9 @@ import datetime
 import pytest
 from core_shared.models.tasks import (
     LapseReason,
-    TaskJournalRef,
     TaskStatus,
     derive_lapse_reason,
-    task_lapse_reason,
 )
-
-from tests.unit.tasks.task_doubles import DUE_JOURNAL_ID, make_list_task, make_task
 
 TODAY = datetime.date(2026, 8, 9)
 YESTERDAY = datetime.date(2026, 8, 8)
@@ -148,70 +144,3 @@ class TestLapseReasonValues:
             LapseReason.DATE_PASSED,
             LapseReason.DUE_JOURNAL_CANCELLED,
         }
-
-
-def due_journal(
-    date: datetime.date = TOMORROW, *, cancelled: bool = False
-) -> TaskJournalRef:
-    """A due journal ref, which is what the gate reads its date from."""
-    return TaskJournalRef(
-        id=DUE_JOURNAL_ID, title="Permit Meeting", date=date, cancelled=cancelled
-    )
-
-
-@pytest.mark.unit
-class TestTaskLapseGate:
-    """Which tasks the lapse rule applies to at all.
-
-    Spec invariant 7: a task on a list never lapses. A late list task becomes
-    *overdue* and stays on its list; only a journal-only task goes quiet. The
-    gate answers that question once, before the rule about dates and
-    cancellation is asked.
-    """
-
-    def test_a_list_task_due_in_a_passed_journal_is_not_lapsed(self) -> None:
-        """Late, but on a list: overdue rather than lapsed."""
-        task = make_list_task(due_journal_id=DUE_JOURNAL_ID)
-
-        assert (
-            task_lapse_reason(
-                task=task, due_journal=due_journal(YESTERDAY), today=TODAY
-            )
-            is None
-        )
-
-    def test_a_list_task_due_in_a_cancelled_journal_is_not_lapsed(self) -> None:
-        """A cancelled due journal does not lapse a list task either."""
-        task = make_list_task(due_journal_id=DUE_JOURNAL_ID)
-
-        assert (
-            task_lapse_reason(
-                task=task, due_journal=due_journal(cancelled=True), today=TODAY
-            )
-            is None
-        )
-
-    def test_a_list_task_with_no_due_journal_is_not_lapsed(self) -> None:
-        """No due journal means nothing for the rule to read."""
-        task = make_list_task()
-
-        assert task_lapse_reason(task=task, due_journal=None, today=TODAY) is None
-
-    @pytest.mark.parametrize(
-        ("date", "cancelled"),
-        [(YESTERDAY, False), (TOMORROW, True), (TOMORROW, False)],
-    )
-    def test_a_journal_only_task_gets_the_rules_own_answer(
-        self, date: datetime.date, cancelled: bool
-    ) -> None:
-        """For a journal-only task the gate adds nothing to the rule."""
-        task = make_task()
-
-        assert task_lapse_reason(
-            task=task, due_journal=due_journal(date, cancelled=cancelled), today=TODAY
-        ) == derive_lapse_reason(
-            status=task.status,
-            due_journal_date=date,
-            due_journal_cancelled=cancelled,
-            today=TODAY,
-        )

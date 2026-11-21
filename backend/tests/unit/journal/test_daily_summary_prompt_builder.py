@@ -702,7 +702,11 @@ def _task(
     for its own helper.
     """
     due_journal = TaskJournalRef(
-        id=900 + task_id, title=journal_title, date=due_date, cancelled=False
+        id=900 + task_id,
+        title=journal_title,
+        date=due_date,
+        last_day=due_date,
+        cancelled=False,
     )
     return build_task_read_model(
         task=Task(
@@ -713,11 +717,12 @@ def _task(
             due_journal_id=due_journal.id,
         ),
         creating_journal=TaskJournalRef(
-            id=1, title="where it arose", date=_TODAY, cancelled=False
+            id=1, title="where it arose", date=_TODAY, last_day=_TODAY, cancelled=False
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=contacts,
+        task_list=None,
         today=_TODAY,
     )
 
@@ -1033,7 +1038,11 @@ def _resolved(
     ``build_task_read_model`` derives the lapse the way production does.
     """
     due_journal = TaskJournalRef(
-        id=800 + task_id, title=journal_title, date=_YESTERDAY, cancelled=cancelled
+        id=800 + task_id,
+        title=journal_title,
+        date=_YESTERDAY,
+        last_day=_YESTERDAY,
+        cancelled=cancelled,
     )
     return build_task_read_model(
         task=Task(
@@ -1045,11 +1054,16 @@ def _resolved(
             status=status,
         ),
         creating_journal=TaskJournalRef(
-            id=1, title="where it arose", date=_YESTERDAY, cancelled=False
+            id=1,
+            title="where it arose",
+            date=_YESTERDAY,
+            last_day=_YESTERDAY,
+            cancelled=False,
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=contacts,
+        task_list=None,
         today=_TODAY,
     )
 

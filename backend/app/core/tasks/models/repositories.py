@@ -970,6 +970,29 @@ class TaskListRepository(ABC):
         """
 
     @abstractmethod
+    async def find_by_ids(
+        self, task_list_ids: Sequence[int], user_id: str
+    ) -> dict[int, TaskList]:
+        """The user's lists among ``task_list_ids``, keyed by id, in one read.
+
+        For a read surface labelling a page of tasks with their lists. Archived
+        lists are included — a task on one still reads. An id that does not
+        exist, or is another user's list, is simply absent.
+        """
+
+    @abstractmethod
+    async def find_for_tasks(
+        self, task_ids: Sequence[int], user_id: str
+    ) -> dict[int, TaskList]:
+        """The list each of the user's tasks sits on, keyed by task id.
+
+        For a surface that holds only task ids — a contact's history feed — and
+        labels each with its list. Both the task and the list must be the
+        user's, so a cross-owner row never names another user's list. A task
+        on no list, a missing task and another user's task are absent.
+        """
+
+    @abstractmethod
     async def list_for_user(
         self,
         user_id: str,

@@ -184,6 +184,28 @@ _LIST_QUERIES = {
 
 _DELETE = text("DELETE FROM task_lists WHERE id = :id AND user_id = :user_id")
 
+_FIND_BY_IDS = text(
+    f"""
+    SELECT {_TASK_LIST_COLUMNS}
+    FROM task_lists
+    WHERE id = ANY(:ids) AND user_id = :user_id
+    """
+)
+
+# Both owners are checked: a task row naming another owner's list must not
+# reveal that list's name.
+_FIND_FOR_TASKS = text(
+    f"""
+    SELECT tasks.id AS task_id,
+           {", ".join(f"task_lists.{column}" for column in _TASK_LIST_COLUMNS.split(", "))}
+    FROM tasks
+    JOIN task_lists ON task_lists.id = tasks.task_list_id
+    WHERE tasks.id = ANY(:task_ids)
+      AND tasks.user_id = :user_id
+      AND task_lists.user_id = :user_id
+    """
+)
+
 
 def _row_to_task_list(row: Any) -> TaskList:
     """Map a ``task_lists`` row to a :class:`TaskList` entity."""
@@ -252,6 +274,31 @@ class SqlTaskListRepository(TaskListRepository):
     ) -> TaskList | None:
         """Find one of the user's lists and hold it against list writers."""
         return await self._find_one(_FIND_FOR_SHARE, task_list_id, user_id)
+
+    async def find_by_ids(
+        self, task_list_ids: Sequence[int], user_id: str
+    ) -> dict[int, TaskList]:
+        """The user's lists among ``task_list_ids``, keyed by id."""
+        if not task_list_ids:
+            return {}
+        result = await self.conn.execute(
+            _FIND_BY_IDS, {"ids": list(task_list_ids), "user_id": user_id}
+        )
+        found = [_row_to_task_list(row) for row in result.fetchall()]
+        return {
+            task_list.id: task_list for task_list in found if task_list.id is not None
+        }
+
+    async def find_for_tasks(
+        self, task_ids: Sequence[int], user_id: str
+    ) -> dict[int, TaskList]:
+        """The list each of the user's tasks sits on, keyed by task id."""
+        if not task_ids:
+            return {}
+        result = await self.conn.execute(
+            _FIND_FOR_TASKS, {"task_ids": list(task_ids), "user_id": user_id}
+        )
+        return {row.task_id: _row_to_task_list(row) for row in result.fetchall()}
 
     async def list_for_user(
         self,

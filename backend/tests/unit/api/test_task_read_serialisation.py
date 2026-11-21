@@ -37,8 +37,10 @@ from core_shared.models.tasks import (
     LapseReason,
     Task,
     TaskContactRef,
+    TaskIcon,
     TaskJournalRef,
     TaskLinkRole,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     UpcomingTasks,
@@ -75,7 +77,9 @@ def journal_ref(
     cancelled: bool = False,
 ) -> TaskJournalRef:
     """A journal as the read model carries it."""
-    return TaskJournalRef(id=journal_id, title=title, date=date, cancelled=cancelled)
+    return TaskJournalRef(
+        id=journal_id, title=title, date=date, last_day=date, cancelled=cancelled
+    )
 
 
 def read_model(
@@ -106,6 +110,8 @@ def read_model(
         due_journal=journal_ref(due_journal_id),
         intermediate_journals=mentions,
         contacts=contacts,
+        task_list=None,
+        overdue=False,
         lapse_reason=lapse_reason,
     )
 
@@ -203,6 +209,8 @@ class TestAnUnpersistedTaskIsRefused:
             due_journal=model.due_journal,
             intermediate_journals=(),
             contacts=(),
+            task_list=None,
+            overdue=False,
             lapse_reason=None,
         )
 
@@ -253,6 +261,8 @@ class TestJournalsByRole:
             due_journal=journal_ref(DUE_JOURNAL_ID, cancelled=True),
             intermediate_journals=(),
             contacts=(),
+            task_list=None,
+            overdue=False,
             lapse_reason=LapseReason.DUE_JOURNAL_CANCELLED,
         )
 
@@ -594,6 +604,8 @@ class TestTheUpcomingWindowEnvelope:
             due_journal=journal_ref(DUE_JOURNAL_ID),
             intermediate_journals=(),
             contacts=(),
+            task_list=None,
+            overdue=False,
             lapse_reason=None,
         )
 
@@ -621,6 +633,8 @@ def list_task_read_model(
         due_journal=due,
         intermediate_journals=(),
         contacts=(),
+        task_list=None,
+        overdue=False,
         lapse_reason=None,
     )
 
@@ -659,3 +673,103 @@ class TestAListTask:
             "date": DUE_DATE.isoformat(),
             "cancelled": False,
         }
+
+
+TASK_LIST_ID = 400
+
+
+def list_task_model(*, overdue: bool = False) -> TaskReadModel:
+    """A dated, flagged task on a list with no journal, as a controller gets it."""
+    return TaskReadModel(
+        task=Task(
+            id=TASK_ID,
+            user_id=USER_ID,
+            text="pack the head torch",
+            task_list_id=TASK_LIST_ID,
+            position=0,
+            due_date=DUE_DATE,
+            flagged=True,
+            icon=TaskIcon.STAR,
+            status=TaskStatus.NOT_DONE,
+        ),
+        creating_journal=None,
+        due_journal=None,
+        intermediate_journals=(),
+        contacts=(),
+        task_list=TaskListRef(
+            id=TASK_LIST_ID, name="Packing", icon=TaskIcon.PACKAGE, archived=True
+        ),
+        overdue=overdue,
+        lapse_reason=None,
+    )
+
+
+@pytest.mark.unit
+class TestTheListDueDateFlagIconAndOverdue:
+    """What a read carries for a task on a list, and for a journal-only one."""
+
+    def test_a_list_task_carries_its_list_as_a_label(self) -> None:
+        """Id, name, icon and archived, so a row can label and link it."""
+        attributes = to_task_read_resource(list_task_model()).attributes
+
+        assert attributes.task_list_id == TASK_LIST_ID
+        assert attributes.task_list is not None
+        assert attributes.task_list.model_dump() == {
+            "id": TASK_LIST_ID,
+            "name": "Packing",
+            "icon": TaskIcon.PACKAGE,
+            "archived": True,
+        }
+
+    def test_the_due_date_flag_and_icon_come_from_the_task(self) -> None:
+        attributes = to_task_read_resource(list_task_model()).attributes
+
+        assert attributes.due_date == DUE_DATE
+        assert attributes.flagged is True
+        assert attributes.icon is TaskIcon.STAR
+
+    @pytest.mark.parametrize("overdue", [True, False])
+    def test_overdue_is_the_models_answer(self, overdue: bool) -> None:
+        attributes = to_task_read_resource(list_task_model(overdue=overdue)).attributes
+
+        assert attributes.overdue is overdue
+        assert attributes.lapsed is False
+
+    def test_a_journal_only_task_has_no_list_and_is_not_overdue(self) -> None:
+        attributes = to_task_read_resource(read_model()).attributes
+
+        assert attributes.task_list_id is None
+        assert attributes.task_list is None
+        assert attributes.due_date is None
+        assert attributes.flagged is False
+        assert attributes.icon is None
+        assert attributes.overdue is False
+
+    def test_the_wire_shape_names_each_field(self) -> None:
+        """Serialised as a client reads it: a date string and the icon key."""
+        wire = to_task_read_resource(list_task_model(overdue=True)).model_dump(
+            mode="json"
+        )["attributes"]
+
+        assert wire["due_date"] == DUE_DATE.isoformat()
+        assert wire["icon"] == "star"
+        assert wire["task_list"] == {
+            "id": TASK_LIST_ID,
+            "name": "Packing",
+            "icon": "package",
+            "archived": True,
+        }
+        assert wire["overdue"] is True
+
+    def test_the_journal_listing_carries_them_too(self) -> None:
+        """A journal's tasks render through the same attributes."""
+        model = list_task_model(overdue=True)
+        groups = JournalTaskGroups(
+            journal_id=JOURNAL_ID, due=(), created=(), mentioned=(model,)
+        )
+
+        resource = to_journal_tasks_response(groups).data[0]
+
+        assert resource.attributes.task_list is not None
+        assert resource.attributes.overdue is True
+        assert resource.attributes.flagged is True

@@ -27,6 +27,7 @@ from app.core.contacts.services.contact_validation_service import (
     ContactValidationService,
 )
 from app.core.contacts.services.tag_hierarchy_service import TagHierarchyService
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 
 
 class RecordingEventPublisher(ContactEventPublisher):
@@ -65,6 +66,8 @@ def build_contact_service(
         event_publisher=event_publisher,
         address_validation_service=AddressValidationService(),
         contact_validation_service=ContactValidationService(contact_repo),
-        history_service=ContactHistoryService(history_repo, contact_repo),
+        history_service=ContactHistoryService(
+            history_repo, contact_repo, SqlTaskListRepository(connection)
+        ),
         tag_hierarchy_service=TagHierarchyService(tag_repo),
     )

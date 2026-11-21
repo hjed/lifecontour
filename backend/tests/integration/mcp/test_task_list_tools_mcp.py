@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon
+from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon, TaskStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -30,6 +30,7 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
+    create_list_task,
     delete_task_list_row,
     seed_task_list,
     seed_task_list_history,
@@ -807,3 +808,43 @@ class TestGetTaskListHistoryTool:
         # The argument and its bound, as pydantic words them (JSON-escaped).
         assert refusal in response.text
         assert "not found" not in response.text.lower()
+
+
+class TestListTaskListsCarriesOpenTaskCounts:
+    async def test_each_list_carries_its_open_task_count(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        packing = await seed_task_list(clean_database, "Packing")
+        await seed_task_list(clean_database, "Empty")
+        old = await seed_task_list(clean_database, "Old", archived_at=ARCHIVED_AT)
+        assert packing.id is not None and old.id is not None
+        for status in (TaskStatus.NOT_DONE, TaskStatus.NOT_DONE, TaskStatus.DONE):
+            await create_list_task(
+                clean_database, task_list_id=packing.id, status=status
+            )
+        await create_list_task(clean_database, task_list_id=old.id)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "list_task_lists", archived="all")
+
+        assert {each["name"]: each["open_task_count"] for each in result["lists"]} == {
+            "Packing": 2,
+            "Empty": 0,
+            "Old": 1,
+        }
+
+    async def test_another_users_open_tasks_never_count(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        mine = await seed_task_list(clean_database, "Mine")
+        assert mine.id is not None
+        await create_list_task(
+            clean_database, task_list_id=mine.id, user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "list_task_lists")
+
+        assert [
+            (each["name"], each["open_task_count"]) for each in result["lists"]
+        ] == [("Mine", 0)]

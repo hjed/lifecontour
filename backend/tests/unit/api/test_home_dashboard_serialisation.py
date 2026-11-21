@@ -29,7 +29,12 @@ from core_shared.models.contacts.important_date_types import (
     ImportantDateType,
 )
 from core_shared.models.date_window import upcoming_window
-from core_shared.models.tasks import TaskContactRef, TaskJournalRef
+from core_shared.models.tasks import (
+    TaskContactRef,
+    TaskIcon,
+    TaskJournalRef,
+    TaskListRef,
+)
 
 from app.api.home_dashboard.schemas import (
     HOME_DASHBOARD_RESOURCE_TYPE,
@@ -183,15 +188,24 @@ def task_row(
     text: str = "book the venue",
     title: str = "Monday standup",
     contacts: tuple[TaskContactRef, ...] = (),
+    flagged: bool = False,
+    icon: TaskIcon | None = None,
+    task_list: TaskListRef | None = None,
+    overdue: bool = False,
 ) -> DashboardTask:
     """One row as the tasks projection produces it, ready for the wire."""
     return DashboardTask(
         task_id=task_id,
         text=text,
+        flagged=flagged,
+        icon=icon,
+        task_list=task_list,
+        overdue=overdue,
         due_journal=TaskJournalRef(
             id=900 + task_id,
             title=title,
             date=ANCHOR + datetime.timedelta(days=days_away),
+            last_day=ANCHOR + datetime.timedelta(days=days_away),
             cancelled=False,
         ),
         days_away=days_away,
@@ -920,6 +934,9 @@ class TestTheTasksSection:
         status, the lapse or the due journal's cancelled flag would send a
         constant and invite a surface to branch on it. The creating and
         intermediate journals are material no dashboard row shows.
+
+        Flag, icon, list and overdue are drawn: a row shows the flag and icon,
+        and names its list and an overdue marker once list tasks join the card.
         """
         document = to_home_dashboard_response(
             dashboard(tasks=DashboardSection.ready(tasks(task_row(12, days_away=1))))
@@ -932,7 +949,53 @@ class TestTheTasksSection:
             "due_journal",
             "days_away",
             "contacts",
+            "flagged",
+            "icon",
+            "task_list",
+            "overdue",
         }
+
+    def test_a_row_carries_its_flag_icon_list_and_overdue(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(
+                tasks=DashboardSection.ready(
+                    tasks(
+                        task_row(
+                            12,
+                            days_away=1,
+                            flagged=True,
+                            icon=TaskIcon.STAR,
+                            task_list=TaskListRef(
+                                id=5, name="Packing", icon=None, archived=False
+                            ),
+                            overdue=True,
+                        )
+                    )
+                )
+            )
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert row["flagged"] is True
+        assert row["icon"] == "star"
+        assert row["task_list"] == {
+            "id": 5,
+            "name": "Packing",
+            "icon": None,
+            "archived": False,
+        }
+        assert row["overdue"] is True
+
+    def test_a_journal_only_row_has_no_list_and_is_not_overdue(self) -> None:
+        document = to_home_dashboard_response(
+            dashboard(tasks=DashboardSection.ready(tasks(task_row(12, days_away=1))))
+        ).model_dump(mode="json")
+
+        (row,) = self.payload_of(document)["tasks"]
+        assert row["flagged"] is False
+        assert row["icon"] is None
+        assert row["task_list"] is None
+        assert row["overdue"] is False
         assert set(row["due_journal"]) == {"id", "title", "date"}
 
     def test_a_row_carries_the_task_and_its_due_journal(self) -> None:

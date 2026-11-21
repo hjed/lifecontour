@@ -11,6 +11,7 @@ contact's history is as much the contact as its name is.
 from unittest.mock import AsyncMock
 
 import pytest
+from core_shared.models.tasks import TaskIcon, TaskList, TaskListRef
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
@@ -38,9 +39,18 @@ class TestContactHistoryService:
         return repo
 
     @pytest.fixture
-    def service(self, mock_history_repo, mock_contact_repo):
+    def mock_task_list_repo(self):
+        """No task is on a list unless a test says otherwise."""
+        repo = AsyncMock()
+        repo.find_for_tasks.return_value = {}
+        return repo
+
+    @pytest.fixture
+    def service(self, mock_history_repo, mock_contact_repo, mock_task_list_repo):
         """Create ContactHistoryService instance."""
-        return ContactHistoryService(mock_history_repo, mock_contact_repo)
+        return ContactHistoryService(
+            mock_history_repo, mock_contact_repo, mock_task_list_repo
+        )
 
     @pytest.mark.asyncio
     async def test_get_contact_history(
@@ -117,6 +127,60 @@ class TestContactHistoryService:
         await service.get_contact_history(1, reader_user_id="reader-9")
 
         mock_history_repo.get_task_labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_task_row_is_labelled_with_the_list_its_task_is_on(
+        self, service, mock_history_repo, mock_task_list_repo
+    ):
+        """List tasks appear on a contact's page labelled with their list.
+
+        One owner-scoped lookup for the page; a task on no list stays unlabelled.
+        """
+        mock_history_repo.get_contact_history.return_value = [
+            ContactFieldHistoryEntry(
+                entity_type="task", entity_id=9, field_name="contact:1", new_value="1"
+            ),
+            ContactFieldHistoryEntry(
+                entity_type="task", entity_id=7, field_name="contact:1", new_value="1"
+            ),
+        ]
+        mock_history_repo.get_task_labels.return_value = {}
+        mock_task_list_repo.find_for_tasks.return_value = {
+            9: TaskList(
+                id=4,
+                user_id="reader-9",
+                name="Packing",
+                icon=TaskIcon.PACKAGE,
+                position=0,
+            )
+        }
+
+        entries = await service.get_contact_history(1, reader_user_id="reader-9")
+
+        mock_task_list_repo.find_for_tasks.assert_awaited_once_with([7, 9], "reader-9")
+        assert entries[0].entity_list == TaskListRef(
+            id=4, name="Packing", icon=TaskIcon.PACKAGE, archived=False
+        )
+        assert entries[1].entity_list is None
+
+    @pytest.mark.asyncio
+    async def test_a_page_with_no_task_rows_asks_for_no_lists(
+        self, service, mock_history_repo, mock_task_list_repo
+    ):
+        mock_history_repo.get_contact_history.return_value = [
+            ContactFieldHistoryEntry(
+                entity_type="contact",
+                entity_id=1,
+                field_name="first_name",
+                old_value="John",
+                new_value="Jane",
+            )
+        ]
+
+        entries = await service.get_contact_history(1, reader_user_id="reader-9")
+
+        mock_task_list_repo.find_for_tasks.assert_not_awaited()
+        assert entries[0].entity_list is None
 
     @pytest.mark.asyncio
     async def test_the_count_is_scoped_to_the_same_reader(

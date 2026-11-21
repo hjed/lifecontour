@@ -24,7 +24,15 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import LapseReason, TaskNotFoundError, TaskStatus
+from core_shared.models.tasks import (
+    LapseReason,
+    TaskIcon,
+    TaskListNotFoundError,
+    TaskListRef,
+    TaskNotFoundError,
+    TaskStatus,
+)
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -35,6 +43,7 @@ from app.core.settings.models import UserSettings
 from app.core.tasks.services.task_read_service import TaskReadService
 from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
+    ARCHIVED_AT,
     OTHER_USER_ID,
     USER_ID,
     create_contact,
@@ -706,3 +715,244 @@ class TestAListTaskReadsWhateverJournalsItHas:
 
         assert model.require_journal("due").cancelled is True
         assert model.lapse_reason is None
+
+
+# Noon UTC on 9 August: the default user has no timezone, so today is the 9th.
+NOON_ON_THE_9TH = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+THE_8TH = date(2026, 8, 8)
+THE_9TH = date(2026, 8, 9)
+
+_FLAG_AND_ICON = text(
+    "UPDATE tasks SET flagged = true, icon = :icon WHERE id = :task_id"
+)
+
+
+@pytest.mark.integration
+class TestTheListDueDateFlagIconAndOverdue:
+    """What a read now carries for a task on a list, against real rows."""
+
+    async def test_a_list_task_carries_its_list_due_date_flag_and_icon(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        """Everything a row needs, read back from the stored columns."""
+        task_list = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.PACKAGE
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            due_date=THE_9TH,
+            flagged=True,
+            icon=TaskIcon.STAR,
+        )
+
+        model = await read_service.read_model(USER_ID, task_id, now=NOON_ON_THE_9TH)
+
+        assert model.task_list == TaskListRef(
+            id=task_list.id, name="Packing", icon=TaskIcon.PACKAGE, archived=False
+        )
+        assert model.task.due_date == THE_9TH
+        assert model.task.flagged is True
+        assert model.task.icon is TaskIcon.STAR
+        assert model.overdue is False
+
+    async def test_a_due_date_that_has_passed_is_overdue(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_date=THE_8TH
+        )
+
+        model = await read_service.read_model(USER_ID, task_id, now=NOON_ON_THE_9TH)
+
+        assert model.overdue is True
+        assert model.lapsed is False
+
+    async def test_a_multi_day_due_journal_is_overdue_only_after_its_last_day(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A trip from the 7th to the 9th: not overdue on the 9th, overdue on
+        the 10th — its date is still the 7th throughout."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        trip = await create_journal(
+            journal_repository,
+            title="Trip",
+            start=datetime(2026, 8, 7, 9, 0, tzinfo=UTC),
+            end=datetime(2026, 8, 9, 9, 0, tzinfo=UTC),
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=trip
+        )
+
+        on_last_day = await read_service.read_model(
+            USER_ID, task_id, now=NOON_ON_THE_9TH
+        )
+        day_after = await read_service.read_model(
+            USER_ID, task_id, now=NOON_ON_THE_9TH + timedelta(days=1)
+        )
+
+        assert on_last_day.require_journal("due").date == date(2026, 8, 7)
+        assert on_last_day.overdue is False
+        assert day_after.overdue is True
+
+    async def test_a_cancelled_due_journal_leaves_a_list_task_undated(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Cancelled and long past: neither overdue nor lapsed."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        due_id = await create_journal(
+            journal_repository, start=datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+        )
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+
+        model = await read_service.read_model(USER_ID, task_id, now=NOON_ON_THE_9TH)
+
+        assert model.overdue is False
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_no_date_is_not_overdue(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The shape a journal delete leaves behind: only the creating journal,
+        long past, and no due date or due journal — undated."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        creating = await create_journal(
+            journal_repository, start=datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, creating_journal_id=creating
+        )
+
+        model = await read_service.read_model(USER_ID, task_id, now=NOON_ON_THE_9TH)
+
+        assert model.overdue is False
+        assert model.lapsed is False
+
+    async def test_a_task_on_an_archived_list_is_marked_archived(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.task_list is not None
+        assert model.task_list.archived is True
+
+    async def test_a_journal_only_task_carries_its_flag_and_icon(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Flag and icon apply to every task, and a journal-only one has no
+        list and is never overdue."""
+        task_id, _, _ = await seed_task(
+            async_connection, journal_repository, due_days_offset=-3
+        )
+        await async_connection.execute(
+            _FLAG_AND_ICON, {"task_id": task_id, "icon": TaskIcon.HEART.value}
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.task.flagged is True
+        assert model.task.icon is TaskIcon.HEART
+        assert model.task_list is None
+        assert model.overdue is False
+        assert model.lapse_reason is LapseReason.DATE_PASSED
+
+    async def test_my_task_on_another_owners_list_is_not_labelled_with_it(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        """A cross-owner row is broken data; the read refuses rather than
+        naming the other user's list."""
+        theirs = await seed_task_list(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=theirs.id)
+
+        with pytest.raises(TaskListNotFoundError):
+            await read_service.read_model(USER_ID, task_id)
+
+
+@pytest.mark.integration
+class TestTheListCostsOneStatement:
+    """Lists are batched like journals: one statement, or none."""
+
+    async def test_a_list_task_read_costs_one_more_statement(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The task, its two link reads, the timezone, the (empty) journals and
+        their cancellations, and the list — no contact names to look up."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        with recorded_statements(async_connection) as statements:
+            await read_service.read_model(USER_ID, task_id)
+
+        assert sum("FROM task_lists" in statement for statement in statements) == 1
+
+    async def test_many_list_tasks_on_one_journal_read_their_lists_once(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Three tasks over two lists, due in one journal: one list statement."""
+        due_id = await create_journal(journal_repository, days_offset=5)
+        packing = await seed_task_list(async_connection, "Packing")
+        shopping = await seed_task_list(async_connection, "Shopping")
+        assert packing.id is not None and shopping.id is not None
+        for task_list_id in (packing.id, packing.id, shopping.id):
+            await create_list_task(
+                async_connection, task_list_id=task_list_id, due_journal_id=due_id
+            )
+
+        with recorded_statements(async_connection) as statements:
+            groups = await read_service.read_models_for_journal(USER_ID, due_id)
+
+        assert sorted(m.task_list.name for m in groups.due if m.task_list) == [
+            "Packing",
+            "Packing",
+            "Shopping",
+        ]
+        assert sum("FROM task_lists" in statement for statement in statements) == 1
+
+    async def test_a_journal_only_read_asks_for_no_list(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        task_id, _, _ = await seed_task(async_connection, journal_repository)
+
+        with recorded_statements(async_connection) as statements:
+            await read_service.read_model(USER_ID, task_id)
+
+        assert not any("task_lists" in statement for statement in statements)

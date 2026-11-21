@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.services import ContactRelationshipService, ContactService
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.infrastructure.search.search_service import SearchService
 from app.mcp.domains.contacts.tools import register_contact_tools
 from tests.fixtures.contact_fixtures import create_basic_contact, create_full_contact
@@ -94,7 +95,9 @@ class ContactTestProvider(Provider):
         address_validation_service = AddressValidationService()
 
         # Create history service
-        history_service = ContactHistoryService(history_repository, contact_repository)
+        history_service = ContactHistoryService(
+            history_repository, contact_repository, SqlTaskListRepository(connection)
+        )
 
         # Create tag hierarchy service
         tag_hierarchy_service = TagHierarchyService(tag_repository)

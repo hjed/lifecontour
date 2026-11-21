@@ -59,7 +59,11 @@ pytestmark = pytest.mark.unit
 def journal_ref(journal_id: int, date: datetime.date) -> TaskJournalRef:
     """A journal as a read surface sees it."""
     return TaskJournalRef(
-        id=journal_id, title=f"Journal {journal_id}", date=date, cancelled=False
+        id=journal_id,
+        title=f"Journal {journal_id}",
+        date=date,
+        last_day=date,
+        cancelled=False,
     )
 
 
@@ -92,6 +96,8 @@ def read_model(
             journal_ref(journal_id, TODAY) for journal_id in mentions
         ),
         contacts=(),
+        task_list=None,
+        overdue=False,
         lapse_reason=None,
     )
 
@@ -451,6 +457,8 @@ class TestReadModelIsUntouched:
             due_journal=model.due_journal,
             intermediate_journals=model.intermediate_journals,
             contacts=(TaskContactRef(id=1, display_name="Sarah", photo_url=None),),
+            task_list=None,
+            overdue=False,
             lapse_reason=model.lapse_reason,
         )
 
@@ -495,6 +503,8 @@ def list_task_model(
             journal_ref(journal_id, TODAY) for journal_id in mentions
         ),
         contacts=(),
+        task_list=None,
+        overdue=False,
         lapse_reason=None,
     )
 

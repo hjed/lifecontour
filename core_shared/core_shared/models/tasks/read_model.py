@@ -20,8 +20,14 @@ mean — stays with the service that did the fetching.
 only one of the two, so both refs are optional. A journal-only task always has
 both, and the surfaces that only ever show journal-only tasks (the dashboard,
 the daily summary) narrow through :meth:`TaskReadModel.require_journal` rather
-than checking for ``None`` themselves. Whether the task has lapsed is decided by
-:func:`~.lapse.task_lapse_reason`, which never lapses a list task.
+than checking for ``None`` themselves.
+
+**Lapsed or overdue is one answer.** Both come from
+:func:`~.list_dates.derive_task_date_state`, the single rule for every task: a
+list task never lapses and may be overdue — after its due date, or once its due
+journal's *last* day has ended — while a journal-only task may lapse and is
+never overdue. That is why a journal ref carries its last day as well as its
+date.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .exceptions import TaskAnchorMissingError
-from .lapse import task_lapse_reason
+from .list_dates import DueJournalDays, derive_task_date_state
 
 if TYPE_CHECKING:
     import datetime
@@ -39,6 +45,7 @@ if TYPE_CHECKING:
     from .entities import Task
     from .exceptions import TaskJournalAnchor
     from .lapse import LapseReason
+    from .task_icon import TaskIcon
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,10 @@ class TaskJournalRef:
         date: Its date **already resolved in the acting user's timezone**. A
             date rather than an instant, so no surface can re-derive it in the
             browser's zone and disagree with the rule that judged the task.
+        last_day: The local date its event range ends on — ``date`` itself for
+            a single-day journal. Only the due journal's is read, by the
+            overdue rule, which waits out a multi-day journal; surfaces do not
+            put it on the wire.
         cancelled: Whether this is a cancelled event journal. Only meaningful on
             the due journal, where it is a lapse cause, but carried on every ref
             because a surface marks a cancelled journal wherever it shows one.
@@ -63,7 +74,32 @@ class TaskJournalRef:
     id: int
     title: str
     date: datetime.date
+    last_day: datetime.date
     cancelled: bool
+
+    def days(self) -> DueJournalDays:
+        """This journal's days, as the date rule reads a due journal."""
+        return DueJournalDays(
+            first_day=self.date, last_day=self.last_day, cancelled=self.cancelled
+        )
+
+
+@dataclass(frozen=True)
+class TaskListRef:
+    """The list a task is on, as a surface labels and links it.
+
+    Attributes:
+        id: The list's id
+        name: Its name, so a label needs no follow-up read
+        icon: Its icon key, or ``None``
+        archived: Whether the list is archived — its tasks are then read-only,
+            and a surface marks them so
+    """
+
+    id: int
+    name: str
+    icon: TaskIcon | None
+    archived: bool
 
 
 @dataclass(frozen=True)
@@ -99,7 +135,11 @@ class TaskReadModel:
             link first. May include the due journal, when a task was retargeted
             onto a journal it was already attached to.
         contacts: The contacts it references, in link order
-        lapse_reason: Why the task has lapsed, or ``None`` if it has not
+        task_list: The list it is on, or ``None`` for a journal-only task
+        lapse_reason: Why the task has lapsed, or ``None`` if it has not;
+            always ``None`` for a task on a list
+        overdue: Whether a task on a list is past its date; always ``False``
+            for a journal-only task
     """
 
     task: Task
@@ -107,7 +147,9 @@ class TaskReadModel:
     due_journal: TaskJournalRef | None
     intermediate_journals: tuple[TaskJournalRef, ...]
     contacts: tuple[TaskContactRef, ...]
+    task_list: TaskListRef | None
     lapse_reason: LapseReason | None
+    overdue: bool
 
     @property
     def lapsed(self) -> bool:
@@ -147,6 +189,7 @@ def build_task_read_model(
     due_journal: TaskJournalRef | None,
     intermediate_journals: Sequence[TaskJournalRef],
     contacts: Sequence[TaskContactRef],
+    task_list: TaskListRef | None,
     today: datetime.date,
 ) -> TaskReadModel:
     """Assemble one task's read model from pieces already fetched.
@@ -154,24 +197,42 @@ def build_task_read_model(
     Args:
         task: The task entity
         creating_journal: Its creating anchor, or ``None`` when it has none
-        due_journal: Its due anchor — the only journal the lapse rule
+        due_journal: Its due anchor — the only journal the date rule
             consults — or ``None`` when it has none
         intermediate_journals: Its mentions, in the order they should be shown
         contacts: Its contacts, in the order they should be shown
+        task_list: The list it is on, given exactly when the task is on one
         today: Today's date in the acting user's timezone
 
     Returns:
-        The read model, with ``lapse_reason`` derived rather than supplied.
+        The read model, with ``lapse_reason`` and ``overdue`` derived rather
+        than supplied.
+
+    Raises:
+        ValueError: ``task_list`` does not name the task's own list (or is
+            missing for a task on one, or given for a task on none) — a
+            caller's bug, as a mismatched due journal is to the date rule.
     """
+    if (None if task_list is None else task_list.id) != task.task_list_id:
+        raise ValueError(
+            f"task_list must be the task's own list (task_list_id={task.task_list_id})"
+        )
+    # Only the due journal decides lapse and overdue. The creating journal is
+    # almost always in the past — that is what "the journal the commitment
+    # arose in" means — so consulting it would lapse nearly every task the day
+    # after it was written.
+    date_state = derive_task_date_state(
+        task=task,
+        due_journal=None if due_journal is None else due_journal.days(),
+        today=today,
+    )
     return TaskReadModel(
         task=task,
         creating_journal=creating_journal,
         due_journal=due_journal,
         intermediate_journals=tuple(intermediate_journals),
         contacts=tuple(contacts),
-        # Only the due journal decides this. The creating journal is almost
-        # always in the past — that is what "the journal the commitment arose
-        # in" means — so consulting it would lapse nearly every task the day
-        # after it was written.
-        lapse_reason=task_lapse_reason(task=task, due_journal=due_journal, today=today),
+        task_list=task_list,
+        lapse_reason=date_state.lapse_reason,
+        overdue=date_state.overdue,
     )

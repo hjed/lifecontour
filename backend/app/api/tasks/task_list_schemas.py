@@ -13,7 +13,7 @@ frontend icon picker takes the keys from there rather than a hand copy.
 from datetime import datetime
 from typing import Literal, Self
 
-from core_shared.models.tasks import TaskIcon, TaskList
+from core_shared.models.tasks import TaskIcon, TaskList, TaskListSummary
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.common.identifiers import INT32_MAX
@@ -218,6 +218,39 @@ class TaskListMoveRequest(JsonApiCreateRequest[TaskListMoveData]):
     model_config = ConfigDict(extra="forbid")
 
 
+class TaskListSummaryAttributes(TaskListAttributes):
+    """A task list as the listing shows it: the list, plus its open count."""
+
+    open_task_count: int = Field(
+        ...,
+        description=(
+            "How many of the list's tasks are not done. Zero for a list with "
+            "none. Only the listing carries it."
+        ),
+    )
+
+
+class TaskListSummaryResource(BaseModel):
+    """A task list resource in the listing."""
+
+    type: Literal["task-lists"] = Field(
+        default=TASK_LIST_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    id: str = Field(..., description="Task list ID")
+    attributes: TaskListSummaryAttributes = Field(
+        ..., description="Task list attributes, with the open-task count"
+    )
+    links: JsonApiLinks | None = Field(default=None, description="Resource links")
+
+
+class TaskListSummaryCollectionResponse(BaseModel):
+    """The user's task lists, each with its open-task count; unpaginated."""
+
+    data: list[TaskListSummaryResource] = Field(
+        ..., description="The lists, in the order the filter defines"
+    )
+
+
 def task_list_self_link(task_list_id: int, base_url: str = "") -> str:
     """The canonical URL of a task list resource."""
     return f"{base_url}/api/task-lists/{task_list_id}"
@@ -244,4 +277,19 @@ def to_task_list_resource(task_list: TaskList, base_url: str = "") -> TaskListRe
             updated_at=task_list.updated_at,
         ),
         links=JsonApiLinks(self=task_list_self_link(task_list.id, base_url)),
+    )
+
+
+def to_task_list_summary_resource(
+    summary: TaskListSummary, base_url: str = ""
+) -> TaskListSummaryResource:
+    """Render a listed task list, with its open-task count."""
+    resource = to_task_list_resource(summary.task_list, base_url)
+    return TaskListSummaryResource(
+        id=resource.id,
+        attributes=TaskListSummaryAttributes(
+            **resource.attributes.model_dump(),
+            open_task_count=summary.open_task_count,
+        ),
+        links=resource.links,
     )
