@@ -678,3 +678,68 @@ class TestALinkCannotSlipInBehindTheCount:
                 )
 
         await overlap(async_engine, detach, task_links)
+
+
+class _MentionDetachedAfterTheRead(SqlTaskAnchorRepository):
+    """The real adapter, with somebody's unlink committing just after its read.
+
+    Removing a mention deletes a ``task_intermediate_journals`` row, which takes
+    no lock the detach's read waits on, so a concurrent unlink can land between
+    that read and the detach's own ``DELETE``. Staged deterministically: the row
+    goes the moment the read returns, as the racing writer's commit would.
+    """
+
+    async def _lock_linked_list_tasks(self, params: dict[str, Any]) -> list[Any]:
+        rows = await super()._lock_linked_list_tasks(params)
+        await self.conn.execute(
+            text("DELETE FROM task_intermediate_journals WHERE journal_id = :j"),
+            {"j": params["journal_id"]},
+        )
+        return rows
+
+
+@pytest.mark.integration
+class TestTheDetachReportsOnlyWhatItRemoved:
+    """A mention someone else removed first is not announced a second time."""
+
+    async def test_a_task_whose_only_mention_went_meanwhile_is_not_reported(
+        self,
+        async_connection: AsyncConnection,
+        task_list_id: int,
+        doomed_id: int,
+        elsewhere_id: int,
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list_id, due_journal_id=elsewhere_id
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=doomed_id
+        )
+        anchors = _MentionDetachedAfterTheRead(async_connection)
+        service = build_journal_service(async_connection, task_anchor_repo=anchors)
+
+        removed = await service.delete_journal(doomed_id, async_connection)
+
+        assert removed == 0
+        assert await _removed_events(async_connection, task_id) == 0
+        assert not await _journal_exists(async_connection, doomed_id)
+
+    async def test_an_anchor_still_removed_is_reported_without_the_mention(
+        self,
+        async_connection: AsyncConnection,
+        task_list_id: int,
+        doomed_id: int,
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list_id, due_journal_id=doomed_id
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=doomed_id
+        )
+        anchors = _MentionDetachedAfterTheRead(async_connection)
+
+        (detachment,) = await anchors.detach_list_tasks_from_journal(doomed_id)
+
+        assert detachment == TaskJournalDetachment(
+            task_id=task_id, user_id=USER_ID, due_anchor_removed=True
+        )

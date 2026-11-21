@@ -120,9 +120,18 @@ _LOCK_LIST_TASKS_LINKED = text(f"""
 
 # Explicit rather than left to the cascade, so the event announcing the removal
 # is true the moment it is published rather than only once the journal goes.
+#
+# Both statements carry ``RETURNING`` and the report believes *that* rather than
+# the locked read, as the merge's re-point does. The read locks the task rows,
+# not their mention rows: a person detaching the mention concurrently deletes a
+# ``task_intermediate_journals`` row, which takes no lock this read conflicts
+# with, so the read's "it has a mention" can be stale by the time this runs —
+# and announcing a removal it did not perform would repeat, in the task's
+# history, the unlink that person's own event already recorded.
 _DELETE_LIST_TASK_MENTIONS = text("""
     DELETE FROM task_intermediate_journals
     WHERE journal_id = :journal_id AND task_id = ANY(:task_ids)
+    RETURNING task_id
 """)
 
 _NULL_LIST_TASK_ANCHORS = text("""
@@ -136,6 +145,7 @@ _NULL_LIST_TASK_ANCHORS = text("""
         updated_at = now()
     WHERE id = ANY(:task_ids)
     AND (creating_journal_id = :journal_id OR due_journal_id = :journal_id)
+    RETURNING id
 """)
 
 # The merge re-point, in the order it has to run. See ``repoint_journal_links``
@@ -252,10 +262,16 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         """Remove every link a list task holds to the journal about to go.
 
         Lock the journal, then three statements: lock and read the affected list
-        tasks with the roles
-        the journal holds on each, delete their intermediate links to it, and
-        null their anchors on it. The roles come from the locked read because
-        afterwards the row no longer says which anchor held the journal.
+        tasks with the roles the journal holds on each, delete their
+        intermediate links to it, and null their anchors on it.
+
+        **What each statement did is reported, not inferred**, as the merge's
+        re-point reports it. Which anchor held the journal comes from the locked
+        read, because afterwards the row no longer says; but whether a mention
+        was removed and whether an anchor was nulled comes from the statements'
+        own ``RETURNING``. A task the two statements both passed over — its only
+        link, a mention, detached by somebody else in the meantime — moved
+        nothing here and is not reported.
         """
         params: dict[str, Any] = {"journal_id": journal_id}
         # Hold the journal first, as the merge does: a task link inserted
@@ -264,23 +280,41 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
         # after the read below — where its mention would cascade away with no
         # event, or its anchor would fail the delete on RESTRICT.
         await self.conn.execute(_LOCK_JOURNAL, params)
-        rows = (await self.conn.execute(_LOCK_LIST_TASKS_LINKED, params)).fetchall()
+        rows = await self._lock_linked_list_tasks(params)
         if not rows:
             return []
 
         params["task_ids"] = [row.id for row in rows]
-        await self.conn.execute(_DELETE_LIST_TASK_MENTIONS, params)
-        await self.conn.execute(_NULL_LIST_TASK_ANCHORS, params)
-        return [
-            TaskJournalDetachment(
-                task_id=row.id,
-                user_id=row.user_id,
-                creating_anchor_removed=row.creating_linked,
-                due_anchor_removed=row.due_linked,
-                link_removed=row.mention_linked,
-            )
+        unmentioned = await self._task_ids_from(_DELETE_LIST_TASK_MENTIONS, params)
+        unanchored = await self._task_ids_from(_NULL_LIST_TASK_ANCHORS, params)
+        detachments = (
+            self._detachment(row, unmentioned=unmentioned, unanchored=unanchored)
             for row in rows
-        ]
+        )
+        return [detachment for detachment in detachments if detachment is not None]
+
+    async def _lock_linked_list_tasks(self, params: dict[str, Any]) -> list[Any]:
+        """The locked read of the detach: each linked list task and its roles."""
+        return list((await self.conn.execute(_LOCK_LIST_TASKS_LINKED, params)).all())
+
+    @staticmethod
+    def _detachment(
+        row: Any, *, unmentioned: set[int], unanchored: set[int]
+    ) -> TaskJournalDetachment | None:
+        """What the two statements did to one task, or ``None`` if nothing."""
+        anchored = row.id in unanchored
+        creating = anchored and bool(row.creating_linked)
+        due = anchored and bool(row.due_linked)
+        mention = row.id in unmentioned
+        if not (creating or due or mention):
+            return None
+        return TaskJournalDetachment(
+            task_id=row.id,
+            user_id=row.user_id,
+            creating_anchor_removed=creating,
+            due_anchor_removed=due,
+            link_removed=mention,
+        )
 
     async def count_list_tasks_linked_to_journal(self, journal_id: int) -> int:
         """How many list tasks a delete of this journal would detach."""
