@@ -629,6 +629,9 @@ class TestIntegerArgumentsAreNotCoerced:
             ("update_task_list", {"task_list_id": True, "name": "Renamed"}),
             ("archive_task_list", {"task_list_id": True}),
             ("unarchive_task_list", {"task_list_id": "1"}),
+            ("get_task_list_history", {"task_list_id": True}),
+            ("get_task_list_history", {"task_list_id": "1"}),
+            ("get_task_list_history", {"task_list_id": 1.0}),
         ],
         ids=repr,
     )
@@ -749,6 +752,29 @@ class TestGetTaskListHistoryTool:
         ].replace("999999", "X")
         assert "Theirs" not in str(refused)
         assert "Packing" not in str(refused)
+
+    @pytest.mark.parametrize(
+        "paging",
+        [{"page": True}, {"page": "1"}, {"limit": 5.0}, {"limit": "5"}],
+        ids=repr,
+    )
+    async def test_a_non_integer_page_or_limit_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        paging: dict[str, Any],
+    ) -> None:
+        """Coerced, ``true`` would read as page 1 and ``"5"`` as five entries —
+        a page nobody asked for, answered as if they had."""
+        list_id = await self._own_list(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client, "get_task_list_history", {"task_list_id": list_id, **paging}
+            )
+
+        assert '"isError":true' in response.text
+        assert "must be a JSON integer" in response.text
 
     @pytest.mark.parametrize(
         ("arguments", "refusal"),
