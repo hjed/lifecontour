@@ -40,8 +40,10 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_intermediate_journal,
+    seed_task_list,
     task_events,
 )
 
@@ -1049,3 +1051,93 @@ class TestMergeBehaviourAroundTasks:
 
         reloaded = await _reload(task_repository, task_id)
         assert reloaded.creating_journal_id == target_id
+
+
+@pytest.mark.integration
+class TestListTaskLinksRepointAsToday:
+    """The specification's *Merge* row for list tasks: "as today".
+
+    No production change makes this true — the re-point's ``CASE`` leaves a
+    NULL anchor NULL, and the referencing query already unions intermediate
+    links — so these pin it for the shapes only a list task can have: one
+    anchor, or none at all.
+    """
+
+    async def _list_task(
+        self,
+        conn: AsyncConnection,
+        creating_journal_id: int | None = None,
+        due_journal_id: int | None = None,
+    ) -> int:
+        task_list = await seed_task_list(conn)
+        assert task_list.id is not None
+        return await create_list_task(
+            conn,
+            task_list_id=task_list.id,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+        )
+
+    async def test_a_due_only_list_task_follows_its_journal(
+        self,
+        merge_service: JournalMergeService,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        task_id = await self._list_task(async_connection, due_journal_id=source_id)
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        reloaded = await _reload(task_repository, task_id)
+        assert reloaded.due_journal_id == target_id
+        assert reloaded.creating_journal_id is None
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"] == {
+            "due_journal_id": [source_id, target_id]
+        }
+
+    async def test_a_creating_only_list_task_follows_its_journal(
+        self,
+        merge_service: JournalMergeService,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        task_id = await self._list_task(async_connection, creating_journal_id=source_id)
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        reloaded = await _reload(task_repository, task_id)
+        assert reloaded.creating_journal_id == target_id
+        assert reloaded.due_journal_id is None
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"] == {
+            "creating_journal_id": [source_id, target_id]
+        }
+
+    async def test_a_list_task_that_only_mentions_the_journal_follows_it(
+        self,
+        merge_service: JournalMergeService,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        task_id = await self._list_task(async_connection)
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=source_id
+        )
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        assert await _intermediate_ids(async_connection, task_id) == [target_id]
+        reloaded = await _reload(task_repository, task_id)
+        assert (reloaded.creating_journal_id, reloaded.due_journal_id) == (None, None)
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"] == {
+            f"journal:{source_id}": [source_id, None],
+            f"journal:{target_id}": [None, target_id],
+        }

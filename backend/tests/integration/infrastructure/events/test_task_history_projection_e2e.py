@@ -55,8 +55,11 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
+    seed_task_list,
     task_events,
 )
+from tests.journal_service_factory import build_journal_service
 from tests.task_event_inventory import task_event_types
 
 TASK_TEXT = "Book the venue"
@@ -107,6 +110,19 @@ async def _anchors(conn: AsyncConnection) -> tuple[int, int]:
         journal_repo, title="Next week", days_offset=7
     )
     return creating_journal_id, due_journal_id
+
+
+async def _list_task_due_in(conn: AsyncConnection, journal_id: int) -> int:
+    """A task on a list, due in ``journal_id``, seeded as a row.
+
+    No product path creates one yet, which is why it is seeded; the history it
+    makes from here on is driven by real services.
+    """
+    task_list = await seed_task_list(conn)
+    assert task_list.id is not None
+    return await create_list_task(
+        conn, task_list_id=task_list.id, due_journal_id=journal_id
+    )
 
 
 async def _task_history(conn: AsyncConnection, task_id: int) -> list[FieldHistoryEntry]:
@@ -471,6 +487,16 @@ class TestTaskProjectionIsIdempotent:
             source=Provenance.UI,
             changed_by="ui",
         )
+        # The eighth type, and the second the journal domain drives: deleting a
+        # journal a *list* task is due in detaches that task rather than being
+        # refused. A second task, because a journal-only one blocks the delete.
+        list_task_id = await _list_task_due_in(async_connection, mentioned_journal_id)
+        await build_journal_service(async_connection).delete_journal(
+            mentioned_journal_id,
+            async_connection,
+            changed_by="ui",
+            source=Provenance.UI,
+        )
         published = {e.event_type for e in await task_events(async_connection)}
         assert published == task_event_types(), (
             f"the lifecycle above should drive every task event type, drove "
@@ -494,6 +520,7 @@ class TestTaskProjectionIsIdempotent:
         second_pass = await _task_history(async_connection, task.id)
         assert [e.id for e in second_pass] == [e.id for e in first_pass]
         assert _values(second_pass) == _values(first_pass)
+        assert len(await _task_history(async_connection, list_task_id)) == 1
 
 
 @pytest.mark.integration
@@ -1494,3 +1521,32 @@ class TestATaskReachesTheContactsOwnFeed:
             (f"contact:{contact_id}", None, str(contact_id)),
             ("__deleted__", None, None),
         }
+
+
+@pytest.mark.integration
+class TestJournalDeleteDetachProjection:
+    @pytest.mark.asyncio
+    async def test_a_detached_list_task_records_the_link_it_lost(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+    ) -> None:
+        """Through the relay and the real consumer: the list task's own history
+        says its due journal went, and with whose hand."""
+        journal_repo = SqlJournalRepository(async_connection)
+        doomed_id = await create_journal(
+            journal_repo, title="Called off", days_offset=4
+        )
+        list_task_id = await _list_task_due_in(async_connection, doomed_id)
+
+        await build_journal_service(async_connection).delete_journal(
+            doomed_id, async_connection, changed_by="mcp", source=Provenance.MCP
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-detach"
+        )
+
+        history = await _task_history(async_connection, list_task_id)
+        assert _values(history) == {("due_journal_id", str(doomed_id), None)}
+        assert history[0].source == Provenance.MCP

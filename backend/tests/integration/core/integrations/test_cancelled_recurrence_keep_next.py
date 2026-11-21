@@ -44,7 +44,12 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     series_cancelled_event,
     sync_event,
 )
-from tests.integration.tasks.task_seeding import create_task
+from tests.integration.tasks.task_seeding import (
+    create_list_task,
+    create_task,
+    link_intermediate_journal,
+    seed_task_list,
+)
 
 WEEKS = 5
 
@@ -274,6 +279,21 @@ class TestProtectedContinuations:
                 due_journal_id=protected,
                 user_id=USER_ID,
             )
+        elif protect in ("list_task_due", "list_task_mention"):
+            # A list task no longer blocks a delete — it would lose the link —
+            # so the tidier has to keep the journal on the task's behalf.
+            task_list = await seed_task_list(connection, user_id=USER_ID)
+            assert task_list.id is not None
+            task_id = await create_list_task(
+                connection,
+                task_list_id=task_list.id,
+                due_journal_id=protected if protect == "list_task_due" else None,
+                user_id=USER_ID,
+            )
+            if protect == "list_task_mention":
+                await link_intermediate_journal(
+                    connection, task_id=task_id, journal_id=protected
+                )
         elif protect in ("ui", "mcp"):
             await _record_history(connection, protected, protect)
         elif protect == "second_calendar":
@@ -293,7 +313,10 @@ class TestProtectedContinuations:
             await _cancel(processor, calendar_id, journals, week)
         return journals, protected
 
-    @pytest.mark.parametrize("protect", ["tag", "task", "ui", "mcp"])
+    @pytest.mark.parametrize(
+        "protect",
+        ["tag", "task", "list_task_due", "list_task_mention", "ui", "mcp"],
+    )
     async def test_a_user_addition_keeps_a_continuation_cancelled(
         self, async_connection: AsyncConnection, protect: str
     ) -> None:

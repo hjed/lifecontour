@@ -25,10 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.journal_service_factory import build_journal_service
 
 
 def create_test_journal(
@@ -73,10 +71,10 @@ class TestJournalServiceIntegration:
         self, journal_repo, event_publisher, clean_database: AsyncConnection
     ):
         """Create JournalService with real dependencies."""
-        return JournalService(
+        return build_journal_service(
+            clean_database,
             journal_repo=journal_repo,
             event_publisher=event_publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio
@@ -463,10 +461,10 @@ class TestJournalServiceFiltering:
         self, journal_repo, event_publisher, clean_database: AsyncConnection
     ):
         """Create JournalService with real dependencies."""
-        return JournalService(
+        return build_journal_service(
+            clean_database,
             journal_repo=journal_repo,
             event_publisher=event_publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio
@@ -730,10 +728,9 @@ class TestDeletionIdentifiersAreFiledBySource:
     def journal_service(
         self, journal_repo: SqlJournalRepository, clean_database: AsyncConnection
     ) -> JournalService:
-        return JournalService(
+        return build_journal_service(
+            clean_database,
             journal_repo=journal_repo,
-            event_publisher=OutboxEventPublisher(clean_database),
-            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio

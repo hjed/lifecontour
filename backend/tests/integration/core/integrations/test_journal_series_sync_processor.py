@@ -635,7 +635,7 @@ class TestSeriesCancelledPerItemSavepoints:
 
         original_delete = processor.journal_service.delete_journal
 
-        async def failing_delete(journal_id: int, *args: Any, **kwargs: Any) -> None:
+        async def failing_delete(journal_id: int, *args: Any, **kwargs: Any) -> int:
             if journal_id == journals["fails"]:
                 raise RuntimeError("simulated delete failure")
             return await original_delete(journal_id, *args, **kwargs)

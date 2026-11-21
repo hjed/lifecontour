@@ -1074,17 +1074,106 @@ entity. No REST, MCP, event or UI contract changed.
 - [ ] The list listing (Phase 3) returns each list's open-task count, using Phase 14's per-list counts.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 16: Journal delete with list tasks — backend
+#### Phase 16: Journal delete with list tasks — backend ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 11.
-**Estimated diff:** ~150 production → **~1,200 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~150 production → **~1,200 tracked** · one capability on REST and MCP together ·
+**Actual:** ~670 production → **~3,180 tracked** (2,931 insertions, 250 deletions excluding this
+document: about 670 net production across 19 files — more than half of it docstrings, the rest the
+repository SQL, the deletion service, the preview on both surfaces and the tidier keep; about 1,970
+net tests across 38 files, of which ~140 lines are the mechanical move of 30 hand-built
+`JournalService(...)` sites onto one factory; 38 net architecture docs). Production ran ×4.5 on the
+estimate: the estimate priced the detach and the preview but not the tidier (a user decision), the
+`JournalService` wiring at three hand-built production sites, or the docstrings. Tests ran at ×2.9
+production, over the capability band, because each guard that pins a hand-written inventory
+(event completeness, history subscriptions, summary-invalidation exclusions, journal-by-id
+ownership coverage, the history e2e "every type" lifecycle) needed the new event or route.
 
 **Acceptance Criteria:**
 
-- [ ] Delete not blocked by list tasks: links removed, due → undated; delete preview reports the count (REST + MCP); the guard sees one-anchor tasks.
-- [ ] Cancel and merge behaviour for list tasks proven here.
-- [ ] Lands before any list task can exist.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Delete not blocked by list tasks: links removed, due → undated; delete preview reports the count (REST + MCP); the guard sees one-anchor tasks (met by the guard and the detach together — see the first decision below).
+- [x] Cancel and merge behaviour for list tasks proven here.
+- [x] Lands before any list task can exist.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** deleting a journal is no longer blocked by tasks on a list; journal-only tasks still
+block with the unchanged `JOURNAL_HAS_ANCHORED_TASKS` 409.
+- `SqlTaskAnchorRepository._FIND_ANCHORED` reads only journal-only tasks (`task_list_id IS NULL`);
+  its inner joins stay correct because `ck_tasks_journal_only_has_both_anchors` gives such a task
+  both anchors. New `detach_list_tasks_from_journal` (lock the list tasks linked in any role, delete
+  their intermediate links to the journal, null their anchors on it; returns
+  `TaskJournalDetachment` per task, new in `core_shared/core_shared/models/tasks/journal_detachment.py`)
+  and `count_list_tasks_linked_to_journal` (same predicate). No migration: the anchors stay
+  `ON DELETE RESTRICT` as the backstop.
+- `TaskJournalDeletionService` (tasks domain, provided by `JournalProvider` and a required
+  keyword-only `JournalService` collaborator) publishes one **`TaskJournalLinksRemoved`** per task:
+  `journal_id` plus `changed_fields` in the merge's vocabulary, every pair `(deleted, None)`. History
+  projects it through `_project_task_updated`; the history consumer subscribes to it.
+- `JournalService.delete_journal`: guard → savepoint(detach → events → `DELETE`); the
+  `IntegrityError` retry re-runs the guard and the detach. Returns the count. New
+  `preview_delete` → `JournalDeletePreview(list_tasks_losing_link)`.
+- REST `GET /api/journals/{id}/delete-preview` (`journal-delete-previews`, 404 for a missing or
+  another user's journal); `DELETE` stays 204. MCP `preview_journal_delete` (read-only) and
+  `delete_journal`'s new `list_tasks_unlinked`; both tool docstrings say list tasks never block.
+- `CancelledRecurrenceTidier._is_protected` keeps a continuation any list task links to.
+- `journal_service_on(connection, publisher, …)` builds the service for the three hand-built
+  production sites (the inbound consumer's two, the MCP tools).
+
+**Tests:** unit `tests/unit/tasks/test_task_journal_detachment.py`,
+`test_task_journal_deletion_service.py`, `test_task_events.py::TestTaskJournalLinksRemoved` (+ id
+uniqueness), `tests/unit/journal/test_journal_delete_guard.py` (`TestListTasksAreDetachedNotBlocking`:
+detach before delete, never on refusal, again on retry, count; `TestDeletePreview`),
+`test_journal_delete_guard_documentation.py` (OpenAPI preview route and tool description),
+`tests/unit/core/integrations/test_cancelled_recurrence_tidier.py` (kept / deleted by count),
+history service and consumer inventories. Integration (list tasks seeded with `create_list_task`):
+new `tests/integration/tasks/test_journal_delete_list_tasks_integration.py` (due → undated, creating,
+both, mention only, closed statuses, untouched, mixed refusal keeps the list task whole, one event
+per task, preview = delete count, journal-only not counted, second user, racing list task caught by
+the retry); `test_journal_delete_guard_integration.py` (guard leaves out due/creating/both list
+tasks, still returns the journal-only one); `test_journal_merge_task_links_integration.py`
+(`TestListTaskLinksRepointAsToday`); `test_journal_cancellation_lapse_integration.py`
+(`TestCancellingAListTasksDueJournal`: through the person's route, links kept, `lapsed=false`, not in
+upcoming, `list_task_due` undated then restored); `test_cancelled_recurrence_keep_next.py` (list
+task due / mentioning keeps a continuation); `test_task_history_projection_e2e.py` (the event through
+the real relay and consumer; the "every type" lifecycle); `test_task_event_completeness_integration.py`
+(write path + read); REST `test_journal_endpoints.py::TestJournalDeleteWithListTasks` and
+`test_journal_ownership.py`; MCP `test_journal_tools_integration.py::TestJournalDeleteWithListTasksMcp`.
+No E2E: no UI change (Phase 17). Gates run locally: ruff format/check and mypy (backend,
+core_shared), backend unit suite (5,595 passed), core_shared (868), the full backend integration
+suite in chunks (~4,600 passed, 7 pre-existing skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **The guard stays journal-only, reversing the Phase 10/11 note that it "must see one-anchor
+  tasks".** One-anchor tasks are list tasks, which the detach handles; together the two cover every
+  task referencing the journal, so none reaches the RESTRICT FK as a raw `IntegrityError`. The
+  `TaskAnchor.creating_journal_title: str` those notes name does not exist; the `str` title of
+  `blocking_task_from_anchors` stays non-optional.
+- **No `SET NULL` migration**: it would trip the journal-only CHECK (`23514`) and null anchors
+  with no event.
+- **The detach locks the journal row first** (as the merge does), so a task link inserted
+  concurrently waits on its foreign key and then fails, rather than landing after the read and
+  cascading away with no event (found by the phase's independent review).
+- **The tidier keeps a continuation a list task links to** (user decision): a sync tidy-up must not
+  undate a user's task now that the guard no longer refuses for it.
+- **The preview returns only the count**; REST `DELETE` stays 204, MCP reports the count.
+- **Daily-summary invalidation does not subscribe** to `TaskJournalLinksRemoved`: summary inputs are
+  journal-only, and `JournalDeleted` already invalidates the deleted journal's days.
+- **Cancel is proven at the row level plus the pure rule over reloaded rows**; no read puts a list
+  task's date on the wire yet.
+- Hand-built test sites moved onto `tests/journal_service_factory.py::build_journal_service`.
+
+**Notes for later phases:**
+- *Phase 15:* read the cancelled-due-journal undated answer through `derive_task_date_state` /
+  `list_task_due` on the wire; a list task whose due anchor was removed by a delete has neither a due
+  journal nor a due date (undated).
+- *Phase 17:* `GET /api/journals/{id}/delete-preview` → `data.attributes.list_tasks_losing_link`;
+  a 404 means missing or not yours. A `delete` can still 409 for journal-only blockers alongside a
+  non-zero count; the dialog should show both.
+- *Phase 19 onward:* any new list-task write that can set an anchor must expect a journal delete to
+  null it under a row lock; `detach_list_tasks_from_journal` locks the affected task rows.
+- *ITER21-008 (search):* index on `TaskJournalLinksRemoved` (due-journal delete is a freshness
+  trigger in the spec).
 
 #### Phase 17: Journal delete confirmation states the count
 

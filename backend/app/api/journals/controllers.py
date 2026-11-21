@@ -57,6 +57,9 @@ from app.api.journals.schemas import (
     JournalContactAddRequest,
     JournalContactRelationshipUpdateRequest,
     JournalCreateRequest,
+    JournalDeletePreviewAttributes,
+    JournalDeletePreviewResource,
+    JournalDeletePreviewResponse,
     JournalHasAnchoredTasksErrorResponse,
     JournalListResponse,
     JournalResource,
@@ -1713,8 +1716,8 @@ async def partial_update_journal(
         409: {
             "model": JournalHasAnchoredTasksErrorResponse,
             "description": (
-                "A task is anchored to this journal as its creating or due "
-                "journal. The JSON:API error carries code "
+                "A task with no list is anchored to this journal as its "
+                "creating or due journal. The JSON:API error carries code "
                 "`JOURNAL_HAS_ANCHORED_TASKS`, an explanatory `detail`, and a "
                 "`meta` object listing each blocking task — its id, text, "
                 "status and blocking roles — with the id and title of the "
@@ -1736,9 +1739,15 @@ async def delete_journal(
 
     Deletes the journal and all its associated data.
 
-    Refused with 409 when a task is anchored to this journal as its creating or
-    due journal, whatever that task's status; cancel, complete or retarget those
-    tasks first, or cancel the journal instead of deleting it. The refusal names
+    Tasks on a task list never block the delete: each loses its link to the
+    journal instead — a list task created or due in it loses that anchor (one
+    due in it becomes undated) and one that mentions it loses the mention.
+    ``GET /api/journals/{journal_id}/delete-preview`` says beforehand how many.
+
+    Refused with 409 when a task with no list is anchored to this journal as its
+    creating or due journal, whatever that task's status; cancel, complete or
+    retarget those tasks first, or cancel the journal instead of deleting it. A
+    refused delete changes nothing, list tasks included. The refusal names
     each blocking task and the journal it can be actioned from, both in prose
     and as data under the error's ``meta``, so a client can render a working
     link without a further lookup.
@@ -1751,6 +1760,35 @@ async def delete_journal(
 
     await journal_write_service.delete_journal(
         journal_id, connection, changed_by="ui", source=Provenance.UI
+    )
+
+
+@router.get(
+    "/{journal_id}/delete-preview",
+    responses={404: {"description": "No such journal, or it belongs to somebody else"}},
+)
+@inject
+async def get_journal_delete_preview(
+    journal_id: int,
+    journal_service: FromDishka[JournalService],
+    user: FromDishka[SessionUser],
+) -> JournalDeletePreviewResponse:
+    """
+    Say what deleting a journal would do to tasks on a task list.
+
+    Returns how many list tasks would lose their link to the journal, so the
+    delete confirmation can state it. Changes nothing. Somebody else's journal
+    is reported as missing, as for the delete itself.
+    """
+    await _require_owned_journal(journal_service, user.id, journal_id)
+    preview = await journal_service.preview_delete(journal_id)
+    return JournalDeletePreviewResponse(
+        data=JournalDeletePreviewResource(
+            id=str(journal_id),
+            attributes=JournalDeletePreviewAttributes(
+                list_tasks_losing_link=preview.list_tasks_losing_link
+            ),
+        )
     )
 
 

@@ -19,7 +19,12 @@ from types import ModuleType
 from typing import Any, get_origin
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskIcon, TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import (
+    TaskIcon,
+    TaskJournalDetachment,
+    TaskJournalRepointing,
+    TaskStatus,
+)
 
 from app.core.tasks.models import events as task_events
 from app.core.tasks.models import task_list_events
@@ -41,6 +46,11 @@ _SAMPLE_ARGUMENTS: dict[Any, Any] = {
     # outcome rather than an all-default instance.
     TaskJournalRepointing: TaskJournalRepointing(
         task_id=1, user_id="x", due_anchor_moved=True
+    ),
+    # A journal delete's summary for one list task; it too refuses to record
+    # nothing, so the sample names the plainest outcome.
+    TaskJournalDetachment: TaskJournalDetachment(
+        task_id=1, user_id="x", due_anchor_removed=True
     ),
 }
 

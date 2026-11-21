@@ -1,8 +1,10 @@
 """What blocks a journal deletion, and where the user can go to clear it.
 
-A task is anchored to exactly two journals — the *creating* journal where the
-commitment arose and the *due* journal where it matters — and the specification
-blocks deleting either of them. The refusal has to be **explanatory rather than
+A journal-only task — one on no task list — is anchored to exactly two journals:
+the *creating* journal where the commitment arose and the *due* journal where it
+matters, and the specification blocks deleting either of them. A task on a list
+never blocks a delete (it loses its link instead), so it never reaches this
+rule. The refusal has to be **explanatory rather than
 opaque**: it names each blocking task and links to a journal where that task can
 be actioned. Tasks have no route of their own, so that link always targets a
 journal detail view.

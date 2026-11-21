@@ -31,6 +31,7 @@ from core_shared.models.journals import BlockingTask
 from core_shared.models.tasks import (
     Task,
     TaskContactRepointing,
+    TaskJournalDetachment,
     TaskJournalRepointing,
     TaskList,
     TaskListArchiveFilter,
@@ -677,6 +678,11 @@ class TaskAnchorRepository(ABC):
         intermediate link never blocks a deletion, and its row cascades away
         with the journal.
 
+        **Only journal-only tasks are returned.** A task on a list never blocks
+        a delete — :meth:`detach_list_tasks_from_journal` removes its links
+        instead — so the guard and the detach between them cover every task
+        that references the journal, one-anchor list tasks included.
+
         Args:
             journal_id: The journal about to be deleted
 
@@ -753,6 +759,43 @@ class TaskAnchorRepository(ABC):
             One summary per task this call moved, ordered by task id so a merge's
             events go out in the same order every time. Empty when the absorbed
             journal has no task on it, which is most merges.
+        """
+
+    @abstractmethod
+    async def detach_list_tasks_from_journal(
+        self, journal_id: int
+    ) -> list[TaskJournalDetachment]:
+        """Remove every link a task **on a list** holds to a journal being deleted.
+
+        The specification's *Journal changes*: a list task never blocks a journal
+        delete. Its creating or due anchor on the journal is nulled — a task due
+        there becomes undated — and its intermediate link to the journal is
+        removed. Journal-only tasks are not touched: they still block, through
+        :meth:`find_tasks_anchored_to_journal`, and their intermediate links
+        still cascade with the journal.
+
+        Called by the delete after the guard has passed and before the journal
+        row goes, inside the same savepoint, so a delete that fails takes this
+        back with it. The affected tasks are locked for the rest of the
+        transaction, so the roles reported are the roles removed.
+
+        Args:
+            journal_id: The journal about to be deleted
+
+        Returns:
+            One summary per list task this call detached, ordered by task id so a
+            delete's events go out in the same order every time. Empty when no
+            list task links to the journal, which is most deletes.
+        """
+
+    @abstractmethod
+    async def count_list_tasks_linked_to_journal(self, journal_id: int) -> int:
+        """How many tasks on a list would lose a link if this journal were deleted.
+
+        The delete preview's number. The same predicate as
+        :meth:`detach_list_tasks_from_journal` — any of the three link kinds,
+        each task counted once — so the confirmation states exactly what the
+        delete then does. Unscoped for the reason the rest of this port is.
         """
 
 

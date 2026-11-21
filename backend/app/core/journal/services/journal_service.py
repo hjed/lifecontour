@@ -2,6 +2,7 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -40,10 +41,26 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 )
 from app.core.journal.services.journal_write_guard import guard_journal_write
 from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.services.task_journal_deletion_service import (
+    TaskJournalDeletionService,
+)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import savepoint, transactional
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class JournalDeletePreview:
+    """What a journal delete would do to tasks on a list.
+
+    Attributes:
+        list_tasks_losing_link: How many list tasks link to the journal — as
+            its creating or due journal, or by mention — and would lose that
+            link. A list task due there would become undated.
+    """
+
+    list_tasks_losing_link: int
 
 
 class JournalService:
@@ -65,6 +82,7 @@ class JournalService:
         tag_hierarchy: JournalTagHierarchyService | None = None,
         *,
         task_anchor_repo: TaskAnchorRepository,
+        task_journal_deletion: TaskJournalDeletionService,
     ):
         """
         Initialize the journal service.
@@ -82,12 +100,18 @@ class JournalService:
                 says is impossible. Keyword-only so the existing positional
                 call sites keep working while the type checker names every one
                 that must supply it.
+            task_journal_deletion: The tasks domain's half of a delete: it
+                detaches the list tasks that link to the journal (which never
+                block it) and announces each, and counts them for the preview.
+                Required for the same reason as the guard: a delete without it
+                would hit the anchors' RESTRICT on the first list task.
         """
         self.journal_repo = journal_repo
         self.event_publisher = event_publisher
         self.contact_relationship_repo = contact_relationship_repo
         self.tag_hierarchy = tag_hierarchy
         self.task_anchor_repo = task_anchor_repo
+        self.task_journal_deletion = task_journal_deletion
 
     @transactional
     async def create_journal(
@@ -387,7 +411,7 @@ class JournalService:
         transaction: AsyncConnection,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
-    ) -> None:
+    ) -> int:
         """
         Delete a journal.
 
@@ -400,19 +424,26 @@ class JournalService:
             changed_by: Who/what made the change (for history provenance)
             source: Provenance of the change (for history provenance)
 
+        Returns:
+            How many tasks on a list lost a link to the journal. A list task
+            never blocks the delete: its anchor on the journal is nulled (a task
+            due there becomes undated) and its mention of it removed.
+
         Raises:
             JournalNotFoundError: If journal doesn't exist
-            JournalHasAnchoredTasksError: If any task is anchored to the journal
-                as its creating or due journal, whatever that task's status
+            JournalHasAnchoredTasksError: If any task with no list is anchored
+                to the journal as its creating or due journal, whatever that
+                task's status
         """
         # Validate journal exists
         journal = await self.journal_repo.find_by_id(journal_id)
         if journal is None:
             raise JournalNotFoundError(journal_id)
 
-        # A task can never exist without both of its journal anchors, so an
-        # anchoring journal cannot be deleted. Checked before anything else is
-        # read or written: the refusal is total, so nothing else is worth doing.
+        # A journal-only task can never exist without both of its journal
+        # anchors, so a journal anchoring one cannot be deleted. Checked before
+        # anything else is read or written: the refusal is total, so nothing
+        # else is worth doing — not even detaching the list tasks below.
         await self._refuse_if_tasks_are_anchored(journal_id)
 
         # Fetch external event IDs before deletion so workers know what to
@@ -476,20 +507,31 @@ class JournalService:
         # resolved from a single Dishka scope; a service built by hand from
         # repositories on some *other* connection would leave the savepoint
         # covering nothing.
+        #
+        # List tasks never block: each loses its links to the journal first,
+        # inside the same savepoint, so a delete that fails takes the detach and
+        # its events back with it and a caller that catches the refusal can
+        # never keep half of a delete.
         try:
             async with savepoint(transaction):
-                await self.journal_repo.delete(journal_id)
+                list_tasks_unlinked = await self._detach_list_tasks_and_delete(
+                    journal_id, transaction, source=source, changed_by=changed_by
+                )
         except IntegrityError:
             # Tasks anchored now? Then that is the explanation.
             await self._refuse_if_tasks_are_anchored(journal_id)
-            # Nothing anchors it any more, so whatever blocked the delete has
-            # since gone — the racing task was cancelled, retargeted or deleted
-            # in its turn. Retrying once gives the caller the deletion they
-            # asked for instead of a 500 about a row that no longer exists.
-            # Once, not in a loop: a second failure is a constraint the guard
-            # cannot explain, and it propagates untouched.
+            # Nothing blocks it any more, so whatever stopped the delete has
+            # since gone — the racing journal-only task was cancelled,
+            # retargeted or deleted in its turn, or a list task linked to the
+            # journal after the detach and is detached now. Retrying once gives
+            # the caller the deletion they asked for instead of a 500 about a
+            # row that no longer exists. Once, not in a loop: a second failure
+            # is a constraint the guard cannot explain, and it propagates
+            # untouched.
             async with savepoint(transaction):
-                await self.journal_repo.delete(journal_id)
+                list_tasks_unlinked = await self._detach_list_tasks_and_delete(
+                    journal_id, transaction, source=source, changed_by=changed_by
+                )
 
         # Publish deletion event
         event = JournalDeleted(
@@ -505,10 +547,52 @@ class JournalService:
         )
         await self.event_publisher.publish(event)
 
-        logger.info("Journal deleted", journal_id=journal_id)
+        logger.info(
+            "Journal deleted",
+            journal_id=journal_id,
+            list_tasks_unlinked=list_tasks_unlinked,
+        )
+        return list_tasks_unlinked
+
+    async def _detach_list_tasks_and_delete(
+        self,
+        journal_id: int,
+        transaction: AsyncConnection,
+        *,
+        source: Provenance,
+        changed_by: str,
+    ) -> int:
+        """Detach the list tasks, then delete the journal row; one attempt."""
+        unlinked = await self.task_journal_deletion.remove_list_task_links(
+            journal_id=journal_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+        await self.journal_repo.delete(journal_id)
+        return unlinked
+
+    async def preview_delete(self, journal_id: int) -> JournalDeletePreview:
+        """What deleting this journal would do to tasks on a list, without doing it.
+
+        The confirmation's number: how many list tasks would lose their link to
+        the journal. Journal-only blockers are not part of it — the delete names
+        those itself, in its refusal. A read, so no transaction; unscoped like
+        the delete, whose callers check ownership first.
+
+        Raises:
+            JournalNotFoundError: If journal doesn't exist
+        """
+        if await self.journal_repo.find_by_id(journal_id) is None:
+            raise JournalNotFoundError(journal_id)
+        return JournalDeletePreview(
+            list_tasks_losing_link=(
+                await self.task_journal_deletion.count_list_task_links(journal_id)
+            )
+        )
 
     async def _refuse_if_tasks_are_anchored(self, journal_id: int) -> None:
-        """Raise if any task is anchored to this journal, naming every one.
+        """Raise if any journal-only task is anchored to this journal, naming each.
 
         Returns quietly when nothing is anchored, which is also what makes it
         usable as the backstop after an ``IntegrityError``: a violation it
@@ -1041,3 +1125,36 @@ class JournalService:
 
         _resolve(journal_type)
         return resolved
+
+
+def journal_service_on(
+    connection: AsyncConnection,
+    event_publisher: OutboxEventPublisher,
+    *,
+    contact_relationship_repo: JournalContactRelationshipRepository | None = None,
+) -> JournalService:
+    """A ``JournalService`` over real adapters on one connection, outside Dishka.
+
+    For the few production paths that build the service by hand — the inbound
+    stream consumer and the MCP delete tool — so the delete's two task-domain
+    collaborators are wired the same way at each: one anchor repository serving
+    both the guard and the list-task detach, publishing through the caller's
+    outbox publisher. Dishka's ``JournalProvider`` remains the normal route.
+    """
+    from app.core.journal.adapters.sql.journal_repository import (
+        SqlJournalRepository,
+    )
+    from app.core.tasks.adapters.sql.task_anchor_repository import (
+        SqlTaskAnchorRepository,
+    )
+
+    task_anchor_repo = SqlTaskAnchorRepository(connection)
+    return JournalService(
+        journal_repo=SqlJournalRepository(connection),
+        event_publisher=event_publisher,
+        contact_relationship_repo=contact_relationship_repo,
+        task_anchor_repo=task_anchor_repo,
+        task_journal_deletion=TaskJournalDeletionService(
+            task_anchor_repo=task_anchor_repo, event_publisher=event_publisher
+        ),
+    )

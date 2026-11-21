@@ -626,9 +626,12 @@ class JournalWriteService:
         *,
         changed_by: str = "system",
         source: Provenance = Provenance.SYSTEM,
-    ) -> None:
-        """Delete a journal as a committed unit of work."""
-        await self.journal_service.delete_journal(
+    ) -> int:
+        """Delete a journal as a committed unit of work.
+
+        Returns how many tasks on a list lost their link to it.
+        """
+        return await self.journal_service.delete_journal(
             journal_id, transaction, changed_by=changed_by, source=source
         )
 

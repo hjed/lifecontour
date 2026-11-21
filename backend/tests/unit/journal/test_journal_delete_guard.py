@@ -27,11 +27,13 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from core_shared.models.history import Provenance
 from core_shared.models.journals import (
     BlockingTask,
     EventDateRange,
     Journal,
     JournalHasAnchoredTasksError,
+    JournalNotFoundError,
     blocking_task_from_anchors,
     describe_roles,
 )
@@ -39,7 +41,10 @@ from core_shared.models.tasks import TaskStatus
 from sqlalchemy.exc import IntegrityError
 
 from app.api.error_handlers import create_domain_error_response
-from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_service import (
+    JournalDeletePreview,
+    JournalService,
+)
 
 DELETED = 10
 OTHER = 20
@@ -274,11 +279,26 @@ def mock_transaction():
 
 
 @pytest.fixture
-def journal_service(mock_journal_repo, mock_event_publisher, mock_task_anchor_repo):
+def mock_task_journal_deletion():
+    """The tasks domain's half of a delete, detaching no list task by default."""
+    deletion = AsyncMock()
+    deletion.remove_list_task_links.return_value = 0
+    deletion.count_list_task_links.return_value = 0
+    return deletion
+
+
+@pytest.fixture
+def journal_service(
+    mock_journal_repo,
+    mock_event_publisher,
+    mock_task_anchor_repo,
+    mock_task_journal_deletion,
+):
     return JournalService(
         journal_repo=mock_journal_repo,
         event_publisher=mock_event_publisher,
         task_anchor_repo=mock_task_anchor_repo,
+        task_journal_deletion=mock_task_journal_deletion,
     )
 
 
@@ -405,3 +425,144 @@ class TestDeleteGuard:
         assert exc_info.value is original
         assert mock_journal_repo.delete.await_count == 2
         mock_event_publisher.publish.assert_not_called()
+
+
+class TestListTasksAreDetachedNotBlocking:
+    """A list task never blocks a delete: it loses its links to the journal.
+
+    The guard still refuses for journal-only tasks; only once it has passed are
+    the list tasks detached, and only then is the journal deleted. The detach
+    therefore never happens for a delete that is refused, and it is repeated on
+    the retry, because the savepoint it ran in was rolled back with the failed
+    ``DELETE``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_list_tasks_are_detached_before_the_journal_goes(
+        self,
+        journal_service,
+        mock_journal_repo,
+        mock_task_journal_deletion,
+        mock_transaction,
+    ):
+        order = MagicMock()
+        order.attach_mock(mock_task_journal_deletion.remove_list_task_links, "detach")
+        order.attach_mock(mock_journal_repo.delete, "delete")
+
+        await journal_service.delete_journal(
+            DELETED, mock_transaction, changed_by="mcp", source=Provenance.MCP
+        )
+
+        assert [call[0] for call in order.mock_calls] == ["detach", "delete"]
+        mock_task_journal_deletion.remove_list_task_links.assert_awaited_once_with(
+            journal_id=DELETED,
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_refused_delete_detaches_nothing(
+        self,
+        journal_service,
+        mock_task_anchor_repo,
+        mock_task_journal_deletion,
+        mock_transaction,
+    ):
+        mock_task_anchor_repo.find_tasks_anchored_to_journal.return_value = [
+            make_blocking_task()
+        ]
+
+        with pytest.raises(JournalHasAnchoredTasksError):
+            await journal_service.delete_journal(DELETED, mock_transaction)
+
+        mock_task_journal_deletion.remove_list_task_links.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_retry_detaches_again(
+        self,
+        journal_service,
+        mock_journal_repo,
+        mock_task_anchor_repo,
+        mock_task_journal_deletion,
+        mock_transaction,
+    ):
+        """The first detach was rolled back with the failed ``DELETE``'s
+        savepoint, so the retry has to perform it again — and picks up a list
+        task that linked to the journal in the meantime."""
+        mock_journal_repo.delete.side_effect = [integrity_error(), None]
+        mock_task_anchor_repo.find_tasks_anchored_to_journal.side_effect = [[], []]
+        mock_task_journal_deletion.remove_list_task_links.side_effect = [0, 1]
+
+        removed = await journal_service.delete_journal(DELETED, mock_transaction)
+
+        assert mock_task_journal_deletion.remove_list_task_links.await_count == 2
+        assert removed == 1
+
+    @pytest.mark.asyncio
+    async def test_a_retry_refused_by_a_new_blocker_detaches_nothing_more(
+        self,
+        journal_service,
+        mock_journal_repo,
+        mock_task_anchor_repo,
+        mock_task_journal_deletion,
+        mock_transaction,
+    ):
+        mock_journal_repo.delete.side_effect = integrity_error()
+        mock_task_anchor_repo.find_tasks_anchored_to_journal.side_effect = [
+            [],
+            [make_blocking_task()],
+        ]
+
+        with pytest.raises(JournalHasAnchoredTasksError):
+            await journal_service.delete_journal(DELETED, mock_transaction)
+
+        assert mock_task_journal_deletion.remove_list_task_links.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_it_returns_how_many_list_tasks_lost_their_link(
+        self, journal_service, mock_task_journal_deletion, mock_transaction
+    ):
+        mock_task_journal_deletion.remove_list_task_links.return_value = 3
+
+        assert await journal_service.delete_journal(DELETED, mock_transaction) == 3
+
+
+class TestDeletePreview:
+    """What a delete would do to list tasks, asked before it is done."""
+
+    @pytest.mark.asyncio
+    async def test_it_reports_the_list_tasks_that_would_lose_their_link(
+        self, journal_service, mock_task_journal_deletion
+    ):
+        mock_task_journal_deletion.count_list_task_links.return_value = 2
+
+        preview = await journal_service.preview_delete(DELETED)
+
+        assert preview == JournalDeletePreview(list_tasks_losing_link=2)
+        mock_task_journal_deletion.count_list_task_links.assert_awaited_once_with(
+            DELETED
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_missing_journal_is_reported_missing(
+        self, journal_service, mock_journal_repo
+    ):
+        mock_journal_repo.find_by_id.return_value = None
+
+        with pytest.raises(JournalNotFoundError):
+            await journal_service.preview_delete(DELETED)
+
+    @pytest.mark.asyncio
+    async def test_the_preview_writes_nothing(
+        self,
+        journal_service,
+        mock_journal_repo,
+        mock_event_publisher,
+        mock_task_journal_deletion,
+    ):
+        await journal_service.preview_delete(DELETED)
+
+        mock_journal_repo.delete.assert_not_called()
+        mock_event_publisher.publish.assert_not_called()
+        mock_task_journal_deletion.remove_list_task_links.assert_not_called()

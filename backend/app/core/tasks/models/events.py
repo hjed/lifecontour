@@ -66,6 +66,7 @@ from typing import Any
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     TaskContactRepointing,
+    TaskJournalDetachment,
     TaskJournalRepointing,
     TaskStatus,
 )
@@ -487,9 +488,11 @@ class TaskJournalUnlinked(DomainEvent):
     other two ways a link row disappears, a journal **merge** announces itself as
     :class:`TaskJournalLinksRepointed` rather than as an unlink, because what
     happened to the task is that one journal became another; and a journal delete
-    cascades, removing the row without anybody acting on the task and publishing
-    nothing. A key with one possible value would advertise a second case that
-    does not exist.
+    either cascades — for a journal-only task, removing the row without anybody
+    acting on the task and publishing nothing — or, for a task on a list, is
+    part of the :class:`TaskJournalLinksRemoved` that also reports its anchors.
+    A key with one possible value would advertise a second case that does not
+    exist.
 
     **Published only when a row was actually removed**, so a detach of a link
     that was not there is silent, as is the refusal a detach of an anchor raises.
@@ -525,8 +528,9 @@ class TaskJournalUnlinked(DomainEvent):
 class TaskJournalLinksRepointed(DomainEvent):
     """Event raised when a journal merge moves a task's links onto the survivor.
 
-    The one event in this module a **task write path does not publish**. The
-    write lives in the journal domain — ``JournalMergeService`` re-points every
+    One of the two events in this module a **task write path does not
+    publish** (the other is :class:`TaskJournalLinksRemoved`, a journal
+    delete's). The write lives in the journal domain — ``JournalMergeService`` re-points every
     link a task holds on the journal it is absorbing, because the anchors are
     ``ON DELETE RESTRICT`` and the intermediate links cascade — and the tasks
     domain publishes this so the affected tasks' own histories say what happened
@@ -652,6 +656,89 @@ def _repointing_changed_fields(
             target_journal_id,
             None,
         )
+    return changed_fields
+
+
+@dataclass(frozen=True)
+class TaskJournalLinksRemoved(DomainEvent):
+    """Event raised when a journal delete takes a list task's links with it.
+
+    The second event a task write path does not publish, beside
+    :class:`TaskJournalLinksRepointed`. A list task never blocks a journal
+    delete: ``JournalService.delete_journal`` detaches it instead — nulling an
+    anchor on the deleted journal and removing an intermediate link to it — and
+    the tasks domain announces what that did to each task, so the task's own
+    history says why its due journal went.
+
+    **Not a retarget and not an edit.** Nothing moved *to* anything, the status
+    is untouched and nobody acted on the task itself, so
+    :class:`TaskDueJournalRetargeted` and :class:`TaskUpdated` would each tell a
+    user's history something that did not happen.
+
+    **The payload is** ``changed_fields`` **in the merge's vocabulary**, so the
+    projection reuses ``_project_task_updated``: each lost anchor is
+    ``(deleted, None)``, and a lost intermediate link is a
+    :func:`journal_field_name` row ``(deleted, None)`` — the key a manual detach
+    lands under, so the two read as the same kind of line. ``journal_id`` names
+    the deleted journal beside the pairs, because it says *why* they moved.
+
+    **Provenance is the deleting user's**, for the reason a merge's is: the
+    delete is something a person (or their agent) did, and the tasks it changed
+    are consequences of that action.
+
+    **``event_id`` names the deleted journal as well as the task.** One delete
+    publishes at most one of these per task, but a clean-up deleting several
+    journals in one unit of work can detach one task from two of them, and the
+    projection writes ``ON CONFLICT DO NOTHING`` over ``event_id``.
+    """
+
+    def __init__(
+        self,
+        detachment: TaskJournalDetachment,
+        journal_id: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=(
+                f"task_journal_links_removed_{detachment.task_id}_"
+                f"{journal_id}_{now.isoformat()}"
+            ),
+            occurred_at=now,
+            aggregate_id=detachment.task_id,
+            event_type="TaskJournalLinksRemoved",
+            event_data={
+                "task_id": detachment.task_id,
+                "user_id": detachment.user_id,
+                "journal_id": journal_id,
+                "changed_fields": _detachment_changed_fields(detachment, journal_id),
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+def _detachment_changed_fields(
+    detachment: TaskJournalDetachment, journal_id: int
+) -> dict[str, Any]:
+    """A journal delete's outcome for one list task, as field changes.
+
+    Built here rather than by the caller for the reason
+    :func:`_repointing_changed_fields` is. Every pair is ``(old, new)``
+    positionally, and ``new`` is always ``None``: the journal is gone. The value
+    object refuses a detachment that records nothing, so this never returns an
+    empty dict for a task the repository reported.
+    """
+    changed_fields: dict[str, Any] = {}
+    if detachment.creating_anchor_removed:
+        changed_fields["creating_journal_id"] = (journal_id, None)
+    if detachment.due_anchor_removed:
+        changed_fields["due_journal_id"] = (journal_id, None)
+    if detachment.link_removed:
+        changed_fields[journal_field_name(journal_id)] = (journal_id, None)
     return changed_fields
 
 

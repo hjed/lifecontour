@@ -28,12 +28,25 @@ def _no_anchored_tasks() -> AsyncMock:
     return repo
 
 
+def _no_list_tasks() -> AsyncMock:
+    """The delete's tasks-domain half, finding no list task to detach.
+
+    Required beside the guard; these tests are about other behaviour, and the
+    list-task detach has its own cases in ``test_journal_delete_guard.py``.
+    """
+    deletion = AsyncMock()
+    deletion.remove_list_task_links.return_value = 0
+    deletion.count_list_task_links.return_value = 0
+    return deletion
+
+
 @pytest.fixture
 def journal_service() -> JournalService:
     return JournalService(
         journal_repo=AsyncMock(),
         event_publisher=AsyncMock(),
         task_anchor_repo=_no_anchored_tasks(),
+        task_journal_deletion=_no_list_tasks(),
     )
 
 

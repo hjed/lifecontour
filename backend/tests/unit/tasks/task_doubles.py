@@ -58,6 +58,11 @@ TASK_LIST_ID = 99
 ABSORBED_JOURNAL_ID = 55
 SURVIVING_JOURNAL_ID = 66
 
+# The journal a delete removes. Its own id for the reason the merge's two are:
+# a delete is described from the journal's side — every link a list task holds
+# on it goes, whichever role it held.
+DELETED_JOURNAL_ID = 88
+
 # The people a task can reference. Two of them, because contact membership is
 # carried as one ``changed_fields`` key *per contact* — ``contact:{id}`` — and a
 # single id cannot show that two people produce two keys rather than overwriting

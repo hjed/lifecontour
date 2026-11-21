@@ -23,9 +23,7 @@ from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import
 from app.core.integrations.journal_outbox_event_processor import (
     JournalOutboxEventProcessor,
 )
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
+from tests.journal_service_factory import build_journal_service
 
 # The Strava worker links each user's activities on their own calendar.
 STRAVA_CALENDAR_ID = synthetic_calendar_id(SyntheticCalendar.STRAVA, "test-user-123")
@@ -108,17 +106,16 @@ async def _create_processor(
         SqlJournalContactRelationshipRepository,
     )
     from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-    from app.core.journal.services.journal_service import JournalService
     from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
     journal_repo = SqlJournalRepository(connection)
     event_publisher = OutboxEventPublisher(connection)
     contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
-    service = JournalService(
+    service = build_journal_service(
+        connection,
         journal_repo=journal_repo,
         event_publisher=event_publisher,
         contact_relationship_repo=contact_relationship_repo,
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return JournalOutboxEventProcessor(
         journal_service=service,

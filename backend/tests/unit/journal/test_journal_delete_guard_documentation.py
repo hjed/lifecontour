@@ -169,3 +169,29 @@ class TestTheMcpToolDocumentsItsRefusal:
 
         assert "retry" in description
         assert "cancel" in description
+
+
+class TestTheListTaskDetachIsDocumented:
+    """List tasks never block a delete; both surfaces have to say so.
+
+    The confirmation that will state the count, and an agent deciding whether
+    to delete, learn it only from these documents — so the preview's route and
+    its tool's description are asserted here alongside the refusal's.
+    """
+
+    def test_the_rest_preview_is_published_with_its_count(self) -> None:
+        schema = create_app().openapi()
+        preview = schema["paths"]["/api/journals/{journal_id}/delete-preview"]["get"]
+
+        assert "404" in preview["responses"]
+        attributes = schema["components"]["schemas"]["JournalDeletePreviewAttributes"][
+            "properties"
+        ]
+        assert set(attributes) == {"list_tasks_losing_link"}
+
+    async def test_the_delete_tool_says_list_tasks_lose_their_link(
+        self, delete_journal_tool_description: str
+    ) -> None:
+        assert "never block" in delete_journal_tool_description
+        assert "preview_journal_delete" in delete_journal_tool_description
+        assert "list_tasks_unlinked" in delete_journal_tool_description

@@ -42,7 +42,6 @@ from app.core.journal.adapters.sql.mood_data_repository import SqlMoodDataReposi
 from app.core.journal.adapters.sql.route_repository import SqlRouteRepository
 from app.core.journal.models.journal_tag import JournalTag
 from app.core.journal.services.journal_patch import JournalPatch
-from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
@@ -50,9 +49,6 @@ from app.core.journal.services.journal_tag_service import JournalTagService
 from app.core.journal.services.journal_write_service import JournalWriteService
 from app.core.journal.services.route_service import RouteService
 from app.core.journal.utils.route_edits import RouteEdit
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
 )
@@ -67,6 +63,7 @@ from tests.integration.infrastructure.events.projection_harness import (
 from tests.integration.mcp.http_helpers import (
     call_mcp_tool,
 )
+from tests.journal_service_factory import build_journal_service
 
 # Owns the journals and tags below: a tag is only assigned to its owner's journals.
 JOURNAL_OWNER = "user-e2e"
@@ -144,10 +141,8 @@ class TestJournalHistoryProjectionE2E:
         stream_client: StreamClient,
         redis_client: Redis,
     ) -> None:
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
-            event_publisher=OutboxEventPublisher(async_connection),
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
         )
 
         # 1. Create then update a journal through the real service (UI provenance).
@@ -227,10 +222,9 @@ class TestJournalHistoryProjectionE2E:
     ) -> None:
         """A MOOD_RATING type-data edit is projected and grouped to the journal."""
         publisher = OutboxEventPublisher(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Mood journal"),
@@ -287,10 +281,9 @@ class TestJournalHistoryProjectionE2E:
         unit-level coverage guard.
         """
         publisher = OutboxEventPublisher(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Climbing journal"),
@@ -349,10 +342,9 @@ class TestJournalHistoryProjectionE2E:
         )
 
         publisher = OutboxEventPublisher(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Plan journal"),
@@ -456,10 +448,9 @@ class TestJournalHistoryProjectionE2E:
         )
 
         publisher = OutboxEventPublisher(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Abseil journal"),
@@ -518,10 +509,9 @@ class TestJournalHistoryProjectionE2E:
     ) -> None:
         """A route edit is projected and grouped to its parent journal."""
         publisher = OutboxEventPublisher(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("Route journal"),
@@ -626,10 +616,8 @@ class TestJournalHistoryProjectionE2E:
             )
 
         processor = ImmichAlbumOutboxEventProcessor(
-            journal_service=JournalService(
-                journal_repo=SqlJournalRepository(async_connection),
-                event_publisher=OutboxEventPublisher(async_connection),
-                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+            journal_service=build_journal_service(
+                async_connection,
             ),
             connection=async_connection,
             event_publisher=OutboxEventPublisher(async_connection),
@@ -822,10 +810,9 @@ class TestJournalTagHistoryProjectionE2E:
         """
         publisher = OutboxEventPublisher(async_connection)
         tag_repo = SqlJournalTagRepository(async_connection)
-        journal_service = JournalService(
-            journal_repo=SqlJournalRepository(async_connection),
+        journal_service = build_journal_service(
+            async_connection,
             event_publisher=publisher,
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
         )
         created = await journal_service.create_journal(
             _make_journal("MCP tag journal"),

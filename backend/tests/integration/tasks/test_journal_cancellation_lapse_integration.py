@@ -39,6 +39,11 @@ from typing import Any
 import pytest
 from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import LapseReason, TaskStatus
+from core_shared.models.tasks.list_dates import (
+    DueJournalDays,
+    ListTaskDue,
+    list_task_due,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -64,11 +69,13 @@ from tests.integration.tasks.task_seeding import (
 from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     link_intermediate_journal,
     linked_contact_ids,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 # The journals here belong to the sync harness's owner rather than the task
@@ -764,3 +771,109 @@ class TestTheLapseReachesTheReadSurfaces:
         attributes = rows[0]["attributes"]
         assert attributes["lapsed"] is True
         assert attributes["lapse_reason"] == LapseReason.DUE_JOURNAL_CANCELLED.value
+
+
+@pytest.mark.integration
+class TestCancellingAListTasksDueJournal:
+    """The specification's *Cancel* row for a task on a list.
+
+    "Links are kept. While the journal is cancelled the task is treated as
+    undated (not overdue, not on the dashboard through that journal);
+    un-cancelling restores the date." A list task never lapses, so where a
+    journal-only task reads ``DUE_JOURNAL_CANCELLED`` this one must read as an
+    open task with no date.
+
+    The cancel and un-cancel are real requests through the person's route. What
+    they leave behind is read back three ways: the rows (links kept), the read
+    model and the upcoming endpoint (no lapse, not surfaced), and the
+    list-task date rule over the reloaded state (undated, then dated again).
+    The rule's answer reaches the wire in a later phase; it is asked here over
+    the real rows so the two halves are already known to agree.
+    """
+
+    async def _put_event_state(
+        self, client: Any, journal_id: int, state: EventState
+    ) -> None:
+        response = await client.put(
+            f"/api/journals/{journal_id}/types/EVENT/data",
+            json={
+                "data": {
+                    "type": "journal-type-data",
+                    "attributes": {"event_state": state.value},
+                }
+            },
+        )
+        assert response.status_code == 200
+
+    async def _due(
+        self, read_service: TaskReadService, task_id: int
+    ) -> ListTaskDue | None:
+        """The list-task date rule over the task and due journal as they now read."""
+        model = await read_service.read_model(TASK_USER_ID, task_id)
+        due_ref = model.require_journal("due")
+        return list_task_due(
+            due_date=None,
+            due_journal=DueJournalDays(
+                first_day=due_ref.date,
+                last_day=due_ref.date,
+                cancelled=due_ref.cancelled,
+            ),
+        )
+
+    async def test_links_are_kept_and_the_task_reads_undated_until_un_cancelled(
+        self,
+        async_connection: AsyncConnection,
+        authenticated_client: Any,
+        journal_repository: SqlJournalRepository,
+        read_service: TaskReadService,
+    ) -> None:
+        due_id = await create_journal(
+            journal_repository, title="Weekend away", days_offset=10
+        )
+        mention_id = await create_journal(
+            journal_repository, title="Where it came up", days_offset=-1
+        )
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CONFIRMED
+        )
+        task_list = await seed_task_list(async_connection, "Packing")
+        assert task_list.id is not None
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=mention_id
+        )
+        assert await self._due(read_service, task_id) is not None
+
+        await self._put_event_state(authenticated_client, due_id, EventState.CANCELLED)
+
+        anchors = (
+            await async_connection.execute(_SELECT_TASK_ANCHORS, {"task_id": task_id})
+        ).one()
+        assert anchors.due_journal_id == due_id
+        assert anchors.status == TaskStatus.NOT_DONE.value
+        mentions = (
+            await async_connection.execute(_SELECT_MENTIONS, {"task_id": task_id})
+        ).scalars()
+        assert list(mentions) == [mention_id]
+        model = await read_service.read_model(TASK_USER_ID, task_id)
+        assert model.lapsed is False
+        assert model.lapse_reason is None
+        assert await self._due(read_service, task_id) is None
+        upcoming = await authenticated_client.get("/api/tasks/upcoming")
+        assert upcoming.status_code == 200
+        assert task_id not in [int(t["id"]) for t in upcoming.json()["data"]]
+
+        await self._put_event_state(authenticated_client, due_id, EventState.CONFIRMED)
+
+        restored = await self._due(read_service, task_id)
+        assert restored is not None
+        assert restored.day == (
+            (await read_service.read_model(TASK_USER_ID, task_id))
+            .require_journal("due")
+            .date
+        )
+        assert (
+            await async_connection.execute(_SELECT_TASK_ANCHORS, {"task_id": task_id})
+        ).one().due_journal_id == due_id

@@ -45,7 +45,6 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_contact_service import JournalContactService
 from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.summary_invalidation_consumer import (
     SummaryInvalidationConsumer,
@@ -56,6 +55,7 @@ from tests.integration.infrastructure.events.consumer_harness import (
     patched_consumer_engine,
     relay_outbox,
 )
+from tests.journal_service_factory import build_journal_service
 
 USER_ID = "user-summary-invalidation"
 GROUP_NAME = "summary-invalidation"
@@ -85,10 +85,8 @@ def _journal(
 
 @pytest.fixture
 def journal_service(async_connection: AsyncConnection) -> JournalService:
-    return JournalService(
-        journal_repo=SqlJournalRepository(async_connection),
-        event_publisher=OutboxEventPublisher(async_connection),
-        task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+    return build_journal_service(
+        async_connection,
     )
 
 

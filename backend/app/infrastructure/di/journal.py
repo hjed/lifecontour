@@ -222,6 +222,9 @@ from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.services.task_journal_deletion_service import (
+    TaskJournalDeletionService,
+)
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
@@ -595,6 +598,7 @@ class JournalProvider(Provider):
         contact_relationship_repo: JournalContactRelationshipRepository,
         tag_hierarchy: JournalTagHierarchyService,
         task_anchor_repo: TaskAnchorRepository,
+        task_journal_deletion: TaskJournalDeletionService,
     ) -> JournalService:
         """Provide a JournalService instance."""
         return JournalService(
@@ -603,6 +607,23 @@ class JournalProvider(Provider):
             contact_relationship_repo=contact_relationship_repo,
             tag_hierarchy=tag_hierarchy,
             task_anchor_repo=task_anchor_repo,
+            task_journal_deletion=task_journal_deletion,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def task_journal_deletion_service(
+        self,
+        task_anchor_repo: TaskAnchorRepository,
+        event_publisher: OutboxEventPublisher,
+    ) -> TaskJournalDeletionService:
+        """Provide the tasks domain's half of a journal delete.
+
+        Provided here rather than by ``TaskProvider`` for the reason the merge's
+        half below is: ``JournalProvider`` stays self-sufficient.
+        """
+        return TaskJournalDeletionService(
+            task_anchor_repo=task_anchor_repo,
+            event_publisher=event_publisher,
         )
 
     @provide(scope=Scope.REQUEST)

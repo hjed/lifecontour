@@ -38,10 +38,7 @@ from app.core.integrations.journal_outbox_event_processor import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
-from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.journal_service_factory import build_journal_service
 
 USER_ID = "series-sync-user"
 MASTER_ID = "recurring-master-1"
@@ -59,11 +56,9 @@ def build_processor(connection: AsyncConnection) -> JournalOutboxEventProcessor:
     exercises them; a double would only assert that the test knows they are
     unused.
     """
-    service = JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
+    service = build_journal_service(
+        connection,
         contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return JournalOutboxEventProcessor(
         journal_service=service,

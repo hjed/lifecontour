@@ -490,7 +490,11 @@ prose.
 `DELETE /api/journals/{id}` answers 409 with code `JOURNAL_HAS_ANCHORED_TASKS`
 and a `meta.blocking_tasks` list giving each blocking task's id, text, status
 and blocking roles, plus the id and title of the journal it can be actioned
-from.
+from. Only tasks with no list block: a task on a list loses its link to the
+journal instead, and `GET /api/journals/{id}/delete-preview` answers beforehand
+with a `journal-delete-previews` resource whose `list_tasks_losing_link` counts
+them (404 for a missing or another user's journal, as the delete does). The MCP
+pair is `preview_journal_delete` and `delete_journal`'s `list_tasks_unlinked`.
 
 `TaskValidationError` names **the field the refusal is about**: every task
 write can answer 400 with code `TASK_VALIDATION_ERROR` and `meta.field`. The

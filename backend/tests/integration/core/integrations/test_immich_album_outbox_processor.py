@@ -23,12 +23,8 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
     SqlJournalContactRelationshipRepository,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.contact_seeding import seed_contact
+from tests.journal_service_factory import build_journal_service
 
 USER_ID = "album-test-user"
 OTHER_USER_ID = "other-user-456"
@@ -37,11 +33,9 @@ END = datetime(2026, 1, 17, 23, 59, 59, 999999, tzinfo=UTC)
 
 
 def _processor(connection: AsyncConnection) -> ImmichAlbumOutboxEventProcessor:
-    service = JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
+    service = build_journal_service(
+        connection,
         contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return ImmichAlbumOutboxEventProcessor(
         journal_service=service, connection=connection

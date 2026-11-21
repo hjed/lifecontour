@@ -24,7 +24,11 @@ a journal that has since passed — are ones a task reaches after creation.
 import pytest
 import pytest_asyncio
 from core_shared.models.journals import BlockingTask, JournalHasAnchoredTasksError
-from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import (
+    TaskJournalDetachment,
+    TaskJournalRepointing,
+    TaskStatus,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -33,14 +37,16 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from app.core.journal.services.journal_service import JournalService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     create_journal,
+    create_list_task,
     create_task,
     link_intermediate_journal,
     make_task_container,
+    seed_task_list,
 )
+from tests.journal_service_factory import build_journal_service
 
 _COUNT_JOURNAL = "SELECT COUNT(*) FROM journals WHERE id = :journal_id"
 _COUNT_TASK = "SELECT COUNT(*) FROM tasks WHERE id = :task_id"
@@ -69,9 +75,9 @@ async def journal_service(
     journal_repository: SqlJournalRepository,
     task_anchor_repository: SqlTaskAnchorRepository,
 ) -> JournalService:
-    return JournalService(
+    return build_journal_service(
+        async_connection,
         journal_repo=journal_repository,
-        event_publisher=OutboxEventPublisher(async_connection),
         task_anchor_repo=task_anchor_repository,
     )
 
@@ -226,9 +232,9 @@ class TestConcurrentInsertBackstop:
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
-        service = JournalService(
+        service = build_journal_service(
+            async_connection,
             journal_repo=journal_repository,
-            event_publisher=OutboxEventPublisher(async_connection),
             task_anchor_repo=BlindOnFirstLook(task_anchor_repository),
         )
 
@@ -269,9 +275,9 @@ class TestConcurrentInsertBackstop:
             creating_journal_id=creating_id,
             due_journal_id=due_id,
         )
-        service = JournalService(
+        service = build_journal_service(
+            async_connection,
             journal_repo=journal_repository,
-            event_publisher=OutboxEventPublisher(async_connection),
             task_anchor_repo=BlockerVanishesOnSecondLook(async_connection, task_id),
         )
 
@@ -295,6 +301,16 @@ class _DeleteGuardDouble(TaskAnchorRepository):
         self, *, source_journal_id: int, target_journal_id: int
     ) -> list[TaskJournalRepointing]:
         raise AssertionError("the delete guard must not re-point task links")
+
+    async def detach_list_tasks_from_journal(
+        self, journal_id: int
+    ) -> list[TaskJournalDetachment]:
+        # The races staged below are about journal-only blockers; no list task
+        # exists in them, so there is nothing to detach.
+        return []
+
+    async def count_list_tasks_linked_to_journal(self, journal_id: int) -> int:
+        return 0
 
 
 class BlindOnFirstLook(_DeleteGuardDouble):
@@ -438,6 +454,43 @@ class TestBlockingQuery:
 
         assert len(statements) == 1
         assert [blocker.task_id for blocker in blockers] == sorted(task_ids)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("anchoring", ["due", "creating", "both"])
+    async def test_a_list_task_never_blocks_whatever_it_anchors(
+        self,
+        clean_database: AsyncConnection,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchor_repository: SqlTaskAnchorRepository,
+        anchoring: str,
+    ):
+        """A list task is detached instead, so it is never a blocker.
+
+        These are the one-anchor shapes the old inner joins dropped silently —
+        leaving the RESTRICT foreign key to refuse the delete as a raw 500. Now
+        they are left out on purpose, and a journal-only task beside them is
+        still reported.
+        """
+        journal_id = await create_journal(journal_repository)
+        other_id = await create_journal(journal_repository)
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            creating_journal_id=journal_id if anchoring != "due" else None,
+            due_journal_id=journal_id if anchoring != "creating" else None,
+        )
+        blocker_id = await create_task(
+            async_connection, creating_journal_id=other_id, due_journal_id=journal_id
+        )
+
+        blockers = await task_anchor_repository.find_tasks_anchored_to_journal(
+            journal_id
+        )
+
+        assert [blocker.task_id for blocker in blockers] == [blocker_id]
 
     @pytest.mark.asyncio
     async def test_a_journal_only_mentioned_by_tasks_has_no_blockers(
