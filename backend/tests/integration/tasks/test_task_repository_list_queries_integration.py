@@ -621,6 +621,14 @@ class TestFindOpenTasksOnList:
 
         assert await _open_ids(repo, list_id) == [mine]
 
+    async def test_my_row_on_another_users_list_is_not_read(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository
+    ) -> None:
+        their_list = await _list_id(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        await create_list_task(async_connection, task_list_id=their_list)
+
+        assert await repo.find_open_tasks_on_list(their_list, USER_ID) == []
+
 
 @pytest.mark.integration
 class TestFindClosedTasksOnList:
@@ -738,6 +746,18 @@ class TestFindClosedTasksOnList:
 
         assert page == TaskPage(tasks=(), total=0)
 
+    async def test_my_row_on_another_users_list_is_not_read(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository
+    ) -> None:
+        their_list = await _list_id(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        await create_list_task(
+            async_connection, task_list_id=their_list, status=TaskStatus.DONE
+        )
+
+        page = await repo.find_closed_tasks_on_list(their_list, USER_ID, limit=10)
+
+        assert page == TaskPage(tasks=(), total=0)
+
 
 @pytest.mark.integration
 class TestCountOpenTasksByList:
@@ -776,6 +796,14 @@ class TestCountOpenTasksByList:
         )
 
         assert await repo.count_open_tasks_by_list([list_id, their_list], USER_ID) == {}
+
+    async def test_my_rows_on_another_users_list_are_not_counted(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository
+    ) -> None:
+        their_list = await _list_id(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        await create_list_task(async_connection, task_list_id=their_list)
+
+        assert await repo.count_open_tasks_by_list([their_list], USER_ID) == {}
 
     async def test_no_lists_count_nothing(self, repo: SqlTaskRepository) -> None:
         assert await repo.count_open_tasks_by_list([], USER_ID) == {}

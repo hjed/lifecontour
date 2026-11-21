@@ -589,7 +589,8 @@ class TaskRepository(ABC):
 
         A list that is not the user's reads as an empty one; callers resolve the
         list first to tell the two apart. The tasks are owner-scoped too, since
-        the table allows a task to reference another owner's list.
+        the table allows a task to reference another owner's list: the user's
+        own task pointing at someone else's list is not read either.
         """
 
     @abstractmethod
