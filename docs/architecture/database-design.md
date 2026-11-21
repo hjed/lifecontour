@@ -218,7 +218,7 @@ originating `event_id`.
 ```sql
 CREATE TABLE field_history (
     id SERIAL PRIMARY KEY,
-    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'journal', 'route', 'gear_item', 'task', ...
+    entity_type VARCHAR(50) NOT NULL, -- 'contact', 'contact_method', 'journal', 'route', 'gear_item', 'task', 'task_list', ...
     entity_id INTEGER NOT NULL,
     field_name VARCHAR(100) NOT NULL, -- field that changed; marker fields for create/delete/type changes
     old_value TEXT,
@@ -227,7 +227,7 @@ CREATE TABLE field_history (
     source VARCHAR(50) NOT NULL DEFAULT 'system', -- Provenance: ui, mcp, google_contacts, google_calendar, strava, immich, summary_regeneration, system
     event_id VARCHAR, -- originating domain event id; NULL for the synchronous contact dual-write
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- set from event.occurred_at by the projection
-    user_id VARCHAR(50) -- owner of the entity; TASK ROWS ONLY (migration 0107)
+    user_id VARCHAR(50) -- owner of the entity; TASK AND TASK-LIST ROWS ONLY (migration 0107; task lists since ITER21-001 Phase 7)
 );
 
 -- Idempotency for the event-driven history projection: re-delivered events never

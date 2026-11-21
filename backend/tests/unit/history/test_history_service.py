@@ -17,7 +17,12 @@ from core_shared.models.history import Provenance
 
 from app.core.history.services.history_service import _HANDLERS, HistoryService
 from app.infrastructure.events.outbox_repository import OutboxEvent
-from tests.task_event_inventory import task_event_types, task_event_types_by_class
+from tests.task_event_inventory import (
+    task_event_types,
+    task_event_types_by_class,
+    task_list_event_types,
+    task_list_event_types_by_class,
+)
 
 OCCURRED_AT = datetime(2024, 3, 1, 8, 0, 0, tzinfo=UTC)
 
@@ -1843,7 +1848,14 @@ class TestEveryTaskEventTypeIsProjected:
     def test_every_task_handler_belongs_to_a_real_event_class(self) -> None:
         """The reverse direction: a handler keyed on a type nobody publishes maps
         an event that can never arrive, and reads as coverage that is not there."""
-        task_keys = {key for key in _HANDLERS if key.startswith("Task")}
+        # Task-list events share the ``Task`` prefix but are another aggregate
+        # with an inventory of its own, so they are set aside by name rather
+        # than by spelling.
+        task_keys = {
+            key
+            for key in _HANDLERS
+            if key.startswith("Task") and key not in task_list_event_types()
+        }
 
         assert task_keys == task_event_types()
 
@@ -2030,3 +2042,284 @@ class TestTaskHistoryCarriesItsOwner:
         )
 
         assert [row.user_id for row in rows] == [None]
+
+
+# --------------------------------------------------------------------------- #
+# Task-list event projection (ITER21-001 Phase 7).
+#
+# A list is its own aggregate, keyed by its own integer id, so its rows go under
+# ("task_list", list_id) — never "task", because a list id can equal a task id,
+# and never the "journal" default ``_row`` falls back to. The field names are
+# the vocabulary the list history read (Phase 8) answers and the web app words
+# (ITER21-002 Phase 17): ``__created__`` carrying the name, then ``name``,
+# ``icon`` and ``archived_at`` pairs exactly as ``TaskListUpdated`` announces
+# them. ``archived_at`` (null, ts) is an archive and (ts, null) an unarchive.
+# --------------------------------------------------------------------------- #
+
+LIST_ID = 42  # deliberately equal to TASK_ID: the entity type keeps them apart
+LIST_NAME = "Groceries"
+ARCHIVED_AT = "2024-03-01T08:00:00+00:00"
+
+
+def _list_event(
+    event_type: str, event_data: dict[str, Any], *, event_id: str = "evt-1"
+) -> OutboxEvent:
+    """A task-list event as the outbox stores it — aggregate id is the list."""
+    return OutboxEvent(
+        id=0,
+        event_id=event_id,
+        event_type=event_type,
+        aggregate_id=event_data.get("task_list_id", 0),
+        event_data=event_data,
+        occurred_at=OCCURRED_AT,
+        retry_count=0,
+        created_at=OCCURRED_AT,
+    )
+
+
+def _list_created_payload(**overrides: Any) -> dict[str, Any]:
+    """A ``TaskListCreated`` payload as ``TaskListService`` publishes it."""
+    payload: dict[str, Any] = {
+        "task_list_id": LIST_ID,
+        "user_id": "u1",
+        "name": LIST_NAME,
+        "icon": None,
+        "source": Provenance.MCP.value,
+        "changed_by": "assistant",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _list_updated_payload(
+    changed_fields: dict[str, Any] | None, **overrides: Any
+) -> dict[str, Any]:
+    """A ``TaskListUpdated`` payload carrying ``changed_fields`` as JSON lists."""
+    payload: dict[str, Any] = {
+        "task_list_id": LIST_ID,
+        "user_id": "u1",
+        "changed_fields": changed_fields,
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _project_update(
+    service: HistoryService, changed_fields: dict[str, Any] | None
+) -> list[tuple[str, int, str, str | None, str | None]]:
+    rows = service.project_event(
+        _list_event("TaskListUpdated", _list_updated_payload(changed_fields))
+    )
+    return [_row_tuple(row) for row in rows]
+
+
+class TestTaskListCreated:
+    def test_projects_a_created_marker_carrying_the_name(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _list_event("TaskListCreated", _list_created_payload())
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task_list", LIST_ID, "__created__", None, LIST_NAME)
+        ]
+
+    def test_a_list_created_with_an_icon_is_still_one_line(
+        self, service: HistoryService
+    ) -> None:
+        """The icon is not itemised: a later icon change is a self-describing
+        (old, new) pair, so nothing needs an opening value to read correctly."""
+        rows = service.project_event(
+            _list_event("TaskListCreated", _list_created_payload(icon="cart"))
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task_list", LIST_ID, "__created__", None, LIST_NAME)
+        ]
+
+    def test_copies_provenance_actor_event_id_and_event_time(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _list_event(
+                "TaskListCreated", _list_created_payload(), event_id="evt-list-1"
+            )
+        )
+
+        assert rows[0].source == Provenance.MCP
+        assert rows[0].changed_by == "assistant"
+        assert rows[0].event_id == "evt-list-1"
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_a_missing_source_defaults_to_system(self, service: HistoryService) -> None:
+        payload = _list_created_payload()
+        del payload["source"]
+        del payload["changed_by"]
+
+        rows = service.project_event(_list_event("TaskListCreated", payload))
+
+        assert rows[0].source == Provenance.SYSTEM
+        assert rows[0].changed_by == "system"
+
+
+class TestTaskListUpdated:
+    def test_a_rename_is_one_name_line(self, service: HistoryService) -> None:
+        assert _project_update(service, {"name": ["Groceries", "Shopping"]}) == [
+            ("task_list", LIST_ID, "name", "Groceries", "Shopping")
+        ]
+
+    @pytest.mark.parametrize(
+        ("change", "old", "new"),
+        [
+            pytest.param([None, "cart"], None, "cart", id="set"),
+            pytest.param(["cart", "star"], "cart", "star", id="replaced"),
+            pytest.param(["cart", None], "cart", None, id="cleared"),
+        ],
+    )
+    def test_an_icon_change_is_one_icon_line(
+        self,
+        service: HistoryService,
+        change: list[str | None],
+        old: str | None,
+        new: str | None,
+    ) -> None:
+        assert _project_update(service, {"icon": change}) == [
+            ("task_list", LIST_ID, "icon", old, new)
+        ]
+
+    def test_an_archive_is_an_archived_at_line_from_nothing(
+        self, service: HistoryService
+    ) -> None:
+        assert _project_update(service, {"archived_at": [None, ARCHIVED_AT]}) == [
+            ("task_list", LIST_ID, "archived_at", None, ARCHIVED_AT)
+        ]
+
+    def test_an_unarchive_is_an_archived_at_line_back_to_nothing(
+        self, service: HistoryService
+    ) -> None:
+        assert _project_update(service, {"archived_at": [ARCHIVED_AT, None]}) == [
+            ("task_list", LIST_ID, "archived_at", ARCHIVED_AT, None)
+        ]
+
+    def test_a_rename_and_an_icon_in_one_write_are_two_lines(
+        self, service: HistoryService
+    ) -> None:
+        assert _project_update(
+            service, {"name": ["Groceries", "Shopping"], "icon": [None, "cart"]}
+        ) == [
+            ("task_list", LIST_ID, "name", "Groceries", "Shopping"),
+            ("task_list", LIST_ID, "icon", None, "cart"),
+        ]
+
+    @pytest.mark.parametrize(
+        "changed_fields",
+        [pytest.param({}, id="empty"), pytest.param(None, id="missing")],
+    )
+    def test_nothing_changed_projects_nothing(
+        self, service: HistoryService, changed_fields: dict[str, Any] | None
+    ) -> None:
+        assert _project_update(service, changed_fields) == []
+
+    def test_a_value_that_is_not_a_pair_is_skipped(
+        self, service: HistoryService
+    ) -> None:
+        assert _project_update(
+            service, {"name": ["Groceries", "Shopping"], "signal": True}
+        ) == [("task_list", LIST_ID, "name", "Groceries", "Shopping")]
+
+    def test_copies_provenance_actor_event_id_and_event_time(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _list_event(
+                "TaskListUpdated",
+                _list_updated_payload({"name": ["Groceries", "Shopping"]}),
+                event_id="evt-list-2",
+            )
+        )
+
+        assert rows[0].source == Provenance.UI
+        assert rows[0].changed_by == "ui"
+        assert rows[0].event_id == "evt-list-2"
+        assert rows[0].created_at == OCCURRED_AT
+
+
+class TestTaskListHistoryCarriesItsOwner:
+    """List rows record their owner, as task rows do, because lists are
+    hard-deleted too (Phase 29) and the list history read must not depend on a
+    row that may be gone."""
+
+    @pytest.mark.parametrize(
+        ("event_type", "payload"),
+        [
+            pytest.param("TaskListCreated", _list_created_payload(), id="created"),
+            pytest.param(
+                "TaskListUpdated",
+                _list_updated_payload(
+                    {"name": ["a", "b"], "archived_at": [None, ARCHIVED_AT]}
+                ),
+                id="updated",
+            ),
+        ],
+    )
+    def test_every_row_carries_the_owner(
+        self, service: HistoryService, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        rows = service.project_event(_list_event(event_type, payload))
+
+        assert rows
+        assert {row.user_id for row in rows} == {"u1"}
+
+    def test_a_payload_without_an_owner_leaves_the_column_empty(
+        self, service: HistoryService
+    ) -> None:
+        payload = _list_created_payload()
+        del payload["user_id"]
+
+        rows = service.project_event(_list_event("TaskListCreated", payload))
+
+        assert [row.user_id for row in rows] == [None]
+
+    def test_the_owner_cases_cover_every_list_event_type(self) -> None:
+        assert task_list_event_types() == {"TaskListCreated", "TaskListUpdated"}
+
+
+class TestEveryTaskListEventTypeIsProjected:
+    """Nothing a list publishes may be written to the stream and never read."""
+
+    def test_every_task_list_event_class_has_a_handler(self) -> None:
+        assert task_list_event_types() <= set(_HANDLERS)
+
+    def test_every_task_list_handler_belongs_to_a_real_event_class(self) -> None:
+        list_keys = {key for key in _HANDLERS if key.startswith("TaskList")}
+
+        assert list_keys == task_list_event_types()
+
+    def test_each_event_type_string_is_its_class_name(self) -> None:
+        by_class = task_list_event_types_by_class()
+
+        assert by_class
+        for name, event_type in by_class.items():
+            assert event_type == name
+
+    @pytest.mark.parametrize(
+        ("event_type", "payload"),
+        [
+            pytest.param("TaskListCreated", _list_created_payload(), id="created"),
+            pytest.param(
+                "TaskListUpdated",
+                _list_updated_payload({"name": ["a", "b"]}),
+                id="updated",
+            ),
+        ],
+    )
+    def test_no_list_row_is_filed_under_a_task_or_a_journal(
+        self, service: HistoryService, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        rows = service.project_event(_list_event(event_type, payload))
+
+        assert rows
+        assert {row.entity_type for row in rows} == {"task_list"}

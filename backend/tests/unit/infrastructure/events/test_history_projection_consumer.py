@@ -16,9 +16,10 @@ from app.infrastructure.events.history_projection_consumer import (
     _CONTACT_HISTORY_EVENT_TYPES,
     _JOURNAL_HISTORY_EVENT_TYPES,
     TASK_HISTORY_EVENT_TYPES,
+    TASK_LIST_HISTORY_EVENT_TYPES,
     HistoryProjectionConsumer,
 )
-from tests.task_event_inventory import task_event_types
+from tests.task_event_inventory import task_event_types, task_list_event_types
 
 _JOURNAL_EVENT_TYPES = {
     "JournalCreated",
@@ -79,6 +80,12 @@ _TASK_EVENT_TYPES = {
 }
 
 
+# Task-list event types (ITER21-001 Phase 7): a list is its own aggregate,
+# projected under ``entity_type='task_list'``. Like the task set, the inventory
+# reads them out of the events module rather than this list.
+_TASK_LIST_EVENT_TYPES = {"TaskListCreated", "TaskListUpdated"}
+
+
 def _consumer() -> HistoryProjectionConsumer:
     return HistoryProjectionConsumer(
         stream_client=MagicMock(),
@@ -95,7 +102,10 @@ def test_consumer_uses_history_projection_group() -> None:
 def test_consumer_subscribes_to_journal_contact_and_task_event_types() -> None:
     consumer = _consumer()
     assert set(consumer._event_type_patterns) == (
-        _JOURNAL_EVENT_TYPES | _CONTACT_EVENT_TYPES | _TASK_EVENT_TYPES
+        _JOURNAL_EVENT_TYPES
+        | _CONTACT_EVENT_TYPES
+        | _TASK_EVENT_TYPES
+        | _TASK_LIST_EVENT_TYPES
     )
 
 
@@ -115,6 +125,15 @@ def test_every_task_event_type_is_subscribed() -> None:
     consumer = _consumer()
 
     assert task_event_types() <= set(consumer._event_type_patterns)
+
+
+def test_every_task_list_event_type_is_subscribed() -> None:
+    """ITER21-001 Phase 7: a list's history is projected, and nothing a list
+    publishes goes unread — read from the events module, so a new list event
+    fails here on the day its class lands."""
+    consumer = _consumer()
+
+    assert task_list_event_types() <= set(consumer._event_type_patterns)
 
 
 def test_contact_projection_is_live() -> None:
@@ -137,6 +156,7 @@ def test_event_type_constants_match_handled_sets() -> None:
     assert set(_JOURNAL_HISTORY_EVENT_TYPES) == _JOURNAL_EVENT_TYPES
     assert set(_CONTACT_HISTORY_EVENT_TYPES) == _CONTACT_EVENT_TYPES
     assert set(TASK_HISTORY_EVENT_TYPES) == _TASK_EVENT_TYPES
+    assert set(TASK_LIST_HISTORY_EVENT_TYPES) == _TASK_LIST_EVENT_TYPES
 
 
 def test_every_subscribed_event_type_has_a_projection_handler() -> None:
@@ -151,6 +171,7 @@ def test_every_subscribed_event_type_has_a_projection_handler() -> None:
         set(_JOURNAL_HISTORY_EVENT_TYPES)
         | set(_CONTACT_HISTORY_EVENT_TYPES)
         | set(TASK_HISTORY_EVENT_TYPES)
+        | set(TASK_LIST_HISTORY_EVENT_TYPES)
     )
 
     assert subscribed <= set(_HANDLERS)
@@ -165,6 +186,8 @@ def test_no_task_handler_exists_without_a_subscription() -> None:
     handler somebody adds for a type the consumer was never told about.
     """
     consumer = _consumer()
+    # Task and task-list handlers both start with ``Task``; either kind added
+    # without its subscription is the silent failure this guards against.
     task_handlers = {key for key in _HANDLERS if key.startswith("Task")}
 
     assert task_handlers <= set(consumer._event_type_patterns)

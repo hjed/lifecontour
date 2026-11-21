@@ -1,7 +1,7 @@
 """History projection consumer for Redis Streams.
 
-Projects journal, contact and task domain events from the ``pms:domain-events``
-stream into ``field_history`` rows via :class:`HistoryService`. Runs as the
+Projects journal, contact, task and task-list domain events from the
+``pms:domain-events`` stream into ``field_history`` rows via :class:`HistoryService`. Runs as the
 ``history-projection`` consumer group.
 
 This is the event-driven replacement for a synchronous dual-write: a journal
@@ -18,6 +18,7 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.services.history_service import HistoryService
+from app.core.tasks.models.task_list_events import TASK_LIST_EVENT_TYPES
 from app.infrastructure.database import get_async_database_engine
 from app.infrastructure.events.dead_letter_consumer_mixin import DeadLetterConsumerMixin
 from app.infrastructure.events.stream_consumer import StreamConsumer
@@ -93,11 +94,19 @@ TASK_HISTORY_EVENT_TYPES: list[str] = [
     "TaskDeleted",
 ]
 
+# Task-list event types (ITER21-001 Phase 7), projected under
+# ``entity_type='task_list'``. Derived from the list events module's own set
+# rather than spelt out, so a list event added there is subscribed here on the
+# day it lands; sorted only so the subscription order is stable. Public for the
+# same reason as the task list above: the startup backfill repairs exactly the
+# set this consumer subscribes to.
+TASK_LIST_HISTORY_EVENT_TYPES: list[str] = sorted(TASK_LIST_EVENT_TYPES)
+
 
 class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
-    """Stream consumer projecting journal, contact and task events into history.
+    """Stream consumer projecting journal, contact, task and task-list events.
 
-    Listens to journal/route/gear, contact and task domain events on the
+    Listens to journal/route/gear, contact, task and task-list domain events on the
     ``pms:domain-events`` stream using the ``history-projection`` consumer group
     and delegates the event-to-rows mapping to :class:`HistoryService`. Since
     ITER12-003 Phase 2 it is the sole writer of contact history (the synchronous
@@ -132,6 +141,7 @@ class HistoryProjectionConsumer(DeadLetterConsumerMixin, StreamConsumer):
                 _JOURNAL_HISTORY_EVENT_TYPES
                 + _CONTACT_HISTORY_EVENT_TYPES
                 + TASK_HISTORY_EVENT_TYPES
+                + TASK_LIST_HISTORY_EVENT_TYPES
             ),
             batch_size=batch_size,
             block_ms=block_ms,

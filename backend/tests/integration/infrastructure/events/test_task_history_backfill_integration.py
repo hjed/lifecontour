@@ -43,7 +43,10 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_list_patch import TaskListPatch
+from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
@@ -266,6 +269,70 @@ class TestTheBackfillRepairsAlreadyAcknowledgedEvents:
         rows = await _task_rows(async_connection, task.id)
         assert {r.field_name for r in rows} == {"__created__", "__deleted__"}
         assert {r.user_id for r in rows} == {USER_ID}
+
+
+@pytest.mark.integration
+class TestTheBackfillRepairsTaskListHistory:
+    """ITER21-001 Phase 7: list events were skip-acknowledged too.
+
+    Lists have published ``TaskListCreated`` and ``TaskListUpdated`` since
+    Phases 3–6, and the deployed group acknowledged every one of them unread.
+    The ``Task``-prefix filter in ``_relay_then_skip_acknowledge_task_events``
+    strips the list patterns as well, which is exactly that deployed state.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_lists_history_appears_after_its_events_were_acked(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        lists = TaskListService(
+            task_list_repo=SqlTaskListRepository(async_connection),
+            event_publisher=OutboxEventPublisher(async_connection),
+        )
+        created = await lists.create_task_list(
+            user_id=USER_ID,
+            name="Groceries",
+            icon=None,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        assert created.id is not None
+        await lists.update_task_list(
+            user_id=USER_ID,
+            task_list_id=created.id,
+            patch=TaskListPatch(name="Shopping"),
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await _relay_then_skip_acknowledge_task_events(
+            stream_client, test_stream_name, async_connection
+        )
+        history = SqlFieldHistoryRepository(async_connection)
+        assert await _pending_count(redis_client, test_stream_name) == 0
+        assert await history.get_entity_history("task_list", created.id) == []
+
+        first = await TaskHistoryBackfill().run(async_connection)
+        second = await TaskHistoryBackfill().run(async_connection)
+
+        rows = await history.get_entity_history("task_list", created.id)
+        assert {(r.field_name, r.old_value, r.new_value) for r in rows} == {
+            ("__created__", None, "Groceries"),
+            ("name", "Groceries", "Shopping"),
+        }
+        by_field = {r.field_name: r for r in rows}
+        assert by_field["__created__"].source == Provenance.MCP
+        assert by_field["name"].source == Provenance.UI
+        assert {r.user_id for r in rows} == {USER_ID}
+        assert first.rows_written == 2
+        assert second.rows_written == 0
+        assert second.events_examined == 0
 
 
 @pytest.mark.integration

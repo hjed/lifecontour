@@ -12,6 +12,11 @@ group sees each message exactly once, so widening them projects events published
 *after* the deploy and nothing before it. Every task that already existed has no
 history at all, and nothing will ever redeliver its events.
 
+**Task-list events were skip-acknowledged the same way** from the day lists
+first published (ITER21-001 Phase 3) until the projection subscribed to them
+(Phase 7), so the repair re-projects those types too — every list created in
+that window gets its history back from the retained events.
+
 **Rows already projected carry no owner.** ``field_history.user_id`` did not
 exist when they were written, and the task-scoped read cannot authorise a row
 that does not say whose it is.
@@ -77,11 +82,21 @@ from app.core.history.adapters.sql.field_history_repository import (
 from app.core.history.services.history_service import HistoryService
 from app.infrastructure.events.history_projection_consumer import (
     TASK_HISTORY_EVENT_TYPES,
+    TASK_LIST_HISTORY_EVENT_TYPES,
 )
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from app.infrastructure.unit_of_work import transactional
 
 logger = structlog.get_logger(__name__)
+
+# Every type the repair re-projects: exactly what the consumer subscribes to for
+# tasks and task lists. List events joined in ITER21-001 Phase 7 — the deployed
+# group had been skip-acknowledging them since lists first published (Phase 3),
+# so every list created before then would otherwise have no history at all.
+_REPAIRED_EVENT_TYPES: list[str] = [
+    *TASK_HISTORY_EVENT_TYPES,
+    *TASK_LIST_HISTORY_EVENT_TYPES,
+]
 
 # How many retained events to pull through the projection at a time. The repair
 # runs before the application starts serving, so this trades a slightly longer
@@ -178,7 +193,7 @@ class TaskHistoryBackfill:
                 await transaction.execute(
                     _UNPROJECTED_TASK_EVENTS,
                     {
-                        "event_types": list(TASK_HISTORY_EVENT_TYPES),
+                        "event_types": _REPAIRED_EVENT_TYPES,
                         "after_id": after_id,
                         "batch_size": _BATCH_SIZE,
                     },

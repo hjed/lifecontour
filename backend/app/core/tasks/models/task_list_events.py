@@ -4,13 +4,14 @@ A list is its own aggregate — keyed by the list id, not a task id — so its
 events live here rather than in :mod:`app.core.tasks.models.events`. That module
 is read by ``tests/task_event_inventory.py``, which requires every event defined
 in it to be projected into *task* history; a list event there would either be
-filed under a task id or fail that inventory. List history gets its own
-projection, under its own ``entity_type``, when it is built.
+filed under a task id or fail that inventory.
 
-Until then no stream consumer subscribes to these types (pinned by
-``tests/unit/infrastructure/events/test_task_list_event_subscriptions.py``):
-they are written to the outbox and relayed, and every consumer acknowledges and
-skips them.
+**List history is projected from these events** (ITER21-001 Phase 7): the
+``history-projection`` group subscribes to ``TASK_LIST_EVENT_TYPES`` and files
+their rows under ``entity_type='task_list'`` — ``__created__`` carrying the
+name, then ``name``, ``icon`` and ``archived_at`` pairs as ``changed_fields``
+names them. No other consumer subscribes yet; both facts are pinned by
+``tests/unit/infrastructure/events/test_task_list_event_subscriptions.py``.
 
 Payloads are plain dictionaries, for the reasons given in the task events
 module, and the shape is guarded by a whole-key assertion in
