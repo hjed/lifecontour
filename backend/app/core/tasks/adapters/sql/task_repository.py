@@ -193,12 +193,21 @@ _REMOVE_FROM_LIST = text(
     """
 )
 
+# Every list read requires the list to be the caller's as well as the task. The
+# foreign key is single-column, so a task can point at another owner's list; a
+# read of that list must still come back empty, as a read of any unowned list.
+_ON_OWN_LIST = """EXISTS (
+        SELECT 1 FROM task_lists owned
+        WHERE owned.id = tasks.task_list_id AND owned.user_id = :user_id
+    )"""
+
 _OPEN_TASKS_ON_LIST = text(
     f"""
     SELECT {_TASK_COLUMNS}
     FROM tasks
     WHERE task_list_id = :task_list_id
       AND user_id = :user_id
+      AND {_ON_OWN_LIST}
       AND status = :status
     ORDER BY position, id
     """
@@ -212,6 +221,7 @@ _CLOSED_TASKS_ON_LIST = text(
     FROM tasks
     WHERE task_list_id = :task_list_id
       AND user_id = :user_id
+      AND {_ON_OWN_LIST}
       AND closed_at IS NOT NULL
     ORDER BY closed_at DESC, id DESC
     LIMIT :limit OFFSET :offset
@@ -221,21 +231,23 @@ _CLOSED_TASKS_ON_LIST = text(
 # Counted separately rather than with ``COUNT(*) OVER ()``: a page past the end
 # returns no rows to carry a window total, and must still report it.
 _COUNT_CLOSED_TASKS_ON_LIST = text(
-    """
+    f"""
     SELECT COUNT(*)
     FROM tasks
     WHERE task_list_id = :task_list_id
       AND user_id = :user_id
+      AND {_ON_OWN_LIST}
       AND closed_at IS NOT NULL
     """
 )
 
 _COUNT_OPEN_BY_LIST = text(
-    """
+    f"""
     SELECT task_list_id, COUNT(*) AS open_count
     FROM tasks
     WHERE task_list_id = ANY(CAST(:ids AS integer[]))
       AND user_id = :user_id
+      AND {_ON_OWN_LIST}
       AND status = :status
     GROUP BY task_list_id
     """

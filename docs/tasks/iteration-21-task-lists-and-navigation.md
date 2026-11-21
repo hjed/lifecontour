@@ -979,7 +979,7 @@ entity. No REST, MCP, event or UI contract changed.
   - `test_task_repository_list_paging_args.py` (4: limit and offset refused before any
     statement; `TaskPage` frozen).
 - Integration:
-  - `tests/integration/tasks/test_task_repository_list_queries_integration.py` (46):
+  - `tests/integration/tasks/test_task_repository_list_queries_integration.py` (49):
     - join and move at the bottom, counting closed tasks;
     - reorder persistence, closed positions untouched, siblings' `updated_at` and the outbox
       unchanged;
@@ -988,7 +988,8 @@ entity. No REST, MCP, event or UI contract changed.
     - open order with a tie;
     - closed order, pages and the total past the end;
     - counts;
-    - second-user and cross-owner-row isolation on every method;
+    - second-user and cross-owner-row isolation on every method, in both directions for the reads
+      (another owner's task on this list, and this owner's task on another owner's list);
     - five overlap tests (join/join, move/join, move/move, edit/move, and a neighbour closed while
       the move waits → 409). The join/join test was mutation-checked: it fails with the list lock
       removed.

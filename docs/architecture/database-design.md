@@ -819,8 +819,11 @@ refused row.
 | `find_closed_tasks_on_list` | Done and cancelled tasks, `closed_at DESC, id DESC`, as a `TaskPage` (`limit`/`offset` and a total from a separate `COUNT`, so a page past the end still reports it). |
 | `count_open_tasks_by_list` | Open-task counts for a set of lists in one statement; a list with none is absent. |
 
-Every one of them scopes the **tasks** to the owner as well as the list: the list FK is single-column,
-so the table would let a task reference another owner's list.
+Every one of them requires **both** the task and the list to be the caller's. The list FK is
+single-column, so the table would let a task reference another owner's list: a read of another
+owner's list returns nothing even if one of the caller's tasks points at it, and a read of the
+caller's list skips another owner's task that points at it. Writes prove the list by locking it,
+owner-checked; reads check it with an `EXISTS` on `task_lists`.
 
 - **Lock order.** Every membership write, and any later write spanning a whole list (archive freeze,
   list delete), locks the **`task_lists` row first and then `tasks` rows, each in ascending id**.
