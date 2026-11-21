@@ -13,13 +13,15 @@ names the list history read answers — ``__created__``, ``name``, ``icon`` and
 ``archived_at`` — and with provenance, owner and event identity intact. Writes
 that change nothing, and reorders, publish nothing and so must project nothing.
 
-Rows are read with ``get_entity_history``: the ``"task_list"`` aggregation
-strategy belongs to the read that uses it (Phase 8).
+Rows are read with ``get_entity_history``, except in
+:class:`TestTheListHistoryReadAnswersWithTheProjectedRows`, which reads them
+back through ``TaskListHistoryService`` and the ``"task_list"`` aggregation
+strategy — proving the read matches the rows the projection really writes.
 """
 
 import pytest
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskIcon
+from core_shared.models.tasks import TaskIcon, TaskListNotFoundError
 from core_shared.stream_client import StreamClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -28,6 +30,9 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.models import FieldHistoryEntry
+from app.core.history.services.task_list_history_service import (
+    TaskListHistoryService,
+)
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_service import TaskListService
@@ -337,3 +342,49 @@ class TestTaskListRowsCarryTheirOwner:
         assert {e.user_id for e in my_entries} == {USER_ID}
         assert len(their_entries) == 2
         assert {e.user_id for e in their_entries} == {OTHER_USER_ID}
+
+
+@pytest.mark.integration
+class TestTheListHistoryReadAnswersWithTheProjectedRows:
+    @pytest.mark.asyncio
+    async def test_real_writes_read_back_newest_first_for_the_owner_only(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        service = _list_service(async_connection)
+        list_id = await _create(service, async_connection)
+        await service.update_task_list(
+            user_id=USER_ID,
+            task_list_id=list_id,
+            patch=TaskListPatch(name="Shopping"),
+            transaction=async_connection,
+        )
+        await service.archive_task_list(
+            user_id=USER_ID, task_list_id=list_id, transaction=async_connection
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-list-read"
+        )
+        reader = TaskListHistoryService(
+            history_repo=SqlFieldHistoryRepository(async_connection),
+            task_list_repo=SqlTaskListRepository(async_connection),
+        )
+
+        entries = await reader.get_task_list_history(
+            task_list_id=list_id, user_id=USER_ID
+        )
+
+        assert [e.field_name for e in entries] == ["archived_at", "name", "__created__"]
+        assert (
+            await reader.get_task_list_history_count(
+                task_list_id=list_id, user_id=USER_ID
+            )
+            == 3
+        )
+        with pytest.raises(TaskListNotFoundError):
+            await reader.get_task_list_history(
+                task_list_id=list_id, user_id=OTHER_USER_ID
+            )

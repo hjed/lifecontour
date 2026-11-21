@@ -80,6 +80,10 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     # check would answer 200 as a no-op rather than 404: still caught.
     CrossUserRequest("POST", LIST_ROUTE + "/archive"),
     CrossUserRequest("POST", LIST_ROUTE + "/unarchive"),
+    # The foreign list has no history rows, so this exercises the live-row
+    # fallback; the owner-on-the-rows branch is driven in
+    # ``test_task_list_history_endpoints.py``.
+    CrossUserRequest("GET", LIST_ROUTE + "/history"),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.

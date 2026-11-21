@@ -271,7 +271,12 @@ Reads are aggregated per root entity via a pluggable aggregation strategy
 its related sub-entities; a `journal` strategy is added in ITER12-002 and a
 `task` strategy in ITER18-003 Phase 8. The `task` predicate deliberately does
 **not** join to `tasks` — that join would silently empty a deleted task's feed,
-which is the one thing this surface exists to serve.
+which is the one thing this surface exists to serve. A `task_list` strategy
+(ITER21-001 Phase 8) is the same shape — `entity_type = 'task_list' AND
+entity_id = :root_id`, no join to `task_lists` — because lists will be
+hard-deleted too. Both reads authorise on the rows' own `user_id` first and fall
+back to the owner-scoped live row only when no row carries an owner yet
+(`OwnerScopedHistory`, `app/core/history/services/owner_scoped_history.py`).
 
 **The `contact` predicate reaches one row that is not a contact row.**
 ITER18-003 Phase 9 adds a branch matching `entity_type = 'task'` and

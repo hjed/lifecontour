@@ -13,6 +13,8 @@ from typing import Literal
 from core_shared.models.tasks import LapseReason, TaskLinkRole, TaskStatus
 from pydantic import BaseModel, Field
 
+from app.core.history.models import FieldHistoryEntry
+
 
 class TaskMCP(BaseModel):
     """A task, as every task-returning write tool answers."""
@@ -165,6 +167,29 @@ class TaskHistoryEntryMCP(BaseModel):
     changed_by: str | None
     source: str = Field(description="Where the change came from, e.g. 'mcp'")
     created_at: str | None = Field(description="ISO 8601 instant")
+
+    @classmethod
+    def from_entry(cls, entry: FieldHistoryEntry) -> TaskHistoryEntryMCP:
+        """One change, as the task and task-list history tools hand it over.
+
+        ``source`` is the ``Provenance`` value rather than the enum, and
+        ``created_at`` an ISO instant — the repository already returns one, so
+        this only has to cope with the ``datetime`` a caller constructing an
+        entry by hand would pass. Both are the shape the REST endpoints send.
+        """
+        created_at = entry.created_at
+        return cls(
+            field_name=entry.field_name,
+            old_value=entry.old_value,
+            new_value=entry.new_value,
+            changed_by=entry.changed_by,
+            source=entry.source.value,
+            created_at=(
+                created_at.isoformat()
+                if isinstance(created_at, datetime.datetime)
+                else created_at
+            ),
+        )
 
 
 class TaskHistoryResponse(BaseModel):

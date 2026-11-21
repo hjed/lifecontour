@@ -25,6 +25,7 @@ from app.api.tasks.controllers import (
     list_upcoming_tasks,
     update_task,
 )
+from app.api.tasks.task_list_controllers import get_task_list_history
 
 
 def _description(endpoint: object) -> str:
@@ -262,3 +263,28 @@ class TestTheHistoryEndpointDocumentsWhatMakesItDifferent:
 
         assert "record" in description
         assert "no collection" in description
+
+
+@pytest.mark.unit
+class TestTheListHistoryEndpointDocumentsItsVocabularyAndRefusals:
+    """What a client cannot learn from the schema of
+    ``GET /api/task-lists/{list_id}/history``: how an archive reads, that an
+    empty answer is not a missing list, and that another user's list is the
+    same answer as an unknown one."""
+
+    def test_it_names_the_field_vocabulary(self) -> None:
+        description = _description(get_task_list_history)
+
+        for term in ("__created__", "name", "icon", "archived_at", "unarchive"):
+            assert term in description, term
+
+    def test_it_says_an_empty_history_is_not_a_missing_list(self) -> None:
+        description = _description(get_task_list_history)
+
+        assert "asynchronous" in description
+        assert "empty list rather than a 404" in description
+
+    def test_it_says_another_users_list_is_an_unknown_one(self) -> None:
+        description = _description(get_task_list_history)
+
+        assert "same answer as an unknown one" in description

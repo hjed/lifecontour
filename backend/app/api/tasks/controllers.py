@@ -62,14 +62,18 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.common.identifiers import INT32_MAX, DatabaseIdPath
+from app.api.common.identifiers import DatabaseIdPath
 from app.api.common.schemas import (
     JsonApiLinks,
-    create_pagination_links,
-    create_pagination_meta,
     get_request_base_url,
 )
-from app.api.history import HistoryConverter, HistoryListResponse
+from app.api.history import HistoryListResponse
+from app.api.history.pages import (
+    HistoryLimitQuery,
+    HistoryPageQuery,
+    history_offset,
+    history_page_response,
+)
 from app.api.tasks.schemas import (
     JournalTasksResponse,
     TaskAttributes,
@@ -243,8 +247,8 @@ async def get_task_history(
     request: Request,
     history_service: FromDishka[TaskHistoryService],
     user: FromDishka[SessionUser],  # Require authentication
-    page: Annotated[int, Query(description="Page number", ge=1, le=INT32_MAX)] = 1,
-    limit: Annotated[int, Query(description="Items per page", ge=1, le=100)] = 20,
+    page: HistoryPageQuery = 1,
+    limit: HistoryLimitQuery = 20,
 ) -> HistoryListResponse:
     """Get field-level change history for a task.
 
@@ -290,29 +294,24 @@ async def get_task_history(
              one answer, so a rejection cannot be used to probe for other users'
              tasks.
     """
-    base_url = get_request_base_url(request)
-    offset = (page - 1) * limit
-
     history_entries = await history_service.get_task_history(
         task_id=task_id,
         user_id=user.id,
         limit=limit,
-        offset=offset,
+        offset=history_offset(page, limit),
     )
     total_count = await history_service.get_task_history_count(
         task_id=task_id,
         user_id=user.id,
     )
 
-    return HistoryListResponse(
-        data=[
-            HistoryConverter.to_resource(entry, "task_history")
-            for entry in history_entries
-        ],
-        meta=create_pagination_meta(total_count, page, limit),
-        links=create_pagination_links(
-            f"{base_url}/api/tasks/{task_id}/history", page, limit, total_count
-        ),
+    return history_page_response(
+        history_entries,
+        total_count=total_count,
+        resource_type="task_history",
+        self_url=f"{get_request_base_url(request)}/api/tasks/{task_id}/history",
+        page=page,
+        limit=limit,
     )
 
 

@@ -19,7 +19,6 @@ for any caller, so it is absent here and the transport rejects it as an unknown
 argument.
 """
 
-from datetime import datetime
 from typing import Annotated
 
 from core_shared.models.history import Provenance
@@ -40,7 +39,6 @@ from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
-from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
@@ -64,6 +62,7 @@ from app.mcp.domains.tasks.task_list_tools import (
     archive_task_list,
     create_task_list,
     get_task_list,
+    get_task_list_history,
     list_task_lists,
     move_task_list,
     unarchive_task_list,
@@ -884,29 +883,6 @@ async def list_upcoming_tasks(
     return _upcoming(upcoming)
 
 
-def _history_entry(entry: FieldHistoryEntry) -> TaskHistoryEntryMCP:
-    """One change, as the history tool hands it over.
-
-    ``source`` is the ``Provenance`` value rather than the enum, and
-    ``created_at`` is an ISO instant — the repository already returns one, so
-    this only has to cope with the ``datetime`` a caller constructing an entry
-    by hand would pass. Both are the shape the REST endpoint sends, because a
-    field a browser can render and an agent cannot is exactly the UI-only
-    behaviour this iteration forbids.
-    """
-    created_at = entry.created_at
-    return TaskHistoryEntryMCP(
-        field_name=entry.field_name,
-        old_value=entry.old_value,
-        new_value=entry.new_value,
-        changed_by=entry.changed_by,
-        source=entry.source.value,
-        created_at=(
-            created_at.isoformat() if isinstance(created_at, datetime) else created_at
-        ),
-    )
-
-
 @tool(annotations=READ_ONLY)
 @mcp_unified_error_handler("get_task_history", "task")
 async def get_task_history(
@@ -979,7 +955,7 @@ async def get_task_history(
         total_count=total_count,
         page=page,
         limit=limit,
-        entries=[_history_entry(entry) for entry in entries],
+        entries=[TaskHistoryEntryMCP.from_entry(entry) for entry in entries],
     )
 
 
@@ -1005,3 +981,4 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(move_task_list)
     mcp.add_tool(archive_task_list)
     mcp.add_tool(unarchive_task_list)
+    mcp.add_tool(get_task_list_history)

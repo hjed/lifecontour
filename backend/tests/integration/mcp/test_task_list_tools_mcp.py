@@ -1,8 +1,8 @@
 """Integration tests for the task list MCP tools, over the real MCP endpoint.
 
 Covers ``create_task_list``, ``get_task_list``, ``list_task_lists``,
-``update_task_list``, ``move_task_list``, ``archive_task_list`` and
-``unarchive_task_list``.
+``update_task_list``, ``move_task_list``, ``archive_task_list``,
+``unarchive_task_list`` and ``get_task_list_history``.
 
 The rules are proven against the services in
 ``tests/integration/tasks/test_task_list_service_integration.py``. These tests
@@ -26,10 +26,13 @@ from tests.integration.mcp.http_helpers import (
     sessionless_mcp_request,
 )
 from tests.integration.tasks.task_seeding import (
+    LIST_LIFE,
     OTHER_USER_ID,
     USER_ID,
     count,
+    delete_task_list_row,
     seed_task_list,
+    seed_task_list_history,
     task_list_events,
 )
 
@@ -645,3 +648,136 @@ class TestIntegerArgumentsAreNotCoerced:
         assert '"isError":true' in response.text
         assert "must be a JSON integer" in response.text
         assert _names(listed) == [seeded.name]
+
+
+class TestGetTaskListHistoryTool:
+    """The list's record, as an agent reads it: the same rows the REST read
+    answers with, the same refusals, from the same service."""
+
+    async def _own_list(
+        self, conn: AsyncConnection, *, with_history: bool = True
+    ) -> int:
+        seeded = await seed_task_list(conn, "Packing")
+        assert seeded.id is not None
+        if with_history:
+            await seed_task_list_history(conn, seeded.id)
+        return seeded.id
+
+    async def test_answers_the_whole_life_most_recent_first(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id = await self._own_list(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "get_task_list_history", task_list_id=list_id)
+
+        assert (result["task_list_id"], result["total_count"]) == (list_id, 5)
+        assert (result["page"], result["limit"]) == (1, 20)
+        assert [
+            (e["field_name"], e["old_value"], e["new_value"], e["source"])
+            for e in result["entries"]
+        ] == [
+            (field, old, new, source.value)
+            for field, old, new, source in reversed(LIST_LIFE)
+        ]
+        assert all(e["changed_by"] == e["source"] for e in result["entries"])
+        assert all(e["created_at"] for e in result["entries"])
+
+    async def test_an_unprojected_list_answers_empty(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id = await self._own_list(clean_database, with_history=False)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "get_task_list_history", task_list_id=list_id)
+
+        assert (result["entries"], result["total_count"]) == ([], 0)
+
+    async def test_pages_slice_one_ordering_and_past_the_end_is_empty(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id = await self._own_list(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            second = await _call(
+                client, "get_task_list_history", task_list_id=list_id, page=2, limit=2
+            )
+            beyond = await _call(
+                client, "get_task_list_history", task_list_id=list_id, page=9, limit=2
+            )
+
+        assert [e["field_name"] for e in second["entries"]] == ["icon", "name"]
+        assert (beyond["entries"], beyond["total_count"]) == ([], 5)
+
+    async def test_the_owner_still_reads_it_once_the_row_is_gone(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id = await self._own_list(clean_database)
+        await delete_task_list_row(clean_database, list_id)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "get_task_list_history", task_list_id=list_id)
+
+        assert result["total_count"] == 5
+
+    @pytest.mark.parametrize("with_history", [True, False], ids=["rows", "fallback"])
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        with_history: bool,
+    ) -> None:
+        """Both branches: the other user's rows answer, or their live row does."""
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert foreign.id is not None
+        if with_history:
+            await seed_task_list_history(
+                clean_database, foreign.id, user_id=OTHER_USER_ID
+            )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "get_task_list_history", task_list_id=foreign.id
+            )
+            missing = await _refused(
+                client, "get_task_list_history", task_list_id=999_999
+            )
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert "Packing" not in str(refused)
+
+    @pytest.mark.parametrize(
+        ("arguments", "refusal"),
+        [
+            (
+                {"task_list_id": 0},
+                "task_list_id\\n  Input should be greater than or equal to 1",
+            ),
+            (
+                {"task_list_id": 1, "limit": 101},
+                "limit\\n  Input should be less than or equal to 100",
+            ),
+            (
+                {"task_list_id": 1, "page": 0},
+                "page\\n  Input should be greater than or equal to 1",
+            ),
+        ],
+    )
+    async def test_an_out_of_range_argument_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, int],
+        refusal: str,
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "get_task_list_history", arguments)
+
+        assert '"isError":true' in response.text
+        # The argument and its bound, as pydantic words them (JSON-escaped).
+        assert refusal in response.text
+        assert "not found" not in response.text.lower()
