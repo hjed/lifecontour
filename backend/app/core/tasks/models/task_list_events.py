@@ -83,12 +83,15 @@ type TaskListFieldChange = tuple[str | None, str | None]
 
 @dataclass(frozen=True)
 class TaskListUpdated(DomainEvent):
-    """Event raised when a list's own fields change: its name or its icon.
+    """Event raised when a list's own fields change: its name, its icon, or
+    whether it is archived.
 
     **One event for one write**, carrying ``changed_fields`` in the
     ``{field: (old, new)}`` shape every updated-event in this codebase uses, so
     a request that renames a list and changes its icon announces one change.
-    Archiving joins this type as another key rather than a type of its own.
+    Archiving and unarchiving are another key of this type rather than a type
+    of their own: ``archived_at``, an ISO instant or ``None`` — ``(None, ts)``
+    archives and ``(ts, None)`` unarchives.
 
     **Only what actually moved is named**: the service compares each requested
     value with the stored one, and a write that changes nothing publishes

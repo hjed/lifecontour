@@ -1,9 +1,9 @@
 """Unit tests for the TaskList domain entity.
 
 Construction-time validation covers what the entity alone can know: the owner,
-the name, the icon and the position. Ownership of the list and whether it may be
-written while archived need the repository and the acting user, so those rules
-live in the service layer.
+the name, the icon and the position — and ``ensure_writable`` holds the one
+read-only rule of an archived list. Ownership of the list needs the repository
+and the acting user, so that rule lives in the service layer.
 """
 
 from datetime import UTC, datetime
@@ -14,6 +14,7 @@ from core_shared.models.tasks import (
     MAX_TASK_LIST_NAME_LENGTH,
     TaskIcon,
     TaskList,
+    TaskListArchivedError,
     TaskListValidationError,
     TaskValidationError,
 )
@@ -134,3 +135,21 @@ class TestTaskListValidationError:
 
         assert exc_info.value.status_code == 400
         assert exc_info.value.error_meta() == {"field": "name"}
+
+
+@pytest.mark.unit
+class TestEnsureWritable:
+    """An archived list is read-only: the one rule every list write consults."""
+
+    def test_an_active_list_may_be_written(self) -> None:
+        _task_list(id=7).ensure_writable()
+
+    def test_an_archived_list_refuses_naming_itself(self) -> None:
+        archived = _task_list(id=7, archived_at=ARCHIVED_AT)
+
+        with pytest.raises(TaskListArchivedError) as exc_info:
+            archived.ensure_writable()
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.task_list_id == 7
+        assert "unarchive" in exc_info.value.message

@@ -1256,9 +1256,11 @@ is `task-lists`.
 |---|---|---|
 | `POST /api/task-lists` | Create a list at the bottom of your lists. Body type `task-lists`, attributes: `name`, optional `icon` | 201; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), an icon outside the fixed set, an unknown attribute or another resource type (`VALIDATION_ERROR`) |
 | `GET /api/task-lists/{list_id}` | Read one list: `name`, `icon`, `position`, `archived`, `archived_at`, timestamps | 200; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
-| `PATCH /api/task-lists/{list_id}` | Rename a list, set or clear its icon, or both. Body type `task-lists` with `id` matching the path; attributes: optional `name`, optional `icon` (`null` clears it) | 200 with the list; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), a body id that disagrees with the path (`TASK_VALIDATION_ERROR`, `meta.field` = `id`), a null name, an icon outside the fixed set, an unknown attribute, a body naming no change or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
+| `PATCH /api/task-lists/{list_id}` | Rename a list, set or clear its icon, or both. Body type `task-lists` with `id` matching the path; attributes: optional `name`, optional `icon` (`null` clears it) | 200 with the list; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), a body id that disagrees with the path (`TASK_VALIDATION_ERROR`, `meta.field` = `id`), a null name, an icon outside the fixed set, an unknown attribute, a body naming no change or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned; 409 `TASK_LIST_ARCHIVED` for an archived list |
 | `GET /api/task-lists` | Your lists by archived state. Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
 | `POST /api/task-lists/{list_id}/move` | Move a list to a new place among your **active** lists. Body type `task-list-moves`, attributes: `index` (0 at the top; past the end → the bottom). Answers your active lists in their new order | 200 (a `task-lists` collection); 400 a negative, non-integer or out-of-range index, an unknown attribute or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND`; 409 `TASK_LIST_ARCHIVED` for an archived list |
+| `POST /api/task-lists/{list_id}/archive` | Archive a list: read-only until unarchived. No body. Its tasks and its `position` are untouched | 200 with the list (`archived: true`, `archived_at` set); already archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
+| `POST /api/task-lists/{list_id}/unarchive` | Unarchive a list: back among the active lists in its old place, writable again. No body | 200 with the list (`archived: false`, `archived_at: null`); not archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
 
 Conventions this surface pins down:
 
@@ -1289,16 +1291,26 @@ Conventions this surface pins down:
   the whole active order, because one move changes several positions. All the
   owner's lists are locked for the move — and by a create before it computes
   the bottom — so concurrent moves and creates serialize.
-- **An archived list is read-only**: writing to one answers 409
+- **An archived list is read-only**: every write to one but unarchive — the
+  update and the move today, task writes from ITER21-001 Phase 18 — answers 409
   `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message naming
-  unarchiving as the way out. Moving is the first write that checks it.
+  unarchiving as the way out. Each write checks `TaskList.ensure_writable()`
+  right after its locked read, so even a no-op `PATCH` is refused.
+- **Archive and unarchive are actions, and idempotent.** They are their own
+  routes, not a `PATCH` attribute. Archiving an archived list (or unarchiving an
+  active one) answers the list unchanged and records nothing, so a retry
+  succeeds and `archived_at` keeps the instant the list was first archived.
 - Creating a list publishes `TaskListCreated`; changing its name or icon
   publishes one `TaskListUpdated` per write, carrying `changed_fields` as
-  `{field: [old, new]}` for exactly the fields that moved. Both record
+  `{field: [old, new]}` for exactly the fields that moved. Archiving and
+  unarchiving publish a `TaskListUpdated` too, with one `archived_at` key:
+  `[null, "<ISO instant>"]` archives, `["<ISO instant>", null]` unarchives. All
+  record
   `source=ui` (REST) or `mcp`. **Moving publishes nothing**: reordering is not
   part of a list's history, and it leaves `updated_at` as it was.
 - The matching MCP tools are `create_task_list`, `update_task_list`,
-  `get_task_list`, `list_task_lists` and `move_task_list`, documented in their
+  `get_task_list`, `list_task_lists`, `move_task_list`, `archive_task_list` and
+  `unarchive_task_list`, documented in their
   docstrings and parameter schemas. `update_task_list` clears the icon with
   `clear_icon=true`, because a tool cannot tell a null argument from an omitted
   one. Their integer arguments (`task_list_id`, `index`) take only JSON

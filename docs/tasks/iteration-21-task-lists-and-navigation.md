@@ -466,16 +466,77 @@ the guard's own message and nothing changed). No E2E: no UI.
 - *ITER21-002 Phase 9:* send the target index in the active view and replace the cached
   `GET /api/task-lists` data with the response, rather than re-fetching.
 
-#### Phase 6: Archive and unarchive
+#### Phase 6: Archive and unarchive ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 4.
-**Estimated diff:** ~140 production → **~1,300 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~140 production → **~1,300 tracked** · one capability on REST and MCP together ·
+**Actual:** ~320 production → **~1,010 tracked** (~1,010 insertions, ~40 deletions excluding this
+document: ~320 production — service 141, MCP tools and registration 88, REST controller 69, entity
+guard 23; ~700 tests; ~30 architecture docs). Tracked lines landed ×0.8 of the estimate, production
+×2.3 (docstrings): Phase 5 had already shipped the archived error and its mapping, which the
+estimate priced in.
 
 **Acceptance Criteria:**
 
-- [ ] Archive with open tasks; list writes refused while archived; unarchive restores.
-- [ ] Emits list-updated.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Archive with open tasks; list writes refused while archived; unarchive restores.
+- [x] Emits list-updated.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `TaskList.ensure_writable()` (`core_shared/core_shared/models/tasks/task_list.py`),
+the one read-only rule of an archived list, raising Phase 5's `TaskListArchivedError` (409
+`TASK_LIST_ARCHIVED`); `TaskListService.archive_task_list` / `unarchive_task_list`
+(`@transactional`, locked read, idempotent, one `TaskListUpdated` carrying `archived_at`);
+`update_task_list` and `move_task_list` both call `ensure_writable` right after their locked read.
+REST: `POST /api/task-lists/{list_id}/archive` and `/unarchive` (no body, 200 with the list). MCP:
+`archive_task_list`, `unarchive_task_list` (`IDEMPOTENT_WRITE`, `JsonIntOnly` list id). Server
+instructions, the `create_task_list`/`update_task_list` docstrings, `api-design.md` *Task List
+Endpoints* and `domain-architecture.md` updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_entity.py` (`TestEnsureWritable`),
+`test_task_list_events.py` (the `archived_at` pair, JSON round trip),
+`tests/unit/mcp/domains/test_task_list_tools_schema.py` (bounded id only, idempotent
+non-destructive hints, `TaskListMCP` output); integration `test_task_list_service_integration.py`
+(`TestArchiveTaskList` 7: keeps name/icon/place, the event, a list holding an open list task
+archived with the task row untouched, re-archive keeps its instant and records nothing,
+provenance, missing, foreign; `TestUnarchiveTaskList` 6: back in the active listing at its old
+place, the event, unarchiving an active list is a no-op, round trip, missing, foreign left
+archived; `TestUpdateTaskList` +5: rename, set/clear icon and a no-op patch refused on an archived
+list, rename accepted after unarchive; `TestConcurrentArchives`: two overlapping archives via
+`concurrency_helpers.overlap` leave one event and the first instant — verified to fail without the
+row lock), `tests/integration/api/test_task_list_endpoints.py`
+(PATCH → 409; archive 7 and unarchive 7: shapes, `source=ui`, idempotent 200, 404, bad ids),
+both routes in `test_task_list_ownership.py` and `test_authentication_requirements.py`,
+`tests/integration/mcp/test_task_list_tools_mcp.py` (archive → unarchive round trip with
+`source=mcp`, repeats record nothing, foreign = missing for both, out-of-range and non-integer
+ids, `update_task_list` on an archived list). No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **Reuses Phase 5's `TaskListArchivedError`**, which merged first; the guard moved from an
+  inline `is_archived` check in the move to `TaskList.ensure_writable()`, so every list write —
+  and Phase 18's task writes — consults one rule.
+- **Two action routes and two tools**, not a `PATCH` attribute: Phase 4 kept archive state out of
+  the update, and the spec names archive and unarchive as operations.
+- **Idempotent**: archiving an archived list, or unarchiving an active one, answers the list
+  unchanged, writes nothing and publishes nothing; `archived_at` keeps its first instant.
+- **The event key is `archived_at`** (ISO instant or `null`), not the `archived` Phase 4's note
+  suggested: it fits `TaskListFieldChange = tuple[str | None, str | None]` and names the entity
+  field as `name` and `icon` do. `(null, ts)` is archived, `(ts, null)` unarchived.
+- **An archived list refuses even a no-op patch**: read-only means "not writable", so the guard
+  runs before the no-op comparison.
+- **`archived_at` is set from the Python clock** (`datetime.now(UTC)`), taken *after* the row lock
+  so it is when the archive took effect (found in review); `updated_at` comes from the database's
+  `now()`. Only `archived_at` orders the archived listing, so the order is consistent.
+
+**Notes for later phases:**
+- *Phase 7:* project `TaskListUpdated`'s `archived_at` key as "Archived" (`[null, ts]`) and
+  "Unarchived" (`[ts, null]`) lines.
+- *Phase 18:* call `TaskList.ensure_writable()` on the task's list inside the task write's unit of
+  work (lock the list, or read it under the task's lock) — do not re-derive the rule.
+- *List delete (Phase 29):* decide whether deleting an archived list is allowed; if not, call
+  `ensure_writable`. Unarchive must never be routed through it.
+- *ITER21-002 Phases 13–14:* archive and unarchive send `POST /api/task-lists/{id}/archive` and
+  `/unarchive` with no body; replace the cached list with the response.
 
 #### Phase 7: List history projection
 

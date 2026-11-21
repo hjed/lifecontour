@@ -6,18 +6,26 @@ back together. Reads live in :class:`TaskListReadService`, which takes no event
 publisher and opens no unit of work — the same split ``TaskService`` and
 ``TaskReadService`` make.
 
-Creation, the field update (rename, set or clear the icon) and reordering exist
-so far; archive extends this class. Every write locks what it reads inside its
-unit of work before writing: the field update its one list with
-``find_by_id_for_update``, a move all the owner's lists. Reordering is the one
-write that publishes no event: the specification keeps it out of history.
+Creation, the field update (rename, set or clear the icon), reordering, and
+archiving and unarchiving live here. Every write locks what it reads inside its
+unit of work before writing: the field update and the archive pair their one
+list with ``find_by_id_for_update``, a move all the owner's lists. Reordering is
+the one write that publishes no event: the specification keeps it out of
+history.
+
+**An archived list is read-only until it is unarchived.** Every write but
+unarchive consults ``TaskList.ensure_writable`` right after its locked read, and
+archiving an archived list (or unarchiving an active one) is a no-op rather than
+a refusal, so a retried request succeeds.
 """
+
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     TaskIcon,
     TaskList,
-    TaskListArchivedError,
     TaskListArchiveFilter,
     TaskListNotFoundError,
     reorder_task_lists,
@@ -36,7 +44,7 @@ from app.infrastructure.unit_of_work import transactional
 
 
 class TaskListService:
-    """Creates, changes and reorders task lists for their owner.
+    """Creates, changes, reorders, archives and unarchives task lists for their owner.
 
     Every write but a move announces itself.
     """
@@ -114,14 +122,18 @@ class TaskListService:
         The patch is applied with one ``replace``, which re-runs the entity's
         validation, so a refused name is refused before anything is written.
 
+        **An archived list refuses every patch**, a no-op one included: the
+        refusal comes before the comparison, because read-only means "not
+        writable", not "unchanged".
+
         Raises:
             TaskListValidationError: The new name is blank or too long.
             TaskListNotFoundError: The list does not exist or is not the acting
                 user's; the two are indistinguishable by design.
+            TaskListArchivedError: The list is archived, and so read-only.
         """
-        stored = await self.task_list_repo.find_by_id_for_update(task_list_id, user_id)
-        if stored is None:
-            raise TaskListNotFoundError(task_list_id)
+        stored = await self._locked(user_id, task_list_id)
+        stored.ensure_writable()
 
         changed_fields = _changed_fields(stored, patch)
         if not changed_fields:
@@ -172,8 +184,7 @@ class TaskListService:
         moved = next((each for each in locked if each.id == task_list_id), None)
         if moved is None:
             raise TaskListNotFoundError(task_list_id)
-        if moved.is_archived:
-            raise TaskListArchivedError(task_list_id)
+        moved.ensure_writable()
 
         await self.task_list_repo.reposition(
             user_id, reorder_task_lists(locked, task_list_id, index)
@@ -181,6 +192,118 @@ class TaskListService:
         return await self.task_list_repo.list_for_user(
             user_id, TaskListArchiveFilter.ACTIVE
         )
+
+    @transactional
+    async def archive_task_list(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> TaskList:
+        """Archive one of the owner's lists, making it read-only.
+
+        The list's tasks are left exactly as they are — open ones included —
+        and so is its position, so unarchiving later returns it to its place.
+        A list already archived keeps the instant it was first archived:
+        nothing is written and nothing is announced.
+
+        Raises:
+            TaskListNotFoundError: No such list, or it belongs to someone else.
+        """
+        return await self._set_archived_at(
+            user_id=user_id,
+            task_list_id=task_list_id,
+            archive=True,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+
+    @transactional
+    async def unarchive_task_list(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> TaskList:
+        """Unarchive one of the owner's lists, restoring it.
+
+        The list rejoins the active lists in the place it kept while archived
+        and accepts writes again. Unarchiving an active list writes and
+        announces nothing.
+
+        Raises:
+            TaskListNotFoundError: No such list, or it belongs to someone else.
+        """
+        return await self._set_archived_at(
+            user_id=user_id,
+            task_list_id=task_list_id,
+            archive=False,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+
+    async def _locked(self, user_id: str, task_list_id: int) -> TaskList:
+        """The owner's list read under its row lock, or not found."""
+        stored = await self.task_list_repo.find_by_id_for_update(task_list_id, user_id)
+        if stored is None:
+            raise TaskListNotFoundError(task_list_id)
+        return stored
+
+    async def _set_archived_at(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        archive: bool,
+        transaction: AsyncConnection,
+        source: Provenance,
+        changed_by: str,
+    ) -> TaskList:
+        """Archive or unarchive a list under its row lock.
+
+        The lock is what makes the pair idempotent under concurrency: a second
+        archive racing the first waits, then reads the list as archived and
+        returns it untouched. The archive instant is taken *after* the lock, so
+        it is when the archive took effect rather than when it started waiting.
+
+        A list already in the asked-for state is returned untouched. Otherwise
+        one ``TaskListUpdated`` carries ``archived_at`` as ``(old, new)`` ISO
+        strings or ``None``, built from the rows as stored so it records the
+        instant the database holds.
+        """
+        stored = await self._locked(user_id, task_list_id)
+        if stored.is_archived == archive:
+            return stored
+
+        archived_at = datetime.now(tz=UTC) if archive else None
+        saved = await self.task_list_repo.save(replace(stored, archived_at=archived_at))
+
+        await self.event_publisher.publish(
+            TaskListUpdated(
+                task_list_id=task_list_id,
+                user_id=user_id,
+                changed_fields={
+                    "archived_at": (_iso(stored.archived_at), _iso(saved.archived_at))
+                },
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return saved
+
+
+def _iso(instant: datetime | None) -> str | None:
+    """An archive instant as the event payload carries it."""
+    return instant.isoformat() if instant is not None else None
 
 
 def _wire(value: object) -> str | None:

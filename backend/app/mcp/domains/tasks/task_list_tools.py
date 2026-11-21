@@ -1,12 +1,14 @@
-"""Task list MCP tools: create, update, read, list and move the user's lists.
+"""Task list MCP tools: create, update, read, list, move, archive and unarchive.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
-no domain error. The writes (``create_task_list``, ``update_task_list`` and
-``move_task_list``) call the ``@transactional`` ``TaskListService``, which
+no domain error. The writes (``create_task_list``, ``update_task_list``,
+``move_task_list``, ``archive_task_list`` and ``unarchive_task_list``) call the
+``@transactional`` ``TaskListService``, which
 commits each list and its event together (a move publishes none); the reads go
 through ``TaskListReadService``, which can change nothing. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
-found", exactly as a missing one.
+found", exactly as a missing one. A write to an archived list comes back as a
+"Task error" naming unarchiving as the way out.
 """
 
 from typing import Annotated
@@ -75,8 +77,10 @@ async def create_task_list(
     """
     Create a task list: a named home for tasks, added below the user's lists.
 
-    Lists can be created, renamed, given or cleared an icon, read and listed;
-    tasks cannot be placed on a list yet, so a new list is empty. A blank or overlong name is refused naming the field.
+    Lists can be created, renamed, given or cleared an icon, read, listed,
+    reordered, archived and unarchived; tasks cannot be placed on a list yet,
+    so a new list is empty. A blank or overlong name is refused naming the
+    field.
     """
     user_id = await get_current_user_id()
 
@@ -123,7 +127,8 @@ async def update_task_list(
     clear_icon=true rather than a null icon, since an omitted icon means "keep
     it". Name at least one change; values the list already has change nothing.
     A blank or overlong name is refused naming the field, and a list that does
-    not exist or belongs to someone else is reported as not found.
+    not exist or belongs to someone else is reported as not found. An archived
+    list is read-only: unarchive it first.
     """
     # Argument shape, not a domain rule: the clear flag exists only because a
     # tool cannot tell a null argument from an omitted one.
@@ -253,3 +258,66 @@ async def move_task_list(
         transaction=db_connection,
     )
     return TaskListsMCP(lists=[_task_list_fields(each) for each in task_lists])
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("archive_task_list", "task list")
+async def archive_task_list(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to archive."),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_list_service: TaskListService = mcp_depends(get_task_list_service),
+) -> TaskListMCP:
+    """
+    Archive one of the user's task lists: the way to put away a finished list
+    rather than delete it.
+
+    An archived list leaves the active listing and is read-only until it is
+    unarchived — it cannot be renamed, re-iconed or moved. Its tasks are left
+    exactly as they are, open ones included. Archiving a list that is already
+    archived changes nothing. A list that does not exist or belongs to someone
+    else is reported as not found.
+    """
+    user_id = await get_current_user_id()
+    archived = await task_list_service.archive_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return _task_list_fields(archived)
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("unarchive_task_list", "task list")
+async def unarchive_task_list(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to unarchive."),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_list_service: TaskListService = mcp_depends(get_task_list_service),
+) -> TaskListMCP:
+    """
+    Unarchive one of the user's task lists, restoring it.
+
+    The list returns to the active listing in the place it had before it was
+    archived, and can be changed again. Use list_task_lists with
+    archived='archived' to find an archived list's id. Unarchiving a list that
+    is not archived changes nothing. A list that does not exist or belongs to
+    someone else is reported as not found.
+    """
+    user_id = await get_current_user_id()
+    unarchived = await task_list_service.unarchive_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return _task_list_fields(unarchived)

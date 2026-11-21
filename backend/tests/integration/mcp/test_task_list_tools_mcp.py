@@ -1,7 +1,8 @@
 """Integration tests for the task list MCP tools, over the real MCP endpoint.
 
-Covers ``create_task_list``, ``get_task_list``, ``list_task_lists`` and
-``move_task_list``.
+Covers ``create_task_list``, ``get_task_list``, ``list_task_lists``,
+``update_task_list``, ``move_task_list``, ``archive_task_list`` and
+``unarchive_task_list``.
 
 The rules are proven against the services in
 ``tests/integration/tasks/test_task_list_service_integration.py``. These tests
@@ -305,6 +306,125 @@ class TestUpdateTaskListTool:
         assert await _row(clean_database, foreign.id) == before
         assert await task_list_events(clean_database) == []
 
+    async def test_an_archived_list_is_refused_naming_the_way_out(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        archived = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert archived.id is not None
+        before = await _row(clean_database, archived.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "update_task_list", task_list_id=archived.id, name="Renamed"
+            )
+
+        assert refused["error"] == "Task error"
+        assert "archived" in refused["message"]
+        assert "unarchive" in refused["message"]
+        assert await _row(clean_database, archived.id) == before
+        assert await task_list_events(clean_database) == []
+
+
+class TestArchiveTaskListTools:
+    """``archive_task_list`` and ``unarchive_task_list``: one list id each."""
+
+    async def test_archive_then_unarchive_round_trips_attributed_to_the_assistant(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing", icon=TaskIcon.LUGGAGE)
+        assert seeded.id is not None
+
+        async with authenticated_lifespan_client() as client:
+            archived = await _call(client, "archive_task_list", task_list_id=seeded.id)
+            listed_active = await _call(client, "list_task_lists")
+            restored = await _call(
+                client, "unarchive_task_list", task_list_id=seeded.id
+            )
+
+        assert archived["archived"] is True
+        assert archived["archived_at"] is not None
+        assert (archived["name"], archived["icon"]) == ("Packing", "luggage")
+        assert listed_active["lists"] == []
+        assert (restored["archived"], restored["archived_at"]) == (False, None)
+        assert restored["position"] == seeded.position
+        archived_event, unarchived_event = await task_list_events(clean_database)
+        old, new = archived_event.payload["changed_fields"]["archived_at"]
+        assert old is None
+        assert datetime.fromisoformat(new) == datetime.fromisoformat(
+            archived["archived_at"]
+        )
+        assert unarchived_event.payload["changed_fields"] == {
+            "archived_at": [new, None]
+        }
+        for event in (archived_event, unarchived_event):
+            assert (event.payload["source"], event.payload["changed_by"]) == (
+                "mcp",
+                "mcp",
+            )
+
+    async def test_repeating_either_answers_the_list_and_records_nothing(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        archived = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+        active = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            again = await _call(client, "archive_task_list", task_list_id=archived.id)
+            still = await _call(client, "unarchive_task_list", task_list_id=active.id)
+
+        assert datetime.fromisoformat(again["archived_at"]) == ARCHIVED_AT
+        assert still["archived"] is False
+        assert await task_list_events(clean_database) == []
+
+    @pytest.mark.parametrize("tool", ["archive_task_list", "unarchive_task_list"])
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        tool: str,
+    ) -> None:
+        # Archived for unarchive, so a refusal cannot be a no-op in disguise.
+        foreign = await seed_task_list(
+            clean_database,
+            "Theirs",
+            user_id=OTHER_USER_ID,
+            archived_at=ARCHIVED_AT if tool == "unarchive_task_list" else None,
+        )
+        assert foreign.id is not None
+        before = await _row(clean_database, foreign.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(client, tool, task_list_id=foreign.id)
+            missing = await _refused(client, tool, task_list_id=999_999)
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert await _row(clean_database, foreign.id) == before
+        assert await task_list_events(clean_database) == []
+
+    @pytest.mark.parametrize("tool", ["archive_task_list", "unarchive_task_list"])
+    async def test_an_out_of_range_id_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        tool: str,
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, tool, {"task_list_id": 0})
+
+        assert '"isError":true' in response.text
+        # The bound's own refusal, not a lookup of a list that does not exist.
+        assert "task_list_id" in response.text
+        assert "greater than or equal to 1" in response.text
+        assert "not found" not in response.text.lower()
+
 
 class TestListTaskListsTool:
     @pytest.mark.parametrize(
@@ -504,6 +624,8 @@ class TestIntegerArgumentsAreNotCoerced:
             ("get_task_list", {"task_list_id": True}),
             ("get_task_list", {"task_list_id": "1"}),
             ("update_task_list", {"task_list_id": True, "name": "Renamed"}),
+            ("archive_task_list", {"task_list_id": True}),
+            ("unarchive_task_list", {"task_list_id": "1"}),
         ],
         ids=repr,
     )

@@ -1,4 +1,5 @@
-"""Integration tests for the task list endpoints: create, read, list, update, move.
+"""Integration tests for the task list endpoints: create, read, list, update, move,
+archive and unarchive.
 
 The rules themselves (bottom placement, owner scoping, the event) are proven
 against ``TaskListService`` and ``TaskListReadService`` in
@@ -415,6 +416,182 @@ class TestUpdateTaskListEndpoint:
         )
 
         assert response.status_code == 400
+
+    async def test_an_archived_list_refuses_a_patch_with_a_conflict(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        archived = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+        before = await _row(async_connection, archived.id or 0)
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{archived.id}",
+            json=_patch_body(archived.id, name="Renamed"),
+        )
+
+        assert response.status_code == 409
+        error = _error(response.json())
+        assert error["code"] == "TASK_LIST_ARCHIVED"
+        assert "unarchive" in str(error["detail"])
+        assert await _row(async_connection, archived.id or 0) == before
+        assert await task_list_events(async_connection) == []
+
+
+class TestArchiveTaskListEndpoint:
+    """``POST /api/task-lists/{list_id}/archive``: no body, answers the list."""
+
+    async def test_archives_the_list_and_answers_with_the_resource(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.LUGGAGE
+        )
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{seeded.id}/archive"
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert (data["type"], data["id"]) == ("task-lists", str(seeded.id))
+        attributes = data["attributes"]
+        assert attributes["archived"] is True
+        assert attributes["archived_at"] is not None
+        assert (attributes["name"], attributes["icon"], attributes["position"]) == (
+            "Packing",
+            "luggage",
+            seeded.position,
+        )
+        assert data["links"]["self"].endswith(f"/api/task-lists/{seeded.id}")
+
+    async def test_the_event_is_attributed_to_the_browser(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{seeded.id}/archive"
+        )
+
+        archived_at = response.json()["data"]["attributes"]["archived_at"]
+        (event,) = await task_list_events(async_connection)
+        assert event.event_type == "TaskListUpdated"
+        (old, new) = event.payload["changed_fields"]["archived_at"]
+        assert old is None
+        assert datetime.fromisoformat(new) == datetime.fromisoformat(archived_at)
+        assert (event.payload["source"], event.payload["changed_by"]) == ("ui", "ui")
+
+    async def test_archiving_an_archived_list_answers_it_unchanged(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{seeded.id}/archive"
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert datetime.fromisoformat(attributes["archived_at"]) == ARCHIVED_AT
+        assert await task_list_events(async_connection) == []
+
+    async def test_a_missing_list_is_not_found(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        response = await authenticated_client.post(
+            f"/api/task-lists/{INT32_MAX}/archive"
+        )
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_LIST_NOT_FOUND"
+
+    @pytest.mark.parametrize("list_id", ["0", str(INT32_MAX + 1), "abc"])
+    async def test_an_out_of_range_id_is_a_bad_request(
+        self, authenticated_client: AsyncClient, list_id: str
+    ) -> None:
+        response = await authenticated_client.post(f"/api/task-lists/{list_id}/archive")
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "VALIDATION_ERROR"
+
+
+class TestUnarchiveTaskListEndpoint:
+    """``POST /api/task-lists/{list_id}/unarchive``: no body, answers the list."""
+
+    async def test_unarchives_the_list_and_it_is_active_and_writable_again(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        await seed_task_list(async_connection, "First")
+        seeded = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+        await seed_task_list(async_connection, "Last")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{seeded.id}/unarchive"
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert (attributes["archived"], attributes["archived_at"]) == (False, None)
+        listed = await authenticated_client.get("/api/task-lists")
+        assert _names(listed.json()) == ["First", "Old trip", "Last"]
+        renamed = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}", json=_patch_body(seeded.id, name="Trip")
+        )
+        assert renamed.status_code == 200
+
+    async def test_the_event_is_attributed_to_the_browser(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        await authenticated_client.post(f"/api/task-lists/{seeded.id}/unarchive")
+
+        (event,) = await task_list_events(async_connection)
+        assert event.payload["changed_fields"] == {
+            "archived_at": [ARCHIVED_AT.isoformat(), None]
+        }
+        assert (event.payload["source"], event.payload["changed_by"]) == ("ui", "ui")
+
+    async def test_unarchiving_an_active_list_answers_it_unchanged(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.post(
+            f"/api/task-lists/{seeded.id}/unarchive"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["archived"] is False
+        assert await task_list_events(async_connection) == []
+
+    async def test_a_missing_list_is_not_found(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        response = await authenticated_client.post(
+            f"/api/task-lists/{INT32_MAX}/unarchive"
+        )
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_LIST_NOT_FOUND"
+
+    @pytest.mark.parametrize("list_id", ["0", str(INT32_MAX + 1), "abc"])
+    async def test_an_out_of_range_id_is_a_bad_request(
+        self, authenticated_client: AsyncClient, list_id: str
+    ) -> None:
+        response = await authenticated_client.post(
+            f"/api/task-lists/{list_id}/unarchive"
+        )
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "VALIDATION_ERROR"
 
 
 class TestListTaskListsEndpoint:
