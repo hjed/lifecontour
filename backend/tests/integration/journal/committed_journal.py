@@ -9,9 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import create_journal
+from tests.journal_service_factory import build_journal_service
 
 
 @asynccontextmanager
@@ -51,8 +50,6 @@ async def committed_journal(
 
 def journal_service_on(connection: AsyncConnection) -> JournalService:
     """A ``JournalService`` over the real repositories on ``connection``."""
-    return JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
+    return build_journal_service(
+        connection,
     )

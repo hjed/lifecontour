@@ -44,7 +44,6 @@ from app.core.journal.adapters.sql.fitness_data_repository import (
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.journal.services.journal_service import JournalService
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
@@ -55,6 +54,7 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     build_processor,
     sync_event,
 )
+from tests.journal_service_factory import build_journal_service
 
 pytestmark = pytest.mark.integration
 
@@ -209,10 +209,8 @@ async def _replay_immich_album(
     connection: AsyncConnection, album_id: str
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
-    service = JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
+    service = build_journal_service(
+        connection,
     )
     return await ImmichAlbumOutboxEventProcessor(
         journal_service=service, connection=connection
@@ -304,10 +302,8 @@ async def _deletion_ids(
     Keyed by the worker's ``JournalDeleted`` key, and only the keys a worker
     acts on: an id filed under another worker's key is one nobody deletes.
     """
-    await JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
+    await build_journal_service(
+        connection,
     ).delete_journal(journal_id, connection)
     row = (
         await connection.execute(

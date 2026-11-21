@@ -82,11 +82,12 @@ class JournalNotFoundError(JournalDomainError):
 class JournalHasAnchoredTasksError(JournalDomainError):
     """Exception raised when a journal cannot be deleted because tasks anchor to it.
 
-    A task is anchored to exactly two journals and can never exist without both,
-    so deleting either is refused — regardless of the task's status, because a
-    done task's link to the journal it was created in is part of the record.
-    Deleting a journal a task merely *mentions* stays permitted and never
-    reaches this error.
+    A task on no list is anchored to exactly two journals and can never exist
+    without both, so deleting either is refused — regardless of the task's
+    status, because a done task's link to the journal it was created in is part
+    of the record. Deleting a journal a task merely *mentions* stays permitted
+    and never reaches this error, and so does deleting one a task **on a list**
+    links to: that task loses its link instead.
 
     **The message is the point.** The database already refuses the delete on its
     own through the anchors' ``ON DELETE RESTRICT``; what a user or an agent

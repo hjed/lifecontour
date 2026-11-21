@@ -29,15 +29,15 @@ from app.core.journal.services.journal_enrichment_service import (
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
-from app.core.journal.services.journal_service import JournalService
+from app.core.journal.services.journal_service import journal_service_on
 from app.core.journal.services.journal_type_metadata import describe_journal_types
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
     JournalConverter,
 )
 from app.mcp.domains.journals.schemas import (
     JournalDeletedMCPResponse,
+    JournalDeletePreviewMCPResponse,
     JournalResponse,
     JournalTypeCatalogueMCPResponse,
 )
@@ -242,14 +242,21 @@ async def delete_journal(
     Delete a journal entry.
 
     Deletes a journal entry and optionally its children.
-    Returns confirmation response.
+    Returns confirmation response, with ``list_tasks_unlinked`` — how many
+    tasks on a task list lost their link to the journal.
 
-    Deletion is refused while any task is anchored to this journal as its
-    creating or due journal — whatever that task's status, since a done task's
-    link to the journal it was created in is part of the record. Cancel,
-    complete or retarget those tasks first, or cancel the journal instead of
-    deleting it. A journal a task merely mentions can be deleted; the mention
-    goes with it and the task is unaffected.
+    **Tasks on a list never block the deletion.** Each loses its link to the
+    journal instead: a list task created or due in it loses that anchor (one
+    that was due here becomes undated) and one that mentions it loses the
+    mention. Call ``preview_journal_delete`` first to learn how many will.
+
+    Deletion is refused while any task **with no list** is anchored to this
+    journal as its creating or due journal — whatever that task's status, since
+    a done task's link to the journal it was created in is part of the record.
+    Cancel, complete or retarget those tasks first, or cancel the journal
+    instead of deleting it. A journal such a task merely mentions can be
+    deleted; the mention goes with it and the task is unaffected. A refused
+    deletion changes nothing, list tasks included.
 
     The refusal is resolvable without a UI: it comes back with
     ``code: "JOURNAL_HAS_ANCHORED_TASKS"``, an explanatory ``message``, the
@@ -267,7 +274,8 @@ async def delete_journal(
 
     Raises:
         JournalNotFoundError: If the journal with the given ID does not exist
-        JournalHasAnchoredTasksError: If a task is anchored to the journal
+        JournalHasAnchoredTasksError: If a task with no list is anchored to the
+            journal
     """
     # Explicitly reject unsupported delete_children behavior to avoid silent misuse
     if delete_children:
@@ -276,37 +284,76 @@ async def delete_journal(
             "Child journals are not deleted automatically."
         )
 
-    # Create repositories
-    journal_repo = SqlJournalRepository(db_connection)
-    contact_relationship_repo = SqlJournalContactRelationshipRepository(db_connection)
-
-    # Somebody else's journal is reported as missing rather than refused, so
-    # neither the deletion nor the explanation it can now return says anything
-    # about a journal that is not yours. Same check as the read tool above.
-    user_id = await get_current_user_id()
-    journal = await journal_repo.find_by_id(journal_id)
-    if not journal or str(journal.user_id) != str(user_id):
-        raise JournalNotFoundError(journal_id)
-
-    journal_service = JournalService(
-        journal_repo,
+    await _require_owned_journal(journal_id, db_connection)
+    journal_service = journal_service_on(
+        db_connection,
         event_publisher,
-        contact_relationship_repo,
-        task_anchor_repo=SqlTaskAnchorRepository(db_connection),
+        contact_relationship_repo=SqlJournalContactRelationshipRepository(
+            db_connection
+        ),
     )
 
-    # Delete journal
-    await journal_service.delete_journal(
+    list_tasks_unlinked = await journal_service.delete_journal(
         journal_id, db_connection, changed_by="mcp", source=Provenance.MCP
     )
 
-    response = JournalDeletedMCPResponse(
+    return JournalDeletedMCPResponse(
         journal_id=journal_id,
         deleted=True,
+        list_tasks_unlinked=list_tasks_unlinked,
         summary=f"Successfully deleted journal {journal_id}",
     )
 
-    return response
+
+@tool(annotations=READ_ONLY)
+@mcp_unified_error_handler("preview_journal_delete", "journal")
+async def preview_journal_delete(
+    journal_id: Annotated[
+        int, Field(description="The unique identifier of the journal to preview")
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    event_publisher: OutboxEventPublisher = mcp_depends(get_outbox_event_publisher),
+) -> JournalDeletePreviewMCPResponse:
+    """
+    Say what deleting a journal would do to tasks on a task list, without doing it.
+
+    Returns ``list_tasks_losing_link``: how many tasks on a list link to the
+    journal — as the journal they were created in, the journal they are due in,
+    or by mention — and would lose that link if it were deleted. A list task
+    due in the journal would become undated. Changes nothing.
+
+    Tasks with no list are not counted: they block the deletion instead, and
+    ``delete_journal``'s refusal names each of them.
+
+    Args:
+        journal_id: The unique identifier of the journal
+
+    Raises:
+        JournalNotFoundError: If the journal does not exist or is not yours
+    """
+    await _require_owned_journal(journal_id, db_connection)
+    preview = await journal_service_on(db_connection, event_publisher).preview_delete(
+        journal_id
+    )
+    return JournalDeletePreviewMCPResponse(
+        journal_id=journal_id,
+        list_tasks_losing_link=preview.list_tasks_losing_link,
+    )
+
+
+async def _require_owned_journal(
+    journal_id: int, db_connection: AsyncConnection
+) -> None:
+    """Report somebody else's journal as missing, as for one that never was.
+
+    Neither the deletion, its refusal (which names tasks and journal titles) nor
+    the preview's count may say anything about a journal that is not yours.
+    Same check as the read tools above.
+    """
+    user_id = await get_current_user_id()
+    journal = await SqlJournalRepository(db_connection).find_by_id(journal_id)
+    if not journal or str(journal.user_id) != str(user_id):
+        raise JournalNotFoundError(journal_id)
 
 
 def register_journal_read_tools(mcp: FastMCP[None]) -> None:
@@ -315,3 +362,4 @@ def register_journal_read_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_journal)
     mcp.add_tool(get_journal_by_external_id)
     mcp.add_tool(delete_journal)
+    mcp.add_tool(preview_journal_delete)

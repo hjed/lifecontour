@@ -351,9 +351,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   idempotent and a retarget only ever adds a link — never removes one — so a task returning to a
   journal it has already left finds it still attached and announces nothing; likewise a repeat
   attach, a detach of a link that is not there, and every refusal. (Links are removable, by
-  `detach_intermediate_journal`, by a merge collapsing redundant ones, and by a journal delete
-  cascading; the first publishes `TaskJournalUnlinked`, the second is part of the merge's own
-  `TaskJournalLinksRepointed`, and only the cascade still publishes nothing.)
+  `detach_intermediate_journal`, by a merge collapsing redundant ones, and by a journal delete;
+  the first publishes `TaskJournalUnlinked`, the second is part of the merge's own
+  `TaskJournalLinksRepointed`, and the delete announces a list task's lost link in
+  `TaskJournalLinksRemoved` — only a journal-only task's cascading link still publishes nothing.)
   **`TaskJournalLinked` carries an `origin`** (`manual` or `retarget`) because two writes produce
   the same fact. That is deliberately *not* the same question as provenance: `source` records who
   acted, and a retarget is something the **user** did, so a link derived from one performed in the
@@ -1085,7 +1086,9 @@ compared against each other in a unit test rather than each against the enum.
 **Cancelling a journal changes nothing about a task.** Not its status, not its text, and none of its
 links — the anchors and the intermediate and contact rows are untouched, because the cancellation
 writes only to `journal_calendar_info` and the external link. The task stays on every journal it was
-on and simply reads as lapsed, which is the specification's stance: cancellation is the escape hatch
+on and simply reads as lapsed — or, for a task on a list, which never lapses, as undated
+(`list_task_due` returns `None` for a cancelled due journal; un-cancelling restores the date) — which is
+the specification's stance: cancellation is the escape hatch
 the delete guard steers users toward, so it must never be refused for a journal that anchors a task
 whatever that task's status. Pinned end to end in
 `tests/integration/tasks/test_journal_cancellation_lapse_integration.py`, which drives both real
@@ -1552,11 +1555,37 @@ warning: whose day it is cannot be guessed, and marking every user's would be a 
 
 ### The journal delete guard
 
-A task can never exist without both of its journal anchors, so the
+A journal-only task — one on no task list — can never exist without both of its journal anchors, so the
 [specification](../product-specifications/home-dashboard-and-tasks-product-specification.md#deletion)
-**blocks** deleting a journal that is any task's creating or due journal — whatever that task's status,
-because a done task's link to the journal it was created in is part of the record. Deleting a journal a
-task merely *mentions* stays permitted; the intermediate link row cascades away with the journal.
+**blocks** deleting a journal that is such a task's creating or due journal — whatever that task's
+status, because a done task's link to the journal it was created in is part of the record. Deleting a
+journal a task merely *mentions* stays permitted; the intermediate link row cascades away with the
+journal.
+
+**A task on a list never blocks** ([Task Lists → Journal
+changes](../product-specifications/task-lists-and-navigation-product-specification.md#journal-changes)).
+It loses its link to the journal instead, and one due there becomes undated. So the guard's query reads
+only journal-only tasks (`t.task_list_id IS NULL`, which is also what keeps its inner joins correct:
+`ck_tasks_journal_only_has_both_anchors` guarantees such a task both anchors), and the list tasks are
+handled by the delete's other half:
+
+- **`TaskJournalDeletionService`** (tasks domain, injected into `JournalService` by `JournalProvider`,
+  the delete's counterpart of `TaskJournalMergeService`) calls
+  `TaskAnchorRepository.detach_list_tasks_from_journal`, which locks the list tasks linked to the
+  journal in any role, deletes their intermediate links to it and nulls their anchors on it, reporting a
+  `TaskJournalDetachment` per task. The service publishes one **`TaskJournalLinksRemoved`** per task —
+  `changed_fields` in the merge's vocabulary, every pair `(deleted, None)` — which the history
+  projection writes through `_project_task_updated`. Journal-only tasks' mentions keep the silent
+  cascade.
+- **Order:** guard → savepoint(detach → events → `DELETE`). A refused delete detaches nothing; a failed
+  `DELETE` rolls the detach and its outbox rows back with it, and the `IntegrityError` retry re-runs the
+  guard and then the detach, so a list task that linked to the journal mid-delete is detached rather
+  than causing a 500. The anchors stay `ON DELETE RESTRICT` as that backstop — `SET NULL` would trip the
+  journal-only CHECK and publish nothing.
+- **The preview** (`JournalService.preview_delete` → REST `GET /api/journals/{id}/delete-preview`, MCP
+  `preview_journal_delete`) counts the same rows with the same predicate
+  (`count_list_tasks_linked_to_journal`), so the confirmation states exactly what the delete does. MCP
+  `delete_journal` reports the number it removed as `list_tasks_unlinked`; REST stays `204`.
 
 The database already refuses these deletes on its own (both anchors are `ON DELETE RESTRICT`). The guard
 exists because a constraint name is not something a user or an agent can act on:
@@ -1617,11 +1646,16 @@ aborted transaction instead of an explanation.
 `CancelledRecurrenceTidier` catches the error when a cancelled calendar recurrence would delete an
 upcoming occurrence — exactly the profile of a task's due journal — and leaves it marked cancelled
 instead. Cancellation is the escape hatch the guard steers users toward, and a user's commitment outranks
-a sync tidy-up.
+a sync tidy-up. **The same holds for a list task**, which the guard no longer refuses for: the tidier's
+`_is_protected` keeps any continuation `preview_delete` reports a list-task link on, so a calendar sync
+never undates a task the user put there (user decision, ITER21-001 Phase 16).
 
 Journal **merge** is deliberately not guarded: it deletes the absorbed journal through
 `JournalRepository.delete` directly, and blocking it would break the calendar-sync workflows the journals
-specification depends on. Re-pointing task links through a merge is ITER18-002 Phase 3.
+specification depends on. Re-pointing task links through a merge is ITER18-002 Phase 3; it needs no
+list-task case, because the re-point's `CASE` leaves a NULL anchor NULL and its referencing query
+already includes mention-only tasks (pinned for list tasks in
+`test_journal_merge_task_links_integration.py`).
 
 ### A contact merge carries the task's people
 

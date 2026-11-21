@@ -12,6 +12,11 @@ supplies the action journal, and whether a row blocks at all are the journal
 domain's rule (:mod:`core_shared.models.journals.task_anchor`), applied to each
 row here.
 
+**The list-task detach** is the delete's other half. A task on a list never
+blocks a journal delete, so the guard reads only journal-only tasks and the
+detach nulls a list task's anchors on the journal and removes its mention of it,
+reporting each task so the tasks domain can announce it.
+
 **The merge re-point** is the other side of the same coin: where a delete is
 refused because task rows point at the journal, a merge moves them instead. That
 one *does* decide, because the rules are relational — a composite primary key
@@ -25,7 +30,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from core_shared.models.journals import BlockingTask, blocking_task_from_anchors
-from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import (
+    TaskJournalDetachment,
+    TaskJournalRepointing,
+    TaskStatus,
+)
 from sqlalchemy import TextClause, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -61,8 +70,72 @@ _FIND_ANCHORED = text("""
     FROM tasks t
     JOIN journals creating ON creating.id = t.creating_journal_id
     JOIN journals due ON due.id = t.due_journal_id
-    WHERE t.creating_journal_id = :journal_id OR t.due_journal_id = :journal_id
+    WHERE (t.creating_journal_id = :journal_id OR t.due_journal_id = :journal_id)
+    AND t.task_list_id IS NULL
     ORDER BY t.id
+""")
+
+# The delete's other half: tasks on a list, which are detached rather than
+# blocking. The inner joins above are therefore safe — a task with no list holds
+# both anchors (``ck_tasks_journal_only_has_both_anchors``) — and the one-anchor
+# shapes they would drop are exactly the rows these statements handle.
+#
+# ``_LIST_TASK_LINKS`` is shared by the preview's count and the detach's
+# pre-read, so the confirmation states exactly what the delete then does. The
+# ``IS TRUE`` turns a NULL anchor's comparison into a plain false.
+_LIST_TASKS_LINKED_WHERE = """
+    t.task_list_id IS NOT NULL
+    AND (
+        t.creating_journal_id = :journal_id
+        OR t.due_journal_id = :journal_id
+        OR EXISTS (
+            SELECT 1 FROM task_intermediate_journals tij
+            WHERE tij.task_id = t.id AND tij.journal_id = :journal_id
+        )
+    )
+"""
+
+_COUNT_LIST_TASKS_LINKED = text(f"""
+    SELECT COUNT(*) FROM tasks t WHERE {_LIST_TASKS_LINKED_WHERE}
+""")
+
+# Locked for the rest of the transaction, so the roles read here are the roles
+# the two statements below remove: nothing can re-anchor or detach these tasks
+# in between.
+_LOCK_LIST_TASKS_LINKED = text(f"""
+    SELECT
+        t.id,
+        t.user_id,
+        (t.creating_journal_id = :journal_id) IS TRUE AS creating_linked,
+        (t.due_journal_id = :journal_id) IS TRUE AS due_linked,
+        EXISTS (
+            SELECT 1 FROM task_intermediate_journals tij
+            WHERE tij.task_id = t.id AND tij.journal_id = :journal_id
+        ) AS mention_linked
+    FROM tasks t
+    WHERE {_LIST_TASKS_LINKED_WHERE}
+    ORDER BY t.id
+    FOR UPDATE OF t
+""")
+
+# Explicit rather than left to the cascade, so the event announcing the removal
+# is true the moment it is published rather than only once the journal goes.
+_DELETE_LIST_TASK_MENTIONS = text("""
+    DELETE FROM task_intermediate_journals
+    WHERE journal_id = :journal_id AND task_id = ANY(:task_ids)
+""")
+
+_NULL_LIST_TASK_ANCHORS = text("""
+    UPDATE tasks
+    SET creating_journal_id = CASE
+            WHEN creating_journal_id = :journal_id THEN NULL
+            ELSE creating_journal_id END,
+        due_journal_id = CASE
+            WHEN due_journal_id = :journal_id THEN NULL
+            ELSE due_journal_id END,
+        updated_at = now()
+    WHERE id = ANY(:task_ids)
+    AND (creating_journal_id = :journal_id OR due_journal_id = :journal_id)
 """)
 
 # The merge re-point, in the order it has to run. See ``repoint_journal_links``
@@ -172,6 +245,49 @@ class SqlTaskAnchorRepository(TaskAnchorRepository):
             due_journal_id=row.due_journal_id,
             due_journal_title=row.due_journal_title,
         )
+
+    async def detach_list_tasks_from_journal(
+        self, journal_id: int
+    ) -> list[TaskJournalDetachment]:
+        """Remove every link a list task holds to the journal about to go.
+
+        Lock the journal, then three statements: lock and read the affected list
+        tasks with the roles
+        the journal holds on each, delete their intermediate links to it, and
+        null their anchors on it. The roles come from the locked read because
+        afterwards the row no longer says which anchor held the journal.
+        """
+        params: dict[str, Any] = {"journal_id": journal_id}
+        # Hold the journal first, as the merge does: a task link inserted
+        # concurrently needs a key-share lock on this row for its foreign key,
+        # so it waits for the delete and then fails rather than slipping in
+        # after the read below — where its mention would cascade away with no
+        # event, or its anchor would fail the delete on RESTRICT.
+        await self.conn.execute(_LOCK_JOURNAL, params)
+        rows = (await self.conn.execute(_LOCK_LIST_TASKS_LINKED, params)).fetchall()
+        if not rows:
+            return []
+
+        params["task_ids"] = [row.id for row in rows]
+        await self.conn.execute(_DELETE_LIST_TASK_MENTIONS, params)
+        await self.conn.execute(_NULL_LIST_TASK_ANCHORS, params)
+        return [
+            TaskJournalDetachment(
+                task_id=row.id,
+                user_id=row.user_id,
+                creating_anchor_removed=row.creating_linked,
+                due_anchor_removed=row.due_linked,
+                link_removed=row.mention_linked,
+            )
+            for row in rows
+        ]
+
+    async def count_list_tasks_linked_to_journal(self, journal_id: int) -> int:
+        """How many list tasks a delete of this journal would detach."""
+        result = await self.conn.execute(
+            _COUNT_LIST_TASKS_LINKED, {"journal_id": journal_id}
+        )
+        return int(result.scalar_one())
 
     async def repoint_journal_links(
         self, *, source_journal_id: int, target_journal_id: int

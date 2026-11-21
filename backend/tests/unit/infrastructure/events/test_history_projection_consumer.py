@@ -64,7 +64,8 @@ _CONTACT_EVENT_TYPES = {
 }
 
 # Task event types the projection maps: the lifecycle set, the anchor move, the
-# intermediate-journal pair and the re-point a journal merge performs. Every type
+# intermediate-journal pair, the re-point a journal merge performs and the detach
+# a journal delete performs on a list task. Every type
 # the tasks domain publishes is projected, which
 # ``test_every_task_event_type_is_subscribed`` asserts against the events module
 # rather than against this list — a list is a thing somebody has to remember to
@@ -76,6 +77,7 @@ _TASK_EVENT_TYPES = {
     "TaskJournalLinked",
     "TaskJournalUnlinked",
     "TaskJournalLinksRepointed",
+    "TaskJournalLinksRemoved",
     "TaskDeleted",
 }
 

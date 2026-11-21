@@ -131,6 +131,11 @@ class TestWhatThisConsumerListensFor:
         journal links are populated on the read model and never rendered, so
         attaching one cannot change a prompt and invalidating on it would buy a
         regeneration that produces the same prose.
+
+        ``TaskJournalLinksRemoved`` is absent for a different reason: it is
+        only ever about a task on a list, and the summary's task inputs are
+        journal-only selections, so no list task reaches a prompt. The deleted
+        journal's own days are already invalidated by ``JournalDeleted``.
         """
         subscribed = {
             event_type
@@ -141,6 +146,7 @@ class TestWhatThisConsumerListensFor:
         assert subscribed == task_event_types() - {
             "TaskJournalLinked",
             "TaskJournalUnlinked",
+            "TaskJournalLinksRemoved",
         }
 
 

@@ -97,9 +97,12 @@ from tests.integration.tasks.task_seeding import (
     TaskEventRow,
     create_contact,
     create_journal,
+    create_list_task,
+    seed_task_list,
     stored_anchors,
     task_events,
 )
+from tests.journal_service_factory import build_journal_service
 
 TASK_TEXT = "book the belay course"
 UPDATED_TEXT = "book the belay course and the refresher"
@@ -129,6 +132,9 @@ def _fact(event: TaskEventRow) -> str:
             # another journal. Which links moved is in ``changed_fields``, and
             # the payload tests are where that belongs.
             "TaskJournalLinksRepointed": "journals-repointed",
+            # A journal delete announces one fact per list task however many of
+            # its links to the journal went, for the merge's reason.
+            "TaskJournalLinksRemoved": "journal-links-removed",
             "TaskDeleted": "deleted",
         }[event.event_type]
 
@@ -422,6 +428,37 @@ async def _act_merge_the_due_journal_away(fixtures: _Fixtures, seeded: Seeded) -
     )
 
 
+async def _seed_list_task_due_in_a_journal(fixtures: _Fixtures) -> Seeded:
+    """A task on a list, due in a journal of its own that is about to be deleted.
+
+    Seeded as a row: no product path creates a list task yet. ``journal_id`` is
+    the journal the action deletes.
+    """
+    doomed_id = await create_journal(
+        fixtures.journals, title="The journal being deleted", days_offset=5
+    )
+    task_list = await seed_task_list(fixtures.connection)
+    assert task_list.id is not None
+    task_id = await create_list_task(
+        fixtures.connection, task_list_id=task_list.id, due_journal_id=doomed_id
+    )
+    return Seeded(task_id=task_id, journal_id=doomed_id)
+
+
+async def _act_delete_the_due_journal(fixtures: _Fixtures, seeded: Seeded) -> None:
+    """The second action performed by another domain: a journal delete.
+
+    A list task never blocks it; the delete detaches the task first, and the
+    write is reached through the journal service, as the merge's is.
+    """
+    await build_journal_service(fixtures.connection).delete_journal(
+        seeded.journal_id,
+        fixtures.connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+
+
 async def _seed_task_and_a_contact_to_merge_into(fixtures: _Fixtures) -> Seeded:
     """A task naming one person, and the person they are about to be merged into."""
     absorbed_id = await create_contact(fixtures.connection, first_name="Sarah")
@@ -546,6 +583,13 @@ WRITE_PATHS: list[WritePath] = [
         expects=["journals-repointed"],
     ),
     WritePath(
+        name="journal delete detaches a list task",
+        ports=frozenset({"detach_list_tasks_from_journal"}),
+        seed=_seed_list_task_due_in_a_journal,
+        act=_act_delete_the_due_journal,
+        expects=["journal-links-removed"],
+    ),
+    WritePath(
         name="contact merge",
         ports=frozenset({"repoint_contact_links"}),
         seed=_seed_task_and_a_contact_to_merge_into,
@@ -591,6 +635,9 @@ PORT_READ_METHODS = frozenset(
         "find_open_tasks_on_list",
         "find_closed_tasks_on_list",
         "count_open_tasks_by_list",
+        # The journal delete preview's count (ITER21-001 Phase 16): how many
+        # list tasks a delete would detach. A count, so nothing to announce.
+        "count_list_tasks_linked_to_journal",
     }
 )
 

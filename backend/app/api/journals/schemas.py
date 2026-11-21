@@ -2006,3 +2006,33 @@ class JournalHasAnchoredTasksErrorResponse(BaseModel):
     errors: list[JournalHasAnchoredTasksErrorObject] = Field(
         ..., description="Array of error objects"
     )
+
+
+class JournalDeletePreviewAttributes(BaseModel):
+    """What deleting a journal would do to tasks on a task list."""
+
+    list_tasks_losing_link: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "How many tasks on a list link to the journal — as the journal "
+            "they were created in, the journal they are due in, or by mention — "
+            "and would lose that link if it were deleted. A list task due in it "
+            "would become undated. Tasks with no list are not counted: they "
+            "block the delete instead, and its 409 names them."
+        ),
+    )
+
+
+class JournalDeletePreviewResource(BaseModel):
+    """JSON:API resource for a journal delete preview, keyed by the journal."""
+
+    type: Literal["journal-delete-previews"] = "journal-delete-previews"
+    id: str = Field(..., description="The journal's id")
+    attributes: JournalDeletePreviewAttributes
+
+
+class JournalDeletePreviewResponse(BaseModel):
+    """Body of ``GET /api/journals/{journal_id}/delete-preview``."""
+
+    data: JournalDeletePreviewResource

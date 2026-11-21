@@ -11,7 +11,10 @@ What counts as "added to":
   routes);
 - another calendar that still holds the event;
 - a change in the journal's history made in the app or through MCP;
-- a task anchored to the journal, which the delete guard refuses.
+- a task anchored to the journal, which the delete guard refuses;
+- a task on a list linked to the journal. The delete would not be refused —
+  a list task loses its link instead — so the tidier keeps the journal itself
+  rather than let a calendar sync undate the user's task.
 
 Each deletion runs in its own SAVEPOINT, so one that fails takes back only
 its own writes and the rest of the recurrence is still tidied. The recurrence
@@ -151,7 +154,13 @@ class CancelledRecurrenceTidier:
         facts = await self.link_repo.get_deletion_protection_facts(linked.journal_id)
         if facts.is_protected:
             return True
-        return await self.link_repo.has_user_history(linked.journal_id)
+        if await self.link_repo.has_user_history(linked.journal_id):
+            return True
+        # A list task's link is something the user added, but deleting the
+        # journal would not be refused for it — the task would just lose the
+        # link — so the guard's refusal below cannot stand in for this check.
+        preview = await self.journal_service.preview_delete(linked.journal_id)
+        return preview.list_tasks_losing_link > 0
 
     async def _delete_unless_protected(
         self, linked: SeriesLinkedJournal, *, source: Provenance, changed_by: str

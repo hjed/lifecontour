@@ -91,6 +91,7 @@ TASK_HISTORY_EVENT_TYPES: list[str] = [
     "TaskJournalLinked",
     "TaskJournalUnlinked",
     "TaskJournalLinksRepointed",
+    "TaskJournalLinksRemoved",
     "TaskDeleted",
 ]
 

@@ -16,8 +16,10 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     count,
     create_journal,
+    create_list_task,
     create_task,
     link_intermediate_journal,
+    seed_task_list,
 )
 
 
@@ -1269,6 +1271,182 @@ class TestJournalDeleteEndpoints:
             followed.json()["data"]["attributes"]["title"]
             == blocker["action_journal_title"]
         )
+
+
+@pytest.mark.integration
+class TestJournalDeleteWithListTasks:
+    """``DELETE /api/journals/{id}`` and its preview, once list tasks exist.
+
+    A task on a list never blocks the delete: it loses its link to the journal.
+    The preview says beforehand how many will, so the confirmation can state it.
+    Each surface answers for another user's journal exactly as for a missing
+    one.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_method(self, clean_database):  # noqa: ARG002
+        pass
+
+    async def _list_task(
+        self,
+        conn: Any,
+        creating_journal_id: int | None = None,
+        due_journal_id: int | None = None,
+    ) -> int:
+        task_list = await seed_task_list(conn)
+        assert task_list.id is not None
+        return await create_list_task(
+            conn,
+            task_list_id=task_list.id,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+        )
+
+    async def test_a_journal_a_list_task_is_due_in_deletes(
+        self, integration_api_client, async_connection
+    ):
+        journal_id = await create_journal(
+            SqlJournalRepository(async_connection), title="Called off"
+        )
+        task_id = await self._list_task(async_connection, due_journal_id=journal_id)
+
+        response = await integration_api_client.delete(f"/api/journals/{journal_id}")
+
+        assert response.status_code == 204
+        due = await async_connection.execute(
+            text("SELECT due_journal_id, due_date FROM tasks WHERE id = :id"),
+            {"id": task_id},
+        )
+        assert due.one() == (None, None)
+
+    async def test_a_journal_only_task_still_refuses_and_is_the_only_one_named(
+        self, integration_api_client, async_connection
+    ):
+        journal_repo = SqlJournalRepository(async_connection)
+        journal_id = await create_journal(journal_repo, title="Permit Meeting")
+        planning_id = await create_journal(journal_repo, title="Monday Planning")
+        blocker_id = await create_task(
+            async_connection,
+            creating_journal_id=planning_id,
+            due_journal_id=journal_id,
+        )
+        list_task_id = await self._list_task(
+            async_connection, due_journal_id=journal_id
+        )
+
+        response = await integration_api_client.delete(f"/api/journals/{journal_id}")
+
+        assert response.status_code == 409
+        blockers = response.json()["errors"][0]["meta"]["blocking_tasks"]
+        assert [b["task_id"] for b in blockers] == [blocker_id]
+        kept = await async_connection.execute(
+            text("SELECT due_journal_id FROM tasks WHERE id = :id"),
+            {"id": list_task_id},
+        )
+        assert kept.scalar_one() == journal_id
+
+    async def test_the_preview_counts_the_list_tasks_that_would_lose_a_link(
+        self, integration_api_client, async_connection
+    ):
+        journal_repo = SqlJournalRepository(async_connection)
+        journal_id = await create_journal(journal_repo, title="Weekend away")
+        other_id = await create_journal(journal_repo, title="Planning")
+        await self._list_task(async_connection, due_journal_id=journal_id)
+        mention_id = await self._list_task(async_connection, due_journal_id=other_id)
+        await link_intermediate_journal(
+            async_connection, task_id=mention_id, journal_id=journal_id
+        )
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/delete-preview"
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "data": {
+                "type": "journal-delete-previews",
+                "id": str(journal_id),
+                "attributes": {"list_tasks_losing_link": 2},
+            }
+        }
+
+    async def test_the_preview_of_a_journal_no_list_task_links_to_is_zero(
+        self, integration_api_client, async_connection
+    ):
+        journal_id = await create_journal(SqlJournalRepository(async_connection))
+
+        response = await integration_api_client.get(
+            f"/api/journals/{journal_id}/delete-preview"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"] == {"list_tasks_losing_link": 0}
+
+    async def test_the_preview_of_a_missing_journal_is_404(
+        self, integration_api_client
+    ):
+        response = await integration_api_client.get(
+            "/api/journals/99999/delete-preview"
+        )
+
+        assert response.status_code == 404
+
+    async def test_the_preview_of_someone_elses_journal_is_404(
+        self, integration_api_client, async_connection
+    ):
+        """Answered exactly as for a missing journal, so the count discloses
+        nothing about a journal that is not yours."""
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        other_list = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        assert other_list.id is not None
+        await create_list_task(
+            async_connection,
+            task_list_id=other_list.id,
+            due_journal_id=other_journal_id,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await integration_api_client.get(
+            f"/api/journals/{other_journal_id}/delete-preview"
+        )
+
+        assert response.status_code == 404
+        assert "list_tasks_losing_link" not in response.text
+
+    async def test_deleting_someone_elses_journal_leaves_their_list_task_linked(
+        self, integration_api_client, async_connection
+    ):
+        other_journal_id = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        other_list = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        assert other_list.id is not None
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=other_list.id,
+            due_journal_id=other_journal_id,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await integration_api_client.delete(
+            f"/api/journals/{other_journal_id}"
+        )
+
+        assert response.status_code == 404
+        kept = await async_connection.execute(
+            text("SELECT due_journal_id FROM tasks WHERE id = :id"), {"id": task_id}
+        )
+        assert kept.scalar_one() == other_journal_id
 
 
 @pytest.mark.integration

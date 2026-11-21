@@ -252,25 +252,17 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
             SqlJournalContactRelationshipRepository,
         )
-        from app.core.journal.adapters.sql.journal_repository import (
-            SqlJournalRepository,
-        )
-        from app.core.journal.services.journal_service import JournalService
-        from app.core.tasks.adapters.sql.task_anchor_repository import (
-            SqlTaskAnchorRepository,
-        )
+        from app.core.journal.services.journal_service import journal_service_on
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
 
-        journal_repo = SqlJournalRepository(connection)
         event_publisher = OutboxEventPublisher(connection)
         contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
-        journal_service = JournalService(
-            journal_repo=journal_repo,
-            event_publisher=event_publisher,
+        journal_service = journal_service_on(
+            connection,
+            event_publisher,
             contact_relationship_repo=contact_relationship_repo,
-            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
         # Optional detector gating Phase 2 emission. Only created/updated events
@@ -331,25 +323,17 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
             SqlJournalContactRelationshipRepository,
         )
-        from app.core.journal.adapters.sql.journal_repository import (
-            SqlJournalRepository,
-        )
-        from app.core.journal.services.journal_service import JournalService
-        from app.core.tasks.adapters.sql.task_anchor_repository import (
-            SqlTaskAnchorRepository,
-        )
+        from app.core.journal.services.journal_service import journal_service_on
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
 
-        journal_repo = SqlJournalRepository(connection)
         event_publisher = OutboxEventPublisher(connection)
         contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
-        journal_service = JournalService(
-            journal_repo=journal_repo,
-            event_publisher=event_publisher,
+        journal_service = journal_service_on(
+            connection,
+            event_publisher,
             contact_relationship_repo=contact_relationship_repo,
-            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
         processor = ImmichAlbumOutboxEventProcessor(

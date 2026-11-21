@@ -1679,6 +1679,45 @@ class TestTaskJournalUnlinked:
         )
 
 
+class TestTaskJournalLinksRemoved:
+    """A journal delete's effect on one list task, as history rows.
+
+    Shares ``_project_task_updated`` with the merge's re-point for the reason
+    that one does: the payload is ``changed_fields``, and "how a task field
+    change becomes a row" already exists. Each lost link is one line, under the
+    key the same link would be removed under by hand.
+    """
+
+    def test_every_link_the_task_lost_is_a_line_of_its_own(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event(
+                "TaskJournalLinksRemoved",
+                _removed_payload(
+                    creating_journal_id=[OLD_JOURNAL_ID, None],
+                    due_journal_id=[OLD_JOURNAL_ID, None],
+                    **{f"journal:{OLD_JOURNAL_ID}": [OLD_JOURNAL_ID, None]},
+                ),
+            )
+        )
+
+        assert sorted(_row_tuple(r) for r in rows) == sorted(
+            [
+                ("task", TASK_ID, "creating_journal_id", str(OLD_JOURNAL_ID), None),
+                ("task", TASK_ID, "due_journal_id", str(OLD_JOURNAL_ID), None),
+                (
+                    "task",
+                    TASK_ID,
+                    f"journal:{OLD_JOURNAL_ID}",
+                    str(OLD_JOURNAL_ID),
+                    None,
+                ),
+            ]
+        )
+        assert {row.source for row in rows} == {Provenance.UI}
+
+
 class TestTaskJournalLinksRepointed:
     """A journal merge's effect on one task, as history rows.
 
@@ -1907,6 +1946,21 @@ def _repointed_payload(**changed_fields: Any) -> dict[str, Any]:
     }
 
 
+def _removed_payload(**changed_fields: Any) -> dict[str, Any]:
+    """A journal delete's payload for one list task, defaulting to its due anchor.
+
+    Written as the publisher writes it: the pairs are lists after the JSON trip.
+    """
+    return {
+        "task_id": TASK_ID,
+        "user_id": "u1",
+        "journal_id": OLD_JOURNAL_ID,
+        "changed_fields": changed_fields or {"due_journal_id": [OLD_JOURNAL_ID, None]},
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+
+
 def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
     """One payload per task event type, each as its publisher writes it.
 
@@ -1952,6 +2006,7 @@ def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
             "changed_by": "ui",
         },
         "TaskJournalLinksRepointed": _repointed_payload(),
+        "TaskJournalLinksRemoved": _removed_payload(),
         "TaskDeleted": {
             "task_id": TASK_ID,
             "user_id": "u1",

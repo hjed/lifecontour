@@ -30,7 +30,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import (
+    TaskJournalDetachment,
+    TaskJournalRepointing,
+    TaskStatus,
+)
 
 from app.core.tasks.models.events import (
     TaskCreated,
@@ -38,6 +42,7 @@ from app.core.tasks.models.events import (
     TaskDueJournalRetargeted,
     TaskJournalLinked,
     TaskJournalLinkOrigin,
+    TaskJournalLinksRemoved,
     TaskJournalLinksRepointed,
     TaskJournalUnlinked,
     TaskUpdated,
@@ -47,6 +52,7 @@ from tests.unit.tasks.task_doubles import (
     ABSORBED_JOURNAL_ID,
     CONTACT_ID,
     CREATING_JOURNAL_ID,
+    DELETED_JOURNAL_ID,
     DUE_JOURNAL_ID,
     INTERMEDIATE_JOURNAL_ID,
     NEW_DUE_JOURNAL_ID,
@@ -211,6 +217,33 @@ def make_repointed(
         ),
         source_journal_id=source_journal_id,
         target_journal_id=target_journal_id,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+def make_removed(
+    *,
+    task_id: int = TASK_ID,
+    journal_id: int = DELETED_JOURNAL_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+    **facts: bool,
+) -> TaskJournalLinksRemoved:
+    """A ``TaskJournalLinksRemoved`` over the shared task constants.
+
+    The default is the plainest case a journal delete produces: the deleted
+    journal was the list task's due anchor, and now the task is undated.
+    """
+    return TaskJournalLinksRemoved(
+        detachment=TaskJournalDetachment(
+            task_id=task_id,
+            user_id=USER_ID,
+            **(facts or {"due_anchor_removed": True}),
+        ),
+        journal_id=journal_id,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -1256,6 +1289,107 @@ class TestTaskJournalLinksRepointed:
         assert make_repointed().transaction is None
 
 
+class TestTaskJournalLinksRemoved:
+    """The event a journal delete publishes about each list task it detached.
+
+    A list task never blocks a journal delete: it loses every link it held to
+    the journal instead, and this is the line in its history that says so. Not
+    a retarget (nothing moved *to* anything, and the status is untouched) and
+    not an edit (nobody acted on the task), so it is a type of its own — the
+    delete's counterpart of :class:`TaskJournalLinksRepointed`, sharing its
+    ``changed_fields`` vocabulary so the projection reuses one shape.
+    """
+
+    def test_identifies_itself_as_a_removal_event(self) -> None:
+        event = make_removed()
+
+        assert event.event_type == "TaskJournalLinksRemoved"
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        event = make_removed()
+
+        assert event.aggregate_id == TASK_ID
+        assert type(event.aggregate_id) is int
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """The deleted journal is named beside the pairs: it says *why* the
+        anchors went, which a bare ``(id, None)`` does not."""
+        event = make_removed()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "journal_id": DELETED_JOURNAL_ID,
+            "changed_fields": {"due_journal_id": (DELETED_JOURNAL_ID, None)},
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_removed_creating_anchor_is_named_as_itself(self) -> None:
+        event = make_removed(creating_anchor_removed=True)
+
+        assert event.event_data["changed_fields"] == {
+            "creating_journal_id": (DELETED_JOURNAL_ID, None)
+        }
+
+    def test_a_removed_intermediate_link_lands_under_the_journal_key(self) -> None:
+        """The same ``journal:{id}`` key a manual detach lands under, so a
+        delete's removal and a person's removal read as the same kind of line."""
+        event = make_removed(link_removed=True)
+
+        assert event.event_data["changed_fields"] == {
+            journal_field_name(DELETED_JOURNAL_ID): (DELETED_JOURNAL_ID, None)
+        }
+
+    def test_every_link_on_the_journal_is_one_line_each(self) -> None:
+        event = make_removed(
+            creating_anchor_removed=True, due_anchor_removed=True, link_removed=True
+        )
+
+        assert event.event_data["changed_fields"] == {
+            "creating_journal_id": (DELETED_JOURNAL_ID, None),
+            "due_journal_id": (DELETED_JOURNAL_ID, None),
+            journal_field_name(DELETED_JOURNAL_ID): (DELETED_JOURNAL_ID, None),
+        }
+
+    def test_the_pairs_are_old_then_new_positionally(self) -> None:
+        """Reversed, the projection would render the delete as having *added*
+        the journal to the task."""
+        change = make_removed().event_data["changed_fields"]["due_journal_id"]
+
+        assert change[0] == DELETED_JOURNAL_ID
+        assert change[1] is None
+
+    def test_it_carries_the_provenance_of_the_delete_that_caused_it(self) -> None:
+        event = make_removed(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        assert make_removed(transaction=transaction).transaction is transaction
+
+    def test_its_id_names_the_deleted_journal_as_well_as_the_task(self) -> None:
+        """A cleanup deleting several journals in one unit of work can detach one
+        task from two of them; the journal id keeps the two events apart under
+        the projection's ``ON CONFLICT DO NOTHING`` over ``event_id``."""
+        event = make_removed()
+
+        assert event.event_id == (
+            f"task_journal_links_removed_{TASK_ID}_{DELETED_JOURNAL_ID}_"
+            f"{event.occurred_at.isoformat()}"
+        )
+
+    def test_its_payload_reaches_the_stream_as_indexable_pairs(self) -> None:
+        round_tripped = json.loads(json.dumps(make_removed().event_data))
+
+        assert round_tripped["changed_fields"] == {
+            "due_journal_id": [DELETED_JOURNAL_ID, None]
+        }
+
+
 class TestTaskDeleted:
     """The event a successful hard delete publishes."""
 
@@ -1339,10 +1473,11 @@ class TestEventIdentity:
             make_linked().event_id,
             make_unlinked().event_id,
             make_repointed().event_id,
+            make_removed().event_id,
             make_deleted().event_id,
         }
 
-        assert len(ids) == 7
+        assert len(ids) == 8
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.

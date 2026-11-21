@@ -21,9 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.journal_service_factory import build_journal_service
 
 
 def create_test_journal(title: str = "Original title") -> Journal:
@@ -61,10 +59,9 @@ class TestJournalUpdatePrecondition:
 
     @pytest.fixture
     def journal_service(self, journal_repo, clean_database: AsyncConnection):
-        return JournalService(
+        return build_journal_service(
+            clean_database,
             journal_repo=journal_repo,
-            event_publisher=OutboxEventPublisher(clean_database),
-            task_anchor_repo=SqlTaskAnchorRepository(clean_database),
         )
 
     @pytest.mark.asyncio

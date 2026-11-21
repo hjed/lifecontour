@@ -36,9 +36,6 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_service import JournalService
 from app.core.journal.services.journal_type_data_reader import render_type_data
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.tools import register_journal_tools
 from tests.integration.contact_seeding import seed_contact
@@ -54,10 +51,13 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     count,
     create_journal,
+    create_list_task,
     create_task,
     link_intermediate_journal,
+    seed_task_list,
     task_events,
 )
+from tests.journal_service_factory import build_journal_service
 
 
 async def call_delete_journal_tool(client: Any, journal_id: int) -> Any:
@@ -99,11 +99,11 @@ class JournalTestProvider(Provider):
 
         # Create and return journal service
         contact_relationship_repo = SqlJournalContactRelationshipRepository(connection)
-        return JournalService(
+        return build_journal_service(
+            connection,
             journal_repo=journal_repository,
             event_publisher=event_publisher,
             contact_relationship_repo=contact_relationship_repo,
-            task_anchor_repo=SqlTaskAnchorRepository(connection),
         )
 
 
@@ -2766,3 +2766,177 @@ class TestMergeMcpToolsMountedIntegration:
         assert "content_excerpt" in candidate
         assert "event_date_range" in candidate
         assert "summary" in candidate
+
+
+@pytest.mark.integration
+class TestJournalDeleteWithListTasksMcp:
+    """``delete_journal`` and ``preview_journal_delete`` once list tasks exist.
+
+    The agent's counterpart of the REST delete and its preview: a list task
+    never blocks the delete — it loses its link — and the preview says
+    beforehand how many will. Another user's journal answers as a missing one.
+    """
+
+    async def _list_task(
+        self,
+        conn: AsyncConnection,
+        *,
+        user_id: str = USER_ID,
+        creating_journal_id: int | None = None,
+        due_journal_id: int | None = None,
+    ) -> int:
+        task_list = await seed_task_list(conn, user_id=user_id)
+        assert task_list.id is not None
+        return await create_list_task(
+            conn,
+            task_list_id=task_list.id,
+            user_id=user_id,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_preview_reports_how_many_list_tasks_would_lose_a_link(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Weekend away")
+        elsewhere = await create_journal(journal_repo, title="Planning")
+        await self._list_task(async_connection, due_journal_id=target)
+        mention = await self._list_task(async_connection, due_journal_id=elsewhere)
+        await link_intermediate_journal(
+            async_connection, task_id=mention, journal_id=target
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool(
+                client, "preview_journal_delete", {"journal_id": target}
+            )
+
+        assert payload["journal_id"] == target
+        assert payload["list_tasks_losing_link"] == 2
+
+    @pytest.mark.asyncio
+    async def test_the_preview_of_a_missing_journal_is_not_found(
+        self, authenticated_lifespan_client
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool_error(
+                client, "preview_journal_delete", {"journal_id": 99999}
+            )
+
+        assert payload["error"] == "Journal not found"
+
+    @pytest.mark.asyncio
+    async def test_the_preview_of_another_users_journal_is_not_found(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        other_journal = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        await self._list_task(
+            async_connection, user_id=OTHER_USER_ID, due_journal_id=other_journal
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool_error(
+                client, "preview_journal_delete", {"journal_id": other_journal}
+            )
+
+        assert payload["error"] == "Journal not found"
+        assert "list_tasks_losing_link" not in json.dumps(payload)
+
+    @pytest.mark.asyncio
+    async def test_delete_reports_the_list_tasks_it_unlinked(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        target = await create_journal(
+            SqlJournalRepository(async_connection), title="Called off"
+        )
+        task_id = await self._list_task(async_connection, due_journal_id=target)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool(
+                client, "delete_journal", {"journal_id": target}
+            )
+
+        assert payload["deleted"] is True
+        assert payload["list_tasks_unlinked"] == 1
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM tasks WHERE id = :id AND due_journal_id IS NULL",
+                {"id": task_id},
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_blocked_delete_names_only_the_journal_only_task(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        journal_repo = SqlJournalRepository(async_connection)
+        target = await create_journal(journal_repo, title="Permit Meeting")
+        planning = await create_journal(journal_repo, title="Monday Planning")
+        blocker = await create_task(
+            async_connection, creating_journal_id=planning, due_journal_id=target
+        )
+        list_task = await self._list_task(async_connection, due_journal_id=target)
+
+        async with authenticated_lifespan_client() as client:
+            response = await call_delete_journal_tool(client, target)
+
+        payload = extract_mcp_json_payload(response.text)
+        assert payload["code"] == "JOURNAL_HAS_ANCHORED_TASKS"
+        assert [t["task_id"] for t in payload["blocking_tasks"]] == [blocker]
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM tasks WHERE id = :id AND due_journal_id = :j",
+                {"id": list_task, "j": target},
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_of_another_users_journal_leaves_their_list_task_linked(
+        self, authenticated_lifespan_client, async_connection: AsyncConnection
+    ) -> None:
+        other_journal = await create_journal(
+            SqlJournalRepository(async_connection),
+            title="Somebody Else's Trip",
+            user_id=OTHER_USER_ID,
+        )
+        task_id = await self._list_task(
+            async_connection, user_id=OTHER_USER_ID, due_journal_id=other_journal
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await call_mcp_tool_error(
+                client, "delete_journal", {"journal_id": other_journal}
+            )
+
+        assert payload["error"] == "Journal not found"
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM tasks WHERE id = :id AND due_journal_id = :j",
+                {"id": task_id, "j": other_journal},
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_preview_tool_is_registered_read_only(self) -> None:
+        mcp: FastMCP[None] = FastMCP("TestServer")
+        register_journal_tools(mcp)
+
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+
+        preview = tools["preview_journal_delete"]
+        assert preview.annotations is not None
+        assert preview.annotations.read_only_hint is True
+        assert preview.annotations.destructive_hint is False

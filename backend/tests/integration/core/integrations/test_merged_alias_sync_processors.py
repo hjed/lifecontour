@@ -29,16 +29,13 @@ from app.core.integrations.immich.album_outbox_event_processor import (
 from app.core.journal.adapters.sql.journal_contact_relationship_repository import (
     SqlJournalContactRelationshipRepository,
 )
-from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
-from app.core.journal.services.journal_service import JournalService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.core.integrations.journal_sync_seeding import (
     USER_ID,
     build_processor,
     create_calendar,
     sync_event,
 )
+from tests.journal_service_factory import build_journal_service
 
 pytestmark = pytest.mark.integration
 
@@ -220,11 +217,9 @@ class TestJournalSyncProcessorLeavesAliasesAlone:
 
 
 def _album_processor(connection: AsyncConnection) -> ImmichAlbumOutboxEventProcessor:
-    service = JournalService(
-        journal_repo=SqlJournalRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
+    service = build_journal_service(
+        connection,
         contact_relationship_repo=SqlJournalContactRelationshipRepository(connection),
-        task_anchor_repo=SqlTaskAnchorRepository(connection),
     )
     return ImmichAlbumOutboxEventProcessor(
         journal_service=service, connection=connection

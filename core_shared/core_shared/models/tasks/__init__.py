@@ -19,6 +19,7 @@ from .exceptions import (
     TaskStatusTransitionError,
     TaskValidationError,
 )
+from .journal_detachment import TaskJournalDetachment
 from .journal_repointing import TaskJournalRepointing
 from .lapse import LapseReason, derive_lapse_reason, task_lapse_reason
 from .link_role import (
@@ -78,6 +79,7 @@ __all__ = [
     "TaskJournalAnchor",
     "TaskJournalIsAnchorError",
     "TaskJournalRef",
+    "TaskJournalDetachment",
     "TaskJournalRepointing",
     "TaskLinkRole",
     "TaskList",

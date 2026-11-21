@@ -1346,7 +1346,26 @@ class JournalDeletedMCPResponse(BaseModel):
 
     journal_id: int
     deleted: bool
+    list_tasks_unlinked: int = Field(
+        default=0,
+        description=(
+            "How many tasks on a task list lost their link to the deleted "
+            "journal; one that was due in it is now undated"
+        ),
+    )
     summary: str
+
+
+class JournalDeletePreviewMCPResponse(BaseModel):
+    """What deleting a journal would do to tasks on a task list."""
+
+    journal_id: int
+    list_tasks_losing_link: int = Field(
+        description=(
+            "How many tasks on a task list link to the journal (created in, due "
+            "in or mentioning it) and would lose that link if it were deleted"
+        )
+    )
 
 
 class CalendarMCPListItem(BaseModel):
