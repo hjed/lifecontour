@@ -66,7 +66,8 @@ _COUNT_DUE_BY_JOURNAL = text(
 # indicator above, and — unlike it — with **no status bound at all**: reporting
 # how a day resolved means reporting the done and cancelled tasks too, so the
 # absence of that predicate is the statement's whole point rather than an
-# omission.
+# omission. Journal-only (``task_list_id IS NULL``): the summary leaves list
+# tasks out until it learns to describe them.
 _TASKS_DUE_IN_JOURNALS = text(
     f"""
     SELECT {_TASK_COLUMNS_PREFIXED}
@@ -74,6 +75,7 @@ _TASKS_DUE_IN_JOURNALS = text(
     JOIN journals j ON j.id = t.due_journal_id
     WHERE t.due_journal_id = ANY(:ids)
       AND t.user_id = :user_id
+      AND t.task_list_id IS NULL
     ORDER BY j.event_date_range_start, t.id
     """
 )
@@ -388,11 +390,17 @@ class SqlTaskRepository(TaskRepository):
         window_start: datetime,
         window_end: datetime,
     ) -> list[Task]:
-        """Find the user's not-done tasks due inside a window, in one statement.
+        """Find the user's not-done journal-only tasks due inside a window.
 
-        The only join to ``journals`` in this repository, and it is an inner one
-        on the due anchor: ``due_journal_id`` is ``NOT NULL`` with an
-        ``ON DELETE RESTRICT`` foreign key, so every task has exactly one row to
+        **Journal-only** (``task_list_id IS NULL``): the dashboard, the
+        ``list_upcoming_tasks`` tool and the daily summary leave list tasks out
+        until they learn to show them, even a list task due in a journal inside
+        the window.
+
+        One of two joins to ``journals`` in this repository, and an inner one on
+        the due anchor. A journal-only task always has its due journal — a
+        ``CHECK`` requires both anchors without a list — and the foreign key is
+        ``ON DELETE RESTRICT``, so every row selected has exactly one journal to
         match and the join can neither drop a task nor duplicate one.
 
         The journal is not owner-scoped, matching ``find_tasks_for_journal``'s
@@ -416,6 +424,7 @@ class SqlTaskRepository(TaskRepository):
             JOIN journals j ON j.id = t.due_journal_id
             WHERE t.user_id = :user_id
               AND t.status = :status
+              AND t.task_list_id IS NULL
               AND j.event_date_range_start BETWEEN :window_start AND :window_end
             ORDER BY j.event_date_range_start, t.id
             """
@@ -434,13 +443,14 @@ class SqlTaskRepository(TaskRepository):
     async def find_tasks_due_in_journals(
         self, journal_ids: list[int], user_id: str
     ) -> list[Task]:
-        """The user's tasks due in any of these journals, in every status.
+        """The user's journal-only tasks due in any of these journals, in every status.
+
+        **Journal-only** (``task_list_id IS NULL``), as :meth:`find_upcoming_tasks`
+        is: the daily summary reads this and leaves list tasks out.
 
         The second join to ``journals`` in this repository and, like
-        :meth:`find_upcoming_tasks`'s, an inner one on the due anchor:
-        ``due_journal_id`` is ``NOT NULL`` with an ``ON DELETE RESTRICT``
-        foreign key, so every task has exactly one row to match and the join can
-        neither drop a task nor duplicate one. Here it earns its place for the
+        :meth:`find_upcoming_tasks`'s, an inner one on the due anchor, which
+        every row it selects has (the ids name it). Here it earns its place for the
         **order** rather than for the filter — the ids alone already select the
         rows — so that a day's tasks come back in the day's own sequence.
 

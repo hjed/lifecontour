@@ -38,9 +38,11 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_intermediate_journal,
     make_task_container,
+    seed_task_list,
 )
 
 _COUNT_INTERMEDIATE = (
@@ -1298,3 +1300,30 @@ class TestTasksDueInJournals:
 
         assert tasks == []
         assert statements == []
+
+
+@pytest.mark.integration
+class TestTasksDueInJournalsAreJournalOnly:
+    """The daily summary's past-day read leaves list tasks out."""
+
+    async def test_a_list_task_due_in_the_journal_is_left_out(
+        self,
+        task_repository: SqlTaskRepository,
+        journal_repository: SqlJournalRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """Both are due in the day's journal; only the journal-only one returns."""
+        creating_id = await create_journal(journal_repository, title="Where it arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-1)
+        journal_only = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+
+        tasks = await task_repository.find_tasks_due_in_journals([due_id], USER_ID)
+
+        assert [task.id for task in tasks] == [journal_only]

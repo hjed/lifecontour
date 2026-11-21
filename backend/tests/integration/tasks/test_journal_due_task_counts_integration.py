@@ -47,8 +47,10 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     create_journal,
+    create_list_task,
     create_task,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 # Midday UTC on 9 August 2026 — the anchor for the today-boundary case, so the
@@ -424,3 +426,80 @@ class TestWhatThePageCosts:
 
         assert counts == {}
         assert statements == []
+
+
+async def add_list_task_due_in(async_connection: AsyncConnection, due_id: int) -> None:
+    """Put a not-done list task, due in ``due_id``, beside whatever is there."""
+    task_list = await seed_task_list(async_connection)
+    assert task_list.id is not None
+    await create_list_task(
+        async_connection, task_list_id=task_list.id, due_journal_id=due_id
+    )
+
+
+@pytest.mark.integration
+class TestListTasksOnTheBadge:
+    """A list task due in a journal counts toward its badge, and hides with it.
+
+    The user's decision: list tasks are a journal's not-done tasks like any
+    other, and the badge's own rule — dropped once the journal has passed or
+    been cancelled — applies to them unchanged, with no extension for their
+    lateness.
+    """
+
+    async def test_a_list_task_due_in_a_future_journal_counts(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Beside one journal-only task, the list task makes the count two."""
+        due_id = await seed_due_journal(
+            async_connection, journal_repository, title="Permit Meeting"
+        )
+        await add_list_task_due_in(async_connection, due_id)
+
+        counts = await read_service.due_task_counts(
+            USER_ID, await journals_by_id(journal_repository, [due_id])
+        )
+
+        assert counts == {due_id: 2}
+
+    async def test_a_list_task_due_in_a_passed_journal_is_not_counted(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The journal has passed, so its badge is dark, list task or not."""
+        due_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-3
+        )
+        await add_list_task_due_in(async_connection, due_id)
+
+        counts = await read_service.due_task_counts(
+            USER_ID, await journals_by_id(journal_repository, [due_id])
+        )
+
+        assert counts == {}
+
+    async def test_a_list_task_due_in_a_cancelled_journal_is_not_counted(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A cancelled journal's badge is dark too, though its date is ahead."""
+        due_id = await create_journal(
+            journal_repository, title="Called off", days_offset=7
+        )
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CANCELLED
+        )
+        await add_list_task_due_in(async_connection, due_id)
+
+        counts = await read_service.due_task_counts(
+            USER_ID, await journals_by_id(journal_repository, [due_id])
+        )
+
+        assert counts == {}

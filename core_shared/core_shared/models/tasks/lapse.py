@@ -22,6 +22,12 @@ the same news. "The day went by" and "the meeting was cancelled" ask the user
 for different things, so a surface words them differently rather than showing
 one marker for both. A caller that only wants the boolean asks whether the
 reason is ``None``.
+
+**Only a journal-only task lapses.** Spec invariant 7: a task on a list never
+lapses. When its date passes it becomes *overdue* and stays on its list instead
+of going quiet. :func:`task_lapse_reason` is the gate that decides whether the
+rule applies to a task at all; :func:`derive_lapse_reason` is the rule itself,
+for a task it does apply to.
 """
 
 from __future__ import annotations
@@ -33,6 +39,9 @@ from .task_status import TaskStatus
 
 if TYPE_CHECKING:
     import datetime
+
+    from .entities import Task
+    from .read_model import TaskJournalRef
 
 
 class LapseReason(StrEnum):
@@ -99,3 +108,42 @@ def derive_lapse_reason(
         return LapseReason.DATE_PASSED
 
     return None
+
+
+def task_lapse_reason(
+    *,
+    task: Task,
+    due_journal: TaskJournalRef | None,
+    today: datetime.date,
+) -> LapseReason | None:
+    """Why this task is lapsed, or ``None`` if it is not or cannot lapse.
+
+    The one place that decides which tasks the lapse rule applies to:
+
+    - **A task on a list never lapses** (spec invariant 7). A late list task is
+      overdue and stays on its list; reporting it as lapsed would hide it the
+      way a journal-only task is hidden.
+    - **A task with no due journal has nothing to lapse against.** Only a list
+      task can have none, so this is the same answer reached a second way, and
+      it is what lets the type of ``due_journal`` be optional.
+
+    Every other task is journal-only, and gets :func:`derive_lapse_reason`'s
+    answer unchanged.
+
+    Args:
+        task: The task being read
+        due_journal: Its due journal, already resolved in the user's timezone,
+            or ``None`` when it has none
+        today: Today's date, in the user's timezone
+
+    Returns:
+        The reason, or ``None`` when the task is not lapsed.
+    """
+    if task.task_list_id is not None or due_journal is None:
+        return None
+    return derive_lapse_reason(
+        status=task.status,
+        due_journal_date=due_journal.date,
+        due_journal_cancelled=due_journal.cancelled,
+        today=today,
+    )

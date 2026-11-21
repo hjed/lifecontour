@@ -61,9 +61,11 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 pytestmark = pytest.mark.integration
@@ -171,8 +173,8 @@ class TestTheWeeksCommitmentsReachTheInput:
         assert assembled.upcoming_tasks is not None
         (model,) = assembled.upcoming_tasks.tasks
         assert model.task.text == "print the permit"
-        assert model.due_journal.title == "Permit Meeting"
-        assert model.due_journal.date == TODAY + timedelta(days=2)
+        assert model.require_journal("due").title == "Permit Meeting"
+        assert model.require_journal("due").date == TODAY + timedelta(days=2)
         assert [c.display_name for c in model.contacts] == ["Sarah"]
 
     async def test_the_boundary_day_is_inside_and_the_day_after_is_not(
@@ -476,3 +478,39 @@ class TestTheWindowIsAnchoredOnTheUsersDay:
         assert assembled.upcoming_tasks is not None
         assert assembled.upcoming_tasks.window.first_day == date(2026, 8, 12)
         assert gathered_texts(assembled) == ["their last day"]
+
+
+class TestListTasksStayOutOfTheBriefing:
+    """The summary's week is journal-only until it learns to describe list tasks."""
+
+    async def test_a_list_task_due_this_week_is_left_out(
+        self,
+        assembler: DailySummaryInputAssembler,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Both are due in the same upcoming journal; only one is briefed."""
+        creating = await creating_journal(journal_repository)
+        due = await create_journal(
+            journal_repository,
+            title="Permit Meeting",
+            start=at(TODAY + timedelta(days=2)),
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=due,
+            text="print the permit",
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            due_journal_id=due,
+            text="pack the head torch",
+        )
+
+        assembled = await assembler.assemble(USER_ID, TODAY, "UTC", now=NOW)
+
+        assert gathered_texts(assembled) == ["print the permit"]

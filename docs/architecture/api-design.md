@@ -718,7 +718,7 @@ rather than this API's taste:
   |---|---|
   | Which tasks | Exactly what `GET /api/tasks/upcoming` returns for the default window: not-done tasks whose due journal falls between today and seven days ahead, both ends inclusive. One listing serves the endpoint, MCP `list_upcoming_tasks`, the daily summary's inputs and this section, so four surfaces cannot disagree about what is coming up. |
   | Which window | Today to seven days ahead, anchored on `meta.anchor.date`. The same `UpcomingWindow` the `upcoming_dates` section is built from — the specification requires the two evidence columns to cover the same week, and one window type is what makes that structural rather than coincidental. |
-  | What is absent | Done, cancelled and **lapsed** tasks — and there is no overdue list, counter or badge anywhere on this page. Inside a *forward* window the only lapse that can bite is a **cancelled due journal**; a date-passed one is behind the window by construction. The excluded task is still on its own journals, where a lapsed task is meant to be found again: hidden here, not lost. |
+  | What is absent | Done, cancelled and **lapsed** tasks, and tasks on a list (the card is journal-only for now) — and there is no overdue list, counter or badge anywhere on this page. Inside a *forward* window the only lapse that can bite is a **cancelled due journal**; a date-passed one is behind the window by construction. The excluded task is still on its own journals, where a lapsed task is meant to be found again: hidden here, not lost. |
   | The relative chip | `days_away` counts from the window's first day, `0` meaning today, and the window's first day *is* `meta.anchor.date` — so the chip's `Today` and the page's own header cannot disagree. Sent rather than derived, because subtracting dates in the browser's zone can land a day out near midnight. |
   | The due journal | Nested, not flattened: `id` and `title` for the "Due in *journal*" link, and `date` already resolved in the user's zone. No `cancelled` flag, because a cancelled due journal lapses its task and a lapsed task is not here. |
   | What a row does *not* carry | No `status`, `lapsed`, `lapse_reason`, creating journal or intermediate journals. The first three are constant for every row this section can hold — those are its entry conditions — and a constant on the wire invites a surface to branch on it; the journals are material no dashboard row draws. The single read and the journal listing carry all of them, and this is deliberately less than `TaskReadResource` rather than a subset that drifted. |
@@ -880,7 +880,7 @@ a capped span of days. Neither can be widened into a task browser.
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
 | `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
 | `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
-| `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
+| `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded, and so are tasks on a list (journal-only for now) | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
@@ -892,6 +892,19 @@ a capped span of days. Neither can be widened into a task browser.
 
 Conventions this surface pins down:
 
+- **A task on a list may have no journal, or only one.** Every route that returns
+  a task — reads and the answers to writes alike, except retarget, which still
+  needs both anchors until it learns list tasks — renders `creating_journal_id`
+  and `due_journal_id` as `null` for an anchor the task does not have, and the
+  read shape's `creating_journal` / `due_journal` refs are `null` exactly when
+  their ids are. A task with no list always has both. A list task is **never
+  `lapsed`**: when its date passes it becomes overdue and stays on its list, so
+  `lapsed` is `false` and `lapse_reason` `null`. `GET /api/tasks/upcoming`, the
+  home dashboard's tasks card and the daily summary are **journal-only** and
+  leave list tasks out, even one due in a journal inside the window. The journal
+  list's "tasks due" badge *does* count a list task due in that journal, and
+  hides with the journal once it has passed or been cancelled, as it does for
+  every task.
 - **The path journal is the creating anchor**, never a body field, so a client
   cannot anchor a task to a journal it did not come from. The request schema has
   no `creating_journal_id`.

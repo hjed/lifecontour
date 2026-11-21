@@ -509,11 +509,14 @@ class DailySummaryPromptBuilder:
         :data:`MAX_TASK_TEXT_LENGTH` — and capping the *number* of tasks does
         nothing about the size of one.
         """
+        # Every task here was selected as journal-only, so it has a due
+        # journal; a list task reaching this line is a broken selection.
+        due_journal = model.require_journal("due")
         parts = [
-            f"Due {model.due_journal.date:%d %b} "
-            f"({cls._relative_day(model.due_journal.date, today)}):",
+            f"Due {due_journal.date:%d %b} "
+            f"({cls._relative_day(due_journal.date, today)}):",
             _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
-            f'(in "{model.due_journal.title}")',
+            f'(in "{due_journal.title}")',
         ]
 
         people = _with_people(
@@ -693,7 +696,8 @@ class DailySummaryPromptBuilder:
         """
         parts = [
             _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
-            f'(in "{model.due_journal.title}")',
+            # Journal-only by selection, so the due journal is always there.
+            f'(in "{model.require_journal("due").title}")',
         ]
 
         people = _with_people(

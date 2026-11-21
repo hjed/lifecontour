@@ -16,6 +16,7 @@ Creation loads journals and resolves contacts, so its repositories are
 produce a fixture whose default no test actually wants.
 """
 
+import datetime
 from unittest.mock import AsyncMock
 
 from core_shared.models.tasks import Task, TaskStatus
@@ -45,6 +46,9 @@ NEW_DUE_JOURNAL_ID = 33
 # ``DUE_JOURNAL_ID`` would read as correct while describing a link the service
 # refuses to write.
 INTERMEDIATE_JOURNAL_ID = 44
+# The list a list task lives on. Its rows are never read by the unit tests: a
+# read model carries the list id on the task and nothing about the list itself.
+TASK_LIST_ID = 99
 
 # The two journals a merge is between. Named rather than reusing the anchors
 # because a merge is described from the *journals*' point of view — every link a
@@ -86,6 +90,32 @@ def make_task(
         text=text,
         creating_journal_id=CREATING_JOURNAL_ID,
         due_journal_id=DUE_JOURNAL_ID,
+        status=status,
+    )
+
+
+def make_list_task(
+    status: TaskStatus = TaskStatus.NOT_DONE,
+    *,
+    task_id: int = TASK_ID,
+    creating_journal_id: int | None = None,
+    due_journal_id: int | None = None,
+    due_date: datetime.date | None = None,
+) -> Task:
+    """A persisted task on a list, holding whichever journals a case gives it.
+
+    A list task may have no journal at all, only one of the two, or both, so
+    every anchor defaults to absent and a case names the ones it wants.
+    """
+    return Task(
+        id=task_id,
+        user_id=USER_ID,
+        text=ORIGINAL_TEXT,
+        task_list_id=TASK_LIST_ID,
+        position=0,
+        creating_journal_id=creating_journal_id,
+        due_journal_id=due_journal_id,
+        due_date=due_date,
         status=status,
     )
 

@@ -56,10 +56,12 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     link_intermediate_journal,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 pytestmark = pytest.mark.integration
@@ -131,8 +133,8 @@ class TestTheWindowAgainstRealTimestamps:
         (model,) = upcoming.tasks
         assert model.task.id == task_id
         assert model.task.text == "print the permit"
-        assert model.due_journal.title == "Permit Meeting"
-        assert model.due_journal.date == TODAY + timedelta(days=2)
+        assert model.require_journal("due").title == "Permit Meeting"
+        assert model.require_journal("due").date == TODAY + timedelta(days=2)
         assert [contact.display_name for contact in model.contacts] == ["Sarah"]
 
     async def test_a_task_due_today_is_listed(
@@ -951,3 +953,71 @@ class TestTheRepositoryOnItsOwnTerms:
         )
 
         assert found == []
+
+
+class TestListTasksAreLeftOut:
+    """The upcoming listing is journal-only until list tasks join it.
+
+    A list task can be due in a journal inside the window, and the inner join
+    on the due anchor would otherwise admit it. Asked both of the statement and
+    of the service, so the exclusion is the SQL's own rather than only the pure
+    rule's on top.
+    """
+
+    async def seed_both(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> tuple[int, int]:
+        """A journal-only task and a list task due in the same in-window journal.
+
+        Returns:
+            ``(journal_only_task_id, list_task_id)``.
+        """
+        creating = await creating_journal(journal_repository)
+        due = await create_journal(
+            journal_repository,
+            title="Permit Meeting",
+            start=at(TODAY + timedelta(days=2)),
+        )
+        journal_only = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=due
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        list_task = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due
+        )
+        return journal_only, list_task
+
+    async def test_the_statement_leaves_out_a_list_task_due_in_the_window(
+        self,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The repository returns only the journal-only task."""
+        journal_only, _ = await self.seed_both(async_connection, journal_repository)
+
+        found = await task_repository.find_upcoming_tasks(
+            USER_ID,
+            window_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+            window_end=datetime.combine(
+                TODAY + timedelta(days=7), datetime.max.time(), tzinfo=UTC
+            ),
+        )
+
+        assert [task.id for task in found] == [journal_only]
+
+    async def test_the_service_lists_only_the_journal_only_task(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Read through the whole listing, the list task is absent."""
+        journal_only, _ = await self.seed_both(async_connection, journal_repository)
+
+        upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert listed_ids(upcoming) == [journal_only]

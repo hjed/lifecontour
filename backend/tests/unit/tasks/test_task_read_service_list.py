@@ -279,9 +279,9 @@ class TestAssembly:
 
         (model,) = groups.due
         assert model.task.id == 1
-        assert model.due_journal.id == JOURNAL_ID
-        assert model.due_journal.title == "Tuesday"
-        assert model.creating_journal.id == ELSEWHERE_ID
+        assert model.require_journal("due").id == JOURNAL_ID
+        assert model.require_journal("due").title == "Tuesday"
+        assert model.require_journal("creating").id == ELSEWHERE_ID
 
     async def test_mentions_are_attached_to_the_task_that_owns_them(
         self, service: TaskReadService, task_repo: AsyncMock

@@ -39,7 +39,7 @@ from core_shared.models.tasks import (
     upcoming_window,
 )
 
-from tests.unit.tasks.task_doubles import CREATING_JOURNAL_ID, USER_ID
+from tests.unit.tasks.task_doubles import CREATING_JOURNAL_ID, USER_ID, make_list_task
 
 pytestmark = pytest.mark.unit
 
@@ -315,3 +315,26 @@ class TestTheAnswerCarriesItsQuestion:
         selected = select_upcoming_tasks(models, upcoming_window(TODAY))
 
         assert selected.total == 1 == len(selected.tasks)
+
+
+class TestListTasksAreLeftOut:
+    """The upcoming selection is journal-only until list tasks join it."""
+
+    def test_a_list_task_due_in_the_window_is_left_out_beside_a_journal_task(
+        self,
+    ) -> None:
+        """Due tomorrow in a journal, but on a list: not this selection's task."""
+        tomorrow = TODAY + datetime.timedelta(days=1)
+        due_journal = TaskJournalRef(
+            id=950, title="on a list", date=tomorrow, cancelled=False
+        )
+        list_task = build_task_read_model(
+            task=make_list_task(task_id=50, due_journal_id=due_journal.id),
+            creating_journal=None,
+            due_journal=due_journal,
+            intermediate_journals=[],
+            contacts=[],
+            today=TODAY,
+        )
+
+        assert selected_ids([list_task, make_model(1, due_date=tomorrow)]) == [1]

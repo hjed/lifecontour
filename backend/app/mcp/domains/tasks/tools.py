@@ -139,9 +139,9 @@ def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
         id=task.id,
         text=task.text,
         status=task.status,
-        # The tool schema promises both anchors until it learns list tasks.
-        creating_journal_id=task.require_anchor("creating"),
-        due_journal_id=task.require_anchor("due"),
+        # Null for an anchor a list task does not have.
+        creating_journal_id=task.creating_journal_id,
+        due_journal_id=task.due_journal_id,
         intermediate_journal_ids=intermediate_journal_ids,
         created_at=task.created_at.isoformat() if task.created_at else None,
         updated_at=task.updated_at.isoformat() if task.updated_at else None,
@@ -623,6 +623,11 @@ def _journal_ref(ref: TaskJournalRef) -> TaskJournalRefMCP:
     )
 
 
+def _optional_journal_ref(ref: TaskJournalRef | None) -> TaskJournalRefMCP | None:
+    """An anchor's journal, or null for an anchor a list task does not have."""
+    return None if ref is None else _journal_ref(ref)
+
+
 def _read_model(model: TaskReadModel) -> TaskReadMCP:
     """A task as the read tools return it.
 
@@ -636,8 +641,8 @@ def _read_model(model: TaskReadModel) -> TaskReadMCP:
         **_task_fields(
             model.task, [ref.id for ref in model.intermediate_journals]
         ).model_dump(),
-        creating_journal=_journal_ref(model.creating_journal),
-        due_journal=_journal_ref(model.due_journal),
+        creating_journal=_optional_journal_ref(model.creating_journal),
+        due_journal=_optional_journal_ref(model.due_journal),
         intermediate_journals=[
             _journal_ref(ref) for ref in model.intermediate_journals
         ],
@@ -704,7 +709,9 @@ async def get_task(
     to describe the task to the user.
 
     A task is **lapsed** when it is still not done and its due journal has either
-    passed or been **cancelled**. Nothing lapses a done or cancelled task. The
+    passed or been **cancelled**. Nothing lapses a done or cancelled task, and a
+    task on a list never lapses: it may have no journal at all, or only one,
+    and the missing journal and its id come back as null. The
     reason says which of the two happened, because they call for different
     follow-ups: a date that went by usually wants the task **retargeted** onto a
     new future journal, which is also how a lapsed or cancelled task is
@@ -765,7 +772,8 @@ async def list_journal_tasks(
     filter: the product has no "everything still outstanding" list, and tasks
     are worked with on journals and on the home dashboard, nowhere else.
 
-    Tasks are ordered by their due journal's date, soonest first.
+    Tasks are ordered by their deadline, soonest first: the due journal's date,
+    or else a list task's due date, with undated list tasks last.
     """
     user_id = await get_current_user_id()
 
@@ -828,7 +836,9 @@ async def list_upcoming_tasks(
     genuinely outstanding rather than everything that exists. A task lapses when
     it is still not done and its due journal has passed or been **cancelled** —
     inside a forward window it is the cancellation that does it, when a meeting
-    a commitment was pinned to was called off.
+    a commitment was pinned to was called off. **Tasks on a list are absent
+    too**, even one due in a journal inside the window: this lists journal-only
+    commitments, the ones the user's dashboard shows.
 
     **An absent task has not been deleted.** If the user asks after something
     they expected to see, use ``list_journal_tasks`` on the journal it is linked

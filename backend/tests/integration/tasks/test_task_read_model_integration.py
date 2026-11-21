@@ -20,7 +20,7 @@ task due in a *future* journal, and every interesting case here is a task that
 has since become something else.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from core_shared.models.journals.event_state import EventState
@@ -39,11 +39,13 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     link_intermediate_journal,
     make_task_container,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 # 23:00 on 9 August in Sydney, and 09:00 that morning in UTC terms is behind it.
@@ -130,7 +132,7 @@ class TestLapseAgainstRealJournals:
         model = await read_service.read_model(USER_ID, task_id)
 
         assert model.lapse_reason == LapseReason.DUE_JOURNAL_CANCELLED
-        assert model.due_journal.cancelled is True
+        assert model.require_journal("due").cancelled is True
 
     async def test_a_cancelled_and_passed_journal_reports_the_cancellation(
         self,
@@ -178,7 +180,7 @@ class TestLapseAgainstRealJournals:
         model = await read_service.read_model(USER_ID, task_id)
 
         assert model.lapsed is False
-        assert model.due_journal.cancelled is False
+        assert model.require_journal("due").cancelled is False
 
     async def test_a_real_future_journal_with_no_event_row_lapses_nothing(
         self,
@@ -250,7 +252,7 @@ class TestLapseAgainstRealJournals:
 
         model = await read_service.read_model(USER_ID, task_id)
 
-        assert model.creating_journal.cancelled is True
+        assert model.require_journal("creating").cancelled is True
         assert model.lapsed is False
 
 
@@ -291,7 +293,7 @@ class TestTheUsersTimezoneDecidesTheDay:
         )
 
         assert model.lapse_reason == LapseReason.DATE_PASSED
-        assert model.due_journal.date == date(2026, 8, 9)
+        assert model.require_journal("due").date == date(2026, 8, 9)
 
     async def test_the_same_rows_fall_back_to_utc_with_no_settings_row(
         self,
@@ -321,7 +323,7 @@ class TestTheUsersTimezoneDecidesTheDay:
         )
 
         assert model.lapse_reason is None
-        assert model.due_journal.date == date(2026, 8, 9)
+        assert model.require_journal("due").date == date(2026, 8, 9)
 
 
 @pytest.mark.integration
@@ -355,11 +357,17 @@ class TestWhatTheReadModelCarries:
 
         model = await read_service.read_model(USER_ID, task_id)
 
-        assert (model.creating_journal.id, model.creating_journal.title) == (
+        assert (
+            model.require_journal("creating").id,
+            model.require_journal("creating").title,
+        ) == (
             creating_id,
             "Monday Planning",
         )
-        assert (model.due_journal.id, model.due_journal.title) == (
+        assert (
+            model.require_journal("due").id,
+            model.require_journal("due").title,
+        ) == (
             due_id,
             "Permit Meeting",
         )
@@ -409,8 +417,8 @@ class TestWhatTheReadModelCarries:
 
         model = await read_service.read_model(USER_ID, task_id)
 
-        assert model.creating_journal.id == shared_id
-        assert model.due_journal.id == shared_id
+        assert model.require_journal("creating").id == shared_id
+        assert model.require_journal("due").id == shared_id
         assert [ref.id for ref in model.intermediate_journals] == [shared_id]
 
 
@@ -550,3 +558,151 @@ class TestTheServiceIsResolvable:
             resolved = await request_container.get(TaskReadService)
 
         assert isinstance(resolved, TaskReadService)
+
+
+@pytest.mark.integration
+class TestAListTaskReadsWhateverJournalsItHas:
+    """Each list-task shape the table allows, read through real rows."""
+
+    async def test_a_list_task_with_no_journal_reads_with_no_refs(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        """No journal at all: both refs are absent and nothing lapses."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.task.task_list_id == task_list.id
+        assert model.creating_journal is None
+        assert model.due_journal is None
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_only_a_due_date_reads_with_no_refs(
+        self, read_service: TaskReadService, async_connection: AsyncConnection
+    ) -> None:
+        """A due date is not a journal, so there is still no ref to carry."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        due_date = datetime.now(UTC).date() + timedelta(days=3)
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_date=due_date
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.task.due_date == due_date
+        assert model.creating_journal is None
+        assert model.due_journal is None
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_only_a_due_journal_keeps_that_ref(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The due journal it has is resolved; it arose in no journal."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        due_id = await create_journal(
+            journal_repository, title="Permit Meeting", days_offset=7
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.creating_journal is None
+        assert model.require_journal("due").id == due_id
+        assert model.require_journal("due").title == "Permit Meeting"
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_only_a_creating_journal_keeps_that_ref(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The journal it arose in is resolved; it has no due journal."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        creating_id = await create_journal(
+            journal_repository, title="Monday Planning", days_offset=-14
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, creating_journal_id=creating_id
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.require_journal("creating").id == creating_id
+        assert model.require_journal("creating").title == "Monday Planning"
+        assert model.due_journal is None
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_both_journals_keeps_both_refs(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A list task may hold both anchors, as a journal-only task does."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        creating_id = await create_journal(journal_repository, days_offset=-14)
+        due_id = await create_journal(journal_repository, days_offset=7)
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.require_journal("creating").id == creating_id
+        assert model.require_journal("due").id == due_id
+
+    async def test_a_list_task_due_in_a_passed_journal_is_not_lapsed(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Spec invariant 7: a late list task is overdue, never lapsed."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        due_id = await create_journal(journal_repository, days_offset=-3)
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.lapse_reason is None
+        assert model.lapsed is False
+
+    async def test_a_list_task_due_in_a_cancelled_journal_is_not_lapsed(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A really cancelled due journal does not lapse a list task either."""
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        due_id = await create_journal(journal_repository, days_offset=7)
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=due_id
+        )
+
+        model = await read_service.read_model(USER_ID, task_id)
+
+        assert model.require_journal("due").cancelled is True
+        assert model.lapse_reason is None

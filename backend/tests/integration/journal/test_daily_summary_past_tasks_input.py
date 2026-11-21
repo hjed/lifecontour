@@ -63,10 +63,12 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     link_intermediate_journal,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 pytestmark = pytest.mark.integration
@@ -184,7 +186,7 @@ class TestHowTheDaysCommitmentsResolved:
         assert model.task.text == "book the venue"
         assert model.task.status is TaskStatus.DONE
         assert model.lapse_reason is None
-        assert model.due_journal.title == "Site visit"
+        assert model.require_journal("due").title == "Site visit"
 
     async def test_an_unfinished_task_lapsed_because_the_day_passed(
         self,
@@ -638,3 +640,38 @@ class TestWhoseDayItIs:
         )
 
         assert assembled.past_day_tasks is None
+
+
+class TestListTasksStayOutOfThePastDay:
+    """The past-day input is journal-only until the summary describes list tasks."""
+
+    async def test_a_list_task_due_in_the_days_journal_is_left_out(
+        self,
+        assembler: DailySummaryInputAssembler,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Both were due in yesterday's journal; only the journal-only one is told."""
+        creating = await creating_journal(journal_repository)
+        due = await create_journal(
+            journal_repository, title="Site visit", start=at(YESTERDAY)
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=due,
+            text="book the venue",
+            status=TaskStatus.DONE,
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            due_journal_id=due,
+            text="pack the head torch",
+        )
+
+        assembled = await assembler.assemble(USER_ID, YESTERDAY, "UTC", now=NOW)
+
+        assert resolutions(assembled) == [("book the venue", TaskStatus.DONE)]

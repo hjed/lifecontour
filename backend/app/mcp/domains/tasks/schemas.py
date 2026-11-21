@@ -20,8 +20,18 @@ class TaskMCP(BaseModel):
     id: int
     text: str
     status: TaskStatus
-    creating_journal_id: int = Field(description="The journal the task arose in")
-    due_journal_id: int = Field(description="The journal the task is due in")
+    creating_journal_id: int | None = Field(
+        description=(
+            "The journal the task arose in. Null for a task on a list that arose "
+            "in no journal; a task with no list always has one."
+        )
+    )
+    due_journal_id: int | None = Field(
+        description=(
+            "The journal the task is due in. Null for a task on a list with no "
+            "due journal; a task with no list always has one."
+        )
+    )
     intermediate_journal_ids: list[int] = Field(
         description="Journals the task has passed through since it was created"
     )
@@ -78,18 +88,27 @@ class TaskContactMCP(BaseModel):
 class TaskReadMCP(TaskMCP):
     """A task as the read tools answer: its journals, contacts and lapse."""
 
-    creating_journal: TaskJournalRefMCP = Field(
-        description="The creating journal: the one the task arose in"
+    creating_journal: TaskJournalRefMCP | None = Field(
+        description=(
+            "The creating journal: the one the task arose in. Null exactly when "
+            "creating_journal_id is."
+        )
     )
-    due_journal: TaskJournalRefMCP = Field(
-        description="The due journal: the one the task is due in"
+    due_journal: TaskJournalRefMCP | None = Field(
+        description=(
+            "The due journal: the one the task is due in. Null exactly when "
+            "due_journal_id is."
+        )
     )
     intermediate_journals: list[TaskJournalRefMCP] = Field(
         description="Journals the task has passed through"
     )
     contacts: list[TaskContactMCP]
     lapsed: bool = Field(
-        description="Still not done, and its due journal has passed or was cancelled"
+        description=(
+            "Still not done, and its due journal has passed or was cancelled. "
+            "Only a task with no list lapses; a task on a list never does."
+        )
     )
     lapse_reason: LapseReason | None = Field(
         description="Why the task lapsed, or null when it has not"

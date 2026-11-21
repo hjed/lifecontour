@@ -56,6 +56,7 @@ from tests.unit.tasks.task_doubles import (
     OTHER_USER_ID,
     TASK_ID,
     USER_ID,
+    make_list_task,
     make_task,
 )
 
@@ -294,7 +295,7 @@ class TestRoundTrips:
 
         _, requested = read_journal_repo.find_by_ids_for_user.await_args.args
         assert requested == [DUE_JOURNAL_ID]
-        assert model.creating_journal.id == DUE_JOURNAL_ID
+        assert model.require_journal("creating").id == DUE_JOURNAL_ID
         assert [ref.id for ref in model.intermediate_journals] == [DUE_JOURNAL_ID]
 
     async def test_contacts_are_fetched_in_one_call(
@@ -431,8 +432,8 @@ class TestTheTimezoneTheDerivationIsAnchoredOn:
         model = await read_service.read_model(USER_ID, TASK_ID)
 
         # 23:00Z on 9 August is 09:00 on the 10th in Sydney.
-        assert model.due_journal.date == datetime.date(2026, 8, 10)
-        assert model.due_journal.date != JOURNAL_AT_NEW_YORK_EVENING.date()
+        assert model.require_journal("due").date == datetime.date(2026, 8, 10)
+        assert model.require_journal("due").date != JOURNAL_AT_NEW_YORK_EVENING.date()
 
     async def test_now_defaults_to_the_real_clock(
         self,
@@ -472,7 +473,7 @@ class TestCancellationThroughTheService:
         model = await read_service.read_model(USER_ID, TASK_ID)
 
         assert model.lapse_reason == LapseReason.DUE_JOURNAL_CANCELLED
-        assert model.due_journal.cancelled is True
+        assert model.require_journal("due").cancelled is True
 
     async def test_a_cancelled_creating_journal_lapses_nothing(
         self,
@@ -486,8 +487,8 @@ class TestCancellationThroughTheService:
 
         model = await read_service.read_model(USER_ID, TASK_ID)
 
-        assert model.creating_journal.cancelled is True
-        assert model.due_journal.cancelled is False
+        assert model.require_journal("creating").cancelled is True
+        assert model.require_journal("due").cancelled is False
         assert model.lapse_reason is None
 
     async def test_a_journal_with_no_calendar_info_is_not_cancelled(
@@ -496,7 +497,7 @@ class TestCancellationThroughTheService:
         """The default fixture is a plain note journal, and it is not cancelled."""
         model = await read_service.read_model(USER_ID, TASK_ID)
 
-        assert model.due_journal.cancelled is False
+        assert model.require_journal("due").cancelled is False
         assert model.lapse_reason is None
 
     @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
@@ -541,8 +542,8 @@ class TestWhatTheModelCarries:
 
         model = await read_service.read_model(USER_ID, TASK_ID)
 
-        assert model.creating_journal.title == "Monday Planning"
-        assert model.due_journal.title == "Permit Meeting"
+        assert model.require_journal("creating").title == "Monday Planning"
+        assert model.require_journal("due").title == "Permit Meeting"
         assert [ref.title for ref in model.intermediate_journals] == ["Standup"]
 
     async def test_intermediate_journals_keep_the_repositorys_order(
@@ -615,3 +616,55 @@ class TestWhatTheModelCarries:
 
         assert model.task.id == TASK_ID
         assert model.task.status is TaskStatus.NOT_DONE
+
+
+@pytest.mark.unit
+class TestAListTask:
+    """A task on a list may hold no journal, or only one, and still reads."""
+
+    async def test_a_list_task_with_no_journal_reads_with_no_refs(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_journal_repo: AsyncMock,
+    ) -> None:
+        """No anchor to resolve is not a missing journal: both refs are ``None``."""
+        read_task_repo.find_by_id.return_value = make_list_task()
+        read_journal_repo.find_by_ids_for_user.return_value = []
+
+        model = await read_service.read_model(USER_ID, TASK_ID)
+
+        assert model.creating_journal is None
+        assert model.due_journal is None
+        assert model.lapsed is False
+
+    async def test_a_list_task_with_only_a_creating_journal_keeps_that_ref(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+    ) -> None:
+        """The anchor it has is resolved; the one it lacks stays ``None``."""
+        read_task_repo.find_by_id.return_value = make_list_task(
+            creating_journal_id=CREATING_JOURNAL_ID
+        )
+
+        model = await read_service.read_model(USER_ID, TASK_ID)
+
+        assert model.require_journal("creating").id == CREATING_JOURNAL_ID
+        assert model.require_journal("creating").title == "Monday Planning"
+        assert model.due_journal is None
+
+    async def test_a_present_anchor_whose_journal_is_missing_still_raises(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_journal_repo: AsyncMock,
+    ) -> None:
+        """Only an *absent* anchor is ``None``; a vanished journal is broken data."""
+        read_task_repo.find_by_id.return_value = make_list_task(
+            due_journal_id=DUE_JOURNAL_ID
+        )
+        read_journal_repo.find_by_ids_for_user.return_value = []
+
+        with pytest.raises(JournalNotFoundError):
+            await read_service.read_model(USER_ID, TASK_ID)

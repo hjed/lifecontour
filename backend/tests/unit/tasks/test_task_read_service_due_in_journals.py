@@ -199,9 +199,9 @@ class TestEveryResolutionIsReported:
             USER_ID, [MORNING_ID], now=NOW
         )
 
-        assert model.due_journal.title == "Morning standup"
-        assert model.due_journal.date == SUMMARY_DAY
-        assert model.creating_journal.title == "Monday"
+        assert model.require_journal("due").title == "Morning standup"
+        assert model.require_journal("due").date == SUMMARY_DAY
+        assert model.require_journal("creating").title == "Monday"
         assert [journal.id for journal in model.intermediate_journals] == [MENTIONED_ID]
         assert [contact.display_name for contact in model.contacts] == ["Sarah Chen"]
 
@@ -303,7 +303,7 @@ class TestWhoseDayItIs:
             USER_ID, [MORNING_ID], now=NOW
         )
 
-        assert model.due_journal.date == TODAY_KIRITIMATI
+        assert model.require_journal("due").date == TODAY_KIRITIMATI
         assert model.lapse_reason is None
 
     async def test_an_injected_zone_is_used_and_settings_are_never_read(
@@ -322,7 +322,7 @@ class TestWhoseDayItIs:
             USER_ID, [MORNING_ID], now=NOW, timezone=KIRITIMATI
         )
 
-        assert [model.due_journal.date for model in models] == [SUMMARY_DAY]
+        assert [model.require_journal("due").date for model in models] == [SUMMARY_DAY]
         settings_repo.get_timezone.assert_not_awaited()
 
     async def test_the_zone_is_resolved_when_the_caller_omits_it(

@@ -322,9 +322,11 @@ class TestSelection:
 
         (model,) = upcoming.tasks
         assert model.task.text == "task 1"
-        assert model.due_journal.id == IN_WINDOW_ID
-        assert model.due_journal.title == "Permit Meeting"
-        assert model.due_journal.date == TODAY_UTC + datetime.timedelta(days=2)
+        assert model.require_journal("due").id == IN_WINDOW_ID
+        assert model.require_journal("due").title == "Permit Meeting"
+        assert model.require_journal("due").date == TODAY_UTC + datetime.timedelta(
+            days=2
+        )
         assert [contact.display_name for contact in model.contacts] == ["Sarah Chen"]
 
     async def test_a_task_whose_due_journal_was_cancelled_is_dropped(

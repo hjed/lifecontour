@@ -18,6 +18,7 @@ import datetime
 import pytest
 from core_shared.models.tasks import (
     LapseReason,
+    TaskAnchorMissingError,
     TaskContactRef,
     TaskJournalRef,
     TaskReadModel,
@@ -28,6 +29,7 @@ from core_shared.models.tasks import (
 from tests.unit.tasks.task_doubles import (
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
+    make_list_task,
     make_task,
 )
 
@@ -80,8 +82,8 @@ class TestJournalsByRole:
             intermediates=(journal_ref(MENTIONED_JOURNAL_ID, title="Standup"),)
         )
 
-        assert model.creating_journal.id == CREATING_JOURNAL_ID
-        assert model.due_journal.id == DUE_JOURNAL_ID
+        assert model.require_journal("creating").id == CREATING_JOURNAL_ID
+        assert model.require_journal("due").id == DUE_JOURNAL_ID
         assert [ref.id for ref in model.intermediate_journals] == [MENTIONED_JOURNAL_ID]
 
     def test_one_journal_may_be_both_anchors(self) -> None:
@@ -95,7 +97,7 @@ class TestJournalsByRole:
         model = build(creating=shared, due=shared)
 
         assert model.creating_journal is model.due_journal
-        assert model.due_journal.id == CREATING_JOURNAL_ID
+        assert model.require_journal("due").id == CREATING_JOURNAL_ID
 
     def test_a_journal_that_is_the_due_anchor_and_a_mention_appears_as_both(
         self,
@@ -110,7 +112,7 @@ class TestJournalsByRole:
 
         model = build(due=due, intermediates=(due,))
 
-        assert model.due_journal.id == DUE_JOURNAL_ID
+        assert model.require_journal("due").id == DUE_JOURNAL_ID
         assert [ref.id for ref in model.intermediate_journals] == [DUE_JOURNAL_ID]
 
     def test_intermediate_journals_keep_the_order_they_arrive_in(self) -> None:
@@ -136,9 +138,9 @@ class TestJournalsByRole:
 
         model = build(due=ref)
 
-        assert model.due_journal.title == "Permit Meeting"
-        assert model.due_journal.date == TOMORROW
-        assert model.due_journal.cancelled is False
+        assert model.require_journal("due").title == "Permit Meeting"
+        assert model.require_journal("due").date == TOMORROW
+        assert model.require_journal("due").cancelled is False
 
 
 @pytest.mark.unit
@@ -226,3 +228,91 @@ class TestTheTaskItself:
         assert model.task.id == make_task().id
         assert model.task.text == make_task().text
         assert model.task.status is TaskStatus.NOT_DONE
+
+
+def build_list_task(
+    *,
+    creating: TaskJournalRef | None = None,
+    due: TaskJournalRef | None = None,
+) -> TaskReadModel:
+    """Assemble a list task's read model, with only the journals it holds."""
+    return build_task_read_model(
+        task=make_list_task(
+            creating_journal_id=creating.id if creating else None,
+            due_journal_id=due.id if due else None,
+        ),
+        creating_journal=creating,
+        due_journal=due,
+        intermediate_journals=(),
+        contacts=(),
+        today=TODAY,
+    )
+
+
+@pytest.mark.unit
+class TestAListTask:
+    """A task on a list may have no journal, one of the two, or both."""
+
+    def test_a_list_task_with_no_journal_has_no_refs_and_is_not_lapsed(
+        self,
+    ) -> None:
+        """Both refs are absent, and with no due journal nothing can lapse."""
+        model = build_list_task()
+
+        assert model.creating_journal is None
+        assert model.due_journal is None
+        assert model.lapse_reason is None
+        assert model.lapsed is False
+
+    def test_a_list_task_with_only_a_due_journal_keeps_that_ref(self) -> None:
+        """The due journal it has is carried; the creating one stays absent."""
+        due = journal_ref(DUE_JOURNAL_ID)
+
+        model = build_list_task(due=due)
+
+        assert model.creating_journal is None
+        assert model.due_journal is due
+
+    def test_a_list_task_with_only_a_creating_journal_keeps_that_ref(self) -> None:
+        """The journal it arose in is carried; it has no due journal."""
+        creating = journal_ref(CREATING_JOURNAL_ID, date=YESTERDAY)
+
+        model = build_list_task(creating=creating)
+
+        assert model.creating_journal is creating
+        assert model.due_journal is None
+
+    def test_a_list_task_due_in_a_passed_journal_is_not_lapsed(self) -> None:
+        """Invariant 7: a late list task is overdue, never lapsed."""
+        model = build_list_task(due=journal_ref(DUE_JOURNAL_ID, date=YESTERDAY))
+
+        assert model.lapse_reason is None
+
+    def test_a_list_task_due_in_a_cancelled_journal_is_not_lapsed(self) -> None:
+        """A cancelled due journal does not lapse a list task either."""
+        model = build_list_task(due=journal_ref(DUE_JOURNAL_ID, cancelled=True))
+
+        assert model.lapse_reason is None
+
+
+@pytest.mark.unit
+class TestRequireJournal:
+    """The narrowing a journal-only surface reads a ref through."""
+
+    def test_it_returns_the_ref_in_each_role(self) -> None:
+        """A journal-only task has both, and each comes back as itself."""
+        model = build()
+
+        assert model.require_journal("creating") is model.creating_journal
+        assert model.require_journal("due") is model.due_journal
+
+    @pytest.mark.parametrize("anchor", ["creating", "due"])
+    def test_it_raises_for_an_absent_ref(self, anchor: str) -> None:
+        """A missing ref on a journal-only path is a broken invariant."""
+        model = build_list_task()
+
+        with pytest.raises(TaskAnchorMissingError) as raised:
+            model.require_journal(anchor)  # type: ignore[arg-type]
+
+        assert raised.value.anchor == anchor
+        assert raised.value.task_id == model.task.id

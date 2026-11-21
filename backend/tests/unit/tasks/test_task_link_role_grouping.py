@@ -39,7 +39,7 @@ from core_shared.models.tasks import (
     group_tasks_by_link_role,
 )
 
-from tests.unit.tasks.task_doubles import USER_ID
+from tests.unit.tasks.task_doubles import TASK_LIST_ID, USER_ID
 
 # The journal whose detail view is being rendered in every test below.
 JOURNAL_ID = 100
@@ -457,3 +457,110 @@ class TestReadModelIsUntouched:
         groups = group_tasks_by_link_role(JOURNAL_ID, [model_with_contacts])
 
         assert groups.due[0] is model_with_contacts
+
+
+def list_task_model(
+    task_id: int,
+    *,
+    creating_journal_id: int | None = None,
+    due_journal_id: int | None = None,
+    due_journal_date: datetime.date = LATER,
+    due_date: datetime.date | None = None,
+    mentions: tuple[int, ...] = (),
+) -> TaskReadModel:
+    """A list task's read model, carrying only the journals it holds."""
+    return TaskReadModel(
+        task=Task(
+            id=task_id,
+            user_id=USER_ID,
+            text=f"list task {task_id}",
+            task_list_id=TASK_LIST_ID,
+            position=0,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            due_date=due_date,
+            status=TaskStatus.NOT_DONE,
+        ),
+        creating_journal=(
+            journal_ref(creating_journal_id, TODAY)
+            if creating_journal_id is not None
+            else None
+        ),
+        due_journal=(
+            journal_ref(due_journal_id, due_journal_date)
+            if due_journal_id is not None
+            else None
+        ),
+        intermediate_journals=tuple(
+            journal_ref(journal_id, TODAY) for journal_id in mentions
+        ),
+        contacts=(),
+        lapse_reason=None,
+    )
+
+
+class TestListTasks:
+    """A task on a list holds a journal role only through the journals it has."""
+
+    def test_a_list_task_created_here_with_no_due_journal_is_created_only(
+        self,
+    ) -> None:
+        """No due journal means no due role, and nothing breaks for its absence."""
+        groups = group_tasks_by_link_role(
+            JOURNAL_ID, [list_task_model(1, creating_journal_id=JOURNAL_ID)]
+        )
+
+        assert task_ids(groups.due) == []
+        assert task_ids(groups.created) == [1]
+        assert task_ids(groups.mentioned) == []
+        assert groups.roles_for(1) == (TaskLinkRole.CREATED,)
+
+    def test_a_list_task_with_no_anchor_mentioned_here_is_mentioned(self) -> None:
+        """A mention is a link of its own, whatever the task's anchors."""
+        groups = group_tasks_by_link_role(
+            JOURNAL_ID, [list_task_model(2, mentions=(JOURNAL_ID,))]
+        )
+
+        assert task_ids(groups.mentioned) == [2]
+        assert groups.due == ()
+        assert groups.created == ()
+
+    def test_a_list_task_due_here_is_grouped_under_due(self) -> None:
+        """A list task may still be due in a journal, and is shown there."""
+        groups = group_tasks_by_link_role(
+            JOURNAL_ID, [list_task_model(3, due_journal_id=JOURNAL_ID)]
+        )
+
+        assert task_ids(groups.due) == [3]
+
+    def test_a_group_orders_by_deadline_then_undated_last_then_id(self) -> None:
+        """The due journal's date or else the due date; undated tasks last.
+
+        A task has a due journal or a due date, never both, so the deadline is
+        whichever one it holds. Two tasks share each deadline and two are
+        undated, so every tie in the order is broken by id.
+        """
+        models = [
+            list_task_model(9, mentions=(JOURNAL_ID,)),
+            read_model(
+                5,
+                creating_journal_id=OTHER_JOURNAL_ID,
+                due_journal_id=THIRD_JOURNAL_ID,
+                due_date=LATER,
+                mentions=(JOURNAL_ID,),
+            ),
+            list_task_model(7, due_date=SOON, mentions=(JOURNAL_ID,)),
+            list_task_model(4, mentions=(JOURNAL_ID,)),
+            list_task_model(
+                6,
+                due_journal_id=OTHER_JOURNAL_ID,
+                due_journal_date=SOON,
+                mentions=(JOURNAL_ID,),
+            ),
+            list_task_model(8, due_date=LATER, mentions=(JOURNAL_ID,)),
+        ]
+
+        groups = group_tasks_by_link_role(JOURNAL_ID, models)
+
+        assert task_ids(groups.mentioned) == [6, 7, 5, 8, 4, 9]
+        assert task_ids(groups.tasks) == [6, 7, 5, 8, 4, 9]
