@@ -24,7 +24,12 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalTaskActions } from '../JournalTaskActions';
 import { JournalTasksSection } from '../JournalTasksSection';
-import { createMockJournalTask, createTestQueryClient } from '../test-helpers';
+import {
+  createMockJournalTask,
+  createMockListTask,
+  createMockTaskJournalRef,
+  createTestQueryClient,
+} from '../test-helpers';
 import { taskKeys } from '@/lib/api/tasks';
 import {
   TaskLinkRole,
@@ -759,6 +764,44 @@ describe('JournalTaskActions', () => {
       ).toBeInTheDocument();
       expect(
         screen.getByRole('button', { name: 'Cancel task' })
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * Retargeting still needs both journals on the server, so a task on a
+     * list missing either is not offered it — the request could only fail.
+     * Its status actions and delete do not depend on a journal, and stay.
+     */
+    it.each([
+      ['no journal at all', createMockListTask()],
+      [
+        'only a creating journal',
+        createMockListTask({
+          creating_journal_id: 1,
+          creating_journal: createMockTaskJournalRef({ id: 1 }),
+        }),
+      ],
+      [
+        'only a due journal',
+        createMockListTask({
+          due_journal_id: 1,
+          due_journal: createMockTaskJournalRef({ id: 1 }),
+        }),
+      ],
+    ])('is not offered on a task with %s', (_, task) => {
+      renderActions(task, TaskLinkRole.MENTIONED);
+
+      expect(
+        screen.queryByTestId('journal-task-action-retarget')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Mark done' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Cancel task' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId('journal-task-action-delete')
       ).toBeInTheDocument();
     });
 

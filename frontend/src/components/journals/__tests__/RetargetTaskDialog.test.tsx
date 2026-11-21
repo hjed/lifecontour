@@ -31,6 +31,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RetargetTaskDialog } from '../RetargetTaskDialog';
 import {
   createMockJournalTask,
+  createMockListTask,
   createMockTaskJournalRef,
   createTestQueryClient,
 } from '../test-helpers';
@@ -503,6 +504,35 @@ describe('RetargetTaskDialog', () => {
         );
       }
     );
+  });
+
+  /**
+   * A task on a list may have no due journal. The row does not offer this
+   * dialog for one yet (retargeting is journal-only until a list task can be
+   * given a due journal), but the dialog must still render it rather than
+   * crash: there is no journal it is leaving, and none it is already due in.
+   */
+  describe('a task with no due journal', () => {
+    const UNDATED = createMockListTask({
+      creating_journal_id: 1,
+      creating_journal: createMockTaskJournalRef({ id: 1 }),
+    });
+
+    it('opens with no journal marked already due and no mention promised', async () => {
+      const { user } = renderDialog(UNDATED);
+
+      await open(user);
+
+      expect(screen.getByTestId('retarget-task-text')).toHaveTextContent(
+        UNDATED.attributes.text
+      );
+      for (const option of screen.getAllByRole('option')) {
+        expect(option).not.toHaveTextContent(/already due here/i);
+      }
+      expect(
+        screen.queryByTestId('retarget-keeps-previous')
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe('the service’s rejection', () => {

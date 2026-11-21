@@ -167,7 +167,12 @@ function TaskChoiceField({
               >
                 <span className='font-medium'>{text}</span>
                 <span className='text-muted-foreground text-xs font-normal'>
-                  {statusWording(status)} · due in {due_journal.title}
+                  {/* A task on a list may have no due journal; the status
+                      alone is then the whole description, rather than a
+                      "due in" with nothing after it. */}
+                  {due_journal
+                    ? `${statusWording(status)} · due in ${due_journal.title}`
+                    : statusWording(status)}
                 </span>
               </Label>
             </div>

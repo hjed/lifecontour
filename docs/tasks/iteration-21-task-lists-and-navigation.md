@@ -913,14 +913,82 @@ must see one-anchor tasks; that is delete behaviour, not a read).
 - *ITER21-004:* the journal-only selections to lift are `find_upcoming_tasks`,
   `find_tasks_due_in_journals` (`task_list_id IS NULL`) and the guard in `select_upcoming_tasks`.
 
-#### Phase 12: Frontend copes with a task that has no journal
+#### Phase 12: Frontend copes with a task that has no journal ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 9.
-**Estimated diff:** ~100 production → **~500 tracked**
+**Estimated diff:** ~100 production → **~500 tracked** · **Actual:** ~135 production → **~630
+tracked** (about 580 insertions, 60 deletions excluding this document: about 135 production —
+`DashboardTaskRow` 46, the task types 17, `task-display` 18, `RetargetTaskDialog` 18, the dashboard
+type 12, the other three components 22; about 420 tests, 134 of them the E2E; 18 architecture
+docs). Production ran ×1.35 on the estimate, most of it the dashboard row's two narrowed branches
+and doc comments carrying each null case's reason.
 
 **Acceptance Criteria:**
 
-- [ ] Task types allow missing journals; `JournalTaskRow`, `AttachTaskDialog`, `RetargetTaskDialog` and `DashboardTaskRow` guarded.
+- [x] Task types allow missing journals; `JournalTaskRow`, `AttachTaskDialog`, `RetargetTaskDialog` and `DashboardTaskRow` guarded.
+
+**Delivered:** the web app renders a task with no journal, or only one, wherever one can reach it.
+- `frontend/src/types/tasks.ts`: `creating_journal_id`/`due_journal_id` are `number | null` and
+  `creating_journal`/`due_journal` are `TaskJournalRef | null`, mirroring Phase 11's REST shapes;
+  doc comments say when each is null and that `lapsed` is always false on a list task.
+- `JournalTaskRow` names a due journal only when there is one and it is not this journal; a list
+  task never shows the lapsed marker (the payload says `lapsed: false`).
+- `AttachTaskDialog` describes an option with no due journal by its status alone.
+- `RetargetTaskDialog` renders with no due journal: none is "already due here" and the "kept as a
+  mention" note is withheld, since no journal is being left.
+- `canRetarget(task)` in `lib/task-display.ts` — both anchors present — gates the retarget trigger
+  in `JournalTaskActions`, because `TaskService` retargeting still narrows on both
+  (`require_anchor`, an unmapped 500). Status actions, delete and mention removal stay: their
+  service paths are null-safe.
+- `HomeDashboardTask.due_journal` is `HomeDashboardTaskJournal | null` (frontend only; the backend
+  schema stays required while the selection is journal-only). `DashboardTaskRow` draws such a row
+  with its text, contacts and action, no chip, no "Due in" line and a neutral accent bar;
+  `dueChipLabel` takes the narrowed `HomeDashboardDueTask`.
+
+**Tests:** RTL `JournalTaskRow.test.tsx` (no journal; created here with no due journal; due
+journal but no creating journal), `AttachTaskDialog.test.tsx` (an option with no due journal named
+by status alone, chosen and attached; a journal-only option still says "due in"),
+`RetargetTaskDialog.test.tsx` (no due journal: nothing already due, no mention note),
+`JournalTaskActions.test.tsx` (no retarget on each one-anchor and no-anchor shape; status actions
+and delete kept), `task-display.test.ts` (`canRetarget` over all four combinations),
+`DashboardTaskRow.test.tsx` (null due journal: text, contacts, action, no chip or due line, neutral
+bar), `TasksCard.test.tsx` (a null-due row beside a dated one), with `createMockListTask` in
+`components/journals/test-helpers.tsx`. E2E `journal-tasks.spec.ts` › *a task with no due journal*
+(390px viewport): a typed list task is injected into a real journal's listing via `route.fetch`
+(no endpoint can create one before Phase 19); it renders under *Created*, with no "Due in", no
+lapsed marker and no retarget, beside an unchanged journal-only task, with no page error and no
+horizontal scroll. Shown red against the pre-phase components (`due_journal is null` TypeError).
+No integration tests: no backend change. Existing tests changed only types: two optional-chained
+ref reads in `lib/api/__tests__/tasks.test.ts` and the `dueChipLabel` helper's return type.
+Gates run locally: `pnpm quality:check`, the full jest suite (3,215 passed), and
+`journal-tasks.spec.ts` and `home-dashboard.spec.ts` on Firefox and Mobile Chrome, the new test
+also with `--repeat-each 3`.
+
+**Decisions (recorded during implementation):**
+- **The dashboard row's due journal is nullable** (user decision). The frontend type is looser than
+  today's wire, so the card cannot crash when ITER21-004 sends a list task; that phase widens the
+  backend schema to match.
+- **Retarget is hidden, not left to fail**, on a task missing either journal: it is the only
+  journal-page action whose service path narrows on the anchors.
+- **No interim wording for an undated task.** The row and the picker omit the due-journal text
+  rather than inventing an "undated" label that Phase 15 / ITER21-002 would reword.
+- **`days_away` stays a number**: a dated list task in ITER21-004 has one without a due journal.
+- **The E2E mock is typed** (`JournalTaskResource` from `src/types/tasks.ts`, `satisfies
+  JournalTasksResponse`), so the route's claim about the wire is compiler-checked.
+
+**Found, not fixed:** the journal page's task action buttons are `size='sm'` (32px) on every row,
+below the 44px phone target of Delivery Rule 8. Pre-existing and not changed by this phase; the
+E2E asserts only the no-horizontal-scroll half. ITER21-002's journal-row work should take it up.
+
+**Notes for later phases:**
+- *Phase 15:* the read shapes gain list, due date, flag, icon and overdue; `JournalTaskRow` is
+  where the overdue marker and due chip go, in place of the omitted due-journal line.
+- *Phase 19:* list tasks can now exist safely on every web surface; replace the E2E's injected task
+  with one created through the new endpoint.
+- *Phase 23:* replace `canRetarget` (journal-only) with the list-task retarget rule.
+- *ITER21-004:* widen the backend `DashboardTask` schema's `due_journal` to nullable (the frontend
+  already is), and give `dueChipLabel` the due-date half for a dated list task.
 
 #### Phase 13: List-task date rules ✅ DONE
 

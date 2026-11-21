@@ -202,12 +202,23 @@ export interface HomeDashboardTask {
   /** The task itself — what the inline done action patches. */
   task_id: number;
   text: string;
-  due_journal: HomeDashboardTaskJournal;
+  /**
+   * The journal it is due in. `null` for a task on a list with no due
+   * journal. Today's selection is journal-only, so the server still sends one
+   * on every row; the type admits the list task so the row cannot crash on
+   * the first one the dashboard is given.
+   */
+  due_journal: HomeDashboardTaskJournal | null;
   /** Days from the window's first day; `0` is today. See the note above. */
   days_away: number;
   /** In link order. Empty is ordinary — most tasks name nobody. */
   contacts: HomeDashboardTaskContact[];
 }
+
+/** A dashboard row that has a due journal — the only kind a due chip can label. */
+export type HomeDashboardDueTask = HomeDashboardTask & {
+  due_journal: HomeDashboardTaskJournal;
+};
 
 /** The span the tasks were read for, in the acting user's timezone. */
 export interface HomeDashboardTasksWindow {

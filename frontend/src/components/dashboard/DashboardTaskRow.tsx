@@ -25,6 +25,11 @@
  * **W23** says the text is not a link, and there is nowhere for it to go: the
  * specification gives a task no detail route, because the dashboard is where a
  * commitment is *reminded of* and a journal is where it is worked with.
+ *
+ * **A row may have no due journal** — a task on a list. It keeps its text, its
+ * people and its action, draws no chip or *"Due in"* line it has nothing to
+ * fill with, and takes a neutral accent bar, since the bar's colour is keyed
+ * to the journal.
  */
 
 import type { ReactNode } from 'react';
@@ -32,7 +37,10 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { CalendarClock } from 'lucide-react';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
-import type { HomeDashboardTask } from '@/lib/api/home-dashboard';
+import type {
+  HomeDashboardDueTask,
+  HomeDashboardTask,
+} from '@/lib/api/home-dashboard';
 import { nameParts } from '@/lib/contact-names';
 import {
   dueAccentClassName,
@@ -54,8 +62,17 @@ interface DashboardTaskRowProps {
   readonly actions?: ReactNode;
 }
 
+/** The bar of a row with no due journal to key a colour to. */
+const NEUTRAL_ACCENT = 'bg-muted-foreground/40';
+
+/** Narrows a row to one with a due journal, which the chip and link need. */
+function hasDueJournal(task: HomeDashboardTask): task is HomeDashboardDueTask {
+  return task.due_journal !== null;
+}
+
 export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
-  const { task_id, text, due_journal, contacts } = task;
+  const { task_id, text, contacts } = task;
+  const dueTask = hasDueJournal(task) ? task : null;
 
   return (
     <li
@@ -67,7 +84,7 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
         data-testid='dashboard-task-accent'
         className={cn(
           'absolute inset-y-0 left-0 w-1',
-          dueAccentClassName(due_journal.id)
+          dueTask ? dueAccentClassName(dueTask.due_journal.id) : NEUTRAL_ACCENT
         )}
       />
 
@@ -90,33 +107,37 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
               first two days — so on those rows the date is in the markup even
               though the words are `Today`. The two are not in conflict for a
               reader either: the page header (W2) names today in full. */}
-          <time
-            dateTime={due_journal.date}
-            data-testid='dashboard-task-chip'
-            className={cn(
-              'flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs',
-              dueChipClassName(due_journal.id)
-            )}
-          >
-            <CalendarClock className='h-3 w-3' aria-hidden='true' />
-            {dueChipLabel(task)}
-          </time>
+          {dueTask && (
+            <time
+              dateTime={dueTask.due_journal.date}
+              data-testid='dashboard-task-chip'
+              className={cn(
+                'flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs',
+                dueChipClassName(dueTask.due_journal.id)
+              )}
+            >
+              <CalendarClock className='h-3 w-3' aria-hidden='true' />
+              {dueChipLabel(dueTask)}
+            </time>
+          )}
           {actions}
         </div>
       </div>
 
-      <p
-        data-testid='dashboard-task-due'
-        className='text-muted-foreground mt-1 text-sm break-words'
-      >
-        Due in{' '}
-        <Link
-          href={`/journals/${due_journal.id}` as Route}
-          className='underline-offset-4 hover:underline'
+      {dueTask && (
+        <p
+          data-testid='dashboard-task-due'
+          className='text-muted-foreground mt-1 text-sm break-words'
         >
-          {due_journal.title}
-        </Link>
-      </p>
+          Due in{' '}
+          <Link
+            href={`/journals/${dueTask.due_journal.id}` as Route}
+            className='underline-offset-4 hover:underline'
+          >
+            {dueTask.due_journal.title}
+          </Link>
+        </p>
+      )}
 
       {contacts.length > 0 && (
         <ul

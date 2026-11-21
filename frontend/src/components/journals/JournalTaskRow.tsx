@@ -82,7 +82,12 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
   const lapse = lapsed ? lapseWording(lapse_reason) : null;
   // Naming the due journal on a row that *is* the due journal would only say
   // "due in this journal"; elsewhere it is the missing half of a lapse marker.
-  const showDueJournal = String(due_journal.id) !== journalId;
+  // A task on a list may have no due journal at all, and then there is
+  // nothing to name.
+  const elsewhereDueJournal =
+    due_journal !== null && String(due_journal.id) !== journalId
+      ? due_journal
+      : null;
 
   return (
     <li
@@ -139,14 +144,14 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
         </div>
       </div>
 
-      {showDueJournal && (
+      {elsewhereDueJournal && (
         <p className='text-muted-foreground mt-1 text-sm'>
           Due in{' '}
           <Link
-            href={`/journals/${due_journal.id}` as Route}
+            href={`/journals/${elsewhereDueJournal.id}` as Route}
             className='underline-offset-4 hover:underline'
           >
-            {due_journal.title}
+            {elsewhereDueJournal.title}
           </Link>
         </p>
       )}

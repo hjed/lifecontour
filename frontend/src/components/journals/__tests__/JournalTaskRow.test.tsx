@@ -18,6 +18,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { JournalTaskRow } from '../JournalTaskRow';
 import {
   createMockJournalTask,
+  createMockListTask,
   createMockTaskJournalRef,
   createTestQueryClient,
 } from '../test-helpers';
@@ -227,6 +228,67 @@ describe('JournalTaskRow', () => {
       expect(
         screen.queryByRole('link', { name: 'This one' })
       ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * A task on a list may hold no journal at all, or only one of the two. The
+   * journal's listing still reaches it — as created or mentioned here — so
+   * the row has to render it whole, saying nothing about a due journal it
+   * does not have, and never as lapsed.
+   */
+  describe('a task with no due journal', () => {
+    it('renders a task in no journal with its text, status and actions', () => {
+      renderRow(
+        createMockListTask({ text: 'Buy sunscreen' }),
+        '1',
+        TaskLinkRole.MENTIONED
+      );
+
+      const row = screen.getByTestId('journal-task-1');
+      expect(within(row).getByText('Buy sunscreen')).toBeInTheDocument();
+      expect(within(row).getByText('Not done')).toBeInTheDocument();
+      expect(
+        within(row).getByRole('button', { name: 'Mark done' })
+      ).toBeInTheDocument();
+      expect(within(row).queryByText(/Due in/)).not.toBeInTheDocument();
+      expect(
+        within(row).queryByTestId('journal-task-lapsed')
+      ).not.toBeInTheDocument();
+    });
+
+    it('renders a task created here with no due journal without a due line', () => {
+      renderRow(
+        createMockListTask({
+          creating_journal_id: 1,
+          creating_journal: createMockTaskJournalRef({ id: 1 }),
+        }),
+        '1',
+        TaskLinkRole.CREATED
+      );
+
+      const row = screen.getByTestId('journal-task-1');
+      expect(within(row).queryByText(/Due in/)).not.toBeInTheDocument();
+      expect(within(row).queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('names the due journal of a list task with no creating journal', () => {
+      renderRow(
+        createMockListTask({
+          due_journal_id: 42,
+          due_journal: createMockTaskJournalRef({
+            id: 42,
+            title: 'Beach trip',
+          }),
+        }),
+        '1',
+        TaskLinkRole.MENTIONED
+      );
+
+      expect(screen.getByRole('link', { name: 'Beach trip' })).toHaveAttribute(
+        'href',
+        '/journals/42'
+      );
     });
   });
 

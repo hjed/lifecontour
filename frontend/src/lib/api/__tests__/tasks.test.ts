@@ -397,8 +397,8 @@ describe('Task API client', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
       const attributes = result.current.data!.data.attributes;
-      expect(attributes.creating_journal.title).toBe('Monday standup');
-      expect(attributes.due_journal.cancelled).toBe(true);
+      expect(attributes.creating_journal?.title).toBe('Monday standup');
+      expect(attributes.due_journal?.cancelled).toBe(true);
       expect(attributes.intermediate_journals).toHaveLength(1);
       expect(attributes.contacts[0].display_name).toBe('Sarah');
       expect(attributes.lapsed).toBe(true);

@@ -238,6 +238,49 @@ describe('DashboardTaskRow', () => {
     expect(screen.queryByTestId('journal-task-lapsed')).not.toBeInTheDocument();
   });
 
+  /**
+   * A task on a list may have no due journal. Today's dashboard selection
+   * never sends one, but the row type allows it so the card cannot crash on
+   * the first such row: it keeps the commitment, its people and its action,
+   * and draws no chip or "Due in" line it has nothing to fill with.
+   */
+  describe('a task with no due journal', () => {
+    it('draws the commitment, contacts and action, and no chip or due line', () => {
+      render(
+        <DashboardTaskRow
+          task={dashboardTask({
+            due_journal: null,
+            contacts: [{ contact_id: 3, name: 'Priya Patel', photo_url: null }],
+          })}
+          actions={<button type='button'>Done</button>}
+        />
+      );
+
+      expect(
+        screen.getByText('Send Priya the deposit receipt')
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('dashboard-task-contacts')).toHaveTextContent(
+        'Priya Patel'
+      );
+      expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-task-chip')
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('dashboard-task-due')
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    });
+
+    it('draws a neutral accent bar rather than a journal colour', () => {
+      render(<DashboardTaskRow task={dashboardTask({ due_journal: null })} />);
+
+      expect(screen.getByTestId('dashboard-task-accent')).toHaveClass(
+        'bg-muted-foreground/40'
+      );
+    });
+  });
+
   it('marks its decorative icons as hidden from assistive tech', () => {
     const { container } = render(<DashboardTaskRow task={dashboardTask()} />);
 

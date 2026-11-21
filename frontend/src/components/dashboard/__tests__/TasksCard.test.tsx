@@ -262,6 +262,25 @@ describe('TasksCard', () => {
       ]);
     });
 
+    it('draws a row with no due journal beside a dated one', async () => {
+      serveReady([
+        dashboardTask({ task_id: 1, days_away: 0 }),
+        dashboardTask({ task_id: 2, days_away: 1, due_journal: null }),
+      ]);
+
+      renderWithProviders(<TasksCard />);
+
+      const rows =
+        await within(tasksList()).findAllByTestId(/^dashboard-task-\d+$/);
+      expect(rows).toHaveLength(2);
+      expect(
+        within(rows[1]!).queryByTestId('dashboard-task-chip')
+      ).not.toBeInTheDocument();
+      expect(
+        within(rows[1]!).getByTestId('dashboard-task-action-done')
+      ).toBeInTheDocument();
+    });
+
     it('draws no empty line while it holds rows', async () => {
       serveReady(SIX_TASKS);
 

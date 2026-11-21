@@ -262,8 +262,12 @@ export function RetargetTaskDialog({
   // for a done task a reopen that never happened. The picker refuses it at
   // selection time; this is the same rule re-read at submit time, where the
   // task's own due journal is a prop and therefore current.
+  //
+  // A task on a list may have no due journal, and then no journal is the one
+  // it is already due in, and none is being left behind as a mention.
+  const currentDueJournalId = due_journal ? String(due_journal.id) : undefined;
   const chosenIsAlreadyDue =
-    chosen != null && chosen.id === String(due_journal.id);
+    chosen != null && chosen.id === currentDueJournalId;
   const canSubmit = chosen != null && !chosenIsAlreadyDue && !busy;
 
   return (
@@ -359,7 +363,7 @@ export function RetargetTaskDialog({
                       inputId={dueJournalInputId}
                       value={field.value}
                       onSelect={journal => field.onChange(journal)}
-                      currentDueJournalId={String(due_journal.id)}
+                      currentDueJournalId={currentDueJournalId}
                       disabled={busy}
                     />
                     <FormMessage />
@@ -369,14 +373,18 @@ export function RetargetTaskDialog({
 
               {/* The model's one automatic link, and it applies to every case
                   rather than only to a deferral, so it is stated here rather
-                  than in one of the four per-case descriptions. */}
-              <p
-                className='text-muted-foreground text-sm'
-                data-testid='retarget-keeps-previous'
-              >
-                The journal this task is leaving is kept on it as a mention, so
-                the trail of a deferred commitment stays visible.
-              </p>
+                  than in one of the four per-case descriptions. Only when
+                  there is a journal being left: a task with no due journal
+                  leaves none behind. */}
+              {currentDueJournalId !== undefined && (
+                <p
+                  className='text-muted-foreground text-sm'
+                  data-testid='retarget-keeps-previous'
+                >
+                  The journal this task is leaving is kept on it as a mention,
+                  so the trail of a deferred commitment stays visible.
+                </p>
+              )}
 
               <DialogFooter>
                 <Button
