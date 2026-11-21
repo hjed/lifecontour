@@ -1648,7 +1648,9 @@ upcoming occurrence — exactly the profile of a task's due journal — and leav
 instead. Cancellation is the escape hatch the guard steers users toward, and a user's commitment outranks
 a sync tidy-up. **The same holds for a list task**, which the guard no longer refuses for: the tidier's
 `_is_protected` keeps any continuation `preview_delete` reports a list-task link on, so a calendar sync
-never undates a task the user put there (user decision, ITER21-001 Phase 16).
+never undates a task the user put there (user decision, ITER21-001 Phase 16). It locks the journal row
+(`SqlJournalEventLinkRepository.lock_journal`) before counting and holds it through the delete, so a link
+committed after the count waits on its foreign key instead of being detached by a delete that found none.
 
 Journal **merge** is deliberately not guarded: it deletes the absorbed journal through
 `JournalRepository.delete` directly, and blocking it would break the calendar-sync workflows the journals

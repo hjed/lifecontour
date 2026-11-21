@@ -159,6 +159,10 @@ class CancelledRecurrenceTidier:
         # A list task's link is something the user added, but deleting the
         # journal would not be refused for it — the task would just lose the
         # link — so the guard's refusal below cannot stand in for this check.
+        # The journal is locked first and stays locked to the delete, so a link
+        # committed after the count cannot be detached by a delete that decided
+        # there were none.
+        await self.link_repo.lock_journal(linked.journal_id)
         preview = await self.journal_service.preview_delete(linked.journal_id)
         return preview.list_tasks_losing_link > 0
 

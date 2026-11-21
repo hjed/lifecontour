@@ -1134,7 +1134,9 @@ the retry); `test_journal_delete_guard_integration.py` (guard leaves out due/cre
 tasks, still returns the journal-only one); `test_journal_merge_task_links_integration.py`
 (`TestListTaskLinksRepointAsToday`); `test_journal_cancellation_lapse_integration.py`
 (`TestCancellingAListTasksDueJournal`: through the person's route, links kept, `lapsed=false`, not in
-upcoming, `list_task_due` undated then restored); `test_cancelled_recurrence_keep_next.py` (list
+upcoming, `list_task_due` undated then restored); in the new delete file, a real detach rolled back by a
+failing `DELETE` (links and outbox restored, one event after a retry) and two-connection lock tests
+(a racing link waits on the tidier's and the detach's journal lock); `test_cancelled_recurrence_keep_next.py` (list
 task due / mentioning keeps a continuation); `test_task_history_projection_e2e.py` (the event through
 the real relay and consumer; the "every type" lifecycle); `test_task_event_completeness_integration.py`
 (write path + read); REST `test_journal_endpoints.py::TestJournalDeleteWithListTasks` and
@@ -1155,7 +1157,8 @@ suite in chunks (~4,600 passed, 7 pre-existing skips) and pre-commit.
   concurrently waits on its foreign key and then fails, rather than landing after the read and
   cascading away with no event (found by the phase's independent review).
 - **The tidier keeps a continuation a list task links to** (user decision): a sync tidy-up must not
-  undate a user's task now that the guard no longer refuses for it.
+  undate a user's task now that the guard no longer refuses for it. It locks the journal row before
+  counting and holds it through the delete (PR review), so a link cannot slip in behind the count.
 - **The preview returns only the count**; REST `DELETE` stays 204, MCP reports the count.
 - **Daily-summary invalidation does not subscribe** to `TaskJournalLinksRemoved`: summary inputs are
   journal-only, and `JournalDeleted` already invalidates the deleted journal's days.

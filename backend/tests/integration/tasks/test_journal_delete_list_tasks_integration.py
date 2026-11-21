@@ -22,7 +22,9 @@ What is asserted, in order:
   existing retry rather than becoming a 500.
 """
 
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -30,15 +32,22 @@ from core_shared.models.history import Provenance
 from core_shared.models.journals import JournalHasAnchoredTasksError
 from core_shared.models.tasks import TaskJournalDetachment, TaskStatus
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from app.core.integrations.adapters.sql.journal_event_link_repository import (
+    SqlJournalEventLinkRepository,
+)
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.journal_service import (
     JournalDeletePreview,
     JournalService,
 )
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.infrastructure.unit_of_work import unit_of_work
+from tests.integration.concurrency_helpers import overlap
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
@@ -484,3 +493,188 @@ class TestARacingListTaskIsCaughtByTheRetry:
         assert removed == 1
         assert (await _task_row(async_connection, task_id)).due_journal_id is None
         assert not await _journal_exists(async_connection, doomed_id)
+
+
+class _DeleteFailsTimes:
+    """The real journal repository, except that its first ``n`` deletes fail.
+
+    The failure is the ``IntegrityError`` the anchors' RESTRICT would raise, so
+    it reaches the delete's savepoint exactly as a real violation would — after
+    the detach has really run, really written and really published.
+    """
+
+    def __init__(self, inner: SqlJournalRepository, failures: int) -> None:
+        self.inner = inner
+        self.failures = failures
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    async def delete(self, journal_id: int) -> None:
+        if self.failures > 0:
+            self.failures -= 1
+            raise IntegrityError(
+                "DELETE FROM journals WHERE id = :id",
+                {},
+                Exception("violates foreign key constraint on table tasks"),
+            )
+        await self.inner.delete(journal_id)
+
+
+async def _removed_events(conn: AsyncConnection, task_id: int) -> int:
+    return len(
+        [
+            event
+            for event in await task_events(conn, task_id=task_id)
+            if event.event_type == "TaskJournalLinksRemoved"
+        ]
+    )
+
+
+@pytest.mark.integration
+class TestAFailedDeleteTakesTheDetachBack:
+    """The detach and its events share the ``DELETE``'s savepoint.
+
+    Here the detach is real — it nulls the anchor, deletes the mention and
+    writes the outbox row — and only then does the ``DELETE`` fail, so these
+    are the tests that would catch the detach running outside the savepoint.
+    """
+
+    async def _linked_list_task(
+        self, conn: AsyncConnection, task_list_id: int, journal_id: int
+    ) -> int:
+        task_id = await create_list_task(
+            conn, task_list_id=task_list_id, due_journal_id=journal_id
+        )
+        await link_intermediate_journal(conn, task_id=task_id, journal_id=journal_id)
+        return task_id
+
+    async def test_a_delete_that_fails_twice_restores_every_link_and_event(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_list_id: int,
+        doomed_id: int,
+    ) -> None:
+        task_id = await self._linked_list_task(
+            async_connection, task_list_id, doomed_id
+        )
+        failing = _DeleteFailsTimes(journal_repository, failures=2)
+        service = build_journal_service(
+            async_connection, journal_repo=cast(JournalRepository, failing)
+        )
+
+        with pytest.raises(IntegrityError):
+            await service.delete_journal(doomed_id, async_connection)
+
+        assert (await _task_row(async_connection, task_id)).due_journal_id == doomed_id
+        assert await _mentions(async_connection, task_id) == [doomed_id]
+        assert await _removed_events(async_connection, task_id) == 0
+        assert await _journal_exists(async_connection, doomed_id)
+
+    async def test_a_retried_delete_announces_each_task_once(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_list_id: int,
+        doomed_id: int,
+    ) -> None:
+        """The first attempt's event is rolled back with it, so the retry's is
+        the only one a task's history ever sees."""
+        task_id = await self._linked_list_task(
+            async_connection, task_list_id, doomed_id
+        )
+        failing = _DeleteFailsTimes(journal_repository, failures=1)
+        service = build_journal_service(
+            async_connection, journal_repo=cast(JournalRepository, failing)
+        )
+
+        removed = await service.delete_journal(doomed_id, async_connection)
+
+        assert removed == 1
+        assert (await _task_row(async_connection, task_id)).due_journal_id is None
+        assert await _mentions(async_connection, task_id) == []
+        assert await _removed_events(async_connection, task_id) == 1
+        assert not await _journal_exists(async_connection, doomed_id)
+
+
+@pytest_asyncio.fixture
+async def racing_owner(async_engine: AsyncEngine) -> AsyncIterator[str]:
+    """A one-off owner whose committed rows are deleted after the test."""
+    owner = f"race-{uuid4()}"
+    yield owner
+    async with async_engine.connect() as cleanup:
+        for table in ("tasks", "task_lists", "journals"):
+            await cleanup.execute(
+                text(f"DELETE FROM {table} WHERE user_id = :owner"),
+                {"owner": owner},
+            )
+        await cleanup.commit()
+
+
+async def _committed_journal_and_list(
+    async_engine: AsyncEngine, owner: str
+) -> tuple[int, int]:
+    async with async_engine.connect() as conn:
+        journal_id = await create_journal(
+            SqlJournalRepository(conn), title="Racing", user_id=owner
+        )
+        task_list = await seed_task_list(conn, "Racing", user_id=owner)
+        assert task_list.id is not None
+        await conn.commit()
+    return journal_id, task_list.id
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestALinkCannotSlipInBehindTheCount:
+    """Both places that decide "no list task links here" hold the journal row.
+
+    A task link's foreign key takes a key-share lock on the journal, so a link
+    written while the journal is held waits for the holder. ``overlap`` fails
+    unless the second writer really blocks, which is the whole assertion.
+    """
+
+    async def test_a_link_waits_for_the_tidiers_journal_lock(
+        self, async_engine: AsyncEngine, racing_owner: str
+    ) -> None:
+        journal_id, task_list_id = await _committed_journal_and_list(
+            async_engine, racing_owner
+        )
+
+        async def tidier_counts(conn: AsyncConnection) -> None:
+            await SqlJournalEventLinkRepository(conn).lock_journal(journal_id)
+
+        async def task_links(conn: AsyncConnection) -> None:
+            async with unit_of_work(conn):
+                await create_list_task(
+                    conn,
+                    task_list_id=task_list_id,
+                    due_journal_id=journal_id,
+                    user_id=racing_owner,
+                )
+
+        await overlap(async_engine, tidier_counts, task_links)
+
+    async def test_a_link_waits_for_the_detach(
+        self, async_engine: AsyncEngine, racing_owner: str
+    ) -> None:
+        journal_id, task_list_id = await _committed_journal_and_list(
+            async_engine, racing_owner
+        )
+
+        async def detach(conn: AsyncConnection) -> None:
+            await SqlTaskAnchorRepository(conn).detach_list_tasks_from_journal(
+                journal_id
+            )
+
+        async def task_links(conn: AsyncConnection) -> None:
+            async with unit_of_work(conn):
+                await create_list_task(
+                    conn,
+                    task_list_id=task_list_id,
+                    due_journal_id=journal_id,
+                    user_id=racing_owner,
+                )
+
+        await overlap(async_engine, detach, task_links)
