@@ -47,6 +47,17 @@
  * points at. That row offers to close instead, because closing *is* the
  * navigation: the task's own actions are on the page underneath. Every other
  * row closes on its way out too, so no overlay outlives the page it was on.
+ *
+ * **Tasks on a list never block, so the confirmation says what they lose.** A
+ * list task created, due or mentioned here loses that link instead, and one
+ * due here becomes undated. The dialog reads the count from the delete
+ * preview each time it opens and holds the confirm until it has an answer, so
+ * nobody confirms before seeing it. Zero says nothing, because nothing is
+ * lost. A failed read says it could not check and lets the delete go ahead:
+ * the delete is safe whatever links exist, so the preview informs rather than
+ * gates. The refusal view states the count too — a delete refused by
+ * journal-only tasks changes nothing, so those list tasks are still waiting to
+ * lose their link once the blockers are cleared.
  */
 
 'use client';
@@ -66,7 +77,11 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { blockingTasksFrom, useDeleteJournal } from '@/lib/api/journals';
+import {
+  blockingTasksFrom,
+  useDeleteJournal,
+  useJournalDeletePreview,
+} from '@/lib/api/journals';
 import { statusWording } from '@/lib/task-display';
 import { JournalType, type BlockingTask, type Journal } from '@/types/journals';
 import type { TaskAnchorRole } from '@/types/journals';
@@ -113,12 +128,37 @@ function describeRemedy(roles: readonly TaskAnchorRole[]): string {
     : 'Retarget it onto another journal, or delete it, to clear this.';
 }
 
+/** What the confirmation says about list tasks that will lose their link. */
+function describeListTasksLosingLink(count: number): string {
+  return count === 1
+    ? '1 task on a list links to this journal and will lose that link. If it’s due here, it will have no due date.'
+    : `${count} tasks on a list link to this journal and will lose that link. Any due here will have no due date.`;
+}
+
+/** The same count, on a refusal: it applies once the blockers are cleared. */
+function describeListTasksAfterBlockers(count: number): string {
+  return `Once these are cleared, ${count} ${count === 1 ? 'task' : 'tasks'} on a list will also lose ${count === 1 ? 'its' : 'their'} link to this journal.`;
+}
+
 export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
   const router = useRouter();
   const deleteJournal = useDeleteJournal();
 
   const [open, setOpen] = useState(false);
   const [blockers, setBlockers] = useState<BlockingTask[] | null>(null);
+
+  // Called here rather than inside the dialog content, which unmounts on
+  // close: the observer persists, so a reopen holds the last count while it
+  // refetches, and only a settled read (`!isFetching`) is shown or trusted.
+  const preview = useJournalDeletePreview(journal.id, { enabled: open });
+  // Settled means an answer: not fetching *and* succeeded or failed. A read
+  // paused offline is neither, and must keep the confirm held.
+  const previewSettled =
+    !preview.isFetching && (preview.isSuccess || preview.isError);
+  const listTasksLosingLink =
+    previewSettled && preview.isSuccess ? preview.data : null;
+  const previewFailed = previewSettled && preview.isError;
+  const awaitingPreview = open && !previewSettled;
 
   const isEvent = journal.types?.includes(JournalType.EVENT) ?? false;
 
@@ -200,10 +240,19 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
               <AlertDialogTitle>
                 This journal can’t be deleted yet
               </AlertDialogTitle>
-              <AlertDialogDescription>
-                {blockers.length === 1
-                  ? 'One task is anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling it will not release the journal — only the anchor itself will.'
-                  : `${blockers.length} tasks are anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling them will not release the journal — only the anchors themselves will.`}
+              <AlertDialogDescription asChild>
+                <div className='space-y-2'>
+                  <p>
+                    {blockers.length === 1
+                      ? 'One task is anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling it will not release the journal — only the anchor itself will.'
+                      : `${blockers.length} tasks are anchored to this journal, and a task can never exist without both of its journals. Completing or cancelling them will not release the journal — only the anchors themselves will.`}
+                  </p>
+                  {listTasksLosingLink ? (
+                    <p data-testid='delete-journal-list-tasks'>
+                      {describeListTasksAfterBlockers(listTasksLosingLink)}
+                    </p>
+                  ) : null}
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
 
@@ -272,11 +321,39 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
           <>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete this journal?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Deleting “{journal.title}” is permanent and takes its content,
-                tags and relationships with it.
+              <AlertDialogDescription asChild>
+                <div className='space-y-2'>
+                  <p>
+                    Deleting “{journal.title}” is permanent and takes its
+                    content, tags and relationships with it.
+                  </p>
+                  {listTasksLosingLink ? (
+                    <p
+                      className='text-foreground'
+                      data-testid='delete-journal-list-tasks'
+                    >
+                      {describeListTasksLosingLink(listTasksLosingLink)}
+                    </p>
+                  ) : null}
+                  {previewFailed ? (
+                    <p data-testid='delete-journal-preview-status'>
+                      Couldn’t check whether tasks on a list link to this
+                      journal.
+                    </p>
+                  ) : null}
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
+
+            {awaitingPreview ? (
+              <p
+                role='status'
+                className='text-muted-foreground text-sm'
+                data-testid='delete-journal-preview-status'
+              >
+                Checking linked tasks…
+              </p>
+            ) : null}
 
             <p
               className='text-muted-foreground text-sm'
@@ -290,7 +367,7 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
               <Button
                 type='button'
                 variant='destructive'
-                disabled={deleteJournal.isPending}
+                disabled={deleteJournal.isPending || awaitingPreview}
                 data-testid='confirm-delete-journal'
                 onClick={send}
               >
