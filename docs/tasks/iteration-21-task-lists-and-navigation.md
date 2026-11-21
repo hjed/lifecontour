@@ -867,14 +867,133 @@ passed, 7 pre-existing skips) and pre-commit.
   (next-day midnight) pushes a journal's last day one day late. The MCP schema's description of
   `end` could say it is inclusive.
 
-#### Phase 14: Task repository: list queries
+#### Phase 14: Task repository: list queries ✅ DONE
 
 **Prerequisites:** Phase 10.
-**Estimated diff:** ~140 production → **~840 tracked** (×6)
+**Estimated diff:** ~140 production → **~840 tracked** (×6) · **Actual:** ~665 production → **~2,170
+tracked** (2,174 insertions, 18 deletions excluding this document: 665 production — adapter 319, port
+156, migration 65, the reorder rule, `TaskPage`, the conflict error and exports 125; 1,460 tests; 49
+architecture docs). Production ran ×4.8 on the estimate: the estimate priced the reads alone, and the phase also took a
+migration (`closed_at`, which Completed's order needs and nothing stored) and in-list reordering
+(user decision) with its lock order. Tracked landed at ×3.3 production; most of the tests are the
+second-user and concurrency cases.
 
 **Acceptance Criteria:**
 
-- [ ] Membership, positions, open tasks in order, closed tasks paged, open counts per list.
+- [x] Membership, positions, open tasks in order, closed tasks paged, open counts per list.
+
+**Delivered:** six methods on the `TaskRepository` port (`app/core/tasks/models/repositories.py`),
+implemented by `SqlTaskRepository`:
+- `add_to_list(task_id, task_list_id, user_id)` puts a task at the **bottom** of a list (one past the
+  owner's highest position there, closed tasks included): a journal-only task joining, a move from
+  another list, or rejoining its own. It keeps journals, due date, status, flag and icon.
+- `move_within_list(task_id, user_id, *, after_task_id)` moves an open task to just after another
+  open task on its list, or to the top (`None`). It writes no event and leaves `updated_at` alone.
+  The order comes from the pure rule `reorder_open_tasks` (`core_shared/core_shared/models/tasks/list_order.py`),
+  which hands the open tasks' **existing** positions out again in the new order and returns only
+  changed rows.
+- `remove_from_list(task_id, user_id)` clears `task_list_id`, `position` and `due_date` in one
+  statement.
+- `find_open_tasks_on_list` returns not-done tasks in `(position, id)` order.
+- `find_closed_tasks_on_list(…, *, limit, offset)` returns a `TaskPage(tasks, total)` (new, in
+  `core_shared.models.tasks`), most recently closed first, with the total from a separate count.
+- `count_open_tasks_by_list(ids, user_id)` returns per-list open counts; a list with none is absent.
+
+Migration `0147_add_closed_at_to_tasks.py` adds `tasks.closed_at`, backfilled from `updated_at` for
+closed rows, with `ck_tasks_closed_at_matches_status` and the partial index
+`ix_tasks_task_list_id_closed_at`. `save()` stamps it on entering a closed status (done →
+cancelled included), clears it on reopening and keeps it on every other edit. It is not on the
+entity. No REST, MCP, event or UI contract changed.
+
+**Tests:**
+- Unit:
+  - `tests/unit/tasks/test_list_order.py` (15: top, middle, bottom, keyboard ±1, no-ops,
+    position reuse with gaps, duplicates made strictly increasing, refusals);
+  - `test_task_repository_list_paging_args.py` (4: limit and offset refused before any
+    statement; `TaskPage` frozen).
+- Integration:
+  - `tests/integration/tasks/test_task_repository_list_queries_integration.py` (46):
+    - join and move at the bottom, counting closed tasks;
+    - reorder persistence, closed positions untouched, siblings' `updated_at` and the outbox
+      unchanged;
+    - every refusal;
+    - leave, and the anchor CHECK refusing a leave with nothing written;
+    - open order with a tie;
+    - closed order, pages and the total past the end;
+    - counts;
+    - second-user and cross-owner-row isolation on every method;
+    - five overlap tests (join/join, move/join, move/move, edit/move, and a neighbour closed while
+      the move waits → 409). The join/join test was mutation-checked: it fails with the list lock
+      removed.
+  - `TestSaveMaintainsClosedAt` in `test_task_repository_list_columns_integration.py` (9).
+  - `test_task_closed_at_migration.py` (3: backfill and round trip, each CHECK mismatch).
+  - `tests/unit/tasks/test_task_validation_error_surfaces.py`: the new 409 code.
+- Existing setup changed, assertions not:
+  - `task_seeding` inserts stamp `closed_at` from status (adds `stored_closed_at` and
+    `backdate_closed_at`);
+  - the raw cancel in `test_task_service_set_status_integration.py` sets it too.
+- `test_task_event_completeness_integration.py` classifies the three reads and pins the
+  exclusions below (user decision).
+- No E2E: no UI.
+- Gates run locally:
+  - ruff format/check and mypy (backend, core_shared);
+  - backend unit suite (5,512 passed), core_shared (868);
+  - the full backend integration suite in ten chunks (4,495 passed, 7 pre-existing skips);
+  - pre-commit on the changed files. The frontend hooks need `node_modules`; no frontend file
+    changed.
+
+**Decisions (recorded during implementation):**
+- **`closed_at`, not `updated_at`** (user decision). Every edit moves `updated_at`, so editing a
+  completed task would jump it to the top of Completed.
+- **Reordering is in this phase** (user decision). "Positions" covers moving as well as placing.
+  The question that made Phase 2 defer list reordering (does the index count archived lists?) has a
+  spec answer for tasks: drag acts on open tasks only.
+- **Moves name a neighbour (`after_task_id`), not an index.** A client with a stale view still lands
+  the task beside the one it chose; an index would put it elsewhere without error.
+- **Positions are reused, not renumbered,** so a move never creates a value a closed task could tie
+  with when reopened.
+- **Lock order: the `task_lists` row first, then `tasks` rows, each in ascending id.** A reorder
+  locks every open task on its list, so a "task, then list" caller would deadlock against it.
+- **Reordering does not touch `updated_at`.** No task route uses it as a precondition (Conditional
+  Writes covers journals and contacts), and moving one task must not look like an edit of its
+  neighbours.
+- **The joining and leaving writes publish nothing yet** (user decision). The repository never
+  publishes; the services that call them do. They are named exclusions in the event-completeness
+  guard until Phases 26 and 27. `move_within_list` is excluded permanently, because the spec gives
+  reordering no event. The guard pins the set to exactly these three.
+- **No new port.** The methods sit on `TaskRepository` so one row mapper serves every read.
+- **A list that changed underneath a write is a 409, not a bug** (from the implementation review).
+  A plain edit locks only its own task, so the neighbour a reorder names, or the task itself, can
+  close or leave the list after the caller checked and before the reorder holds the locks.
+  `TaskListChangedConcurrentlyError` (409, REST `TASK_LIST_CHANGED`, mapped ahead of its endpoint)
+  refuses it; an overlap test reproduces the race. Following itself, or a task on no list, stays a
+  `ValueError` (a caller's bug).
+- **The lock order covers list-side writers only.** A journal merge re-points anchors by journal
+  without a list lock, so a merge overlapping a reorder of the same tasks can deadlock (PostgreSQL
+  aborts one side). No corruption; left as is.
+
+**Notes for later phases:**
+- *Every list-wide or membership write (Phases 18, 25, 26, 27, 29):* follow the lock order.
+  - Lock the list(s) by ascending id, then the task(s), then call the repository. Re-locking in
+    the same transaction is free.
+  - Never take a task lock and then ask for its list.
+- *Phase 15:* read `count_open_tasks_by_list(...).get(id, 0)` for the list listing.
+- *Phase 19:* reuse `_BOTTOM_OF_LIST` in the list-task INSERT, and lock the list first.
+- *Phase 21:* `find_open_tasks_on_list` / `find_closed_tasks_on_list` return `[]` / an empty page
+  for an unowned list. Resolve the list first to return a 404.
+- *Phase 24:* reopening clears `closed_at` through `save()`. The task keeps its old position, which
+  reordering never hands to another task.
+- *Phase 25:* expose `move_within_list` with `after_task_id` (`null` = top).
+  - Validate that the task and the anchor are open tasks on the same list and map that to a 4xx.
+    A race the check cannot close surfaces as `TaskListChangedConcurrentlyError` (409, already
+    mapped on REST); give the MCP tool's refusal test that case too.
+  - No event; the exclusion stays.
+- *Phase 26:* call `add_to_list` after locking source and target lists. Publish the list-membership
+  event, then **delete the `add_to_list` entry from `NAMED_EXCLUSIONS`** and add a `WritePath` in
+  `test_task_event_completeness_integration.py`.
+- *Phase 27:* check both anchors under lock, then call `remove_from_list`. **Delete its
+  `NAMED_EXCLUSIONS` entry** and add a `WritePath`.
+- *Phase 29:* lock the list, then its tasks in id order, before settling each task.
 
 #### Phase 15: Task reads carry list, due date, flag, icon, overdue
 
@@ -997,6 +1116,7 @@ passed, 7 pre-existing skips) and pre-commit.
 
 - [ ] List → list; journal-only → list (stops lapsing).
 - [ ] New list-membership event with its history projection.
+- [ ] `add_to_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 27: Remove a task from its list
@@ -1007,6 +1127,7 @@ passed, 7 pre-existing skips) and pre-commit.
 **Acceptance Criteria:**
 
 - [ ] Only with both anchors; response says when it leaves the task lapsed.
+- [ ] `remove_from_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 28: Flag and icon on any task

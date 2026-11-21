@@ -502,6 +502,13 @@ a refusal a client can place from the code alone (`TASK_DUE_JOURNAL_NOT_FUTURE`,
 `TASK_DUE_DATE_IN_PAST` (400) refuses a list task's due date before today in the
 user's timezone; it is mapped ahead of the first endpoint that can set a due date
 (see *[List-task dates and overdue derivation](./domain-architecture.md#list-task-dates-and-overdue-derivation)*).
+`TASK_LIST_CHANGED` (409) refuses a list membership write — a reorder naming a
+task and the neighbour it should follow, or a removal — when, once the list's
+lock is held, either task has closed or left the list. A plain edit locks only
+its own task, so this can happen however carefully the caller checked first; the
+client re-reads the list and retries. It is mapped ahead of the first endpoint
+that can raise it (reorder, removal from a list); see *Tasks on a list* in
+[`database-design.md`](./database-design.md).
 
 `TaskAnchorJournalNotFoundError` names **which journal anchor was refused**:
 a create or retarget can answer 404 with code `TASK_ANCHOR_JOURNAL_NOT_FOUND`

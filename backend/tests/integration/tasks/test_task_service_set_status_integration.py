@@ -405,7 +405,10 @@ class TestOverlappingCallsCannotBypassTheMatrix:
                     )
 
                 await holder.execute(
-                    text("UPDATE tasks SET status = 'cancelled' WHERE id = :task_id"),
+                    text(
+                        "UPDATE tasks SET status = 'cancelled', closed_at = now() "
+                        "WHERE id = :task_id"
+                    ),
                     {"task_id": task_id},
                 )
                 await holder.commit()
