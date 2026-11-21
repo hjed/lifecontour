@@ -1153,6 +1153,9 @@ suite in chunks (~4,600 passed, 7 pre-existing skips) and pre-commit.
   `blocking_task_from_anchors` stays non-optional.
 - **No `SET NULL` migration**: it would trip the journal-only CHECK (`23514`) and null anchors
   with no event.
+- **The detach reports what its statements did, not what its read inferred** (PR review): the
+  mention delete and the anchor update carry `RETURNING`, so a mention someone else detached after
+  the read is not announced a second time, and a task left with nothing removed is not reported.
 - **The detach locks the journal row first** (as the merge does), so a task link inserted
   concurrently waits on its foreign key and then fails, rather than landing after the read and
   cascading away with no event (found by the phase's independent review).
