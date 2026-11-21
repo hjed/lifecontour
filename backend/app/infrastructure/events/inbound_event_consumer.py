@@ -193,6 +193,9 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
             TagHierarchyService,
         )
         from app.core.integrations.outbox_event_processor import OutboxEventProcessor
+        from app.core.tasks.adapters.sql.task_list_repository import (
+            SqlTaskListRepository,
+        )
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
@@ -206,7 +209,11 @@ class InboundEventConsumer(DeadLetterConsumerMixin, StreamConsumer):
         # Create services
         address_validation_service = AddressValidationService()
         contact_validation_service = ContactValidationService(contact_repository)
-        history_service = ContactHistoryService(history_repository, contact_repository)
+        history_service = ContactHistoryService(
+            history_repository,
+            contact_repository,
+            SqlTaskListRepository(connection),
+        )
         tag_hierarchy_service = TagHierarchyService(tag_repository)
 
         # Create contact service

@@ -495,7 +495,11 @@ def _read_model(
     gives for its own helper.
     """
     due_journal = TaskJournalRef(
-        id=900 + task_id, title=f"journal {task_id}", date=due_date, cancelled=False
+        id=900 + task_id,
+        title=f"journal {task_id}",
+        date=due_date,
+        last_day=due_date,
+        cancelled=False,
     )
     return build_task_read_model(
         task=Task(
@@ -506,11 +510,16 @@ def _read_model(
             due_journal_id=due_journal.id,
         ),
         creating_journal=TaskJournalRef(
-            id=1, title="where it arose", date=due_date, cancelled=False
+            id=1,
+            title="where it arose",
+            date=due_date,
+            last_day=due_date,
+            cancelled=False,
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=[],
+        task_list=None,
         today=due_date,
     )
 

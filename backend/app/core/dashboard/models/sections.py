@@ -44,7 +44,12 @@ from datetime import date
 from enum import StrEnum
 
 from core_shared.models.date_window import UpcomingWindow
-from core_shared.models.tasks import TaskContactRef, TaskJournalRef
+from core_shared.models.tasks import (
+    TaskContactRef,
+    TaskIcon,
+    TaskJournalRef,
+    TaskListRef,
+)
 
 from app.core.contacts.models.upcoming_dates import UpcomingContactDate
 from app.core.journal.models.agenda import AgendaEntry
@@ -181,9 +186,13 @@ class DashboardTask:
     material no dashboard row shows. A field that is always the same value
     invites a surface to branch on it.
 
-    The two field types it does keep are the tasks domain's own
-    ``TaskJournalRef`` and ``TaskContactRef``, reused rather than re-declared:
-    they already say exactly what a row needs, and a parallel pair would be two
+    ``task_list`` and ``overdue`` are the deliberate exception: constant only
+    until ITER21-004 widens the selection to list tasks, they are carried now
+    so the row's shape does not change when its selection does.
+
+    The field types it keeps are the tasks domain's own ``TaskJournalRef``,
+    ``TaskListRef`` and ``TaskContactRef``, reused rather than re-declared:
+    they already say exactly what a row needs, and a parallel set would be two
     definitions of a task's journal to keep in step.
 
     Attributes:
@@ -199,6 +208,14 @@ class DashboardTask:
             from (**W25**), published rather than left to be derived: the
             window's first day is the page's anchor, and a browser subtracting
             dates in its own zone can land a day out near midnight.
+        flagged: Whether the task is flagged; a row marks it
+        icon: The task's icon key, drawn beside its text, or ``None``
+        task_list: The list the task is on, which a row names and links, or
+            ``None``. Always ``None`` until ITER21-004 lets list tasks onto the
+            card — the selection is journal-only — and carried now so that
+            change is a selection change alone.
+        overdue: Whether a list task is past its date. Always ``False`` until
+            list tasks join the card, for the same reason.
         contacts: The people the task references, in link order (**W27**)
     """
 
@@ -206,6 +223,10 @@ class DashboardTask:
     text: str
     due_journal: TaskJournalRef
     days_away: int
+    flagged: bool
+    icon: TaskIcon | None
+    task_list: TaskListRef | None
+    overdue: bool
     contacts: tuple[TaskContactRef, ...] = ()
 
 

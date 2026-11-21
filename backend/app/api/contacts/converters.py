@@ -63,6 +63,7 @@ from app.api.contacts.schemas import (
     TagAttributes,
     TagResource,
 )
+from app.api.tasks.schemas import task_list_ref_schema
 from app.core.contacts.models.repositories import ContactFieldHistoryEntry
 
 
@@ -607,6 +608,7 @@ class ContactHistoryConverter:
             else str(entry.source),
             created_at=created_at,
             entity_label=entry.entity_label,
+            task_list=task_list_ref_schema(entry.entity_list),
         )
 
         if entry.id is None:

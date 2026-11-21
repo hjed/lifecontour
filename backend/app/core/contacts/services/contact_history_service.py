@@ -8,6 +8,7 @@ tool. The summary generator reads the history repository directly, for a contact
 it has already resolved to its owner.
 """
 
+from core_shared.models.tasks import TaskListRef
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
@@ -16,6 +17,7 @@ from app.core.contacts.models.repositories import (
     ContactFieldHistoryRepository,
     ContactRepository,
 )
+from app.core.tasks.models.repositories import TaskListRepository
 
 _TASK_ENTITY_TYPE = "task"
 
@@ -32,9 +34,14 @@ class ContactHistoryService:
         self,
         history_repo: ContactFieldHistoryRepository,
         contact_repo: ContactRepository,
+        task_list_repo: TaskListRepository,
     ):
         self.history_repo = history_repo
         self.contact_repo = contact_repo
+        # The tasks domain's own port, so a task row is labelled with its list
+        # through the domain that owns lists rather than by SQL reaching into
+        # its tables from here.
+        self.task_list_repo = task_list_repo
 
     async def _require_readable(self, contact_id: int, reader_user_id: str) -> None:
         if not await self.contact_repo.contact_exists(
@@ -60,7 +67,12 @@ class ContactHistoryService:
         the name the entry reads "Linked to a task" and points at nothing — and
         a task has no route of its own to link to instead.
 
-        One extra query, and only when the page actually holds task rows.
+        A task row whose task is on a list is also **labelled with that list**
+        (``entity_list``), so a list task reads on a contact's page as "on
+        Packing". The list is the task's *current* one, read live; a deleted
+        task, or one on no list, is left unlabelled.
+
+        Two extra queries, and only when the page actually holds task rows.
 
         ``reader_user_id`` must own the contact, and it reaches both the
         aggregate read and the naming query: the task rows are scoped to the
@@ -74,6 +86,7 @@ class ContactHistoryService:
             contact_id, limit, offset, reader_user_id=reader_user_id
         )
         await self._name_the_tasks(entries, reader_user_id=reader_user_id)
+        await self._label_the_lists(entries, reader_user_id=reader_user_id)
         return entries
 
     async def _name_the_tasks(
@@ -93,6 +106,36 @@ class ContactHistoryService:
         for entry in entries:
             if entry.entity_type == _TASK_ENTITY_TYPE:
                 entry.entity_label = labels.get(entry.entity_id)
+
+    async def _label_the_lists(
+        self,
+        entries: list[ContactFieldHistoryEntry],
+        *,
+        reader_user_id: str,
+    ) -> None:
+        """Stamp ``entity_list`` on the task rows whose task is on a list.
+
+        Owner-scoped on both the task and the list, so a row never names
+        another user's list.
+        """
+        task_ids = {e.entity_id for e in entries if e.entity_type == _TASK_ENTITY_TYPE}
+        if not task_ids:
+            return
+
+        lists = await self.task_list_repo.find_for_tasks(
+            sorted(task_ids), reader_user_id
+        )
+        for entry in entries:
+            if entry.entity_type != _TASK_ENTITY_TYPE:
+                continue
+            task_list = lists.get(entry.entity_id)
+            if task_list is not None and task_list.id is not None:
+                entry.entity_list = TaskListRef(
+                    id=task_list.id,
+                    name=task_list.name,
+                    icon=task_list.icon,
+                    archived=task_list.is_archived,
+                )
 
     async def get_contact_history_count(
         self,

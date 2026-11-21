@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon
+from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon, TaskStatus
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,6 +25,7 @@ from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
+    create_list_task,
     seed_task_list,
     task_list_events,
 )
@@ -852,3 +853,105 @@ class TestPublishedSchema:
         schemas = create_app(settings=test_settings).openapi()["components"]["schemas"]
 
         assert schemas["TaskIcon"]["enum"] == [icon.value for icon in TaskIcon]
+
+
+async def _seed_counted_lists(conn: AsyncConnection) -> tuple[int, int, int]:
+    """Packing (2 open, 1 done, 1 cancelled), Empty (none), Old (archived, 1
+    open) — and another user's open task on a list of theirs."""
+    packing = await seed_task_list(conn, "Packing")
+    empty = await seed_task_list(conn, "Empty")
+    old = await seed_task_list(conn, "Old", archived_at=ARCHIVED_AT)
+    theirs = await seed_task_list(conn, "Theirs", user_id=OTHER_USER_ID)
+    assert packing.id and empty.id and old.id and theirs.id
+    for status in (
+        TaskStatus.NOT_DONE,
+        TaskStatus.NOT_DONE,
+        TaskStatus.DONE,
+        TaskStatus.CANCELLED,
+    ):
+        await create_list_task(conn, task_list_id=packing.id, status=status)
+    await create_list_task(conn, task_list_id=old.id)
+    await create_list_task(conn, task_list_id=theirs.id, user_id=OTHER_USER_ID)
+    return packing.id, empty.id, old.id
+
+
+def _counts(response_json: dict[str, Any]) -> dict[str, int]:
+    return {
+        resource["attributes"]["name"]: resource["attributes"]["open_task_count"]
+        for resource in response_json["data"]
+    }
+
+
+class TestTheListingCarriesOpenTaskCounts:
+    async def test_each_active_list_carries_its_open_task_count(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Done and cancelled tasks are not open; a list with none says 0."""
+        await _seed_counted_lists(async_connection)
+
+        response = await authenticated_client.get("/api/task-lists")
+
+        assert response.status_code == 200
+        assert _counts(response.json()) == {"Packing": 2, "Empty": 0}
+
+    @pytest.mark.parametrize(
+        ("archived", "expected"),
+        [
+            ("archived", {"Old": 1}),
+            ("all", {"Packing": 2, "Empty": 0, "Old": 1}),
+        ],
+    )
+    async def test_every_archived_filter_carries_the_counts(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        archived: str,
+        expected: dict[str, int],
+    ) -> None:
+        await _seed_counted_lists(async_connection)
+
+        response = await authenticated_client.get(
+            "/api/task-lists", params={"archived": archived}
+        )
+
+        assert _counts(response.json()) == expected
+
+    async def test_another_users_open_tasks_never_count_or_show(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Their task on my list is not one of my open tasks either."""
+        mine = await seed_task_list(async_connection, "Mine")
+        assert mine.id is not None
+        await create_list_task(
+            async_connection, task_list_id=mine.id, user_id=OTHER_USER_ID
+        )
+        theirs = await seed_task_list(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+        await create_list_task(
+            async_connection, task_list_id=theirs.id, user_id=OTHER_USER_ID
+        )
+
+        response = await authenticated_client.get(
+            "/api/task-lists", params={"archived": "all"}
+        )
+
+        assert _counts(response.json()) == {"Mine": 0}
+
+    async def test_an_unknown_filter_is_refused(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        response = await authenticated_client.get(
+            "/api/task-lists", params={"archived": "yes"}
+        )
+
+        assert response.status_code == 400
+
+    async def test_a_single_list_read_is_unchanged(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """The count is the listing's; reading one list answers the list alone."""
+        packing_id, _, _ = await _seed_counted_lists(async_connection)
+
+        response = await authenticated_client.get(f"/api/task-lists/{packing_id}")
+
+        assert "open_task_count" not in response.json()["data"]["attributes"]

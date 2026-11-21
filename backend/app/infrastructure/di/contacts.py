@@ -57,7 +57,10 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
-from app.core.tasks.models.repositories import TaskContactRepository
+from app.core.tasks.models.repositories import (
+    TaskContactRepository,
+    TaskListRepository,
+)
 from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
@@ -188,8 +191,9 @@ class ContactProvider(Provider):
         self,
         history_repo: ContactFieldHistoryRepository,
         contact_repo: ContactRepository,
+        task_list_repo: TaskListRepository,
     ) -> ContactHistoryService:
-        return ContactHistoryService(history_repo, contact_repo)
+        return ContactHistoryService(history_repo, contact_repo, task_list_repo)
 
     @provide
     def get_tag_hierarchy_service(self, tag_repo: TagRepository) -> TagHierarchyService:

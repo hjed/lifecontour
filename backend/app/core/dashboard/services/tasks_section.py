@@ -66,6 +66,10 @@ def _row(model: TaskReadModel, window: UpcomingWindow) -> DashboardTask:
         text=model.task.text,
         due_journal=due_journal,
         days_away=(due_journal.date - window.first_day).days,
+        flagged=model.task.flagged,
+        icon=model.task.icon,
+        task_list=model.task_list,
+        overdue=model.overdue,
         contacts=model.contacts,
     )
 

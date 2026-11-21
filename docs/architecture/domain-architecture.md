@@ -1015,24 +1015,30 @@ The pieces:
   returned rather than a boolean because "the day went by" and "the meeting was cancelled" ask the
   user for different things; the wording is the UI's, and ITER18-002 Phase 4 pins the cancellation
   path end to end.
-- **`task_lapse_reason(task, due_journal, today)`** (same module) — the gate in front of the rule.
+- **The gate in front of the rule is `derive_task_date_state`** (`list_dates.py`, below).
   **Only a journal-only task lapses**: a task on a list never does (list spec invariant 7) — when
-  its date passes it becomes *overdue* and stays on its list — and a task with no due journal has
-  nothing to lapse against, so both answer `None`. Every other task gets `derive_lapse_reason`'s
-  answer unchanged. The list-task date rules extend this gate rather than defining lateness a
-  second time.
-- **`TaskReadModel`, `TaskJournalRef`, `TaskContactRef`** (`core_shared/models/tasks/read_model.py`),
-  built by the pure `build_task_read_model(...)`. A journal ref carries a resolved **`date`**, not an
-  instant, so no surface can re-derive it in the browser's zone and disagree with the rule that
-  judged the task. `TaskReadModel.lapsed` is defined as "there is a reason" rather than computed a
-  second way. **Both anchor refs are optional**, since a list task may have no journal or only one;
+  its date passes it becomes *overdue* and stays on its list. Every journal-only task gets
+  `derive_lapse_reason`'s answer unchanged. Lapse and overdue are one answer, so lateness is never
+  defined twice.
+- **`TaskReadModel`, `TaskJournalRef`, `TaskListRef`, `TaskContactRef`**
+  (`core_shared/models/tasks/read_model.py`), built by the pure `build_task_read_model(...)`. A
+  journal ref carries a resolved **`date`** and **`last_day`**, not instants, so no surface can
+  re-derive them in the browser's zone and disagree with the rule that judged the task; `last_day`
+  is what the overdue rule waits out and is not put on the wire. The model carries `lapse_reason`
+  and `overdue` from `derive_task_date_state` — the due ref becomes `DueJournalDays` through
+  `TaskJournalRef.days()` — and `task_list` (`TaskListRef`: id, name, icon, archived), which must be
+  the task's own list or the builder raises. `TaskReadModel.lapsed` is defined as "there is a
+  reason" rather than computed a second way. **Both anchor refs are optional**, since a list task may have no journal or only one;
   `TaskReadModel.require_journal(anchor)` narrows to a ref for the surfaces that only ever see
   journal-only tasks (the dashboard row, the daily summary's lines). A journal's task groups order
   by the due journal's date, else a list task's due date, with undated tasks last, then by id.
 - **`TaskReadService`** (`backend/app/core/tasks/services/task_read_service.py`), request-scoped
   from `TaskProvider`. An anchor the task does not have reads as a `None` ref; a *present* anchor
   whose journal is missing is still `JournalNotFoundError` (both foreign keys are
-  `ON DELETE RESTRICT`, so that is broken data). The upcoming window and the past-day read
+  `ON DELETE RESTRICT`, so that is broken data). The lists the tasks sit on are one more batched,
+  owner-scoped read (`TaskListRepository.find_by_ids`), **skipped when no task is on a list**, so a
+  journal-only page keeps its statement count; a task naming a list its owner cannot read is
+  `TaskListNotFoundError`, as a missing anchor is. The upcoming window and the past-day read
   (`find_upcoming_tasks`, `find_tasks_due_in_journals`) are **journal-only** in SQL
   (`task_list_id IS NULL`), and `select_upcoming_tasks` states the same rule, so the dashboard,
   `list_upcoming_tasks` and the daily summary leave list tasks out until they learn to show them.

@@ -12,16 +12,21 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListNotFoundError,
+    TaskListSummary,
 )
 
-from app.core.tasks.models.repositories import TaskListRepository
+from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
 
 
 class TaskListReadService:
     """Reads one list, or the owner's lists by archived state."""
 
-    def __init__(self, task_list_repo: TaskListRepository) -> None:
+    def __init__(
+        self, task_list_repo: TaskListRepository, task_repo: TaskRepository
+    ) -> None:
         self.task_list_repo = task_list_repo
+        # For the listing's open-task counts, which are task rows.
+        self.task_repo = task_repo
 
     async def get_task_list(self, *, user_id: str, task_list_id: int) -> TaskList:
         """Return one of the user's lists.
@@ -36,9 +41,25 @@ class TaskListReadService:
 
     async def list_task_lists(
         self, *, user_id: str, archived: TaskListArchiveFilter
-    ) -> list[TaskList]:
-        """Return the user's lists for one archived filter, in the order the
-        repository defines for it: manual order for ``ACTIVE`` and ``ALL``,
-        most-recently-archived first for ``ARCHIVED``.
+    ) -> list[TaskListSummary]:
+        """Return the user's lists for one archived filter, each with its
+        open-task count, in the order the repository defines for it: manual
+        order for ``ACTIVE`` and ``ALL``, most-recently-archived first for
+        ``ARCHIVED``.
+
+        The counts are one owner-scoped statement for the whole listing, and
+        a list with no open tasks — absent from the counts — reads as zero.
         """
-        return await self.task_list_repo.list_for_user(user_id, archived)
+        task_lists = await self.task_list_repo.list_for_user(user_id, archived)
+        if not task_lists:
+            return []
+        # A listed list is persisted, so its id is always set.
+        list_ids = [task_list.id for task_list in task_lists if task_list.id]
+        counts = await self.task_repo.count_open_tasks_by_list(list_ids, user_id)
+        return [
+            TaskListSummary(
+                task_list=task_list,
+                open_task_count=counts.get(task_list.id or 0, 0),
+            )
+            for task_list in task_lists
+        ]

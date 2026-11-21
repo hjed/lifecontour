@@ -37,9 +37,11 @@ from datetime import time as time_type
 from typing import Literal
 
 from core_shared.models.contacts.important_date_types import ImportantDateType
+from core_shared.models.tasks import TaskIcon
 from pydantic import BaseModel, Field
 
 from app.api.common.schemas import JsonApiLinks
+from app.api.tasks.schemas import TaskListRefSchema, task_list_ref_schema
 from app.core.contacts.models.upcoming_dates import UpcomingContactDate
 from app.core.dashboard.models.sections import (
     AgendaDay,
@@ -394,6 +396,24 @@ class DashboardTaskSchema(BaseModel):
             "ordinary — most tasks name nobody — and renders as nothing."
         ),
     )
+    flagged: bool = Field(..., description="Whether the task is flagged")
+    icon: TaskIcon | None = Field(
+        ..., description="The task's icon key from the fixed set, or null"
+    )
+    task_list: TaskListRefSchema | None = Field(
+        ...,
+        description=(
+            "The list the task is on, for the row to name and link, or null. "
+            "Always null while this section holds journal-only tasks."
+        ),
+    )
+    overdue: bool = Field(
+        ...,
+        description=(
+            "Whether a task on a list is past its date. Always false while this "
+            "section holds journal-only tasks, which lapse instead."
+        ),
+    )
 
 
 class TasksSectionSchema(BaseModel):
@@ -707,6 +727,10 @@ def _dashboard_task(task: DashboardTask) -> DashboardTaskSchema:
             date=task.due_journal.date,
         ),
         days_away=task.days_away,
+        flagged=task.flagged,
+        icon=task.icon,
+        task_list=task_list_ref_schema(task.task_list),
+        overdue=task.overdue,
         contacts=[
             DashboardTaskContactSchema(
                 contact_id=contact.id,

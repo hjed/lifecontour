@@ -47,8 +47,8 @@ NEW_DUE_JOURNAL_ID = 33
 # ``DUE_JOURNAL_ID`` would read as correct while describing a link the service
 # refuses to write.
 INTERMEDIATE_JOURNAL_ID = 44
-# The list a list task lives on. Its rows are never read by the unit tests: a
-# read model carries the list id on the task and nothing about the list itself.
+# The list a list task lives on. ``make_task_list_repo`` knows it as "Packing",
+# so a read model built over a list task can label it.
 TASK_LIST_ID = 99
 
 # The two journals a merge is between. Named rather than reusing the anchors
@@ -134,9 +134,9 @@ def make_task_list_repo() -> AsyncMock:
     a renamed method fails rather than being invented by the mock.
     """
     repo = AsyncMock(spec=TaskListRepository)
-    repo.find_by_id_for_share.return_value = TaskList(
-        id=TASK_LIST_ID, user_id=USER_ID, name="Packing", position=0
-    )
+    packing = TaskList(id=TASK_LIST_ID, user_id=USER_ID, name="Packing", position=0)
+    repo.find_by_id_for_share.return_value = packing
+    repo.find_by_ids.return_value = {TASK_LIST_ID: packing}
     return repo
 
 

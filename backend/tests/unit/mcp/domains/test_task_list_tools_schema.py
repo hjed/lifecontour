@@ -47,6 +47,14 @@ def _enum_values(schema: dict[str, Any], node: dict[str, Any]) -> list[str]:
     return enum
 
 
+def _item(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """A list item's own schema, through a ``$ref``."""
+    if "$ref" in node:
+        resolved: dict[str, Any] = schema["$defs"][node["$ref"].rsplit("/", 1)[-1]]
+        return resolved
+    return node
+
+
 class TestTheInputsAreTyped:
     async def test_create_offers_exactly_the_fixed_icon_set(self) -> None:
         schema = (await _tools())["create_task_list"].input_schema
@@ -172,15 +180,25 @@ class TestTheResultShapeIsPublished:
                 icon.value for icon in TaskIcon
             ]
 
-    async def test_list_and_move_answer_with_lists(self) -> None:
-        tools = await _tools()
+    async def test_move_answers_with_lists(self) -> None:
+        schema = (await _tools())["move_task_list"].output_schema
 
-        for name in ("list_task_lists", "move_task_list"):
-            schema = tools[name].output_schema
-            assert schema is not None, f"{name} publishes no outputSchema"
-            assert set(schema["properties"]) == {"lists"}
-            item = schema["properties"]["lists"]["items"]
-            assert set(item["properties"]) == _LIST_FIELDS
+        assert schema is not None, "move_task_list publishes no outputSchema"
+        assert set(schema["properties"]) == {"lists"}
+        item = _item(schema, schema["properties"]["lists"]["items"])
+        assert set(item["properties"]) == _LIST_FIELDS
+
+    async def test_the_listing_answers_with_lists_and_their_open_task_counts(
+        self,
+    ) -> None:
+        """The listing carries each list's open-task count; a move does not."""
+        schema = (await _tools())["list_task_lists"].output_schema
+
+        assert schema is not None, "list_task_lists publishes no outputSchema"
+        assert set(schema["properties"]) == {"lists"}
+        item = _item(schema, schema["properties"]["lists"]["items"])
+        assert set(item["properties"]) == _LIST_FIELDS | {"open_task_count"}
+        assert item["properties"]["open_task_count"]["type"] == "integer"
 
     async def test_history_answers_with_a_page_of_entries(self) -> None:
         schema = (await _tools())["get_task_list_history"].output_schema

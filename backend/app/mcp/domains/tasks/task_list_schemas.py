@@ -31,8 +31,7 @@ class TaskListMCP(BaseModel):
 
 
 class TaskListsMCP(BaseModel):
-    """The user's task lists in their order: one archived filter's, or the
-    active lists after a move."""
+    """The user's active lists in their new order, after a move."""
 
     lists: list[TaskListMCP]
 
@@ -45,3 +44,17 @@ class TaskListHistoryResponse(BaseModel):
     page: int
     limit: int
     entries: list[TaskHistoryEntryMCP]
+
+
+class TaskListSummaryMCP(TaskListMCP):
+    """A task list as the listing answers it, with its open-task count."""
+
+    open_task_count: int = Field(
+        description="How many of the list's tasks are not done; 0 for none"
+    )
+
+
+class TaskListSummariesMCP(BaseModel):
+    """The user's task lists for one archived filter, each with its count."""
+
+    lists: list[TaskListSummaryMCP]

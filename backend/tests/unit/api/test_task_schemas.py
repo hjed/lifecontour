@@ -575,6 +575,10 @@ class TestTaskResponse:
                 status=self._task().status,
                 creating_journal_id=1,
                 due_journal_id=2,
+                task_list_id=None,
+                due_date=None,
+                flagged=False,
+                icon=None,
                 created_at=self._task().created_at,
                 updated_at=self._task().updated_at,
             ),
@@ -593,6 +597,10 @@ class TestTaskResponse:
                     status=TaskStatus.NOT_DONE,
                     creating_journal_id=1,
                     due_journal_id=2,
+                    task_list_id=None,
+                    due_date=None,
+                    flagged=False,
+                    icon=None,
                 ),
             )
         )
@@ -607,6 +615,10 @@ class TestTaskResponse:
             status=TaskStatus.NOT_DONE,
             creating_journal_id=1,
             due_journal_id=2,
+            task_list_id=None,
+            due_date=None,
+            flagged=False,
+            icon=None,
         )
 
         assert attributes.created_at is None
@@ -632,6 +644,10 @@ class TestTheTaskResourceCarriesItsJournalTrail:
             status=TaskStatus.NOT_DONE,
             creating_journal_id=1,
             due_journal_id=2,
+            task_list_id=None,
+            due_date=None,
+            flagged=False,
+            icon=None,
             intermediate_journal_ids=[7, 8],
         )
 
@@ -646,6 +662,10 @@ class TestTheTaskResourceCarriesItsJournalTrail:
             status=TaskStatus.NOT_DONE,
             creating_journal_id=1,
             due_journal_id=2,
+            task_list_id=None,
+            due_date=None,
+            flagged=False,
+            icon=None,
         )
 
         assert attributes.intermediate_journal_ids == []
@@ -659,6 +679,10 @@ class TestTheTaskResourceCarriesItsJournalTrail:
                     status=TaskStatus.NOT_DONE,
                     creating_journal_id=1,
                     due_journal_id=2,
+                    task_list_id=None,
+                    due_date=None,
+                    flagged=False,
+                    icon=None,
                     intermediate_journal_ids=[7],
                 ),
             )
@@ -674,12 +698,20 @@ class TestTheTaskResourceCarriesItsJournalTrail:
             status=TaskStatus.NOT_DONE,
             creating_journal_id=1,
             due_journal_id=2,
+            task_list_id=None,
+            due_date=None,
+            flagged=False,
+            icon=None,
         )
         second = TaskAttributes(
             text="b",
             status=TaskStatus.NOT_DONE,
             creating_journal_id=1,
             due_journal_id=2,
+            task_list_id=None,
+            due_date=None,
+            flagged=False,
+            icon=None,
         )
         first.intermediate_journal_ids.append(99)
 

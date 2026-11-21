@@ -17,7 +17,8 @@ calling the rule directly.
 task, so a read that costs one query per journal or per contact becomes an N+1
 the first time a journal has twenty tasks in it. Every fetch below is batched
 over the ids it needs, including the two anchors and the mentions, which go in a
-single owner-scoped journal query.
+single owner-scoped journal query, and the lists the tasks sit on, which go in
+one more — skipped entirely when no task is on a list.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ from core_shared.models.tasks import (
     TaskContactRef,
     TaskJournalAnchor,
     TaskJournalRef,
+    TaskListNotFoundError,
+    TaskListRef,
     TaskNotFoundError,
     TaskReadModel,
     TaskStatus,
@@ -45,6 +48,7 @@ from core_shared.models.tasks import (
 
 from app.core.journal.services.journal_date_resolver import (
     journal_date,
+    journal_last_day,
     local_window,
     today_in,
 )
@@ -65,7 +69,10 @@ if TYPE_CHECKING:
         JournalRepository,
     )
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
-    from app.core.tasks.models.repositories import TaskRepository
+    from app.core.tasks.models.repositories import (
+        TaskListRepository,
+        TaskRepository,
+    )
 
 
 def _ordered_unique(values: Iterable[int]) -> list[int]:
@@ -119,12 +126,14 @@ class TaskReadService:
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         calendar_info_repo: CalendarInfoRepository,
+        task_list_repo: TaskListRepository,
         date_resolver: JournalDateResolver,
     ) -> None:
         self.task_repo = task_repo
         self.journal_repo = journal_repo
         self.contact_repo = contact_repo
         self.calendar_info_repo = calendar_info_repo
+        self.task_list_repo = task_list_repo
         self.date_resolver = date_resolver
 
     async def read_model(
@@ -538,13 +547,15 @@ class TaskReadService:
 
         **One read per collection, whatever the task count.** The timezone is
         resolved once, every journal across every role of every task arrives in
-        one query, cancellation in one more, and every contact name in one. That
-        is what lets the single-task read and a journal's whole task list share
-        this method: the single read is simply the batch with one task in it,
-        and its seven statements are the same seven. Seven is the *ceiling*
-        rather than a constant: the contact-name lookup is skipped when nothing
-        references anyone, and a journal with no tasks skips both batched link
-        reads as well, so the floor is four. The invariance in the **task
+        one query, cancellation in one more, every contact name in one, and
+        every list the tasks sit on in one. That is what lets the single-task
+        read and a journal's whole task list share this method: the single read
+        is simply the batch with one task in it, and its statements are the
+        same statements. Eight is the *ceiling* rather than a constant: the
+        list lookup is skipped when no task is on a list — so a journal-only
+        page costs the seven it always has — the contact-name lookup when
+        nothing references anyone, and a journal with no tasks skips both
+        batched link reads as well, so the floor is four. The invariance in the **task
         count** is the part that matters, and the part the tests pin.
 
         Args:
@@ -607,6 +618,7 @@ class TaskReadService:
             ),
             user_id=user_id,
         )
+        list_refs = await self._list_refs(user_id, tasks)
 
         models = [
             build_task_read_model(
@@ -629,6 +641,7 @@ class TaskReadService:
                     for contact_id in contacts.get(task.id or 0, [])
                     if contact_id in contact_refs
                 ],
+                task_list=self._list_ref(list_refs, task),
                 today=today,
             )
             for task in tasks
@@ -672,8 +685,49 @@ class TaskReadService:
             id=journal_id,
             title=journal.title,
             date=journal_date(journal, timezone),
+            last_day=journal_last_day(journal, timezone),
             cancelled=cancelled,
         )
+
+    async def _list_refs(
+        self, user_id: str, tasks: Sequence[Task]
+    ) -> dict[int, TaskListRef]:
+        """Every list the tasks sit on, keyed by id, from one owner-scoped read.
+
+        Skipped when no task is on a list, so a page of journal-only tasks costs
+        exactly what it did before lists existed.
+        """
+        list_ids = _ordered_unique(
+            task.task_list_id for task in tasks if task.task_list_id is not None
+        )
+        if not list_ids:
+            return {}
+        found = await self.task_list_repo.find_by_ids(list_ids, user_id)
+        return {
+            list_id: TaskListRef(
+                id=list_id,
+                name=task_list.name,
+                icon=task_list.icon,
+                archived=task_list.is_archived,
+            )
+            for list_id, task_list in found.items()
+        }
+
+    @staticmethod
+    def _list_ref(list_refs: dict[int, TaskListRef], task: Task) -> TaskListRef | None:
+        """The task's list ref, ``None`` for a journal-only task.
+
+        A list the owner cannot read is broken data underneath — a task's list
+        is always its owner's — so it is the list's 404, as a vanished anchor
+        is the journal's. Answering ``None`` would misreport a list task as
+        journal-only, and its lapse with it.
+        """
+        if task.task_list_id is None:
+            return None
+        ref = list_refs.get(task.task_list_id)
+        if ref is None:
+            raise TaskListNotFoundError(task.task_list_id)
+        return ref
 
     @staticmethod
     def _anchor_ref(

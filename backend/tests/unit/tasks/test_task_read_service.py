@@ -44,6 +44,10 @@ from core_shared.models.journals import (
 from core_shared.models.tasks import (
     LapseReason,
     Task,
+    TaskIcon,
+    TaskList,
+    TaskListNotFoundError,
+    TaskListRef,
     TaskNotFoundError,
     TaskStatus,
 )
@@ -55,6 +59,7 @@ from tests.unit.tasks.task_doubles import (
     DUE_JOURNAL_ID,
     OTHER_USER_ID,
     TASK_ID,
+    TASK_LIST_ID,
     USER_ID,
     make_list_task,
     make_task,
@@ -83,6 +88,7 @@ def make_journal(
     start: datetime.datetime,
     *,
     title: str = "Permit Meeting",
+    end: datetime.datetime | None = None,
 ) -> Journal:
     """A persisted journal, as the repository hands it back."""
     return Journal(
@@ -90,8 +96,17 @@ def make_journal(
         user_id=USER_ID,
         title=title,
         content="content",
-        event_date_range=EventDateRange(start=start, end=start),
+        event_date_range=EventDateRange(start=start, end=end or start),
     )
+
+
+PACKING = TaskList(
+    id=TASK_LIST_ID,
+    user_id=USER_ID,
+    name="Packing",
+    icon=TaskIcon.PACKAGE,
+    position=0,
+)
 
 
 @pytest.fixture
@@ -133,6 +148,14 @@ def read_calendar_info_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def read_task_list_repo() -> AsyncMock:
+    """A list repository that knows the one list list tasks sit on."""
+    repo = AsyncMock()
+    repo.find_by_ids.return_value = {TASK_LIST_ID: PACKING}
+    return repo
+
+
+@pytest.fixture
 def read_settings_repo() -> AsyncMock:
     """A settings repository with no configured timezone — the UTC fallback."""
     repo = AsyncMock()
@@ -147,6 +170,7 @@ def read_service(
     read_contact_repo: AsyncMock,
     read_calendar_info_repo: AsyncMock,
     read_settings_repo: AsyncMock,
+    read_task_list_repo: AsyncMock,
 ) -> TaskReadService:
     """The service under test, over mocked ports."""
     return TaskReadService(
@@ -154,6 +178,7 @@ def read_service(
         journal_repo=read_journal_repo,
         contact_repo=read_contact_repo,
         calendar_info_repo=read_calendar_info_repo,
+        task_list_repo=read_task_list_repo,
         date_resolver=JournalDateResolver(read_settings_repo),
     )
 
@@ -668,3 +693,147 @@ class TestAListTask:
 
         with pytest.raises(JournalNotFoundError):
             await read_service.read_model(USER_ID, TASK_ID)
+
+
+@pytest.mark.unit
+class TestTheListAndOverdue:
+    """The list a task is on, and whether it is overdue, through the service."""
+
+    async def test_a_list_task_carries_its_list(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_task_list_repo: AsyncMock,
+    ) -> None:
+        """The list is resolved owner-scoped and carried as a ref."""
+        read_task_repo.find_by_id.return_value = make_list_task()
+
+        model = await read_service.read_model(USER_ID, TASK_ID)
+
+        assert model.task_list == TaskListRef(
+            id=TASK_LIST_ID, name="Packing", icon=TaskIcon.PACKAGE, archived=False
+        )
+        read_task_list_repo.find_by_ids.assert_awaited_once_with(
+            [TASK_LIST_ID], USER_ID
+        )
+
+    async def test_a_journal_only_task_asks_for_no_list(
+        self, read_service: TaskReadService, read_task_list_repo: AsyncMock
+    ) -> None:
+        """No list, no statement: a journal-only page keeps its round trips."""
+        model = await read_service.read_model(USER_ID, TASK_ID)
+
+        assert model.task_list is None
+        read_task_list_repo.find_by_ids.assert_not_awaited()
+
+    async def test_a_list_the_owner_cannot_read_raises(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_task_list_repo: AsyncMock,
+    ) -> None:
+        """A task naming a list that is not there is broken data, as a missing
+        anchor is — and the read never names another user's list."""
+        read_task_repo.find_by_id.return_value = make_list_task()
+        read_task_list_repo.find_by_ids.return_value = {}
+
+        with pytest.raises(TaskListNotFoundError):
+            await read_service.read_model(USER_ID, TASK_ID)
+
+    async def test_a_past_due_date_is_overdue(
+        self, read_service: TaskReadService, read_task_repo: AsyncMock
+    ) -> None:
+        """A due date before today, in the user's timezone, is overdue."""
+        read_task_repo.find_by_id.return_value = make_list_task(
+            due_date=datetime.date(2026, 8, 8)
+        )
+
+        model = await read_service.read_model(
+            USER_ID, TASK_ID, now=NOW_PAST_SYDNEY_MIDNIGHT
+        )
+
+        assert model.overdue is True
+        assert model.lapsed is False
+
+    async def test_a_multi_day_due_journal_waits_out_its_last_local_day(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_journal_repo: AsyncMock,
+        read_settings_repo: AsyncMock,
+    ) -> None:
+        """The last day is the journal's end resolved in the user's zone.
+
+        A trip ending 23:00 on 9 August in Sydney is over at Sydney's 00:30 on
+        the 10th, so its list task is overdue there.
+        """
+        read_settings_repo.get_timezone.return_value = SYDNEY
+        read_task_repo.find_by_id.return_value = make_list_task(
+            due_journal_id=DUE_JOURNAL_ID
+        )
+        read_journal_repo.find_by_ids_for_user.return_value = [
+            make_journal(
+                DUE_JOURNAL_ID,
+                JOURNAL_AT_SYDNEY_LATE_EVENING - datetime.timedelta(days=2),
+                end=JOURNAL_AT_SYDNEY_LATE_EVENING,
+            )
+        ]
+
+        model = await read_service.read_model(
+            USER_ID, TASK_ID, now=NOW_PAST_SYDNEY_MIDNIGHT
+        )
+
+        assert model.require_journal("due").date == datetime.date(2026, 8, 7)
+        assert model.require_journal("due").last_day == datetime.date(2026, 8, 9)
+        assert model.overdue is True
+
+    async def test_the_same_trip_read_in_utc_is_not_overdue_yet(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_journal_repo: AsyncMock,
+    ) -> None:
+        """In UTC it is still the 9th — the trip's last day — so not overdue."""
+        read_task_repo.find_by_id.return_value = make_list_task(
+            due_journal_id=DUE_JOURNAL_ID
+        )
+        read_journal_repo.find_by_ids_for_user.return_value = [
+            make_journal(
+                DUE_JOURNAL_ID,
+                JOURNAL_AT_SYDNEY_LATE_EVENING - datetime.timedelta(days=2),
+                end=JOURNAL_AT_SYDNEY_LATE_EVENING,
+            )
+        ]
+
+        model = await read_service.read_model(
+            USER_ID, TASK_ID, now=NOW_PAST_SYDNEY_MIDNIGHT
+        )
+
+        assert model.overdue is False
+
+    async def test_a_cancelled_due_journal_leaves_a_list_task_undated(
+        self,
+        read_service: TaskReadService,
+        read_task_repo: AsyncMock,
+        read_journal_repo: AsyncMock,
+        read_calendar_info_repo: AsyncMock,
+    ) -> None:
+        """Cancelled and past: neither overdue nor lapsed."""
+        read_task_repo.find_by_id.return_value = make_list_task(
+            due_journal_id=DUE_JOURNAL_ID
+        )
+        read_journal_repo.find_by_ids_for_user.return_value = [
+            make_journal(DUE_JOURNAL_ID, JOURNAL_AT_SYDNEY_LATE_EVENING)
+        ]
+        read_calendar_info_repo.find_cancelled_journal_ids.return_value = {
+            DUE_JOURNAL_ID
+        }
+
+        model = await read_service.read_model(
+            USER_ID,
+            TASK_ID,
+            now=NOW_BEFORE_NEW_YORK_MIDNIGHT + datetime.timedelta(days=3),
+        )
+
+        assert model.overdue is False
+        assert model.lapsed is False

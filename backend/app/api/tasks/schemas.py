@@ -37,8 +37,10 @@ from core_shared.models.tasks import (
     LapseReason,
     Task,
     TaskContactRef,
+    TaskIcon,
     TaskJournalRef,
     TaskLinkRole,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     UpcomingTasks,
@@ -97,8 +99,53 @@ class TaskAttributes(BaseModel):
             "though a journal may be both an anchor and an intermediate link."
         ),
     )
+    task_list_id: int | None = Field(
+        ...,
+        description=(
+            "The list the task is on, or null for a journal-only task. A task on "
+            "a list never lapses; past its date it is overdue instead, which the "
+            "read shape's overdue field reports."
+        ),
+    )
+    due_date: date_type | None = Field(
+        ...,
+        description=(
+            "A plain due date, `YYYY-MM-DD` in your timezone, or null. Only a "
+            "task on a list has one, and never beside a due journal."
+        ),
+    )
+    flagged: bool = Field(
+        ..., description="Whether the task is flagged as one that matters"
+    )
+    icon: TaskIcon | None = Field(
+        ..., description="An icon key from the fixed set, or null"
+    )
     created_at: datetime | None = Field(default=None, description="Creation timestamp")
     updated_at: datetime | None = Field(default=None, description="Last update")
+
+
+def task_attribute_values(
+    task: Task, intermediate_journal_ids: list[int]
+) -> dict[str, Any]:
+    """The attributes every task resource carries, read off the entity.
+
+    Shared by the write answers and the read surfaces, so a task has one
+    attribute set whichever route produced it.
+    """
+    return {
+        "text": task.text,
+        "status": task.status,
+        # Null for an anchor a list task does not have.
+        "creating_journal_id": task.creating_journal_id,
+        "due_journal_id": task.due_journal_id,
+        "intermediate_journal_ids": intermediate_journal_ids,
+        "task_list_id": task.task_list_id,
+        "due_date": task.due_date,
+        "flagged": task.flagged,
+        "icon": task.icon,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
 
 
 class TaskResource(BaseModel):
@@ -519,6 +566,32 @@ def task_self_link(task_id: int, base_url: str = "") -> str:
     return f"{base_url}/api/tasks/{task_id}"
 
 
+class TaskListRefSchema(BaseModel):
+    """The list a task is on, enough to label it and link to it."""
+
+    id: int = Field(..., description="The list's id")
+    name: str = Field(..., description="Its name, the label's text")
+    icon: TaskIcon | None = Field(
+        ..., description="Its icon key from the fixed set, or null"
+    )
+    archived: bool = Field(
+        ...,
+        description=(
+            "Whether the list is archived. Its tasks are then read-only until "
+            "the list is unarchived."
+        ),
+    )
+
+
+def task_list_ref_schema(ref: TaskListRef | None) -> TaskListRefSchema | None:
+    """Render a task's list ref, or null for a journal-only task."""
+    if ref is None:
+        return None
+    return TaskListRefSchema(
+        id=ref.id, name=ref.name, icon=ref.icon, archived=ref.archived
+    )
+
+
 class TaskJournalRefSchema(BaseModel):
     """One of a task's journals, as a read surface shows it.
 
@@ -611,6 +684,20 @@ class TaskReadAttributes(TaskAttributes):
             "Why it lapsed, or null. Structured rather than pre-worded, because "
             "'the day went by' and 'the meeting was called off' ask the user for "
             "different things and a surface words them differently."
+        ),
+    )
+    task_list: TaskListRefSchema | None = Field(
+        ...,
+        description="The list the task is on, or null exactly when task_list_id is.",
+    )
+    overdue: bool = Field(
+        ...,
+        description=(
+            "Whether a task on a list is past its date and still not done: after "
+            "its due date, or once its due journal's last day has ended. A "
+            "cancelled due journal leaves it undated, so not overdue. Always "
+            "false for a journal-only task, which lapses instead. Derived on "
+            "every read and never stored."
         ),
     )
 
@@ -731,13 +818,9 @@ def _contact_ref(ref: TaskContactRef) -> TaskContactRefSchema:
 def _read_attributes(model: TaskReadModel) -> dict[str, Any]:
     """The read attributes shared by the single read and a journal's listing."""
     return {
-        "text": model.task.text,
-        "status": model.task.status,
-        "creating_journal_id": model.task.creating_journal_id,
-        "due_journal_id": model.task.due_journal_id,
-        "intermediate_journal_ids": [ref.id for ref in model.intermediate_journals],
-        "created_at": model.task.created_at,
-        "updated_at": model.task.updated_at,
+        **task_attribute_values(
+            model.task, [ref.id for ref in model.intermediate_journals]
+        ),
         "creating_journal": _optional_journal_ref(model.creating_journal),
         "due_journal": _optional_journal_ref(model.due_journal),
         "intermediate_journals": [
@@ -748,6 +831,8 @@ def _read_attributes(model: TaskReadModel) -> dict[str, Any]:
         # flag and the reason can never disagree about the same task.
         "lapsed": model.lapsed,
         "lapse_reason": model.lapse_reason,
+        "task_list": task_list_ref_schema(model.task_list),
+        "overdue": model.overdue,
     }
 
 

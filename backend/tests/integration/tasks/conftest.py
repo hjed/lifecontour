@@ -72,5 +72,6 @@ async def read_service(
         journal_repo=journal_repository,
         contact_repo=SqlContactRepository(async_connection),
         calendar_info_repo=SqlCalendarInfoRepository(async_connection),
+        task_list_repo=SqlTaskListRepository(async_connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
     )

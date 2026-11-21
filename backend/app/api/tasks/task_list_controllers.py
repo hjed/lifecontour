@@ -37,8 +37,10 @@ from app.api.tasks.task_list_schemas import (
     TaskListCreateRequest,
     TaskListMoveRequest,
     TaskListResponse,
+    TaskListSummaryCollectionResponse,
     TaskListUpdateRequest,
     to_task_list_resource,
+    to_task_list_summary_resource,
 )
 from app.core.history.services.task_list_history_service import (
     TaskListHistoryService,
@@ -96,18 +98,20 @@ async def list_task_lists(
             )
         ),
     ] = TaskListArchiveFilter.ACTIVE,
-) -> TaskListCollectionResponse:
+) -> TaskListSummaryCollectionResponse:
     """List your task lists, filtered by archived state.
+
+    Each list carries ``open_task_count``: how many of its tasks are not done.
 
     Raises:
         400: An unknown ``archived`` value.
     """
-    task_lists = await task_list_read_service.list_task_lists(
+    summaries = await task_list_read_service.list_task_lists(
         user_id=user.id, archived=archived
     )
     base_url = get_request_base_url(request)
-    return TaskListCollectionResponse(
-        data=[to_task_list_resource(task_list, base_url) for task_list in task_lists]
+    return TaskListSummaryCollectionResponse(
+        data=[to_task_list_summary_resource(each, base_url) for each in summaries]
     )
 
 

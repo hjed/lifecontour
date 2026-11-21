@@ -29,6 +29,7 @@ from core_shared.models.tasks import (
     Task,
     TaskJournalRef,
     TaskLinkRole,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     UpcomingTasks,
@@ -53,6 +54,7 @@ from app.mcp.domains.tasks.schemas import (
     TaskHistoryResponse,
     TaskJournalLinkResponse,
     TaskJournalRefMCP,
+    TaskListRefMCP,
     TaskMCP,
     TaskReadMCP,
     UpcomingTasksResponse,
@@ -144,6 +146,10 @@ def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
         creating_journal_id=task.creating_journal_id,
         due_journal_id=task.due_journal_id,
         intermediate_journal_ids=intermediate_journal_ids,
+        task_list_id=task.task_list_id,
+        due_date=task.due_date,
+        flagged=task.flagged,
+        icon=task.icon,
         created_at=task.created_at.isoformat() if task.created_at else None,
         updated_at=task.updated_at.isoformat() if task.updated_at else None,
     )
@@ -653,6 +659,15 @@ def _optional_journal_ref(ref: TaskJournalRef | None) -> TaskJournalRefMCP | Non
     return None if ref is None else _journal_ref(ref)
 
 
+def _list_ref(ref: TaskListRef | None) -> TaskListRefMCP | None:
+    """The task's list, or null for a journal-only task."""
+    if ref is None:
+        return None
+    return TaskListRefMCP(
+        id=ref.id, name=ref.name, icon=ref.icon, archived=ref.archived
+    )
+
+
 def _read_model(model: TaskReadModel) -> TaskReadMCP:
     """A task as the read tools return it.
 
@@ -683,6 +698,8 @@ def _read_model(model: TaskReadModel) -> TaskReadMCP:
         # flag and the reason can never disagree about the same task.
         lapsed=model.lapsed,
         lapse_reason=model.lapse_reason,
+        task_list=_list_ref(model.task_list),
+        overdue=model.overdue,
     )
 
 
@@ -747,6 +764,14 @@ async def get_task(
 
     A lapsed task is not broken: it can still be completed, reworded, cancelled
     or retargeted.
+
+    A task on a list comes back with its list (``task_list``: id, name, icon
+    and whether it is archived — an archived list's tasks are read-only), and
+    may carry a plain ``due_date``. Past its date such a task is **overdue**
+    rather than lapsed: ``overdue`` is true once its due date has passed, or
+    once its due journal's **last** day has ended, so a multi-day trip's list is
+    not overdue on day two. A cancelled due journal leaves it undated, and so
+    not overdue. ``flagged`` and ``icon`` apply to every task.
     """
     user_id = await get_current_user_id()
 
@@ -799,6 +824,10 @@ async def list_journal_tasks(
 
     Tasks are ordered by their deadline, soonest first: the due journal's date,
     or else a list task's due date, with undated list tasks last.
+
+    Each task carries the fields ``get_task`` answers with — its list, due
+    date, flag, icon and ``overdue``. A list task past its date is marked
+    overdue, never lapsed.
     """
     user_id = await get_current_user_id()
 
@@ -864,6 +893,10 @@ async def list_upcoming_tasks(
     a commitment was pinned to was called off. **Tasks on a list are absent
     too**, even one due in a journal inside the window: this lists journal-only
     commitments, the ones the user's dashboard shows.
+
+    Each task carries ``flagged`` and ``icon``, and the same ``task_list`` and
+    ``overdue`` fields ``get_task`` answers with; since only journal-only tasks
+    are listed here, ``task_list`` is null and ``overdue`` false.
 
     **An absent task has not been deleted.** If the user asks after something
     they expected to see, use ``list_journal_tasks`` on the journal it is linked

@@ -21,7 +21,7 @@ from .exceptions import (
 )
 from .journal_detachment import TaskJournalDetachment
 from .journal_repointing import TaskJournalRepointing
-from .lapse import LapseReason, derive_lapse_reason, task_lapse_reason
+from .lapse import LapseReason, derive_lapse_reason
 from .link_role import (
     JournalTaskGroups,
     TaskLinkRole,
@@ -41,11 +41,17 @@ from .list_order import reorder_open_tasks
 from .read_model import (
     TaskContactRef,
     TaskJournalRef,
+    TaskListRef,
     TaskReadModel,
     build_task_read_model,
 )
 from .task_icon import TaskIcon
-from .task_list import MAX_TASK_LIST_NAME_LENGTH, TaskList, TaskListArchiveFilter
+from .task_list import (
+    MAX_TASK_LIST_NAME_LENGTH,
+    TaskList,
+    TaskListArchiveFilter,
+    TaskListSummary,
+)
 from .task_list_order import reorder_task_lists
 from .task_page import TaskPage
 from .task_status import TaskStatus, is_status_transition_allowed
@@ -79,6 +85,8 @@ __all__ = [
     "TaskJournalAnchor",
     "TaskJournalIsAnchorError",
     "TaskJournalRef",
+    "TaskListRef",
+    "TaskListSummary",
     "TaskJournalDetachment",
     "TaskJournalRepointing",
     "TaskLinkRole",
@@ -109,6 +117,5 @@ __all__ = [
     "list_task_due",
     "reorder_task_lists",
     "select_upcoming_tasks",
-    "task_lapse_reason",
     "upcoming_window",
 ]
