@@ -314,13 +314,15 @@ class TaskAnchorMissingError(RuntimeError):
     """A task reached code that needs a journal anchor it does not have.
 
     Deliberately **not** a :class:`TaskDomainError`. Since a task may live on a
-    list, both anchors are optional on the entity, but several existing contracts
-    (an event payload, the REST and MCP task schemas, retargeting) still promise
-    an ``int``. They narrow through :meth:`Task.require_anchor`, and reaching
-    this error there means a list task got somewhere no list task can yet go — a
-    broken invariant, not a request a client could correct — so it surfaces as
-    the ordinary 500 rather than as a refusal with its own code. Each of those
-    call sites is replaced by the phase that teaches it about list tasks.
+    list, both anchors are optional on the entity, but some existing contracts
+    (the ``TaskCreated`` payload, retargeting) still promise an ``int``. They
+    narrow through :meth:`Task.require_anchor`, and the journal-only read
+    surfaces (the dashboard row, the daily summary) narrow a read model through
+    :meth:`TaskReadModel.require_journal`. Reaching this error from either means
+    a list task got somewhere no list task can yet go — a broken invariant, not
+    a request a client could correct — so it surfaces as the ordinary 500 rather
+    than as a refusal with its own code. Each of those call sites is replaced by
+    the phase that teaches it about list tasks.
 
     A ``RuntimeError`` rather than an ``assert``: asserts vanish under ``-O``.
     """

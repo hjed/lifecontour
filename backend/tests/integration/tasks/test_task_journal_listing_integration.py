@@ -19,7 +19,7 @@ recorder listens to what actually reached the driver, at two fixture sizes, so a
 per-task loop fails whatever number it happens to run to.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from core_shared.models.journals import JournalNotFoundError
@@ -45,10 +45,12 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     link_intermediate_journal,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 pytestmark = pytest.mark.integration
@@ -264,7 +266,7 @@ class TestLapseAgainstRealJournals:
         assert model.task.id == task_id
         assert model.lapsed is True
         assert model.lapse_reason is LapseReason.DUE_JOURNAL_CANCELLED
-        assert model.due_journal.cancelled is True
+        assert model.require_journal("due").cancelled is True
 
     async def test_a_confirmed_event_journal_lapses_nothing(
         self,
@@ -285,7 +287,7 @@ class TestLapseAgainstRealJournals:
         groups = await read_service.read_models_for_journal(USER_ID, viewed)
 
         assert groups.created[0].lapse_reason is None
-        assert groups.created[0].due_journal.cancelled is False
+        assert groups.created[0].require_journal("due").cancelled is False
 
     async def test_a_task_due_in_a_passed_journal_is_lapsed(
         self,
@@ -838,8 +840,88 @@ class TestJournalDatesAreResolvedOnce:
 
         groups = await read_service.read_models_for_journal(USER_ID, viewed)
 
-        dates = {model.due_journal.date for model in groups.created}
-        titles = {model.due_journal.title for model in groups.created}
+        dates = {model.require_journal("due").date for model in groups.created}
+        titles = {model.require_journal("due").title for model in groups.created}
         assert len(groups.created) == 3
         assert len(dates) == 1
         assert titles == {"Shared deadline"}
+
+
+@pytest.mark.integration
+class TestListTasksOnAJournal:
+    """List tasks linked to a journal are listed there, in the roles they hold."""
+
+    async def test_list_tasks_are_grouped_by_the_journals_they_have(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Created here, due here, or mentioned here — whatever else is absent.
+
+        In the *created* group the deadlines are a list task's due date in two
+        days, a journal-only task's due journal in a week, and an undated list
+        task, which sorts last.
+        """
+        viewed = await seed_viewed_journal(journal_repository)
+        elsewhere = await create_journal(
+            journal_repository, title="Elsewhere", days_offset=7
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+
+        undated_created_here = await create_list_task(
+            async_connection, task_list_id=task_list.id, creating_journal_id=viewed
+        )
+        journal_only_created_here = await create_task(
+            async_connection, creating_journal_id=viewed, due_journal_id=elsewhere
+        )
+        dated_created_here = await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            position=1,
+            creating_journal_id=viewed,
+            due_date=datetime.now(UTC).date() + timedelta(days=2),
+        )
+        due_here = await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            position=2,
+            due_journal_id=viewed,
+        )
+        mentioned_here = await create_list_task(
+            async_connection, task_list_id=task_list.id, position=3
+        )
+        await link_intermediate_journal(
+            async_connection, task_id=mentioned_here, journal_id=viewed
+        )
+
+        groups = await read_service.read_models_for_journal(USER_ID, viewed)
+
+        assert task_ids(groups.due) == [due_here]
+        assert task_ids(groups.created) == [
+            dated_created_here,
+            journal_only_created_here,
+            undated_created_here,
+        ]
+        assert task_ids(groups.mentioned) == [mentioned_here]
+        assert groups.roles_for(due_here) == (TaskLinkRole.DUE,)
+
+    async def test_a_list_task_due_in_this_passed_journal_is_not_lapsed(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The journal page never shows the lapsed marker on a list task."""
+        viewed = await seed_viewed_journal(journal_repository)
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(
+            async_connection, task_list_id=task_list.id, due_journal_id=viewed
+        )
+
+        groups = await read_service.read_models_for_journal(USER_ID, viewed)
+
+        assert task_ids(groups.due) == [task_id]
+        assert groups.due[0].lapsed is False

@@ -207,7 +207,8 @@ class TaskReadService:
                 specific side of a day boundary. Production omits it.
 
         Returns:
-            The three groups, each ordered by due-journal date then task id.
+            The three groups, each ordered by deadline (the due journal's date,
+            else a list task's due date, undated last) then task id.
 
         Raises:
             JournalNotFoundError: The journal does not exist or is not this
@@ -293,6 +294,8 @@ class TaskReadService:
 
         Returns:
             The window and its tasks, ordered by due-journal date then task id.
+            Journal-only: a task on a list is left out, even one due inside
+            the window.
 
         Raises:
             TaskValidationError: ``days_ahead`` is negative or beyond the
@@ -351,7 +354,10 @@ class TaskReadService:
         now: datetime.datetime | None = None,
         timezone: ZoneInfo | None = None,
     ) -> list[TaskReadModel]:
-        """The tasks due in these journals, whatever became of each of them.
+        """The journal-only tasks due in these journals, whatever became of each.
+
+        A task on a list is left out, as the summary reading this leaves list
+        tasks out.
 
         The daily summary's past-day read. The upcoming window asks *what is
         still outstanding*; this asks *what was due here, and how did it
@@ -457,6 +463,15 @@ class TaskReadService:
         re-derived — a second definition of *lapsed* on the busiest listing in
         the product is exactly the drift the pure rule exists to prevent.
 
+        **List tasks count, and are hidden with their journal.** A list task due
+        in a journal is one of its not-done tasks, so it lights the badge. It
+        never *lapses* — a late list task is overdue and stays on its list — but
+        the journal-level rule here still drops the count once the journal has
+        passed or been cancelled. That is a choice about the badge, not a lapse
+        verdict on the task: the journal list does not keep a badge lit for
+        lateness beyond its journal, as the dashboard shows an overdue task for
+        only a week.
+
         **A page that has nothing due costs one query.** The count runs first
         and, when it comes back empty, the timezone read and the cancellation
         lookup are skipped: there is nothing to judge. That is the path nearly
@@ -560,7 +575,9 @@ class TaskReadService:
             was among them, and re-fetching to find out would undo the batching.
 
         Raises:
-            JournalNotFoundError: An anchor journal is missing.
+            JournalNotFoundError: A task's anchor journal is missing. An anchor
+                the task does not have — a list task's — is not missing; its ref
+                is ``None``.
         """
         journal_refs = await self._journal_refs(
             user_id,
@@ -594,8 +611,8 @@ class TaskReadService:
         models = [
             build_task_read_model(
                 task=task,
-                creating_journal=self._require_ref(journal_refs, task, "creating"),
-                due_journal=self._require_ref(journal_refs, task, "due"),
+                creating_journal=self._anchor_ref(journal_refs, task, "creating"),
+                due_journal=self._anchor_ref(journal_refs, task, "due"),
                 # A mention whose journal is missing is dropped rather than
                 # fatal. The asymmetry with the anchors is deliberate: the due
                 # journal is what the lapse rule reads, so losing it would make
@@ -659,24 +676,29 @@ class TaskReadService:
         )
 
     @staticmethod
-    def _require_ref(
+    def _anchor_ref(
         journal_refs: dict[int, TaskJournalRef],
         task: Task,
         anchor: TaskJournalAnchor,
-    ) -> TaskJournalRef:
-        """An anchor's ref, or the journal domain's 404.
+    ) -> TaskJournalRef | None:
+        """An anchor's ref, ``None`` for an anchor the task does not have.
 
-        Both anchors are ``ON DELETE RESTRICT`` foreign keys and are resolved
-        under the task's own owner, so an absent one means the data has been
-        broken underneath us rather than that the caller asked for something
-        reasonable. Failing beats inventing a lapse verdict for a journal
-        nobody can see.
+        A task on a list may have no journal in either role, and that is an
+        ordinary task rather than a missing journal, so an **absent** anchor
+        reads as ``None``.
 
-        The read model still promises both anchors, so a task without one —
-        a list task, which nothing can create yet — fails here rather than
-        rendering half a task.
+        A **present** anchor whose journal is not among the refs is the journal
+        domain's 404. Both anchors are ``ON DELETE RESTRICT`` foreign keys and
+        are resolved under the task's own owner, so a vanished one means the
+        data has been broken underneath us rather than that the caller asked
+        for something reasonable. Failing beats inventing a lapse verdict for a
+        journal nobody can see.
         """
-        journal_id = task.require_anchor(anchor)
+        journal_id = (
+            task.creating_journal_id if anchor == "creating" else task.due_journal_id
+        )
+        if journal_id is None:
+            return None
         ref = journal_refs.get(journal_id)
         if ref is None:
             raise JournalNotFoundError(journal_id)

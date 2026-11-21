@@ -19,7 +19,7 @@ from .exceptions import (
     TaskValidationError,
 )
 from .journal_repointing import TaskJournalRepointing
-from .lapse import LapseReason, derive_lapse_reason
+from .lapse import LapseReason, derive_lapse_reason, task_lapse_reason
 from .link_role import (
     JournalTaskGroups,
     TaskLinkRole,
@@ -101,5 +101,6 @@ __all__ = [
     "list_task_due",
     "reorder_task_lists",
     "select_upcoming_tasks",
+    "task_lapse_reason",
     "upcoming_window",
 ]

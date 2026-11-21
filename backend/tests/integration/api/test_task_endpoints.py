@@ -64,6 +64,7 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     delete_contact,
     delete_journal,
@@ -72,6 +73,7 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     linked_contact_ids,
     mark_journal_as_event,
+    seed_task_list,
     stored_anchors,
     stored_status,
     stored_text,
@@ -4495,3 +4497,148 @@ class TestListUpcomingTasksEndpoint:
         assert [resource["id"] for resource in response.json()["data"]] == [
             str(today_task)
         ]
+
+
+async def _seeded_list_id(
+    async_connection: AsyncConnection, *, user_id: str = USER_ID
+) -> int:
+    """A list for the list tasks below to live on."""
+    task_list = await seed_task_list(async_connection, user_id=user_id)
+    assert task_list.id is not None
+    return task_list.id
+
+
+@pytest.mark.integration
+class TestListTasksOnTheRestSurface:
+    """A task on a list reads and is written through every task route.
+
+    Seeded as a row: nothing in the product creates a list task yet, so this is
+    the only way to show the readers cope with one before it can arrive.
+    """
+
+    async def test_get_a_list_task_with_no_journal_answers_with_null_anchors(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Null anchor ids, null refs, and never lapsed."""
+        task_id = await create_list_task(
+            async_connection, task_list_id=await _seeded_list_id(async_connection)
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["creating_journal_id"] is None
+        assert attributes["due_journal_id"] is None
+        assert attributes["creating_journal"] is None
+        assert attributes["due_journal"] is None
+        assert attributes["lapsed"] is False
+        assert attributes["lapse_reason"] is None
+
+    async def test_a_journals_tasks_list_a_list_task_created_there(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """It is listed under *created*, with no due journal beside it."""
+        viewed_id = await create_journal(journal_repository, title="Tuesday")
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            creating_journal_id=viewed_id,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["meta"]["groups"]["created"] == [task_id]
+        (resource,) = body["data"]
+        assert resource["attributes"]["creating_journal"]["id"] == viewed_id
+        assert resource["attributes"]["due_journal"] is None
+        assert resource["attributes"]["link_roles"] == ["created"]
+
+    async def test_upcoming_leaves_out_a_list_task_due_in_the_window(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Only the journal-only task due in the same journal is listed."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Permit Meeting", days_offset=2
+        )
+        journal_only = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        assert response.status_code == 200
+        assert [resource["id"] for resource in response.json()["data"]] == [
+            str(journal_only)
+        ]
+
+    async def test_patching_a_list_tasks_text_answers_with_null_anchors(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """The write response renders the same nullable resource."""
+        task_id = await create_list_task(
+            async_connection, task_list_id=await _seeded_list_id(async_connection)
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="pack the spare batteries"),
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["text"] == "pack the spare batteries"
+        assert attributes["creating_journal_id"] is None
+        assert attributes["due_journal_id"] is None
+        assert await stored_text(async_connection, task_id) == (
+            "pack the spare batteries"
+        )
+
+    async def test_patching_a_list_tasks_status_answers_with_null_anchors(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Marking a list task done works and answers with its null anchors."""
+        task_id = await create_list_task(
+            async_connection, task_list_id=await _seeded_list_id(async_connection)
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, status="done")
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["status"] == "done"
+        assert attributes["creating_journal_id"] is None
+        assert attributes["due_journal_id"] is None
+        assert await stored_status(async_connection, task_id) == "done"
+
+    async def test_another_users_list_task_is_not_found(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Owner scoping holds for list tasks: theirs answers 404, as any task."""
+        theirs = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection, user_id=OTHER_USER_ID),
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{theirs}")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_NOT_FOUND"

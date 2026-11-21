@@ -164,7 +164,7 @@ class TestTheRowARowDraws:
                 user_id=USER_ID,
                 text="never saved",
                 creating_journal_id=CREATING_JOURNAL_ID,
-                due_journal_id=model.due_journal.id,
+                due_journal_id=model.require_journal("due").id,
             ),
             creating_journal=model.creating_journal,
             due_journal=model.due_journal,

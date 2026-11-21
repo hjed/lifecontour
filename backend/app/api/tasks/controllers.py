@@ -118,9 +118,9 @@ def _to_resource(
         attributes=TaskAttributes(
             text=task.text,
             status=task.status,
-            # The resource promises both anchors until it learns list tasks.
-            creating_journal_id=task.require_anchor("creating"),
-            due_journal_id=task.require_anchor("due"),
+            # Null for an anchor a list task does not have.
+            creating_journal_id=task.creating_journal_id,
+            due_journal_id=task.due_journal_id,
             intermediate_journal_ids=intermediate_journal_ids,
             created_at=task.created_at,
             updated_at=task.updated_at,
@@ -172,6 +172,9 @@ async def list_upcoming_tasks(
     lists it with its lapse marker and the user can **retarget** it onto a new
     future journal.
 
+    **Tasks on a list are absent too**, even one due in a journal inside the
+    window: this listing is journal-only for now.
+
     **The whole window is returned and it is not paginated.** The window bounds
     the collection, so a caller showing the first few can name the full count
     from `meta.total` and reveal the rest without asking again. There is
@@ -207,7 +210,9 @@ async def get_task(
 
     **`lapsed` is derived on every read and never stored.** A task is lapsed
     when it is still not done and its due journal has either passed or been
-    cancelled. `lapse_reason` says which, because the two ask you for different
+    cancelled. Only a task with no list lapses: a task on a list never does,
+    and may also have no journal in either role, in which case that id and ref
+    are null. `lapse_reason` says which, because the two ask you for different
     things: a passed date invites retargeting the task onto a new future
     journal, while a cancelled meeting may mean the commitment is moot. Only the
     due journal decides it — the journal a task arose in is almost always in the

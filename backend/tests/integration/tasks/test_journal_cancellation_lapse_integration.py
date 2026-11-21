@@ -229,7 +229,7 @@ class TestCancellingTheDueJournalLapsesTheTask:
         model = await read_service.read_model(USER_ID, task_id)
         assert model.lapsed is False
         assert model.lapse_reason is None
-        assert model.due_journal.id == replacement_id
+        assert model.require_journal("due").id == replacement_id
         # The cancelled journal is still on the task, still marked, and now
         # decides nothing — which is the whole point of the previous assertion.
         assert [(ref.id, ref.cancelled) for ref in model.intermediate_journals] == [
@@ -311,8 +311,8 @@ class TestCancellingTheDueJournalLapsesTheTask:
         )
 
         model = await read_service.read_model(USER_ID, task_id)
-        assert model.due_journal.cancelled is True
-        assert model.creating_journal.cancelled is False
+        assert model.require_journal("due").cancelled is True
+        assert model.require_journal("creating").cancelled is False
         assert [ref.cancelled for ref in model.intermediate_journals] == [False]
 
     @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
@@ -349,7 +349,7 @@ class TestCancellingTheDueJournalLapsesTheTask:
         )
 
         model = await read_service.read_model(USER_ID, task_id)
-        assert model.due_journal.cancelled is True
+        assert model.require_journal("due").cancelled is True
         assert model.lapsed is False
         assert model.lapse_reason is None
         # And the cancellation did not quietly move the task's own status.
@@ -392,8 +392,8 @@ class TestCancellingAnyOtherJournalIsInert:
         )
 
         model = await read_service.read_model(USER_ID, task_id)
-        assert model.creating_journal.cancelled is True
-        assert model.due_journal.cancelled is False
+        assert model.require_journal("creating").cancelled is True
+        assert model.require_journal("due").cancelled is False
         assert model.lapsed is False
         assert model.lapse_reason is None
 
@@ -614,7 +614,7 @@ class TestCancellingThroughTheProductSurface:
         after = await read_service.read_model(TASK_USER_ID, task_id)
         assert after.lapsed is True
         assert after.lapse_reason is LapseReason.DUE_JOURNAL_CANCELLED
-        assert after.due_journal.cancelled is True
+        assert after.require_journal("due").cancelled is True
 
     async def test_a_user_un_cancelling_the_event_un_lapses_the_task(
         self,
@@ -659,7 +659,7 @@ class TestCancellingThroughTheProductSurface:
         after = await read_service.read_model(TASK_USER_ID, task_id)
         assert after.lapsed is False
         assert after.lapse_reason is None
-        assert after.due_journal.cancelled is False
+        assert after.require_journal("due").cancelled is False
 
 
 @pytest.mark.integration

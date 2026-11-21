@@ -55,12 +55,17 @@ def tasks_section_for(upcoming: UpcomingTasks) -> TasksSectionData:
 
 
 def _row(model: TaskReadModel, window: UpcomingWindow) -> DashboardTask:
-    """One task as a row draws it — a projection, deciding nothing else."""
+    """One task as a row draws it — a projection, deciding nothing else.
+
+    The upcoming selection is journal-only, so every task here has a due
+    journal, and the row narrows to it rather than carrying an optional one.
+    """
+    due_journal = model.require_journal("due")
     return DashboardTask(
         task_id=_persisted_task_id(model.task),
         text=model.task.text,
-        due_journal=model.due_journal,
-        days_away=(model.due_journal.date - window.first_day).days,
+        due_journal=due_journal,
+        days_away=(due_journal.date - window.first_day).days,
         contacts=model.contacts,
     )
 

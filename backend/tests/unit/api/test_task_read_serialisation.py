@@ -46,6 +46,7 @@ from core_shared.models.tasks import (
 )
 
 from app.api.tasks.schemas import (
+    TaskJournalRefSchema,
     to_journal_tasks_response,
     to_task_read_resource,
     to_upcoming_tasks_response,
@@ -58,6 +59,12 @@ DUE_JOURNAL_ID = 200
 MENTIONED_JOURNAL_ID = 300
 
 DUE_DATE = datetime.date(2026, 8, 20)
+
+
+def present(ref: TaskJournalRefSchema | None) -> TaskJournalRefSchema:
+    """A rendered anchor ref that this case's journal-only task always has."""
+    assert ref is not None
+    return ref
 
 
 def journal_ref(
@@ -225,16 +232,18 @@ class TestJournalsByRole:
         """Enough to render a link without a second request."""
         resource = to_task_read_resource(read_model())
 
-        assert resource.attributes.creating_journal.id == JOURNAL_ID
-        assert resource.attributes.creating_journal.title == "Monday Planning"
-        assert resource.attributes.due_journal.title == "Permit Meeting"
+        assert present(resource.attributes.creating_journal).id == JOURNAL_ID
+        assert present(resource.attributes.creating_journal).title == "Monday Planning"
+        assert present(resource.attributes.due_journal).title == "Permit Meeting"
 
     def test_a_journal_ref_carries_a_date_rather_than_an_instant(self) -> None:
         """The date the lapse rule judged, not one a browser can re-derive."""
         resource = to_task_read_resource(read_model())
 
-        assert resource.attributes.due_journal.date == DUE_DATE
-        assert not isinstance(resource.attributes.due_journal.date, datetime.datetime)
+        assert present(resource.attributes.due_journal).date == DUE_DATE
+        assert not isinstance(
+            present(resource.attributes.due_journal).date, datetime.datetime
+        )
 
     def test_a_cancelled_journal_is_marked_wherever_it_appears(self) -> None:
         """The flag rides on the ref, so any surface showing one can mark it."""
@@ -249,8 +258,8 @@ class TestJournalsByRole:
 
         resource = to_task_read_resource(model)
 
-        assert resource.attributes.due_journal.cancelled is True
-        assert resource.attributes.creating_journal.cancelled is False
+        assert present(resource.attributes.due_journal).cancelled is True
+        assert present(resource.attributes.creating_journal).cancelled is False
 
     def test_mentions_are_rendered_in_the_order_the_model_holds_them(self) -> None:
         """Ordering is the domain's decision; the renderer does not re-sort."""
@@ -476,7 +485,7 @@ class TestTheJournalListingEnvelope:
 
         attributes = response.data[0].attributes
         assert attributes.text == "return Sarah's book"
-        assert attributes.due_journal.id == JOURNAL_ID
+        assert present(attributes.due_journal).id == JOURNAL_ID
         assert attributes.lapsed is False
         assert attributes.contacts == []
 
@@ -510,8 +519,8 @@ class TestTheUpcomingWindowEnvelope:
 
         attributes = response.data[0].attributes
         assert attributes.text == "return Sarah's book"
-        assert attributes.due_journal.title == "Permit Meeting"
-        assert attributes.due_journal.date == DUE_DATE
+        assert present(attributes.due_journal).title == "Permit Meeting"
+        assert present(attributes.due_journal).date == DUE_DATE
         assert [contact.display_name for contact in attributes.contacts] == [
             "Sarah Chen"
         ]
@@ -590,3 +599,63 @@ class TestTheUpcomingWindowEnvelope:
 
         with pytest.raises(ValueError, match="persisted"):
             to_upcoming_tasks_response(self.upcoming(unpersisted))
+
+
+def list_task_read_model(
+    *,
+    creating: TaskJournalRef | None = None,
+    due: TaskJournalRef | None = None,
+) -> TaskReadModel:
+    """A list task's read model, holding only the journals a case gives it."""
+    return TaskReadModel(
+        task=Task(
+            id=TASK_ID,
+            user_id=USER_ID,
+            text="pack the head torch",
+            task_list_id=5,
+            position=0,
+            creating_journal_id=creating.id if creating else None,
+            due_journal_id=due.id if due else None,
+        ),
+        creating_journal=creating,
+        due_journal=due,
+        intermediate_journals=(),
+        contacts=(),
+        lapse_reason=None,
+    )
+
+
+@pytest.mark.unit
+class TestAListTask:
+    """A task on a list renders whatever journals it has, and null for the rest."""
+
+    def test_a_list_task_with_no_journal_renders_null_anchors_and_refs(
+        self,
+    ) -> None:
+        """Both ids and both refs are null on the wire, and it is not lapsed."""
+        wire = to_task_read_resource(list_task_read_model()).attributes.model_dump(
+            mode="json"
+        )
+
+        assert wire["creating_journal_id"] is None
+        assert wire["due_journal_id"] is None
+        assert wire["creating_journal"] is None
+        assert wire["due_journal"] is None
+        assert wire["lapsed"] is False
+        assert wire["lapse_reason"] is None
+
+    def test_a_list_task_with_only_a_due_journal_renders_that_ref(self) -> None:
+        """The journal it has is rendered; the one it lacks is null."""
+        wire = to_task_read_resource(
+            list_task_read_model(due=journal_ref(DUE_JOURNAL_ID))
+        ).attributes.model_dump(mode="json")
+
+        assert wire["creating_journal_id"] is None
+        assert wire["creating_journal"] is None
+        assert wire["due_journal_id"] == DUE_JOURNAL_ID
+        assert wire["due_journal"] == {
+            "id": DUE_JOURNAL_ID,
+            "title": "Permit Meeting",
+            "date": DUE_DATE.isoformat(),
+            "cancelled": False,
+        }

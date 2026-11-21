@@ -29,6 +29,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.settings.models import UserSettings
 from app.core.tasks.models.events import contact_field_name
+from app.mcp.domains.tasks.schemas import TaskReadMCP
 from tests.integration.core.integrations.journal_sync_seeding import (
     MASTER_ID,
     build_processor,
@@ -54,12 +55,14 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     intermediate_journal_ids,
     link_contact,
     link_intermediate_journal,
     linked_contact_ids,
     mark_journal_as_event,
+    seed_task_list,
     stored_anchors,
     stored_status,
     stored_text,
@@ -3808,3 +3811,163 @@ class TestGetTaskHistoryTool:
             )
 
         assert '"isError":true' in response.text
+
+
+async def _seeded_list_id(
+    connection: AsyncConnection, *, user_id: str = USER_ID
+) -> int:
+    """A list for the list tasks below to live on."""
+    task_list = await seed_task_list(connection, user_id=user_id)
+    assert task_list.id is not None
+    return task_list.id
+
+
+@pytest.mark.integration
+class TestListTasksThroughTheTools:
+    """A task on a list reads and is written through the task tools.
+
+    Seeded as a row: nothing creates a list task yet, so this is how the tools
+    are shown to cope with one before it can arrive.
+    """
+
+    async def test_get_task_answers_a_list_task_with_null_anchors(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """Typed, matching the published read shape, with nulls where it has none."""
+        task_id = await create_list_task(
+            clean_database, task_list_id=await _seeded_list_id(clean_database)
+        )
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "get_task", {"task_id": task_id})
+
+        assert response.status_code == 200
+        payload = extract_typed_tool_result(response.text)
+        # The tool's outputSchema is generated from this model, so a payload it
+        # accepts is one the published schema describes.
+        TaskReadMCP.model_validate(payload)
+        assert payload["id"] == task_id
+        assert payload["creating_journal_id"] is None
+        assert payload["due_journal_id"] is None
+        assert payload["creating_journal"] is None
+        assert payload["due_journal"] is None
+        assert payload["lapsed"] is False
+
+    async def test_the_published_read_schema_allows_null_anchors(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """``get_task``'s outputSchema lets both anchors and both refs be null."""
+        async with authenticated_lifespan_client() as client:
+            response = await client.post(
+                "/mcp-server/mcp",
+                json=sessionless_mcp_request("tools/list", {}),
+                headers=sessionless_mcp_headers("tools/list"),
+            )
+
+        assert response.status_code == 200
+        tools = extract_mcp_json_payload(response.text)["tools"]
+        (get_task,) = [tool for tool in tools if tool["name"] == "get_task"]
+        properties = get_task["outputSchema"]["properties"]
+        for field in (
+            "creating_journal_id",
+            "due_journal_id",
+            "creating_journal",
+            "due_journal",
+        ):
+            assert {"type": "null"} in properties[field]["anyOf"], field
+
+    async def test_list_journal_tasks_lists_a_list_task_created_there(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Under *created*, with no due journal beside it."""
+        viewed_id = await create_journal(journal_repository, title="Tuesday")
+        task_id = await create_list_task(
+            clean_database,
+            task_list_id=await _seeded_list_id(clean_database),
+            creating_journal_id=viewed_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _list_journal_tasks(client, journal_id=viewed_id)
+
+        (task,) = payload["groups"]["created"]
+        assert task["id"] == task_id
+        assert task["due_journal"] is None
+        assert payload["groups"]["due"] == []
+
+    async def test_list_upcoming_tasks_leaves_out_a_list_task(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Only the journal-only task due in the same journal is listed."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(
+            journal_repository, title="Permit Meeting", days_offset=2
+        )
+        journal_only = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await create_list_task(
+            clean_database,
+            task_list_id=await _seeded_list_id(clean_database),
+            due_journal_id=due_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _list_upcoming_tasks(client)
+
+        assert payload["total"] == 1
+        assert [task["id"] for task in payload["tasks"]] == [journal_only]
+
+    async def test_set_task_status_on_a_list_task_answers_with_null_anchors(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """The write succeeds and its answer carries the null anchors."""
+        task_id = await create_list_task(
+            clean_database, task_list_id=await _seeded_list_id(clean_database)
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _set_task_status(client, task_id=task_id, status="done")
+
+        assert payload["status"] == "done"
+        assert payload["creating_journal_id"] is None
+        assert payload["due_journal_id"] is None
+        assert await stored_status(clean_database, task_id) == "done"
+
+    async def test_update_task_text_on_a_list_task_answers_with_null_anchors(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """The reword succeeds and its answer carries the null anchors."""
+        task_id = await create_list_task(
+            clean_database, task_list_id=await _seeded_list_id(clean_database)
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task_text(client, task_id=task_id, text="reworded")
+
+        assert payload["text"] == "reworded"
+        assert payload["creating_journal_id"] is None
+        assert payload["due_journal_id"] is None
+        assert await stored_text(clean_database, task_id) == "reworded"
+
+    async def test_another_users_list_task_is_not_found(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """Owner scoping holds for list tasks: theirs is not found, as any task."""
+        theirs = await create_list_task(
+            clean_database,
+            task_list_id=await _seeded_list_id(clean_database, user_id=OTHER_USER_ID),
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(client, "get_task", task_id=theirs)
+
+        assert refused["error"] == "Not found"

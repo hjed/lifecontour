@@ -283,7 +283,11 @@ class TaskRepository(ABC):
         window_start: datetime,
         window_end: datetime,
     ) -> list[Task]:
-        """The user's not-done tasks whose due journal starts inside a window.
+        """The user's not-done journal-only tasks whose due journal starts in a window.
+
+        **Journal-only**: a task on a list is left out even when it is due in
+        a journal inside the window. The dashboard, ``list_upcoming_tasks`` and
+        the daily summary all read this, and none of them shows list tasks yet.
 
         The query behind the dashboard's tasks section. It is the **only**
         listing that reaches across journals, and it is bounded by the window
@@ -322,7 +326,10 @@ class TaskRepository(ABC):
     async def find_tasks_due_in_journals(
         self, journal_ids: list[int], user_id: str
     ) -> list[Task]:
-        """The user's tasks due in any of these journals, in **every** status.
+        """The user's journal-only tasks due in any of these journals, in **every** status.
+
+        **Journal-only**, as :meth:`find_upcoming_tasks` is: a list task due in
+        one of these journals is left out of the summary that reads this.
 
         The daily summary's past-day read: *what was due on this day, and what
         became of it*. Its subject is a journal rather than a task, like
@@ -441,6 +448,12 @@ class TaskRepository(ABC):
         ``creating_journal_id`` nor ``task_intermediate_journals`` is consulted.
         A task holding two roles in one journal is therefore counted once
         without needing to be de-duplicated.
+
+        **List tasks count.** A list task due in a journal is one of that
+        journal's not-done tasks, so it lights the indicator the same way. The
+        caller's rule that hides the count once the journal has passed or been
+        cancelled applies to it too: the journal list does not keep a badge lit
+        for a list task's lateness beyond its journal.
 
         **Lapsing is not filtered here**, matching
         :meth:`find_upcoming_tasks`'s reasoning. Whether a journal's date has

@@ -75,11 +75,19 @@ class TaskAttributes(BaseModel):
 
     text: str = Field(..., description="The commitment, as plain text")
     status: TaskStatus = Field(..., description="Not done, done, or cancelled")
-    creating_journal_id: int = Field(
-        ..., description="The journal the commitment arose in; never changes"
+    creating_journal_id: int | None = Field(
+        ...,
+        description=(
+            "The journal the commitment arose in; never changes. Null for a task "
+            "on a list that arose in no journal; a task with no list always has one."
+        ),
     )
-    due_journal_id: int = Field(
-        ..., description="The journal the commitment is due in; may be retargeted"
+    due_journal_id: int | None = Field(
+        ...,
+        description=(
+            "The journal the commitment is due in; may be retargeted. Null for a "
+            "task on a list with no due journal; a task with no list always has one."
+        ),
     )
     intermediate_journal_ids: list[int] = Field(
         default_factory=list,
@@ -563,11 +571,19 @@ class TaskReadAttributes(TaskAttributes):
     were built around.
     """
 
-    creating_journal: TaskJournalRefSchema = Field(
-        ..., description="The journal the commitment arose in"
+    creating_journal: TaskJournalRefSchema | None = Field(
+        ...,
+        description=(
+            "The journal the commitment arose in. Null exactly when "
+            "creating_journal_id is."
+        ),
     )
-    due_journal: TaskJournalRefSchema = Field(
-        ..., description="The journal it is due in — the only one that can lapse it"
+    due_journal: TaskJournalRefSchema | None = Field(
+        ...,
+        description=(
+            "The journal it is due in — the only one that can lapse it. Null "
+            "exactly when due_journal_id is."
+        ),
     )
     intermediate_journals: list[TaskJournalRefSchema] = Field(
         default_factory=list,
@@ -584,7 +600,8 @@ class TaskReadAttributes(TaskAttributes):
         ...,
         description=(
             "Whether the commitment has been let slide: still not done, and its "
-            "due journal has either passed or been cancelled. Derived on every "
+            "due journal has either passed or been cancelled. Only a task with no "
+            "list lapses; a task on a list is never lapsed. Derived on every "
             "read and never stored."
         ),
     )
@@ -692,6 +709,11 @@ class JournalTasksResponse(BaseModel):
     meta: JournalTasksMeta = Field(..., description="The grouping by link role")
 
 
+def _optional_journal_ref(ref: TaskJournalRef | None) -> TaskJournalRefSchema | None:
+    """Render an anchor's ref, or null for an anchor the task does not have."""
+    return None if ref is None else _journal_ref(ref)
+
+
 def _journal_ref(ref: TaskJournalRef) -> TaskJournalRefSchema:
     """Render one journal ref."""
     return TaskJournalRefSchema(
@@ -716,8 +738,8 @@ def _read_attributes(model: TaskReadModel) -> dict[str, Any]:
         "intermediate_journal_ids": [ref.id for ref in model.intermediate_journals],
         "created_at": model.task.created_at,
         "updated_at": model.task.updated_at,
-        "creating_journal": _journal_ref(model.creating_journal),
-        "due_journal": _journal_ref(model.due_journal),
+        "creating_journal": _optional_journal_ref(model.creating_journal),
+        "due_journal": _optional_journal_ref(model.due_journal),
         "intermediate_journals": [
             _journal_ref(ref) for ref in model.intermediate_journals
         ],

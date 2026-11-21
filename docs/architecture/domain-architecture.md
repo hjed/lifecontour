@@ -178,13 +178,14 @@ the *creating* journal where it arose and the *due* journal where it matters.
     Like `TaskList`, the entity is keyword-only and a new list task's `position` is `None` until the
     repository places it. Whether a due date is today or later needs the user's timezone and is a
     service rule
-  - **Narrowing to a journal-only task.** Several existing contracts still promise both anchors as
-    `int`s — the `TaskCreated` payload, the REST `TaskAttributes` and MCP `TaskMCP` schemas, the
-    read model's anchor refs and retargeting. They narrow through `Task.require_anchor(anchor)`,
+  - **Narrowing to a journal-only task.** Two existing contracts still promise both anchors as
+    `int`s — the `TaskCreated` payload and retargeting. They narrow through `Task.require_anchor(anchor)`,
     which raises `TaskAnchorMissingError` — a `RuntimeError`, deliberately not a `DomainError`, since
     reaching it means a list task got somewhere none can yet go (a broken invariant, surfacing as a
     500), not a request a client could correct. The phase that teaches each surface about list
-    tasks replaces its narrowing
+    tasks replaces its narrowing. The readers already have: the read model's refs and the REST and
+    MCP task schemas are nullable, and the journal-only surfaces narrow a read model through
+    `TaskReadModel.require_journal(anchor)`, which raises the same error
   - The creating and due journals may be the same journal
   - Validation is split by what each layer can know: the entity checks the owner, the text and the
     anchors a task with no list requires; whether the due journal exists, is owned by the acting user and is
@@ -990,13 +991,28 @@ The pieces:
   returned rather than a boolean because "the day went by" and "the meeting was cancelled" ask the
   user for different things; the wording is the UI's, and ITER18-002 Phase 4 pins the cancellation
   path end to end.
+- **`task_lapse_reason(task, due_journal, today)`** (same module) — the gate in front of the rule.
+  **Only a journal-only task lapses**: a task on a list never does (list spec invariant 7) — when
+  its date passes it becomes *overdue* and stays on its list — and a task with no due journal has
+  nothing to lapse against, so both answer `None`. Every other task gets `derive_lapse_reason`'s
+  answer unchanged. The list-task date rules extend this gate rather than defining lateness a
+  second time.
 - **`TaskReadModel`, `TaskJournalRef`, `TaskContactRef`** (`core_shared/models/tasks/read_model.py`),
   built by the pure `build_task_read_model(...)`. A journal ref carries a resolved **`date`**, not an
   instant, so no surface can re-derive it in the browser's zone and disagree with the rule that
   judged the task. `TaskReadModel.lapsed` is defined as "there is a reason" rather than computed a
-  second way.
+  second way. **Both anchor refs are optional**, since a list task may have no journal or only one;
+  `TaskReadModel.require_journal(anchor)` narrows to a ref for the surfaces that only ever see
+  journal-only tasks (the dashboard row, the daily summary's lines). A journal's task groups order
+  by the due journal's date, else a list task's due date, with undated tasks last, then by id.
 - **`TaskReadService`** (`backend/app/core/tasks/services/task_read_service.py`), request-scoped
-  from `TaskProvider`. It is **read-only** — no `@transactional`, no lock, no domain event — because
+  from `TaskProvider`. An anchor the task does not have reads as a `None` ref; a *present* anchor
+  whose journal is missing is still `JournalNotFoundError` (both foreign keys are
+  `ON DELETE RESTRICT`, so that is broken data). The upcoming window and the past-day read
+  (`find_upcoming_tasks`, `find_tasks_due_in_journals`) are **journal-only** in SQL
+  (`task_list_id IS NULL`), and `select_upcoming_tasks` states the same rule, so the dashboard,
+  `list_upcoming_tasks` and the daily summary leave list tasks out until they learn to show them.
+  The journal list's due-task count does include list tasks. It is **read-only** — no `@transactional`, no lock, no domain event — because
   a read that opened a unit of work would hold a transaction for the length of a page render.
 
 Four rules the derivation applies, each a deliberate reading of the specification:

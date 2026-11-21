@@ -106,13 +106,14 @@ def upcoming_window(
 def _sort_key(model: TaskReadModel) -> tuple[datetime.date, int]:
     """Soonest deadline first, ties broken by task id.
 
-    The same key ``link_role`` orders a journal's groups by, so the two listings
+    It agrees with the key ``link_role`` orders a journal's groups by for every
+    task this selection admits — each has a due journal — so the two listings
     present the same tasks in the same order. The tie-break is load-bearing
     rather than defensive: a dashboard week routinely holds several tasks due on
     one day, and without it the same request could answer in a different order
     between runs.
     """
-    return (model.due_journal.date, model.task.id or 0)
+    return (model.require_journal("due").date, model.task.id or 0)
 
 
 @dataclass(frozen=True)
@@ -156,8 +157,12 @@ def select_upcoming_tasks(
     the lapse verdict and the contacts the assembler decided cannot be
     contradicted here.
 
-    Three exclusions, and they compose:
+    Four exclusions, and they compose:
 
+    - **on a list** — the selection is journal-only for now. A list task's
+      lateness is *overdue* rather than lapsed, and it joins the dashboard on
+      its own terms later, so it is left out here even when it is due in a
+      journal inside the window;
     - **not in the window** — the due journal's date is outside it;
     - **not outstanding** — the task is done or cancelled;
     - **lapsed** — read from the model, which in a forward window means its due
@@ -182,7 +187,9 @@ def select_upcoming_tasks(
                 (
                     model
                     for model in models
-                    if model.task.status is TaskStatus.NOT_DONE
+                    if model.task.task_list_id is None
+                    and model.due_journal is not None
+                    and model.task.status is TaskStatus.NOT_DONE
                     and not model.lapsed
                     and window.contains(model.due_journal.date)
                 ),

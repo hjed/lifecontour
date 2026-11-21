@@ -620,15 +620,109 @@ skips) and pre-commit.
 - *Phase 23:* retargeting narrows on both anchors; a list task with no due (or creating) journal
   needs its own path there.
 
-#### Phase 11: Readers cope with a task that has no journal
+#### Phase 11: Readers cope with a task that has no journal ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 10.
-**Estimated diff:** ~150 production → **~900 tracked**
+**Estimated diff:** ~150 production → **~900 tracked** · **Actual:** ~420 production → **~1,890
+tracked** (1,702 insertions, 184 deletions excluding this document: 416 production, a good half of
+it docstrings carrying each null case's reason; 1,425 tests; 45 architecture docs). Production ran
+×2.8 on the estimate: the widened REST and MCP schemas and the lapse gate were priced, but the field
+descriptions and docstrings were not. Tests ran ×1.9 on the multiplier, because every reader got a
+list-task case at the layer it is observable at, plus the badge pins (decision below).
 
 **Acceptance Criteria:**
 
-- [ ] The ~45 anchor reads and the inner joins made null-safe; dashboard, upcoming and summary selections keep to journal-only tasks.
-- [ ] Integration tests seed a list task directly.
+- [x] The ~45 anchor reads and the inner joins made null-safe; dashboard, upcoming and summary selections keep to journal-only tasks.
+- [x] Integration tests seed a list task directly.
+
+**Delivered:** every task *reader* copes with a task on a list that has no journal, or only one.
+- `TaskReadModel.creating_journal`/`due_journal` are `TaskJournalRef | None`; `build_task_read_model`
+  takes optional refs; `TaskReadModel.require_journal(anchor)` narrows (raising the internal
+  `TaskAnchorMissingError`) for surfaces that only ever see journal-only tasks.
+- `task_lapse_reason(task, due_journal, today)` in `lapse.py` is the one gate: a list task never
+  lapses (spec invariant 7 — a late list task is *overdue*, Phases 13/15), nor does a task with no
+  due journal; otherwise `derive_lapse_reason`, unchanged.
+- `link_role` orders by the due journal's date, else the task's `due_date`, undated last, then id;
+  `select_upcoming_tasks` is journal-only.
+- `TaskReadService._anchor_ref` replaces `_require_ref`: an absent anchor is `None`, a present
+  anchor whose journal is missing is still `JournalNotFoundError`. One list task no longer 500s a
+  whole journal page, upcoming window or summary.
+- `find_upcoming_tasks` and `find_tasks_due_in_journals` keep their inner join as journal-only
+  selections (`task_list_id IS NULL`), so the dashboard card, `GET /api/tasks/upcoming`,
+  `list_upcoming_tasks` and both daily-summary inputs leave list tasks out. Stale "NOT NULL"
+  docstrings fixed in the repository and port.
+- The dashboard row and both summary prompt lines narrow through `require_journal("due")`;
+  `DashboardTask` is unchanged.
+- REST `TaskAttributes`/`TaskReadAttributes` and MCP `TaskMCP`/`TaskReadMCP` anchors and refs are
+  nullable, with field descriptions saying when; `_to_resource` and `_task_fields` no longer call
+  `require_anchor`, so the answers to `PATCH`/`set_task_status`/`update_task_text` on a list task
+  are 200s with null anchors.
+
+**Tests:** unit `test_task_lapse_derivation.py` (gate: list task with passed, cancelled or no due
+journal → `None`; journal-only → the rule's own answer), `test_task_read_model.py` (no journal,
+only due, only creating; passed/cancelled due journal not lapsed; `require_journal` both ways),
+`test_task_link_role_grouping.py` (created-only, mentioned-only and due list tasks; deadline order
+with undated last), `test_task_upcoming_window.py` (list task in the window left out),
+`test_task_read_service.py` (null refs; a present-but-missing anchor still raises),
+`api/test_task_read_serialisation.py` (null anchors and refs on the wire). Integration, every list
+task seeded with `create_list_task`: `test_task_read_model_integration.py` (all five shapes, and
+past and cancelled due journals → `lapsed=false`), `test_task_journal_listing_integration.py`
+(roles and order on one journal), `test_task_upcoming_listing_integration.py` (the statement and
+the service both leave a list task out), `test_task_repository_integration.py`
+(`find_tasks_due_in_journals` journal-only), `test_journal_due_task_counts_integration.py` (badge:
+counted on a future journal, not on a passed or cancelled one), `journal/test_daily_summary_tasks_input.py`
+and `test_daily_summary_past_tasks_input.py` (left out of both inputs),
+`api/test_task_endpoints.py` (GET, journal tasks, upcoming exclusion, `PATCH` text and status, a
+second user's list task 404s), `api/test_home_dashboard_tasks.py` (card ready, journal-only row),
+`mcp/test_task_tools_mcp.py` (`get_task` typed and model-valid with nulls, its `outputSchema`
+admits null, `list_journal_tasks`, `list_upcoming_tasks` exclusion, `set_task_status`,
+`update_task_text`, second user not found). No E2E: no UI changes (Phase 12 owns the frontend).
+Gates run locally: ruff format/check and mypy (backend, core_shared), backend unit suite (5,441
+passed), core_shared (868), the full backend integration suite in chunks (4,422 passed, 7
+pre-existing skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **Widen the general read contracts, narrow the journal-only ones.** Task detail, a journal's
+  tasks, the REST and MCP task shapes and the answers to writes became nullable; the dashboard row
+  and the summary lines narrow through `require_journal`, because their selections are journal-only.
+- **The journal list badge counts list tasks, with no time extension** (user decision). A list task
+  due in a journal is one of its not-done tasks; the badge's existing rule still hides the count
+  once the journal has passed or been cancelled. No production change to the count; its docstrings
+  say so and the integration tests pin both halves.
+- **The summary narrows with an error rather than skipping a list task**: the SQL filter makes one
+  unreachable there, and a leak should fail loudly, as Phase 10's broken-invariant stance has it.
+- **Existing tests' ref reads were narrowed, not their assertions.** Optional refs made mypy reject
+  `model.due_journal.title` in 13 existing test files; those reads now go through
+  `require_journal(...)` (read models) or a local `present(...)` (REST schema refs). Every removed
+  line is an import or such an accessor; no assertion changed what it checks.
+- The read-service unit doubles gained `task_doubles.make_list_task` rather than widening
+  `read_service_doubles.make_task`, which stays journal-only for the suites that use it.
+
+**Review:** an independent review against this entry and the spec found no bugs; its doc gaps were
+fixed — retarget is excluded from the "every route renders null anchors" convention (it still
+narrows, Phase 23), and the `get_task`/`list_journal_tasks` tool docstrings and the REST
+`GET /api/tasks/upcoming`/`GET /api/tasks/{id}` descriptions now state the list-task exceptions.
+
+**Deferred:** the journal delete guard's `_FIND_ANCHORED` inner joins
+(`task_anchor_repository.py`) and `TaskAnchor.creating_journal_title: str` are Phase 16's (the guard
+must see one-anchor tasks; that is delete behaviour, not a read).
+
+**Notes for later phases:**
+- *Phase 12:* REST tasks may carry `creating_journal_id`/`due_journal_id`/`creating_journal`/
+  `due_journal` as `null`, and `lapsed` is always `false` on a list task; `GET /api/tasks/upcoming`
+  and the dashboard card never include a list task yet.
+- *Phase 13:* extend `task_lapse_reason` (the gate) with the overdue rule rather than a second
+  definition of lateness; a cancelled due journal on a list task currently just reads as not lapsed.
+- *Phase 15:* the read shapes are where list, due date, flag, icon and overdue are added; the
+  journal page's sort already uses `due_date`.
+- *Phase 16:* `_FIND_ANCHORED` above. Summary invalidation still marks the summary stale for a list
+  task with a due journal, though the summary leaves it out — harmless over-invalidation.
+- *Phase 19:* `TaskCreated`'s `require_anchor` calls in `TaskService.create_task` are the remaining
+  creation narrowing; the create response itself is already nullable.
+- *Phase 23:* retargeting still narrows on both anchors (`TaskService` retarget paths).
+- *ITER21-004:* the journal-only selections to lift are `find_upcoming_tasks`,
+  `find_tasks_due_in_journals` (`task_list_id IS NULL`) and the guard in `select_upcoming_tasks`.
 
 #### Phase 12: Frontend copes with a task that has no journal
 

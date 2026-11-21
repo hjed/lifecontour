@@ -21,8 +21,9 @@ a link the specification's three-group display exists to show.
 **The ordering is a promise, and a total one.** Phase 10 recorded that
 ``created_at`` defaults to ``transaction_timestamp()``, so links written in one
 request tie and "oldest first" is only a partial order. Groups here are ordered
-by the due journal's **date**, then by task id — soonest first, with a tie-break
-that cannot itself tie. In the *due* group every task shares the journal and
+by the task's deadline — its due journal's **date**, or else a list task's due
+date, with undated list tasks last — then by task id: soonest first, with a
+tie-break that cannot itself tie. In the *due* group every task shares the journal and
 therefore its date, so that group is ordered by id alone; that is not a
 degenerate case but the whole of its order, which is why the tie-break is
 load-bearing rather than defensive.
@@ -30,12 +31,12 @@ load-bearing rather than defensive.
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import datetime
     from collections.abc import Iterable, Sequence
 
     from .read_model import TaskReadModel
@@ -146,13 +147,21 @@ class JournalTaskGroups:
         )
 
 
-def _sort_key(model: TaskReadModel) -> tuple[datetime.date, int]:
-    """Soonest deadline first, ties broken by task id.
+def _sort_key(model: TaskReadModel) -> tuple[bool, datetime.date, int]:
+    """Soonest deadline first, undated tasks last, ties broken by task id.
+
+    A task's deadline is its due journal's date, or else its due date: a task
+    has one or the other, never both, and only a list task can have neither.
+    Those undated tasks sort after every dated one — a task with no deadline is
+    not more urgent than one with a deadline next year.
 
     The id is not a tie-break of last resort here: every task in the *due* group
     shares the journal's own date, so it is the only thing separating them.
     """
-    return (model.due_journal.date, model.task.id or 0)
+    deadline = (
+        model.due_journal.date if model.due_journal is not None else model.task.due_date
+    )
+    return (deadline is None, deadline or datetime.date.min, model.task.id or 0)
 
 
 def _ordered(models: Iterable[TaskReadModel]) -> list[TaskReadModel]:

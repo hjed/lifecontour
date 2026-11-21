@@ -64,9 +64,11 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_contact,
     create_journal,
+    create_list_task,
     create_task,
     link_contact,
     mark_journal_as_event,
+    seed_task_list,
 )
 
 URL = "/api/home-dashboard"
@@ -639,3 +641,38 @@ class TestTheRoundTrips:
 
         assert len(rows_of(response)) == 6
         assert len(six_tasks) == len(one_task)
+
+
+class TestListTasksStayOffTheCard:
+    async def test_the_card_is_ready_and_shows_only_the_journal_only_task(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A list task due in the week's journal neither appears nor breaks it.
+
+        The card is journal-only until list tasks join the dashboard; before
+        this, the list task reached the row builder and the section failed.
+        """
+        creating_id, _ = task_anchors
+        due_id = await due_journal(journal_repository, days_offset=3)
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            text="book the venue",
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            due_journal_id=due_id,
+            text="pack the head torch",
+        )
+
+        response = await authenticated_client.get(URL)
+
+        assert [row["task_id"] for row in rows_of(response)] == [task_id]
