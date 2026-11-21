@@ -802,7 +802,11 @@ test.describe('Journal delete confirmation and list tasks', () => {
     await expect(count).toHaveText(
       '2 tasks on a list link to this journal and will lose that link. Any due here will have no due date.'
     );
-    // Part of the dialog's description, so it is announced on open.
+    // It arrives after the dialog opens, so it lands in the dialog's live
+    // region (announced on arrival) inside its description.
+    await expect(dialog.getByRole('status')).toContainText(
+      '2 tasks on a list link to this journal'
+    );
     await expect(dialog).toHaveAccessibleDescription(
       /2 tasks on a list link to this journal/
     );

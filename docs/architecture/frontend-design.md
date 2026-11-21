@@ -1028,13 +1028,17 @@ states how many, read from `GET /api/journals/{id}/delete-preview` through
   while the dialog is open and has `staleTime: 0`. The hook sits in the dialog
   body, which outlives the Radix content, so a reopen holds the previous count
   while it refetches; the dialog shows a count only once the read is settled —
-  not fetching **and** succeeded or failed — never the last visit's answer. A
-  read paused offline is neither, so it keeps the confirm held. Window focus
+  `fetchStatus === 'idle'` **and** succeeded or failed — never the last visit's
+  answer. A read paused offline is not fetching and keeps the last open's cached
+  success, so neither `!isFetching` nor `isSuccess` alone would do. Window focus
   does not refetch (`refetchOnWindowFocus: false`): that would blank the count
   mid-decision.
-- **The confirm waits for the count**, with a `role="status"` "Checking linked
-  tasks…" line meanwhile. The count is part of the `AlertDialogDescription`
-  (rendered `asChild` as a `div`), so it is announced on open.
+- **The confirm waits for the count.** One `role="status"` live region stays
+  mounted while the confirmation is open and holds "Checking linked tasks…",
+  then the count, the failure line, or nothing. The count arrives after the
+  dialog opens, so it has to land in a region already being watched to be
+  announced. The region sits inside the `AlertDialogDescription` (rendered
+  `asChild` as a `div`), so the description reads it too.
 - **Zero says nothing; a failed read lets the delete go ahead.** The delete is
   safe whatever links exist, so the preview informs rather than gates: a
   failure (`retry: false`) says it could not check and enables the confirm.

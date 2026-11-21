@@ -89,6 +89,7 @@ jest.mock('@/lib/api/journals', () => ({
     isSuccess: true,
     isError: false,
     isFetching: false,
+    fetchStatus: 'idle',
   }),
   useAddContactRelationship: () => ({
     mutateAsync: mockAddContact,

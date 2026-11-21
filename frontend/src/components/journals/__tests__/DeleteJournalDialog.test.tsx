@@ -584,9 +584,7 @@ describe('DeleteJournalDialog', () => {
       expect(
         screen.queryByTestId('delete-journal-list-tasks')
       ).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId('delete-journal-preview-status')
-      ).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
     });
 
     it('holds the confirm until it knows the count', async () => {
@@ -599,9 +597,8 @@ describe('DeleteJournalDialog', () => {
 
       const confirm = await screen.findByTestId('confirm-delete-journal');
       expect(confirm).toBeDisabled();
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Checking linked tasks…'
-      );
+      const status = screen.getByRole('status');
+      expect(status).toHaveTextContent('Checking linked tasks…');
 
       pending.resolve(preview(2));
 
@@ -609,7 +606,79 @@ describe('DeleteJournalDialog', () => {
       expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
         /^2 tasks on a list/
       );
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      // The count lands in the same live region that was mounted while it
+      // loaded, so its arrival is announced rather than silently appended.
+      expect(screen.getByRole('status')).toBe(status);
+      expect(status).toHaveTextContent(/^2 tasks on a list/);
+      expect(status).not.toHaveTextContent('Checking linked tasks…');
+    });
+
+    it('announces a failed read in the same live region', async () => {
+      const user = userEvent.setup();
+      const pending = deferred();
+      answerPreview = () => pending.promise;
+      renderDialog();
+
+      await user.click(screen.getByRole('button', { name: 'Delete journal' }));
+      const confirm = await screen.findByTestId('confirm-delete-journal');
+      const status = screen.getByRole('status');
+
+      pending.resolve(
+        mockApiResponse(
+          { errors: [{ status: '500', detail: 'Something broke' }] },
+          { status: 500 }
+        )
+      );
+
+      await waitFor(() => expect(confirm).toBeEnabled());
+      expect(screen.getByRole('status')).toBe(status);
+      expect(status).toHaveTextContent(
+        'Couldn’t check whether tasks on a list link to this journal.'
+      );
+    });
+
+    it('does not trust the last count when a reopen is paused offline', async () => {
+      // A cached success stays `isSuccess` while the reopen's read is paused,
+      // and a paused read is not fetching — so neither flag alone says the
+      // answer is fresh. Only an idle fetch status does.
+      const user = userEvent.setup();
+      answerPreview = async () => preview(2);
+      renderDialog();
+
+      await openSettled(user);
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        /^2 tasks/
+      );
+      await user.click(screen.getByRole('button', { name: /keep/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+
+      answerPreview = async () => preview(5);
+      onlineManager.setOnline(false);
+      try {
+        await user.click(
+          screen.getByRole('button', { name: 'Delete journal' })
+        );
+
+        const confirm = await screen.findByTestId('confirm-delete-journal');
+        expect(confirm).toBeDisabled();
+        expect(
+          screen.queryByTestId('delete-journal-list-tasks')
+        ).not.toBeInTheDocument();
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Checking linked tasks…'
+        );
+
+        onlineManager.setOnline(true);
+
+        await waitFor(() => expect(confirm).toBeEnabled());
+        expect(
+          screen.getByTestId('delete-journal-list-tasks')
+        ).toHaveTextContent(/^5 tasks/);
+      } finally {
+        onlineManager.setOnline(true);
+      }
     });
 
     it('holds the confirm while the read is paused offline', async () => {
@@ -657,9 +726,7 @@ describe('DeleteJournalDialog', () => {
 
       await openSettled(user);
 
-      expect(
-        screen.getByTestId('delete-journal-preview-status')
-      ).toHaveTextContent(
+      expect(screen.getByRole('status')).toHaveTextContent(
         'Couldn’t check whether tasks on a list link to this journal.'
       );
       expect(
