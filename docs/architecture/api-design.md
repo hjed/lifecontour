@@ -733,6 +733,7 @@ rather than this API's taste:
   | The relative chip | `days_away` counts from the window's first day, `0` meaning today, and the window's first day *is* `meta.anchor.date` — so the chip's `Today` and the page's own header cannot disagree. Sent rather than derived, because subtracting dates in the browser's zone can land a day out near midnight. |
   | The due journal | Nested, not flattened: `id` and `title` for the "Due in *journal*" link, and `date` already resolved in the user's zone. No `cancelled` flag, because a cancelled due journal lapses its task and a lapsed task is not here. |
   | What a row does *not* carry | No `status`, `lapsed`, `lapse_reason`, creating journal or intermediate journals. The first three are constant for every row this section can hold — those are its entry conditions — and a constant on the wire invites a surface to branch on it; the journals are material no dashboard row draws. The single read and the journal listing carry all of them, and this is deliberately less than `TaskReadResource` rather than a subset that drifted. |
+  | Flag, icon, list, overdue | Each row carries `flagged`, `icon` (a `TaskIcon` key or `null`), `task_list` (`{id, name, icon, archived}` or `null`) and `overdue`. Flag and icon vary for journal-only tasks; `task_list` is `null` and `overdue` `false` until list tasks join the card (ITER21-004), carried now so that change is a selection change alone. |
   | The cap | **None on the server.** The whole window travels with `total`, and the card renders five of it, so the show-more reveals the remainder without a second request and can name a count larger than the rows on screen. `total` equals `tasks.length` and is named because that is what the show-more displays. |
   | Round trips | The listing's own — one statement for the tasks and a batched read per link collection — invariant in the number of tasks. An integration test counts the whole request at one task and at six. |
 
@@ -916,6 +917,25 @@ Conventions this surface pins down:
   list's "tasks due" badge *does* count a list task due in that journal, and
   hides with the journal once it has passed or been cancelled, as it does for
   every task.
+- **Every task resource carries its list, due date, flag and icon.** The write
+  answers and the reads alike carry `task_list_id`, `due_date` (`YYYY-MM-DD` in
+  your timezone; only a list task has one, never beside a due journal),
+  `flagged` and `icon` (a `TaskIcon` key). The read shape adds `task_list`
+  (`{id, name, icon, archived}`, `null` exactly when `task_list_id` is) and
+  `overdue`: a list task still not done after its due date, or once its due
+  journal's **last** day has ended — a multi-day trip's list is not overdue on
+  day two. A cancelled due journal leaves the task undated, so not overdue.
+  `overdue` is always `false` for a journal-only task, which lapses instead, and
+  `lapsed` always `false` for a list task. A task naming a list you cannot read
+  answers `404 TASK_LIST_NOT_FOUND` rather than another user's list name. The
+  dashboard's task row carries `flagged`, `icon`, `task_list` and `overdue` too
+  (the last two constant until list tasks join the card), and so does each
+  `list_upcoming_tasks` / `get_task` / `list_journal_tasks` answer over MCP.
+- **A contact's task record is labelled with its list.** On
+  `GET /api/contacts/{id}/history`, a task row whose task is on a list carries
+  `task_list` (`{id, name, icon, archived}`, the task's current list, owner-scoped
+  on both the task and the list); every other row carries `null`. MCP has no
+  contact-history listing, so the label is REST-only.
 - **The path journal is the creating anchor**, never a body field, so a client
   cannot anchor a task to a journal it did not come from. The request schema has
   no `creating_journal_id`.
@@ -1268,7 +1288,7 @@ is `task-lists`.
 | `POST /api/task-lists` | Create a list at the bottom of your lists. Body type `task-lists`, attributes: `name`, optional `icon` | 201; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), an icon outside the fixed set, an unknown attribute or another resource type (`VALIDATION_ERROR`) |
 | `GET /api/task-lists/{list_id}` | Read one list: `name`, `icon`, `position`, `archived`, `archived_at`, timestamps | 200; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `PATCH /api/task-lists/{list_id}` | Rename a list, set or clear its icon, or both. Body type `task-lists` with `id` matching the path; attributes: optional `name`, optional `icon` (`null` clears it) | 200 with the list; 400 a blank or over-200-character name (`TASK_VALIDATION_ERROR`, `meta.field` = `name`), a body id that disagrees with the path (`TASK_VALIDATION_ERROR`, `meta.field` = `id`), a null name, an icon outside the fixed set, an unknown attribute, a body naming no change or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned; 409 `TASK_LIST_ARCHIVED` for an archived list |
-| `GET /api/task-lists` | Your lists by archived state. Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
+| `GET /api/task-lists` | Your lists by archived state, each with `open_task_count` (its not-done tasks; 0 for none). Optional `?archived=active\|archived\|all` (default `active`): `active` and `all` in your manual order, `archived` most recently archived first | 200 (no lists is `data: []`); 400 an unknown `archived` value |
 | `POST /api/task-lists/{list_id}/move` | Move a list to a new place among your **active** lists. Body type `task-list-moves`, attributes: `index` (0 at the top; past the end → the bottom). Answers your active lists in their new order | 200 (a `task-lists` collection); 400 a negative, non-integer or out-of-range index, an unknown attribute or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND`; 409 `TASK_LIST_ARCHIVED` for an archived list |
 | `POST /api/task-lists/{list_id}/archive` | Archive a list: read-only until unarchived. No body. Its tasks and its `position` are untouched | 200 with the list (`archived: true`, `archived_at` set); already archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
 | `POST /api/task-lists/{list_id}/unarchive` | Unarchive a list: back among the active lists in its old place, writable again. No body | 200 with the list (`archived: false`, `archived_at: null`); not archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
@@ -1288,6 +1308,10 @@ Conventions this surface pins down:
   on create (`extra="forbid"`), and a new list is never archived.
 - **The listing is unpaginated** — the lists a user keeps are a sidebar-sized
   set; paging arrives with the archived lists page.
+- **Only the listing carries `open_task_count`.** It is one owner-scoped count
+  for the whole listing (MCP `list_task_lists` answers the same); reading one
+  list and the write answers return the list alone, and a client refetches the
+  listing after a write rather than reading a count off it.
 - **On update, `null` and absent differ**: `"icon": null` clears the icon,
   while an absent `icon` leaves it alone. A list must have a name, so
   `"name": null` is refused. `position` and the archive state are not

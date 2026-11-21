@@ -20,7 +20,9 @@ from core_shared.models.tasks import (
     LapseReason,
     TaskAnchorMissingError,
     TaskContactRef,
+    TaskIcon,
     TaskJournalRef,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     build_task_read_model,
@@ -29,6 +31,7 @@ from core_shared.models.tasks import (
 from tests.unit.tasks.task_doubles import (
     CREATING_JOURNAL_ID,
     DUE_JOURNAL_ID,
+    TASK_LIST_ID,
     make_list_task,
     make_task,
 )
@@ -46,10 +49,22 @@ def journal_ref(
     *,
     title: str = "Permit Meeting",
     date: datetime.date = TOMORROW,
+    last_day: datetime.date | None = None,
     cancelled: bool = False,
 ) -> TaskJournalRef:
-    """One journal as a read surface sees it."""
-    return TaskJournalRef(id=journal_id, title=title, date=date, cancelled=cancelled)
+    """One journal as a read surface sees it; single-day unless ``last_day``."""
+    return TaskJournalRef(
+        id=journal_id,
+        title=title,
+        date=date,
+        last_day=date if last_day is None else last_day,
+        cancelled=cancelled,
+    )
+
+
+PACKING = TaskListRef(
+    id=TASK_LIST_ID, name="Packing", icon=TaskIcon.PACKAGE, archived=False
+)
 
 
 def build(
@@ -68,6 +83,7 @@ def build(
         due_journal=due or journal_ref(DUE_JOURNAL_ID),
         intermediate_journals=intermediates,
         contacts=contacts,
+        task_list=None,
         today=TODAY,
     )
 
@@ -234,18 +250,24 @@ def build_list_task(
     *,
     creating: TaskJournalRef | None = None,
     due: TaskJournalRef | None = None,
+    due_date: datetime.date | None = None,
+    status: TaskStatus = TaskStatus.NOT_DONE,
+    today: datetime.date = TODAY,
 ) -> TaskReadModel:
     """Assemble a list task's read model, with only the journals it holds."""
     return build_task_read_model(
         task=make_list_task(
+            status,
             creating_journal_id=creating.id if creating else None,
             due_journal_id=due.id if due else None,
+            due_date=due_date,
         ),
         creating_journal=creating,
         due_journal=due,
         intermediate_journals=(),
         contacts=(),
-        today=TODAY,
+        task_list=PACKING,
+        today=today,
     )
 
 
@@ -316,3 +338,140 @@ class TestRequireJournal:
 
         assert raised.value.anchor == anchor
         assert raised.value.task_id == model.task.id
+
+
+@pytest.mark.unit
+class TestTheList:
+    """The list a task is on, carried as a ref a surface can label and link."""
+
+    def test_a_list_task_carries_its_list(self) -> None:
+        """Id, name, icon and archived state, with no second lookup."""
+        model = build_list_task()
+
+        assert model.task_list == PACKING
+
+    def test_a_journal_only_task_has_no_list(self) -> None:
+        """No list, no ref."""
+        assert build().task_list is None
+
+    def test_a_list_ref_for_another_list_is_refused(self) -> None:
+        """A ref that does not name the task's own list is a caller's bug."""
+        other = TaskListRef(
+            id=TASK_LIST_ID + 1, name="Other", icon=None, archived=False
+        )
+
+        with pytest.raises(ValueError, match="task_list"):
+            build_task_read_model(
+                task=make_list_task(),
+                creating_journal=None,
+                due_journal=None,
+                intermediate_journals=(),
+                contacts=(),
+                task_list=other,
+                today=TODAY,
+            )
+
+    def test_a_list_task_without_its_list_ref_is_refused(self) -> None:
+        """Leaving the ref out for a task on a list is the same bug."""
+        with pytest.raises(ValueError, match="task_list"):
+            build_task_read_model(
+                task=make_list_task(),
+                creating_journal=None,
+                due_journal=None,
+                intermediate_journals=(),
+                contacts=(),
+                task_list=None,
+                today=TODAY,
+            )
+
+    def test_a_list_ref_on_a_journal_only_task_is_refused(self) -> None:
+        """A journal-only task cannot be labelled with a list."""
+        with pytest.raises(ValueError, match="task_list"):
+            build_task_read_model(
+                task=make_task(),
+                creating_journal=journal_ref(CREATING_JOURNAL_ID, date=YESTERDAY),
+                due_journal=journal_ref(DUE_JOURNAL_ID),
+                intermediate_journals=(),
+                contacts=(),
+                task_list=PACKING,
+                today=TODAY,
+            )
+
+
+@pytest.mark.unit
+class TestOverdueOnTheModel:
+    """Overdue, read from the one date rule every task goes through."""
+
+    def test_a_due_date_before_today_is_overdue(self) -> None:
+        """Past its date, a list task is overdue rather than lapsed."""
+        model = build_list_task(due_date=YESTERDAY)
+
+        assert model.overdue is True
+        assert model.lapsed is False
+
+    def test_a_due_date_of_today_is_not_overdue(self) -> None:
+        """Due today is outstanding, not late."""
+        assert build_list_task(due_date=TODAY).overdue is False
+
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    def test_a_closed_list_task_is_never_overdue(self, status: TaskStatus) -> None:
+        """The marker lasts only until the task is done or cancelled."""
+        assert build_list_task(due_date=YESTERDAY, status=status).overdue is False
+
+    def test_a_passed_due_journal_makes_a_list_task_overdue(self) -> None:
+        """A due journal dates the task as a due date would."""
+        model = build_list_task(due=journal_ref(DUE_JOURNAL_ID, date=YESTERDAY))
+
+        assert model.overdue is True
+        assert model.lapsed is False
+
+    def test_a_multi_day_due_journal_is_not_overdue_on_its_last_day(self) -> None:
+        """A trip that started two days ago and ends today is not yet over."""
+        trip = journal_ref(
+            DUE_JOURNAL_ID, date=TODAY - datetime.timedelta(days=2), last_day=TODAY
+        )
+
+        assert build_list_task(due=trip).overdue is False
+
+    def test_a_multi_day_due_journal_is_overdue_after_its_last_day(self) -> None:
+        """Once the trip's last day has ended, the task is overdue."""
+        trip = journal_ref(
+            DUE_JOURNAL_ID,
+            date=TODAY - datetime.timedelta(days=3),
+            last_day=YESTERDAY,
+        )
+
+        assert build_list_task(due=trip).overdue is True
+
+    def test_a_cancelled_due_journal_leaves_a_list_task_undated(self) -> None:
+        """Undated while cancelled: neither overdue nor lapsed."""
+        model = build_list_task(
+            due=journal_ref(DUE_JOURNAL_ID, date=YESTERDAY, cancelled=True)
+        )
+
+        assert model.overdue is False
+        assert model.lapsed is False
+
+    def test_a_list_task_with_no_date_at_all_is_not_overdue(self) -> None:
+        """No due date and no due journal — as after its due journal was
+        deleted — is simply undated."""
+        model = build_list_task(
+            creating=journal_ref(CREATING_JOURNAL_ID, date=YESTERDAY)
+        )
+
+        assert model.overdue is False
+        assert model.lapsed is False
+
+    def test_a_journal_only_task_is_never_overdue(self) -> None:
+        """Past its due journal it lapses, as it always has."""
+        model = build(due=journal_ref(DUE_JOURNAL_ID, date=YESTERDAY))
+
+        assert model.overdue is False
+        assert model.lapse_reason == LapseReason.DATE_PASSED
+
+    def test_a_journal_only_task_waits_out_no_last_day(self) -> None:
+        """A journal-only task lapses by its due journal's *first* day,
+        unchanged, however long the journal runs."""
+        trip = journal_ref(DUE_JOURNAL_ID, date=YESTERDAY, last_day=TOMORROW)
+
+        assert build(due=trip).lapse_reason == LapseReason.DATE_PASSED

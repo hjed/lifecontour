@@ -736,3 +736,150 @@ class TestATaskAppearsOnAContactsHistoryEndpoint:
         # The count is scoped too: a total that included it would both leak the
         # existence of the row and advertise a page the list will not return.
         assert body["meta"]["total_count"] == len(body["data"])
+
+    @pytest.mark.asyncio
+    async def test_a_list_tasks_record_is_labelled_with_its_list(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+    ):
+        """List tasks appear on a contact's page labelled with their list —
+        archived marked, so the record can show it read-only."""
+        from core_shared.models.history import Provenance
+        from core_shared.models.tasks import TaskIcon
+
+        from tests.integration.tasks.task_seeding import (
+            ARCHIVED_AT,
+            create_list_task,
+            seed_task_list,
+        )
+
+        contact = await contact_factory.create_contact(
+            first_name="Listed", last_name="Task"
+        )
+        contact_id = int(contact["id"])
+        task_list = await seed_task_list(
+            async_connection,
+            "Packing",
+            icon=TaskIcon.PACKAGE,
+            archived_at=ARCHIVED_AT,
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        (task_entry,) = [
+            e
+            for e in response.json()["data"]
+            if e["attributes"]["entity_type"] == "task"
+        ]
+        assert task_entry["attributes"]["task_list"] == {
+            "id": task_list.id,
+            "name": "Packing",
+            "icon": "package",
+            "archived": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_journal_only_tasks_record_has_no_list(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+        task_anchors,
+    ):
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import create_task
+
+        contact = await contact_factory.create_contact(
+            first_name="Journal", last_name="Only"
+        )
+        contact_id = int(contact["id"])
+        creating_id, due_id = task_anchors
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        entries = response.json()["data"]
+        assert entries
+        for entry in entries:
+            assert entry["attributes"]["task_list"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_task_on_another_owners_list_is_not_labelled_with_it(
+        self,
+        authenticated_client,
+        contact_factory: ContactFactory,
+        async_connection,
+    ):
+        """A cross-owner row never names the other user's list."""
+        from core_shared.models.history import Provenance
+
+        from tests.integration.tasks.task_seeding import (
+            OTHER_USER_ID,
+            create_list_task,
+            seed_task_list,
+        )
+
+        contact = await contact_factory.create_contact(
+            first_name="Cross", last_name="Owner"
+        )
+        contact_id = int(contact["id"])
+        theirs = await seed_task_list(
+            async_connection, "Their secret list", user_id=OTHER_USER_ID
+        )
+        assert theirs.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=theirs.id)
+        await self._seed_link_row(
+            async_connection,
+            task_id=task_id,
+            contact_id=contact_id,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{contact_id}/history")
+
+        assert response.status_code == 200
+        assert "Their secret list" not in response.text
+        (task_entry,) = [
+            e
+            for e in response.json()["data"]
+            if e["attributes"]["entity_type"] == "task"
+        ]
+        assert task_entry["attributes"]["task_list"] is None
+
+    @pytest.mark.asyncio
+    async def test_another_users_contact_is_refused(
+        self, authenticated_client, async_connection
+    ):
+        """Rejection: a contact that is not the reader's has no feed to label."""
+        from tests.integration.contact_seeding import seed_contact
+
+        theirs = await seed_contact(
+            async_connection, first_name="Not", last_name="Mine", user_id="someone-else"
+        )
+
+        response = await authenticated_client.get(f"/api/contacts/{theirs}/history")
+
+        assert response.status_code == 404

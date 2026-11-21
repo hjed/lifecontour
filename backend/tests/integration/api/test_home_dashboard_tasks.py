@@ -49,8 +49,9 @@ from typing import Any
 
 import pytest
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskStatus
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -676,3 +677,54 @@ class TestListTasksStayOffTheCard:
         response = await authenticated_client.get(URL)
 
         assert [row["task_id"] for row in rows_of(response)] == [task_id]
+
+
+_FLAG_AND_ICON = text(
+    "UPDATE tasks SET flagged = true, icon = :icon WHERE id = :task_id"
+)
+
+
+class TestARowCarriesItsFlagIconListAndOverdue:
+    async def test_a_flagged_task_arrives_with_its_flag_and_icon(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Flag and icon apply to journal-only tasks; such a row names no list
+        and is never overdue, until list tasks join the card (ITER21-004)."""
+        creating_id, _ = task_anchors
+        due_id = await due_journal(journal_repository, days_offset=3)
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await async_connection.execute(
+            _FLAG_AND_ICON, {"task_id": task_id, "icon": TaskIcon.STAR.value}
+        )
+
+        [row] = rows_of(await authenticated_client.get(URL))
+
+        assert row["task_id"] == task_id
+        assert row["flagged"] is True
+        assert row["icon"] == "star"
+        assert row["task_list"] is None
+        assert row["overdue"] is False
+
+    async def test_an_unflagged_task_says_so(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, _ = task_anchors
+        due_id = await due_journal(journal_repository, days_offset=2)
+        await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        [row] = rows_of(await authenticated_client.get(URL))
+
+        assert row["flagged"] is False
+        assert row["icon"] is None

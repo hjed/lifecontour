@@ -216,7 +216,7 @@ def upcoming_task(
     is the one production derives, not a hand-set flag.
     """
     due_journal = TaskJournalRef(
-        id=900 + task_id, title=title, date=due_date, cancelled=False
+        id=900 + task_id, title=title, date=due_date, last_day=due_date, cancelled=False
     )
     return build_task_read_model(
         task=Task(
@@ -227,11 +227,16 @@ def upcoming_task(
             due_journal_id=due_journal.id,
         ),
         creating_journal=TaskJournalRef(
-            id=700, title="where it arose", date=ANCHOR, cancelled=False
+            id=700,
+            title="where it arose",
+            date=ANCHOR,
+            last_day=ANCHOR,
+            cancelled=False,
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=[TaskContactRef(id=5, display_name="Ada Lovelace", photo_url=None)],
+        task_list=None,
         today=ANCHOR,
     )
 

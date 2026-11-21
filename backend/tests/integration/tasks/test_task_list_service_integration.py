@@ -34,6 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
@@ -66,7 +67,9 @@ def make_service(conn: AsyncConnection) -> TaskListService:
 
 
 def make_read_service(conn: AsyncConnection) -> TaskListReadService:
-    return TaskListReadService(task_list_repo=SqlTaskListRepository(conn))
+    return TaskListReadService(
+        task_list_repo=SqlTaskListRepository(conn), task_repo=SqlTaskRepository(conn)
+    )
 
 
 class TestCreateTaskList:
@@ -985,7 +988,7 @@ class TestUnarchiveTaskList:
         active = await make_read_service(async_connection).list_task_lists(
             user_id=USER_ID, archived=TaskListArchiveFilter.ACTIVE
         )
-        assert [each.id for each in active] == [first.id, middle.id, last.id]
+        assert [each.task_list.id for each in active] == [first.id, middle.id, last.id]
         assert (await _row(async_connection, middle.id))["archived_at"] is None
 
     @pytest.mark.asyncio
@@ -1135,7 +1138,7 @@ class TestListTaskLists:
             lists = await service.list_task_lists(
                 user_id=USER_ID, archived=archived_filter
             )
-            return [task_list.name for task_list in lists]
+            return [each.task_list.name for each in lists]
 
         assert await names(TaskListArchiveFilter.ACTIVE) == [first.name, second.name]
         assert await names(TaskListArchiveFilter.ARCHIVED) == [archived.name]

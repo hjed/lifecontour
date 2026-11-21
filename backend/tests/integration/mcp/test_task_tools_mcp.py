@@ -14,12 +14,13 @@ the user's timezone — with two zones 25 hours apart, whose local dates therefo
 differ at every instant.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskStatus
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -3971,3 +3972,143 @@ class TestListTasksThroughTheTools:
             refused = await _refused(client, "get_task", task_id=theirs)
 
         assert refused["error"] == "Not found"
+
+
+_SET_FLAG_AND_ICON = sa_text(
+    "UPDATE tasks SET flagged = true, icon = :icon WHERE id = :task_id"
+)
+
+
+@pytest.mark.integration
+class TestTaskToolsCarryListDueDateFlagIconAndOverdue:
+    """The read tools mark each task with its list, dates, flag, icon and
+    overdue — the MCP half of the REST reads."""
+
+    async def test_get_task_carries_a_list_tasks_fields(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(
+            clean_database, "Packing", icon=TaskIcon.PACKAGE
+        )
+        assert task_list.id is not None
+        due = datetime.now(UTC).date() - timedelta(days=2)
+        task_id = await create_list_task(
+            clean_database,
+            task_list_id=task_list.id,
+            due_date=due,
+            flagged=True,
+            icon=TaskIcon.STAR,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "get_task", {"task_id": task_id})
+
+        payload = extract_typed_tool_result(response.text)
+        TaskReadMCP.model_validate(payload)
+        assert payload["task_list_id"] == task_list.id
+        assert payload["task_list"] == {
+            "id": task_list.id,
+            "name": "Packing",
+            "icon": "package",
+            "archived": False,
+        }
+        assert payload["due_date"] == due.isoformat()
+        assert payload["flagged"] is True
+        assert payload["icon"] == "star"
+        assert payload["overdue"] is True
+        assert payload["lapsed"] is False
+
+    async def test_list_journal_tasks_carries_them(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A multi-day due journal that has ended makes its list task overdue."""
+        now = datetime.now(UTC)
+        trip = await create_journal(
+            journal_repository,
+            title="Trip",
+            start=now - timedelta(days=5),
+            end=now - timedelta(days=2),
+        )
+        task_id = await create_list_task(
+            clean_database,
+            task_list_id=await _seeded_list_id(clean_database),
+            due_journal_id=trip,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _list_journal_tasks(client, journal_id=trip)
+
+        (task,) = payload["groups"]["due"]
+        assert task["id"] == task_id
+        assert task["task_list"]["name"] == "Seeded list"
+        assert task["overdue"] is True
+        assert task["lapsed"] is False
+
+    async def test_list_upcoming_tasks_carries_a_journal_only_tasks_flag(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, days_offset=2)
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await clean_database.execute(
+            _SET_FLAG_AND_ICON, {"task_id": task_id, "icon": TaskIcon.HEART.value}
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _list_upcoming_tasks(client)
+
+        (task,) = payload["tasks"]
+        assert task["flagged"] is True
+        assert task["icon"] == "heart"
+        assert task["task_list"] is None
+        assert task["overdue"] is False
+
+    async def test_a_write_tool_answers_with_the_plain_fields(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id = await _seeded_list_id(clean_database)
+        task_id = await create_list_task(
+            clean_database, task_list_id=list_id, flagged=True, icon=TaskIcon.GIFT
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task_text(client, task_id=task_id, text="wrap it")
+
+        assert payload["task_list_id"] == list_id
+        assert payload["due_date"] is None
+        assert payload["flagged"] is True
+        assert payload["icon"] == "gift"
+
+    async def test_an_unknown_task_is_refused(
+        self, authenticated_lifespan_client: Any
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(client, "get_task", task_id=999_999_999)
+
+        assert refused["error"] == "Not found"
+
+    async def test_another_users_list_task_never_names_their_list(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        theirs_list = await seed_task_list(
+            clean_database, "Their secret list", user_id=OTHER_USER_ID
+        )
+        assert theirs_list.id is not None
+        theirs = await create_list_task(
+            clean_database, task_list_id=theirs_list.id, user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "get_task", {"task_id": theirs})
+
+        assert "Their secret list" not in response.text
+        assert extract_mcp_tool_error(response.text)["error"] == "Not found"

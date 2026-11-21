@@ -146,6 +146,7 @@ def read_service(
     contact_repo: AsyncMock,
     calendar_info_repo: AsyncMock,
     settings_repo: AsyncMock,
+    mock_task_list_repo: AsyncMock,
 ) -> TaskReadService:
     """The read service under test, over mocked ports.
 
@@ -160,5 +161,6 @@ def read_service(
         journal_repo=journal_repo,
         contact_repo=contact_repo,
         calendar_info_repo=calendar_info_repo,
+        task_list_repo=mock_task_list_repo,
         date_resolver=JournalDateResolver(settings_repo),
     )

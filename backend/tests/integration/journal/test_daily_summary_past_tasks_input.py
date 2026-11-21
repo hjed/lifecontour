@@ -56,6 +56,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.settings.models import UserSettings
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_read_service import TaskReadService
 from tests.integration.tasks.task_seeding import (
@@ -118,6 +119,7 @@ def assembler(
             journal_repo=journal_repository,
             contact_repo=SqlContactRepository(async_connection),
             calendar_info_repo=SqlCalendarInfoRepository(async_connection),
+            task_list_repo=SqlTaskListRepository(async_connection),
             date_resolver=JournalDateResolver(
                 user_settings_repo=user_settings_repository
             ),

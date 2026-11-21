@@ -112,15 +112,16 @@ def counting_service(
 ) -> TaskReadService:
     """The service under test, over mocked ports.
 
-    The journal and contact repositories are present because the constructor
-    requires them and are never touched: this read is handed its journals and
-    reads no contact.
+    The journal, contact and list repositories are present because the
+    constructor requires them and are never touched: this read is handed its
+    journals and reads no contact or list.
     """
     return TaskReadService(
         task_repo=counting_task_repo,
         journal_repo=AsyncMock(),
         contact_repo=AsyncMock(),
         calendar_info_repo=counting_calendar_info_repo,
+        task_list_repo=AsyncMock(),
         date_resolver=JournalDateResolver(counting_settings_repo),
     )
 

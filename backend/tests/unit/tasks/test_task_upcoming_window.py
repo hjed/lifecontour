@@ -31,6 +31,7 @@ from core_shared.models.tasks import (
     Task,
     TaskContactRef,
     TaskJournalRef,
+    TaskListRef,
     TaskReadModel,
     TaskStatus,
     TaskValidationError,
@@ -39,7 +40,12 @@ from core_shared.models.tasks import (
     upcoming_window,
 )
 
-from tests.unit.tasks.task_doubles import CREATING_JOURNAL_ID, USER_ID, make_list_task
+from tests.unit.tasks.task_doubles import (
+    CREATING_JOURNAL_ID,
+    TASK_LIST_ID,
+    USER_ID,
+    make_list_task,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -62,7 +68,11 @@ def make_model(
     selection rule that had stopped agreeing with the lapse rule.
     """
     due_journal = TaskJournalRef(
-        id=900 + task_id, title=f"journal {task_id}", date=due_date, cancelled=cancelled
+        id=900 + task_id,
+        title=f"journal {task_id}",
+        date=due_date,
+        last_day=due_date,
+        cancelled=cancelled,
     )
     return build_task_read_model(
         task=Task(
@@ -77,11 +87,13 @@ def make_model(
             id=CREATING_JOURNAL_ID,
             title="where it arose",
             date=TODAY - datetime.timedelta(days=30),
+            last_day=TODAY - datetime.timedelta(days=30),
             cancelled=False,
         ),
         due_journal=due_journal,
         intermediate_journals=[],
         contacts=[TaskContactRef(id=5, display_name="Sarah", photo_url=None)],
+        task_list=None,
         today=today,
     )
 
@@ -326,7 +338,7 @@ class TestListTasksAreLeftOut:
         """Due tomorrow in a journal, but on a list: not this selection's task."""
         tomorrow = TODAY + datetime.timedelta(days=1)
         due_journal = TaskJournalRef(
-            id=950, title="on a list", date=tomorrow, cancelled=False
+            id=950, title="on a list", date=tomorrow, last_day=tomorrow, cancelled=False
         )
         list_task = build_task_read_model(
             task=make_list_task(task_id=50, due_journal_id=due_journal.id),
@@ -334,6 +346,9 @@ class TestListTasksAreLeftOut:
             due_journal=due_journal,
             intermediate_journals=[],
             contacts=[],
+            task_list=TaskListRef(
+                id=TASK_LIST_ID, name="Packing", icon=None, archived=False
+            ),
             today=TODAY,
         )
 

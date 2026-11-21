@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from core_shared.models.history import Provenance
+from core_shared.models.tasks import TaskListRef
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.models.events import CONTACT_FIELD_PREFIX
@@ -43,6 +44,7 @@ class FieldHistoryEntry:
         created_at: str | datetime | None = None,
         user_id: str | None = None,
         entity_label: str | None = None,
+        entity_list: TaskListRef | None = None,
     ):
         self.id = id
         self.entity_type = entity_type
@@ -68,6 +70,10 @@ class FieldHistoryEntry:
         # values are the reader's own id and nothing names the commitment. Left
         # ``None`` on every read where the row names itself.
         self.entity_label = entity_label
+        # The list a task row's task is on, resolved at read time and never
+        # stored, for the same contact-feed case: a list task is labelled with
+        # its list there. ``None`` for every other row.
+        self.entity_list = entity_list
 
 
 def resolve_task_label(

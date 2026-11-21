@@ -18,6 +18,7 @@ from app.api.common.schemas import (
     JsonApiResponse,
     JsonApiUpdateRequest,
 )
+from app.api.tasks.schemas import TaskListRefSchema
 
 _ARCHIVED_DESC = (
     "No longer in use, but kept for matching and reference. Never primary, "
@@ -658,6 +659,14 @@ class ContactHistoryAttributes(BaseModel):
             "and a task has no route of its own to link to. Null for every row "
             "that names itself, and for a task whose history has not been "
             "projected yet."
+        ),
+    )
+    task_list: TaskListRefSchema | None = Field(
+        default=None,
+        description=(
+            "For a task row, the list the task is on now — so a list task is "
+            "labelled with its list. Null for a task on no list, a deleted "
+            "task, and every row that is not about a task."
         ),
     )
 

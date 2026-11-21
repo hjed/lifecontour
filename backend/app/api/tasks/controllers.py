@@ -87,6 +87,7 @@ from app.api.tasks.schemas import (
     TaskUpdateRequest,
     UpcomingTasksResponse,
     persisted_task_id,
+    task_attribute_values,
     task_self_link,
     to_journal_tasks_response,
     to_task_read_resource,
@@ -120,14 +121,7 @@ def _to_resource(
     return TaskResource(
         id=str(task_id),
         attributes=TaskAttributes(
-            text=task.text,
-            status=task.status,
-            # Null for an anchor a list task does not have.
-            creating_journal_id=task.creating_journal_id,
-            due_journal_id=task.due_journal_id,
-            intermediate_journal_ids=intermediate_journal_ids,
-            created_at=task.created_at,
-            updated_at=task.updated_at,
+            **task_attribute_values(task, intermediate_journal_ids)
         ),
         links=JsonApiLinks(self=task_self_link(task_id, base_url)),
     )

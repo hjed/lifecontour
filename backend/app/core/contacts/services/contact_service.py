@@ -249,9 +249,7 @@ class ContactService:
         self.contact_validation = (
             contact_validation_service or ContactValidationService(contact_repo)
         )
-        self.history_service = history_service or ContactHistoryService(
-            history_repo, contact_repo
-        )
+        self.history_service = history_service
         self.tag_hierarchy = tag_hierarchy_service or TagHierarchyService(tag_repo)
 
     async def _guard_write(

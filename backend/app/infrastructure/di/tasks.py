@@ -81,10 +81,10 @@ class TaskProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def task_list_read_service(
-        self, task_list_repo: TaskListRepository
+        self, task_list_repo: TaskListRepository, task_repo: TaskRepository
     ) -> TaskListReadService:
         """Provide the task list read service, which writes nothing."""
-        return TaskListReadService(task_list_repo=task_list_repo)
+        return TaskListReadService(task_list_repo=task_list_repo, task_repo=task_repo)
 
     @provide(scope=Scope.REQUEST)
     def task_service(
@@ -118,6 +118,7 @@ class TaskProvider(Provider):
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         calendar_info_repo: CalendarInfoRepository,
+        task_list_repo: TaskListRepository,
         date_resolver: JournalDateResolver,
     ) -> TaskReadService:
         """Provide a TaskReadService instance.
@@ -134,6 +135,7 @@ class TaskProvider(Provider):
             journal_repo=journal_repo,
             contact_repo=contact_repo,
             calendar_info_repo=calendar_info_repo,
+            task_list_repo=task_list_repo,
             date_resolver=date_resolver,
         )
 

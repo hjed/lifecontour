@@ -120,3 +120,16 @@ class TaskList:
             raise TaskListValidationError(
                 "position", "Position must be zero or greater"
             )
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskListSummary:
+    """A list as the listing shows it: the list, and how many tasks are open.
+
+    Attributes:
+        task_list: The list itself
+        open_task_count: Its not-done tasks; zero for a list with none
+    """
+
+    task_list: TaskList
+    open_task_count: int

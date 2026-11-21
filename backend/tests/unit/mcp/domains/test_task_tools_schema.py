@@ -16,7 +16,7 @@ descriptions the schema carries — and nowhere else, so a test asserts it exist
 from typing import Any
 
 import pytest
-from core_shared.models.tasks import TaskLinkRole, TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskLinkRole, TaskStatus
 from fastmcp import Client, FastMCP
 
 from app.mcp.domains.tasks.tools import register_task_tools
@@ -1219,6 +1219,10 @@ _TASK_FIELDS = {
     "creating_journal_id",
     "due_journal_id",
     "intermediate_journal_ids",
+    "task_list_id",
+    "due_date",
+    "flagged",
+    "icon",
     "created_at",
     "updated_at",
 }
@@ -1227,8 +1231,10 @@ _READ_FIELDS = _TASK_FIELDS | {
     "due_journal",
     "intermediate_journals",
     "contacts",
+    "task_list",
     "lapsed",
     "lapse_reason",
+    "overdue",
 }
 
 
@@ -1299,3 +1305,55 @@ class TestTheResultShapeIsPublished:
 
         groups = schema["properties"]["groups"]
         assert set(groups["properties"]) == {str(role) for role in TaskLinkRole}
+
+
+def _resolve(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Follow a ``$ref`` into ``$defs``; return any other node unchanged."""
+    ref = node.get("$ref")
+    if ref is None:
+        return node
+    resolved: dict[str, Any] = schema["$defs"][ref.rsplit("/", 1)[-1]]
+    return resolved
+
+
+def _non_null(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """The non-null branch of a nullable property, resolved."""
+    branches = [b for b in node.get("anyOf", [node]) if b.get("type") != "null"]
+    assert len(branches) == 1
+    return _resolve(schema, branches[0])
+
+
+@pytest.mark.unit
+class TestTheListFieldsArePublished:
+    """An agent reads list, due date, flag, icon and overdue from the schema."""
+
+    async def test_the_icon_is_one_of_the_fixed_keys_or_null(self) -> None:
+        schema = await _output_schema("get_task")
+
+        icon = schema["properties"]["icon"]
+        assert {"type": "null"} in icon["anyOf"]
+        assert set(_non_null(schema, icon)["enum"]) == {str(i) for i in TaskIcon}
+
+    async def test_the_list_is_a_nullable_ref_with_its_label(self) -> None:
+        schema = await _output_schema("get_task")
+
+        task_list = schema["properties"]["task_list"]
+        assert {"type": "null"} in task_list["anyOf"]
+        assert set(_non_null(schema, task_list)["properties"]) == {
+            "id",
+            "name",
+            "icon",
+            "archived",
+        }
+
+    async def test_overdue_and_flagged_are_booleans(self) -> None:
+        schema = await _output_schema("get_task")
+
+        assert schema["properties"]["overdue"]["type"] == "boolean"
+        assert schema["properties"]["flagged"]["type"] == "boolean"
+
+    async def test_the_due_date_is_a_calendar_date_or_null(self) -> None:
+        schema = await _output_schema("get_task")
+
+        due_date = schema["properties"]["due_date"]
+        assert _non_null(schema, due_date) == {"type": "string", "format": "date"}

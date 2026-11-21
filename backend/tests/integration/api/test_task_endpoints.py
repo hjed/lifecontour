@@ -36,14 +36,15 @@ are 25 hours apart, so their local dates differ at every instant — no clock, n
 race, and a UTC reading fails both.
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.journals import JournalNotFoundError
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskStatus
 from httpx import AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -53,6 +54,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.settings.models import UserSettings
 from app.core.tasks.models.events import contact_field_name
 from tests.integration.tasks.task_seeding import (
+    ARCHIVED_AT,
     COUNT_CONTACT_LINKS,
     COUNT_CONTACT_LINKS_FOR_TASK,
     COUNT_INTERMEDIATE_JOURNALS,
@@ -4642,3 +4644,254 @@ class TestListTasksOnTheRestSurface:
 
         assert response.status_code == 404
         assert _error(response.json())["code"] == "TASK_NOT_FOUND"
+
+
+_FLAG_AND_ICON = text(
+    "UPDATE tasks SET flagged = true, icon = :icon WHERE id = :task_id"
+)
+
+
+def _utc_today() -> date:
+    """Today for the test user, who has no timezone: UTC's date."""
+    return datetime.now(UTC).date()
+
+
+@pytest.mark.integration
+class TestTaskReadsCarryListDueDateFlagIconAndOverdue:
+    """Every task read carries the list, due date, flag, icon and overdue."""
+
+    async def test_get_a_list_task_carries_its_list_and_dates(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """Past its due date: overdue, never lapsed, labelled with its list."""
+        task_list = await seed_task_list(
+            async_connection, "Packing", icon=TaskIcon.PACKAGE
+        )
+        assert task_list.id is not None
+        due = _utc_today() - timedelta(days=3)
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=task_list.id,
+            due_date=due,
+            flagged=True,
+            icon=TaskIcon.STAR,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["task_list_id"] == task_list.id
+        assert attributes["task_list"] == {
+            "id": task_list.id,
+            "name": "Packing",
+            "icon": "package",
+            "archived": False,
+        }
+        assert attributes["due_date"] == due.isoformat()
+        assert attributes["flagged"] is True
+        assert attributes["icon"] == "star"
+        assert attributes["overdue"] is True
+        assert attributes["lapsed"] is False
+
+    async def test_a_future_due_date_is_not_overdue(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            due_date=_utc_today() + timedelta(days=3),
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.json()["data"]["attributes"]["overdue"] is False
+
+    async def test_a_multi_day_due_journal_still_running_is_not_overdue(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Started three days ago and not over yet: its date has passed, but
+        the task is overdue only once the journal's last day has ended."""
+        now = datetime.now(UTC)
+        trip = await create_journal(
+            journal_repository,
+            title="Trip",
+            start=now - timedelta(days=3),
+            end=now + timedelta(days=1),
+        )
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            due_journal_id=trip,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert (
+            attributes["due_journal"]["date"]
+            == (now - timedelta(days=3)).date().isoformat()
+        )
+        assert attributes["overdue"] is False
+
+    async def test_a_multi_day_due_journal_that_has_ended_is_overdue(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        now = datetime.now(UTC)
+        trip = await create_journal(
+            journal_repository,
+            title="Trip",
+            start=now - timedelta(days=5),
+            end=now - timedelta(days=2),
+        )
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            due_journal_id=trip,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.json()["data"]["attributes"]["overdue"] is True
+
+    async def test_a_cancelled_due_journal_leaves_a_list_task_undated(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        due_id = await create_journal(journal_repository, days_offset=-4)
+        await mark_journal_as_event(
+            async_connection, due_id, event_state=EventState.CANCELLED
+        )
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["due_journal"]["cancelled"] is True
+        assert attributes["overdue"] is False
+        assert attributes["lapsed"] is False
+
+    async def test_a_task_on_an_archived_list_is_marked_archived(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        response = await authenticated_client.get(f"/api/tasks/{task_id}")
+
+        assert response.json()["data"]["attributes"]["task_list"]["archived"] is True
+
+    async def test_a_journals_tasks_carry_the_same_fields(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        viewed_id = await create_journal(journal_repository, title="Tuesday")
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _seeded_list_id(async_connection),
+            creating_journal_id=viewed_id,
+            due_date=_utc_today() - timedelta(days=1),
+            flagged=True,
+        )
+
+        response = await authenticated_client.get(f"/api/journals/{viewed_id}/tasks")
+
+        (resource,) = response.json()["data"]
+        assert resource["id"] == str(task_id)
+        assert resource["attributes"]["task_list"]["name"] == "Seeded list"
+        assert resource["attributes"]["flagged"] is True
+        assert resource["attributes"]["overdue"] is True
+
+    async def test_upcoming_carries_a_journal_only_tasks_flag_and_icon(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """Flag and icon apply to every task; a journal-only one has no list."""
+        creating_id, _ = task_anchors
+        due_id = await create_journal(journal_repository, days_offset=2)
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        await async_connection.execute(
+            _FLAG_AND_ICON, {"task_id": task_id, "icon": TaskIcon.HEART.value}
+        )
+
+        response = await authenticated_client.get("/api/tasks/upcoming")
+
+        (resource,) = response.json()["data"]
+        attributes = resource["attributes"]
+        assert attributes["flagged"] is True
+        assert attributes["icon"] == "heart"
+        assert attributes["task_list_id"] is None
+        assert attributes["task_list"] is None
+        assert attributes["due_date"] is None
+        assert attributes["overdue"] is False
+
+    async def test_a_write_answer_carries_the_plain_fields(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        """PATCH answers with the list id, due date, flag and icon too."""
+        list_id = await _seeded_list_id(async_connection)
+        due = _utc_today() + timedelta(days=4)
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            due_date=due,
+            flagged=True,
+            icon=TaskIcon.GIFT,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, text="wrap it")
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["task_list_id"] == list_id
+        assert attributes["due_date"] == due.isoformat()
+        assert attributes["flagged"] is True
+        assert attributes["icon"] == "gift"
+
+    async def test_an_unknown_task_is_refused(
+        self, authenticated_client: AsyncClient
+    ) -> None:
+        response = await authenticated_client.get("/api/tasks/999999999")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_NOT_FOUND"
+
+    async def test_another_users_list_task_never_names_their_list(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        theirs_list = await seed_task_list(
+            async_connection, "Their secret list", user_id=OTHER_USER_ID
+        )
+        assert theirs_list.id is not None
+        theirs = await create_list_task(
+            async_connection, task_list_id=theirs_list.id, user_id=OTHER_USER_ID
+        )
+
+        response = await authenticated_client.get(f"/api/tasks/{theirs}")
+
+        assert response.status_code == 404
+        assert "Their secret list" not in response.text
