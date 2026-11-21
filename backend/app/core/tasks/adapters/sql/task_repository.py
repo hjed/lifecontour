@@ -266,18 +266,23 @@ class SqlTaskRepository(TaskRepository):
         row = result.fetchone()
         return None if row is None else _row_to_task(row)
 
-    async def delete(self, task_id: int, user_id: str) -> None:
-        """Hard-delete one of the user's tasks.
+    async def delete(self, task_id: int, user_id: str) -> int | None:
+        """Hard-delete one of the user's tasks, answering the list it was on.
 
         Both link tables cascade from ``task_id``, so the links go with it and
         the journals and contacts they pointed at are untouched.
         """
-        query = text("DELETE FROM tasks WHERE id = :task_id AND user_id = :user_id")
+        query = text(
+            "DELETE FROM tasks WHERE id = :task_id AND user_id = :user_id "
+            "RETURNING task_list_id"
+        )
         result = await self.conn.execute(
             query, {"task_id": task_id, "user_id": user_id}
         )
-        if result.rowcount == 0:
+        row = result.one_or_none()
+        if row is None:
             raise TaskNotFoundError(task_id)
+        return None if row.task_list_id is None else int(row.task_list_id)
 
     async def add_intermediate_journal(
         self, task_id: int, journal_id: int, user_id: str

@@ -881,14 +881,14 @@ a capped span of days. Neither can be widened into a task browser.
 | `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
 | `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
 | `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded, and so are tasks on a list (journal-only for now) | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
-| `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition |
-| `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement |
-| `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete |
+| `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
-| `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown |
-| `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned |
-| `POST /api/tasks/{task_id}/relationships/intermediate-journals` | Attach an intermediate journal. Body: a resource identifier, `{"data": {"type": "journals", "id": "9"}}` | 204; 400 unknown field, a role attribute, another resource type, or a non-integer id; 404 task or journal unknown/not-owned; 409 the journal is already the creating or due journal |
-| `DELETE /api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}` | Remove an intermediate-journal link | 204; 404 task unknown/not-owned; 409 the journal is the creating or due journal *and* holds no intermediate link |
+| `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `POST /api/tasks/{task_id}/relationships/intermediate-journals` | Attach an intermediate journal. Body: a resource identifier, `{"data": {"type": "journals", "id": "9"}}` | 204; 400 unknown field, a role attribute, another resource type, or a non-integer id; 404 task or journal unknown/not-owned; 409 the journal is already the creating or due journal; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `DELETE /api/tasks/{task_id}/relationships/intermediate-journals/{journal_id}` | Remove an intermediate-journal link | 204; 404 task unknown/not-owned; 409 the journal is the creating or due journal *and* holds no intermediate link; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 
 Conventions this surface pins down:
 
@@ -1291,11 +1291,16 @@ Conventions this surface pins down:
   the whole active order, because one move changes several positions. All the
   owner's lists are locked for the move — and by a create before it computes
   the bottom — so concurrent moves and creates serialize.
-- **An archived list is read-only**: every write to one but unarchive — the
-  update and the move today, task writes from ITER21-001 Phase 18 — answers 409
-  `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message naming
-  unarchiving as the way out. Each write checks `TaskList.ensure_writable()`
-  right after its locked read, so even a no-op `PATCH` is refused.
+- **An archived list is read-only, and so are its tasks**: every write to one
+  but unarchive — the update and the move — and every write to a task on one —
+  `PATCH /api/tasks/{task_id}` (text and status), retarget, delete, and the
+  contact and intermediate-journal relationship routes, with their MCP tools —
+  answers 409 `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message
+  naming unarchiving as the way out. Each list write checks
+  `TaskList.ensure_writable()` right after its locked read, and each task write
+  checks it on the task's list, held `FOR SHARE` for the unit of work, so even
+  a no-op is refused and an archive cannot land between the check and the
+  write. Reads stay open, and another user's task is still a plain 404.
 - **Archive and unarchive are actions, and idempotent.** They are their own
   routes, not a `PATCH` attribute. Archiving an archived list (or unarchiving an
   active one) answers the list unchanged and records nothing, so a retry

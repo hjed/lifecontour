@@ -42,6 +42,7 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -309,6 +310,7 @@ class TestTheWriteIsAUnitOfWork:
 
         service = TaskService(
             task_repo=_ObservingRepository(async_connection),
+            task_list_repo=SqlTaskListRepository(async_connection),
             journal_repo=journal_repository,
             contact_repo=SqlContactRepository(async_connection),
             date_resolver=JournalDateResolver(

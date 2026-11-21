@@ -522,6 +522,7 @@ def service_on(
     """
     return TaskService(
         task_repo=repo(connection),
+        task_list_repo=SqlTaskListRepository(connection),
         journal_repo=journal_repo(connection),
         contact_repo=SqlContactRepository(connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),
@@ -670,4 +671,82 @@ async def seed_task_list(
     """
     return await SqlTaskListRepository(conn).save(
         TaskList(user_id=user_id, name=name, icon=icon, archived_at=archived_at)
+    )
+
+
+# An instant to archive seeded lists at; any fixed one will do.
+ARCHIVED_AT = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
+
+
+@dataclass(frozen=True)
+class ArchivedListTask:
+    """A task on an archived list, holding a link of every kind.
+
+    Both anchors, an intermediate journal and a contact, so that every task
+    write — retarget, unlink and detach included — has something real to act
+    on, and a refusal can be checked against all of it. The ``unlinked_*`` ids
+    and ``later_journal_id`` are valid targets the task does not yet hold.
+    """
+
+    task_id: int
+    task_list_id: int
+    later_journal_id: int
+    intermediate_journal_id: int
+    unlinked_journal_id: int
+    contact_id: int
+    unlinked_contact_id: int
+
+
+async def seed_archived_list_task(
+    conn: AsyncConnection,
+    journal_repository: SqlJournalRepository,
+    task_anchors: tuple[int, int],
+) -> ArchivedListTask:
+    """Seed an :class:`ArchivedListTask` as rows, on the test's connection.
+
+    Rows rather than service calls because nothing creates a list task yet,
+    and because the list has to be archived *with* its task already on it.
+    """
+    creating_id, due_id = task_anchors
+    later_id = await create_journal(journal_repository, title="Later", days_offset=14)
+    mentioned_id = await create_journal(journal_repository, title="Mentioned")
+    unlinked_journal_id = await create_journal(journal_repository, title="Unlinked")
+    contact_id = await create_contact(conn, first_name="Sarah")
+    unlinked_contact_id = await create_contact(conn, first_name="Tom")
+    task_list = await seed_task_list(conn, "Old trip", archived_at=ARCHIVED_AT)
+    assert task_list.id is not None
+    task_id = await create_list_task(
+        conn,
+        task_list_id=task_list.id,
+        creating_journal_id=creating_id,
+        due_journal_id=due_id,
+    )
+    await link_intermediate_journal(conn, task_id=task_id, journal_id=mentioned_id)
+    await link_contact(conn, task_id=task_id, contact_id=contact_id)
+    return ArchivedListTask(
+        task_id=task_id,
+        task_list_id=task_list.id,
+        later_journal_id=later_id,
+        intermediate_journal_id=mentioned_id,
+        unlinked_journal_id=unlinked_journal_id,
+        contact_id=contact_id,
+        unlinked_contact_id=unlinked_contact_id,
+    )
+
+
+async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
+    """Everything a task write could change, read straight from the tables.
+
+    Existence, status, text, both anchors, and both kinds of link — so one
+    equality says a refused write left the task exactly as it was.
+    """
+    if not await task_exists(conn, task_id):
+        return (False,)
+    return (
+        True,
+        await stored_status(conn, task_id),
+        await stored_text(conn, task_id),
+        await stored_anchors(conn, task_id),
+        await intermediate_journal_ids(conn, task_id),
+        await linked_contact_ids(conn, task_id),
     )

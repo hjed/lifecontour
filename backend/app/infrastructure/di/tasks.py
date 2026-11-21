@@ -87,6 +87,7 @@ class TaskProvider(Provider):
     def task_service(
         self,
         task_repo: TaskRepository,
+        task_list_repo: TaskListRepository,
         journal_repo: JournalRepository,
         contact_repo: ContactRepository,
         date_resolver: JournalDateResolver,
@@ -100,6 +101,7 @@ class TaskProvider(Provider):
         """
         return TaskService(
             task_repo=task_repo,
+            task_list_repo=task_list_repo,
             journal_repo=journal_repo,
             contact_repo=contact_repo,
             date_resolver=date_resolver,

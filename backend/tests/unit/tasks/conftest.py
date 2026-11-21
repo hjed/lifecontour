@@ -19,7 +19,7 @@ from core_shared.models.tasks import Task
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import make_task
+from tests.unit.tasks.task_doubles import make_task, make_task_list_repo
 
 
 @pytest.fixture
@@ -32,7 +32,15 @@ def mock_task_repo() -> AsyncMock:
 
     repo.save.side_effect = save
     repo.find_by_id_for_update.return_value = make_task()
+    # The list a deleted task was on: none, for the journal-only task above.
+    repo.delete.return_value = None
     return repo
+
+
+@pytest.fixture
+def mock_task_list_repo() -> AsyncMock:
+    """A list repository; a journal-only task never reaches it."""
+    return make_task_list_repo()
 
 
 @pytest.fixture
@@ -75,6 +83,7 @@ def mock_transaction() -> AsyncMock:
 @pytest.fixture
 def service(
     mock_task_repo: AsyncMock,
+    mock_task_list_repo: AsyncMock,
     mock_journal_repo: AsyncMock,
     mock_contact_repo: AsyncMock,
     mock_settings_repo: AsyncMock,
@@ -83,6 +92,7 @@ def service(
     """The service under test, over mocked ports."""
     return TaskService(
         task_repo=mock_task_repo,
+        task_list_repo=mock_task_list_repo,
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=JournalDateResolver(mock_settings_repo),

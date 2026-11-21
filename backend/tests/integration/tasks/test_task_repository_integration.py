@@ -342,6 +342,28 @@ class TestDelete:
         with pytest.raises(TaskNotFoundError):
             await task_repository.delete(999_999, USER_ID)
 
+    async def test_delete_of_a_journal_only_task_returns_no_list(
+        self, task_repository: SqlTaskRepository, saved_task: Task
+    ) -> None:
+        """``None`` means "on no list", never "not found", which still raises."""
+        assert saved_task.id is not None
+
+        assert await task_repository.delete(saved_task.id, USER_ID) is None
+
+    async def test_delete_of_a_list_task_returns_its_list(
+        self, task_repository: SqlTaskRepository, async_connection: AsyncConnection
+    ) -> None:
+        """The statement answers which list the task was on, so the service can
+        refuse an archived one without a read before the delete."""
+        task_list = await seed_task_list(async_connection, "Packing")
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        assert await task_repository.delete(task_id, USER_ID) == task_list.id
+        assert (
+            await count(async_connection, _COUNT_TASKS_BY_ID, {"task_id": task_id}) == 0
+        )
+
     async def test_delete_cascades_links_and_spares_journals_and_contacts(
         self,
         task_repository: SqlTaskRepository,

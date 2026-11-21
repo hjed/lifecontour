@@ -22,6 +22,7 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
@@ -44,6 +45,7 @@ async def service(
     """
     return TaskService(
         task_repo=task_repository,
+        task_list_repo=SqlTaskListRepository(async_connection),
         journal_repo=journal_repository,
         contact_repo=SqlContactRepository(async_connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),

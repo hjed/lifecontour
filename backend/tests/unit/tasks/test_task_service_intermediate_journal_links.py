@@ -58,7 +58,7 @@ from app.core.journal.models.repositories import JournalRepository
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.models.repositories import TaskRepository
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import published_events
+from tests.unit.tasks.task_doubles import make_task_list_repo, published_events
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -178,6 +178,7 @@ def service(
     """
     return TaskService(
         task_repo=mock_task_repo,
+        task_list_repo=make_task_list_repo(),
         journal_repo=mock_journal_repo,
         contact_repo=mock_contact_repo,
         date_resolver=JournalDateResolver(mock_settings_repo),

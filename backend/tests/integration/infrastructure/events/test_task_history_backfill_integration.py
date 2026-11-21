@@ -43,6 +43,7 @@ from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
@@ -68,6 +69,7 @@ def _task_service(conn: AsyncConnection) -> TaskService:
     """The real service over real adapters on the test's single connection."""
     return TaskService(
         task_repo=SqlTaskRepository(conn),
+        task_list_repo=SqlTaskListRepository(conn),
         journal_repo=SqlJournalRepository(conn),
         contact_repo=SqlContactRepository(conn),
         date_resolver=JournalDateResolver(
