@@ -12,20 +12,26 @@ the journal controller does exactly that before calling
 to load: ``TaskService.delete_task`` removes the row and the ``TaskDeleted``
 event projects a ``__deleted__`` marker, which under the ordinary pattern would
 be written to a surface nobody could ever be authorised to read. Putting the
-resolution here rather than in the two callers also means the endpoint and the
+resolution here (through ``OwnerScopedHistory``) rather than in the two callers also means the endpoint and the
 MCP tool cannot answer the question differently.
 """
 
 from core_shared.models.tasks.exceptions import TaskNotFoundError
 
 from app.core.history.models import FieldHistoryEntry, FieldHistoryRepository
+from app.core.history.services.owner_scoped_history import OwnerScopedHistory
 from app.core.tasks.models.repositories import TaskRepository
 
 _TASK_ROOT_TYPE = "task"
 
 
 class TaskHistoryService:
-    """Paginated, owner-scoped read access to a task's change history."""
+    """Paginated, owner-scoped read access to a task's change history.
+
+    The authorisation lives in :class:`OwnerScopedHistory` — the owner on the
+    history rows first, the live task row as the fallback for a task whose
+    events have not been projected yet — shared with the task-list read.
+    """
 
     def __init__(
         self,
@@ -34,6 +40,12 @@ class TaskHistoryService:
     ):
         self.history_repo = history_repo
         self.task_repo = task_repo
+        self._history = OwnerScopedHistory(
+            history_repo,
+            root_type=_TASK_ROOT_TYPE,
+            owns_live_row=self._owns_task,
+            not_found=TaskNotFoundError,
+        )
 
     async def get_task_history(
         self, task_id: int, user_id: str, limit: int = 20, offset: int = 0
@@ -45,10 +57,7 @@ class TaskHistoryService:
                 two are the same answer everywhere in this domain, so a
                 rejection here cannot be used to probe for other users' tasks.
         """
-        await self._require_owned(task_id, user_id)
-        return await self.history_repo.get_history_for_aggregate(
-            _TASK_ROOT_TYPE, task_id, limit, offset
-        )
+        return await self._history.read(task_id, user_id, limit, offset)
 
     async def get_task_history_count(self, task_id: int, user_id: str) -> int:
         """Get the total number of history entries for a task.
@@ -56,34 +65,7 @@ class TaskHistoryService:
         Authorised identically to the read, because a count is a disclosure too:
         how much history a task has is information about that task.
         """
-        await self._require_owned(task_id, user_id)
-        return await self.history_repo.get_history_for_aggregate_count(
-            _TASK_ROOT_TYPE, task_id
-        )
+        return await self._history.count(task_id, user_id)
 
-    async def _require_owned(self, task_id: int, user_id: str) -> None:
-        """Resolve whose history this is, or refuse.
-
-        **The history rows answer first, and the task row is only a fallback.**
-        The order is what makes a deleted task readable: its rows carry the
-        owner (``field_history.user_id``, stamped from the event payload — see
-        ``_owner_for`` in the history service), and asking the ``tasks`` table
-        first would refuse the very case this surface was built for.
-
-        ``get_history_owner`` returning ``None`` is **not** a refusal. It means
-        no row carries an owner, which happens for a task whose events have not
-        been projected yet — projection is asynchronous, so a task created
-        moments ago is in exactly that state, and answering 404 would tell the
-        user their new task does not exist. The live row settles it, through the
-        owner-scoped ``find_by_id`` rather than a comparison written again here.
-
-        Nothing is read before this returns. A service that fetched the rows and
-        then decided is one careless refactor away from returning them.
-        """
-        owner = await self.history_repo.get_history_owner(_TASK_ROOT_TYPE, task_id)
-        if owner is not None:
-            if owner != user_id:
-                raise TaskNotFoundError(task_id)
-            return
-        if await self.task_repo.find_by_id(task_id, user_id) is None:
-            raise TaskNotFoundError(task_id)
+    async def _owns_task(self, task_id: int, user_id: str) -> bool:
+        return await self.task_repo.find_by_id(task_id, user_id) is not None

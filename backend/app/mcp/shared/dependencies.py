@@ -24,6 +24,9 @@ from app.core.contacts.services.upcoming_important_dates_service import (
     UpcomingImportantDatesService,
 )
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.history.services.task_list_history_service import (
+    TaskListHistoryService,
+)
 from app.core.integrations.immich.conflict_resolution_service import (
     ImmichConflictResolutionService,
 )
@@ -436,4 +439,15 @@ async def get_strava_athlete_mapping_service() -> Any:
     return cast(
         StravaAthleteMappingService,
         await _resolve_dependency(StravaAthleteMappingService),
+    )
+
+
+async def get_task_list_history_service() -> TaskListHistoryService:
+    """Resolve the task list history read service for the current MCP request.
+
+    It carries the ownership check itself, so the tool cannot answer "is this
+    yours?" differently from the endpoint.
+    """
+    return cast(
+        TaskListHistoryService, await _resolve_dependency(TaskListHistoryService)
     )

@@ -132,7 +132,7 @@ class SqlFieldHistoryRepository(FieldHistoryRepository):
                 # happened. The synchronous contact dual-write passes None and the
                 # COALESCE falls through to the DB default (now()), unchanged.
                 "created_at": self._coerce_created_at(entry.created_at),
-                # Only task rows carry one; every other producer passes None.
+                # Only task and task-list rows carry one; every other producer passes None.
                 "user_id": entry.user_id,
             },
         )

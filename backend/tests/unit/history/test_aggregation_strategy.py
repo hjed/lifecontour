@@ -66,6 +66,22 @@ def test_task_strategy_is_registered() -> None:
     assert "FROM tasks" not in strategy.where_clause
 
 
+def test_task_list_strategy_is_registered() -> None:
+    """The 'task_list' strategy reads the list's own rows and nothing else.
+
+    It must not join ``task_lists`` (lists will be hard-deleted and their
+    history must outlive the row), and must not reach task rows: a task and a
+    list can share an integer id.
+    """
+    strategy = get_aggregation_strategy("task_list")
+
+    assert strategy.root_type == "task_list"
+    assert "entity_type = 'task_list'" in strategy.where_clause
+    assert "entity_id = :root_id" in strategy.where_clause
+    assert "entity_type = 'task'" not in strategy.where_clause
+    assert "FROM task_lists" not in strategy.where_clause
+
+
 class TestContactStrategyReachesTaskLinkRows:
     """The contact aggregate spans the rows recording a task link to *that* contact.
 

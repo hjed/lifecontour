@@ -117,6 +117,42 @@ class TestTheInputsAreTyped:
             assert annotations.destructive_hint is False, name
             assert annotations.idempotent_hint is True, name
 
+    async def test_history_takes_a_bounded_list_id_and_a_bounded_page(
+        self,
+    ) -> None:
+        schema = (await _tools())["get_task_list_history"].input_schema
+        properties = schema["properties"]
+
+        assert set(properties) == {"task_list_id", "page", "limit"}
+        assert schema["required"] == ["task_list_id"]
+        assert (
+            properties["task_list_id"]["minimum"],
+            properties["task_list_id"]["maximum"],
+        ) == (1, INT32_MAX)
+        assert (properties["page"]["minimum"], properties["page"]["maximum"]) == (
+            1,
+            INT32_MAX,
+        )
+        assert (properties["limit"]["minimum"], properties["limit"]["maximum"]) == (
+            1,
+            100,
+        )
+
+    async def test_history_is_read_only(self) -> None:
+        annotations = (await _tools())["get_task_list_history"].annotations
+
+        assert annotations is not None
+        assert annotations.read_only_hint is True
+
+    async def test_history_names_its_vocabulary(self) -> None:
+        """An agent must be able to tell an archive from an unarchive."""
+        description = (await _tools())["get_task_list_history"].description or ""
+
+        for term in ("__created__", "name", "icon", "archived_at"):
+            assert f"``{term}``" in description, term
+        assert "archive" in description
+        assert "unarchive" in description
+
 
 class TestTheResultShapeIsPublished:
     async def test_create_get_and_update_answer_with_one_list(self) -> None:
@@ -145,3 +181,26 @@ class TestTheResultShapeIsPublished:
             assert set(schema["properties"]) == {"lists"}
             item = schema["properties"]["lists"]["items"]
             assert set(item["properties"]) == _LIST_FIELDS
+
+    async def test_history_answers_with_a_page_of_entries(self) -> None:
+        schema = (await _tools())["get_task_list_history"].output_schema
+
+        assert schema is not None
+        assert set(schema["properties"]) == {
+            "task_list_id",
+            "total_count",
+            "page",
+            "limit",
+            "entries",
+        }
+        entry = schema["properties"]["entries"]["items"]
+        if "$ref" in entry:
+            entry = schema["$defs"][entry["$ref"].rsplit("/", 1)[-1]]
+        assert set(entry["properties"]) == {
+            "field_name",
+            "old_value",
+            "new_value",
+            "changed_by",
+            "source",
+            "created_at",
+        }

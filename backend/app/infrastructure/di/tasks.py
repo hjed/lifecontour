@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.contacts.models.repositories import ContactRepository
 from app.core.history.models import FieldHistoryRepository
 from app.core.history.services.task_history_service import TaskHistoryService
+from app.core.history.services.task_list_history_service import (
+    TaskListHistoryService,
+)
 from app.core.journal.models.repositories import (
     CalendarInfoRepository,
     JournalRepository,
@@ -151,4 +154,20 @@ class TaskProvider(Provider):
         return TaskHistoryService(
             history_repo=history_repo,
             task_repo=task_repo,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def task_list_history_service(
+        self,
+        history_repo: FieldHistoryRepository,
+        task_list_repo: TaskListRepository,
+    ) -> TaskListHistoryService:
+        """Provide the task list history read service.
+
+        Authorises itself as the task history read does, with the live list
+        row as the fallback for a list whose events have not been projected.
+        """
+        return TaskListHistoryService(
+            history_repo=history_repo,
+            task_list_repo=task_list_repo,
         )

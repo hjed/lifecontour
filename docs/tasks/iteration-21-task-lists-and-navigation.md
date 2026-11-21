@@ -614,15 +614,74 @@ and owner; a second run writes nothing). No E2E: no UI.
   gated on `entity_type === 'task_list'` — the generic `ActivityItem` path would read an archive as
   "created" and an unarchive as "deleted".
 
-#### Phase 8: List history read
+#### Phase 8: List history read ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 7.
-**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together · **Actual:** ~370 production → **~1,270 tracked**
+(+1,269 / −125 excluding this document: production +456 / −88, of which roughly two thirds is
+docstrings on the endpoint, the tool and the shared owner check; tests +795 / −34; architecture docs
++18). Tracked lines ×1.4 the estimate, inside the 900–1,500 band for a REST + MCP capability.
+Production ran well past ~100 because the ownership check was extracted rather than copied (it
+moved ~40 lines out of `TaskHistoryService`) and because both surfaces document their vocabulary.
 
 **Acceptance Criteria:**
 
-- [ ] Endpoint and tool.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Endpoint and tool.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `GET /api/task-lists/{list_id}/history` (`app/api/tasks/task_list_controllers.py`) and
+the MCP tool `get_task_list_history` (`app/mcp/domains/tasks/task_list_tools.py`), both over
+`TaskListHistoryService` (`app/core/history/services/task_list_history_service.py`).
+- REST answers the shared `HistoryListResponse` with JSON:API type `task_list_history`, paged with
+  `page` (1..INT32_MAX) and `limit` (1–100, default 20); 404 `TASK_LIST_NOT_FOUND`, 400 for an
+  out-of-range id, page or limit. MCP answers `TaskListHistoryResponse` (`task_list_id`,
+  `total_count`, `page`, `limit`, `entries` of `TaskHistoryEntryMCP`).
+- A `"task_list"` aggregation strategy (`entity_type = 'task_list' AND entity_id = :root_id`, no
+  join to `task_lists`) in `app/core/history/models.py`.
+- **`OwnerScopedHistory`** (`app/core/history/services/owner_scoped_history.py`) is the one rule both
+  the task and the task-list history reads now use: the owner on the history rows answers first, the
+  owner-scoped live row is the fallback only while nothing is projected, and nothing is read before
+  the check. `TaskHistoryService` delegates to it unchanged in behaviour (its unit tests keep
+  every assertion; only the shared fake moved to `history_fakes.py`). The two history routes share `history_page_response` and the `page`/`limit` query
+  types (`app/api/history/pages.py`); the two tools share `TaskHistoryEntryMCP.from_entry`.
+
+**Tests:** unit `tests/unit/history/test_task_list_history_service.py` (9: rows answer first and the
+list row is not consulted, the owner reads a list whose row is gone, another user refused with
+nothing read, the unprojected fallback, unknown and foreign-unprojected refused, the `task_list`
+root and page pass-through, the count authorised the same way); `test_aggregation_strategy.py`
+(`task_list` registered, no join, no task rows); `test_task_list_tools_schema.py` (bounded inputs,
+read-only, the vocabulary named, the published output shape); `test_task_endpoint_docs.py` (the
+route's docstring names the vocabulary, empty-is-not-missing and foreign-is-unknown); the shared
+`tests/unit/history/history_fakes.py`. Integration `tests/integration/api/test_task_list_history_endpoints.py`
+(13 tests, 16 cases: the whole life newest first with archive/unarchive pairs, the shared shape with provenance and
+actor, unprojected reads empty, an archived list readable, task/journal rows with the same id left out,
+the owner reads after the row is gone and another user does not, a foreign list with history and
+without both answer as an unknown one, paging with a fixed total and links, past the end empty, 400s);
+the `{list_id}` ownership guard now covers the route; `TestGetTaskListHistoryTool` in
+`tests/integration/mcp/test_task_list_tools_mcp.py` (6 tests, 9 cases: typed result in order,
+unprojected empty, paging, readable after the row is gone, foreign list "Not found" like an unknown
+one on both branches with nothing leaked, out-of-range arguments refused by their bounds); and one
+projection → read test in `test_task_list_history_projection_e2e.py` (real create, rename and archive
+read back through the service, refused to a second user). No E2E: no UI until ITER21-002 Phase 17.
+
+**Decisions (recorded during implementation):**
+- **The ownership rule was extracted, not copied** (plan D2), so the task and list reads cannot
+  disagree and Sonar's duplication gate stays clear.
+- **An archived list's history is readable** — archiving refuses writes, and this is a read.
+- **The MCP entry model is shared** (`TaskHistoryEntryMCP`) — the shape is identical.
+- **Not in `READ_ONLY_TOOL_NAMES`**, the AI summary generators' curated subset, which holds no task
+  tools.
+
+**Notes for later phases:**
+- *ITER21-002 Phase 17:* read `GET /api/task-lists/{list_id}/history`; entries carry
+  `entity_type: 'task_list'`. Direction of an `archived_at` row is which side is null.
+- *Phase 29 (list delete):* the read already authorises on the rows, so a deleted list's
+  `__deleted__` marker is readable by its owner with no change here — add an integration test for it
+  beside `TestADeletedListStillHasAHistory`, which simulates the delete with a raw row delete.
+- *Local integration runs:* this worktree's path hashes to the same `pms_test_43` containers as
+  another worktree's, and concurrent runs reset each other's schema; `test_authentication_integration.py`
+  builds `Settings` without a Redis URL, so export `REDIS_URL` to the workspace Redis port.
 
 #### Phase 9: Task schema: list columns and relaxed anchors ✅ DONE
 

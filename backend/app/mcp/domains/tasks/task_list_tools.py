@@ -1,11 +1,13 @@
-"""Task list MCP tools: create, update, read, list, move, archive and unarchive.
+"""Task list MCP tools: create, update, read, list, move, archive, unarchive and
+read a list's history.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
 no domain error. The writes (``create_task_list``, ``update_task_list``,
 ``move_task_list``, ``archive_task_list`` and ``unarchive_task_list``) call the
 ``@transactional`` ``TaskListService``, which
 commits each list and its event together (a move publishes none); the reads go
-through ``TaskListReadService``, which can change nothing. A refused name
+through ``TaskListReadService``, which can change nothing, and the history
+through ``TaskListHistoryService``, which authorises the read itself. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
 found", exactly as a missing one. A write to an archived list comes back as a
 "Task error" naming unarchiving as the way out.
@@ -25,16 +27,25 @@ from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.history.services.task_list_history_service import (
+    TaskListHistoryService,
+)
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
-from app.mcp.domains.tasks.task_list_schemas import TaskListMCP, TaskListsMCP
+from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP
+from app.mcp.domains.tasks.task_list_schemas import (
+    TaskListHistoryResponse,
+    TaskListMCP,
+    TaskListsMCP,
+)
 from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
 from app.mcp.shared.arguments import JsonBool, JsonIntOnly
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
     get_current_user_id,
+    get_task_list_history_service,
     get_task_list_read_service,
     get_task_list_service,
     mcp_depends,
@@ -321,3 +332,69 @@ async def unarchive_task_list(
         changed_by="mcp",
     )
     return _task_list_fields(unarchived)
+
+
+@tool(annotations=READ_ONLY)
+@mcp_unified_error_handler("get_task_list_history", "task list")
+async def get_task_list_history(
+    task_list_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The id of the task list to read the history of.",
+        ),
+    ],
+    page: Annotated[
+        int, Field(description="Page number (1-based)", ge=1, le=INT32_MAX)
+    ] = 1,
+    limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
+    history_service: TaskListHistoryService = mcp_depends(
+        get_task_list_history_service
+    ),
+) -> TaskListHistoryResponse:
+    """
+    Read a task list's change history: what changed, when, and where it came from.
+
+    Entries are **most recent first** and paginated. Each names the field that
+    changed, its value on both sides, when, who acted (``changed_by``) and the
+    provenance (``source`` — ``ui``, ``mcp`` for an assistant like you, or
+    ``system``). It is the same history the user sees.
+
+    **The field names are the vocabulary.** ``__created__`` opens the history
+    and carries the list's name; ``name`` is a rename; ``icon`` is an icon set,
+    changed or cleared (an empty side is no icon). ``archived_at`` records
+    archiving and unarchiving: ``old_value`` empty and ``new_value`` an ISO
+    instant is an **archive**; the instant moving to empty is an **unarchive**.
+    Reordering lists is not recorded. Changes to the tasks on a list are in each
+    task's own history (``get_task_history``), not here.
+
+    **History is written asynchronously**, a moment behind the change. If you
+    change a list and read its history straight back, your change may not be
+    there yet; a list whose events have not been projected answers an empty
+    history rather than an error. An archived list's history is readable.
+
+    This is a **record of the past, not a way to browse lists** — use
+    ``get_task_list`` or ``list_task_lists`` for that. Another user's list is
+    reported as not found, exactly as a missing one. A page past the end is an
+    ordinary empty answer, and ``total_count`` still says how many entries
+    there are.
+    """
+    user_id = await get_current_user_id()
+
+    entries = await history_service.get_task_list_history(
+        task_list_id=task_list_id,
+        user_id=user_id,
+        limit=limit,
+        offset=(page - 1) * limit,
+    )
+    total_count = await history_service.get_task_list_history_count(
+        task_list_id=task_list_id, user_id=user_id
+    )
+    return TaskListHistoryResponse(
+        task_list_id=task_list_id,
+        total_count=total_count,
+        page=page,
+        limit=limit,
+        entries=[TaskHistoryEntryMCP.from_entry(entry) for entry in entries],
+    )

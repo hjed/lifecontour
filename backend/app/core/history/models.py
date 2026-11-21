@@ -342,6 +342,27 @@ register_aggregation_strategy(
 )
 
 
+# The task-list aggregation predicate. List events project with
+# entity_type='task_list', entity_id=list_id, so this keys on the list directly.
+#
+# **No join to ``task_lists``**, for the reason the task predicate gives: lists
+# will be hard-deleted and their history has to stay readable afterwards. Ownership
+# is checked on the rows by ``TaskListHistoryService`` before this runs. The
+# ``entity_type`` equality also keeps a task that shares the list's integer id
+# out of the feed.
+_TASK_LIST_AGGREGATION_WHERE = """
+    entity_type = 'task_list' AND entity_id = :root_id
+"""
+
+
+register_aggregation_strategy(
+    HistoryAggregationStrategy(
+        root_type="task_list",
+        where_clause=_TASK_LIST_AGGREGATION_WHERE,
+    )
+)
+
+
 class FieldHistoryRepository(ABC):
     """Repository interface for entity-agnostic field-level change history."""
 
@@ -409,8 +430,9 @@ class FieldHistoryRepository(ABC):
         """Return the owner recorded on an entity's history rows, if any.
 
         The answer to *"whose history is this?"* for a read that cannot ask the
-        entity, because the entity may no longer exist. Only task rows carry an
-        owner today (see ``field_history.user_id``), so this returns ``None``
+        entity, because the entity may no longer exist. Only task and task-list
+        rows carry an owner today (see ``field_history.user_id``), so this
+        returns ``None``
         for a journal or a contact — and also for an entity whose events have
         not been projected yet, which a caller must distinguish from "not
         yours" rather than treat as a refusal.

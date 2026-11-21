@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from core_shared.models.history import Provenance
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.journals.event_state import EventState
 from core_shared.models.tasks import TaskIcon, TaskList, TaskStatus
@@ -33,6 +34,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.models import FieldHistoryEntry
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.settings.adapters.sql.user_settings_repository import (
@@ -793,4 +798,58 @@ async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
         await stored_anchors(conn, task_id),
         await intermediate_journal_ids(conn, task_id),
         await linked_contact_ids(conn, task_id),
+    )
+
+
+LIST_HISTORY_START = datetime(2026, 11, 1, 8, 0, tzinfo=UTC)
+ARCHIVED_AT_EXAMPLE = "2026-11-02T09:00:00+00:00"
+
+# A list's life in the Phase 7 vocabulary, oldest first:
+# ``(field_name, old_value, new_value, source)``. One of each shape the list
+# events project — the created marker, a rename, an icon set, an archive and an
+# unarchive — from two origins.
+LIST_LIFE: tuple[tuple[str, str | None, str | None, Provenance], ...] = (
+    ("__created__", None, "Packing", Provenance.UI),
+    ("name", "Packing", "Packing for Bowral", Provenance.MCP),
+    ("icon", None, "star", Provenance.UI),
+    ("archived_at", None, ARCHIVED_AT_EXAMPLE, Provenance.UI),
+    ("archived_at", ARCHIVED_AT_EXAMPLE, None, Provenance.MCP),
+)
+
+
+async def seed_task_list_history(
+    conn: AsyncConnection,
+    task_list_id: int,
+    *,
+    user_id: str = USER_ID,
+    entity_type: str = "task_list",
+) -> None:
+    """Write :data:`LIST_LIFE` as the projection consumer would, a minute apart.
+
+    ``user_id`` is the **list owner** the projection stamps on every row, not
+    the actor. ``entity_type`` lets a test file the same rows under another type
+    to prove the list read does not reach them.
+    """
+    repo = SqlFieldHistoryRepository(conn)
+    for minutes, (field, old, new, source) in enumerate(LIST_LIFE):
+        await repo.record_change(
+            FieldHistoryEntry(
+                entity_type=entity_type,
+                entity_id=task_list_id,
+                field_name=field,
+                old_value=old,
+                new_value=new,
+                changed_by=source.value,
+                source=source,
+                event_id=f"evt-{entity_type}-{task_list_id}-{minutes}",
+                created_at=LIST_HISTORY_START + timedelta(minutes=minutes),
+                user_id=user_id,
+            )
+        )
+
+
+async def delete_task_list_row(conn: AsyncConnection, task_list_id: int) -> None:
+    """Remove a list row directly, standing in for the hard delete to come."""
+    await conn.execute(
+        text("DELETE FROM task_lists WHERE id = :id"), {"id": task_list_id}
     )

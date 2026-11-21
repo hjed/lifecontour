@@ -1,4 +1,5 @@
-"""Task list API endpoints: create, read, list, update, move, archive and unarchive.
+"""Task list API endpoints: create, read, list, update, move, archive, unarchive
+and the list's history.
 
 Thin by design, like the task controller: every rule lives in
 ``TaskListService`` (the ``@transactional`` writes and their events; the move
@@ -24,6 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import DatabaseIdPath
 from app.api.common.schemas import get_request_base_url
+from app.api.history import HistoryListResponse
+from app.api.history.pages import (
+    HistoryLimitQuery,
+    HistoryPageQuery,
+    history_offset,
+    history_page_response,
+)
 from app.api.tasks.task_list_schemas import (
     TaskListCollectionResponse,
     TaskListCreateRequest,
@@ -31,6 +39,9 @@ from app.api.tasks.task_list_schemas import (
     TaskListResponse,
     TaskListUpdateRequest,
     to_task_list_resource,
+)
+from app.core.history.services.task_list_history_service import (
+    TaskListHistoryService,
 )
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
@@ -119,6 +130,65 @@ async def get_task_list(
     )
     return TaskListResponse(
         data=to_task_list_resource(task_list, get_request_base_url(request))
+    )
+
+
+@router.get("/task-lists/{list_id}/history")
+@inject
+async def get_task_list_history(
+    list_id: DatabaseIdPath,
+    request: Request,
+    history_service: FromDishka[TaskListHistoryService],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: HistoryPageQuery = 1,
+    limit: HistoryLimitQuery = 20,
+) -> HistoryListResponse:
+    """Get a task list's field-level change history, most recent first.
+
+    Each entry names the field that changed and its value on both sides:
+    ``__created__`` (the list's name), ``name`` (a rename), ``icon`` (set,
+    changed or cleared) and ``archived_at`` — an archive moves it from null to
+    the instant, an unarchive from the instant back to null. Each carries its
+    provenance and actor, in the shape the task and journal feeds use. Wording
+    belongs to the client; these field names are the contract.
+
+    History is produced asynchronously by the projection consumer, so a
+    just-made change may take a moment to appear, and a list whose events have
+    not been projected yet answers an **empty list rather than a 404** — "not
+    projected yet" is not "does not exist". An archived list's history is
+    readable: archiving refuses writes, and this is a read.
+
+    Ownership is resolved by ``TaskListHistoryService`` from the history rows
+    themselves, with the live list row only as a fallback, so the history stays
+    readable by its owner once a list can be deleted, and this endpoint and the
+    ``get_task_list_history`` MCP tool cannot answer it differently.
+
+    No transaction is opened on this path. A page past the end is an ordinary
+    empty answer; ``meta`` still carries the total.
+
+    Raises:
+        400: An out-of-range id, a ``limit`` outside 1–100, or a ``page``
+             outside the ``INTEGER`` range.
+        404: The list does not exist or is not yours. Another user's list is
+             the same answer as an unknown one, so a refusal cannot be used to
+             probe for other users' lists.
+    """
+    entries = await history_service.get_task_list_history(
+        task_list_id=list_id,
+        user_id=user.id,
+        limit=limit,
+        offset=history_offset(page, limit),
+    )
+    total_count = await history_service.get_task_list_history_count(
+        task_list_id=list_id, user_id=user.id
+    )
+    return history_page_response(
+        entries,
+        total_count=total_count,
+        resource_type="task_list_history",
+        self_url=f"{get_request_base_url(request)}/api/task-lists/{list_id}/history",
+        page=page,
+        limit=limit,
     )
 
 
