@@ -10,7 +10,8 @@ through ``TaskListReadService``, which can change nothing, and the history
 through ``TaskListHistoryService``, which authorises the read itself. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
 found", exactly as a missing one. A write to an archived list comes back as a
-"Task error" naming unarchiving as the way out.
+"Task error" naming unarchiving as the way out. Every integer argument takes
+only a JSON integer (``JsonIntOnly``), as REST does.
 """
 
 from typing import Annotated
@@ -344,11 +345,16 @@ async def get_task_list_history(
             le=INT32_MAX,
             description="The id of the task list to read the history of.",
         ),
+        JsonIntOnly,
     ],
     page: Annotated[
-        int, Field(description="Page number (1-based)", ge=1, le=INT32_MAX)
+        int,
+        Field(description="Page number (1-based)", ge=1, le=INT32_MAX),
+        JsonIntOnly,
     ] = 1,
-    limit: Annotated[int, Field(description="Entries per page", ge=1, le=100)] = 20,
+    limit: Annotated[
+        int, Field(description="Entries per page", ge=1, le=100), JsonIntOnly
+    ] = 20,
     history_service: TaskListHistoryService = mcp_depends(
         get_task_list_history_service
     ),

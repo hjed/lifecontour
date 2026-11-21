@@ -659,9 +659,11 @@ actor, unprojected reads empty, an archived list readable, task/journal rows wit
 the owner reads after the row is gone and another user does not, a foreign list with history and
 without both answer as an unknown one, paging with a fixed total and links, past the end empty, 400s);
 the `{list_id}` ownership guard now covers the route; `TestGetTaskListHistoryTool` in
-`tests/integration/mcp/test_task_list_tools_mcp.py` (6 tests, 9 cases: typed result in order,
+`tests/integration/mcp/test_task_list_tools_mcp.py` (7 tests, 13 cases: typed result in order,
 unprojected empty, paging, readable after the row is gone, foreign list "Not found" like an unknown
-one on both branches with nothing leaked, out-of-range arguments refused by their bounds); and one
+one on both branches with nothing leaked, out-of-range arguments refused by their bounds,
+`page`/`limit` that are not JSON integers refused), plus `get_task_list_history` cases in
+`TestIntegerArgumentsAreNotCoerced` (`true`, `"1"` and `1.0` as the list id refused); and one
 projection → read test in `test_task_list_history_projection_e2e.py` (real create, rename and archive
 read back through the service, refused to a second user). No E2E: no UI until ITER21-002 Phase 17.
 
