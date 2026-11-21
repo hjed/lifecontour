@@ -1314,12 +1314,13 @@ suite in chunks (~4,600 passed, 7 pre-existing skips) and pre-commit.
 
 **Status:** ✅ DONE
 **Prerequisites:** Phase 16.
-**Estimated diff:** ~90 production → **~450 tracked** · **Actual:** ~163 production → **~700
-tracked** (703 insertions, 32 deletions excluding this document: production 163 — dialog 86,
-hook and fetcher 50, types 23, key and endpoint 4; tests 515 — dialog 284, E2E 139, hook 84,
-page-test stub 8; 25 architecture docs). Production ran ×1.8 on the estimate, mostly the dialog's
-docstring and the refusal-view and failed-read states. Tests ran ×3.2 production, because every
-existing dialog test moved onto URL-aware fetch mocks once opening the dialog started a request.
+**Estimated diff:** ~90 production → **~450 tracked** · **Actual:** ~160 production → **~810
+tracked** (776 insertions, 32 deletions excluding this document: production 160 — dialog 83,
+hook and fetcher 50, types 23, key and endpoint 4; tests 587 — dialog 360, E2E 143, hook 84;
+29 architecture docs). Production ran ×1.8 on the estimate, mostly the dialog's docstring and
+the refusal-view, failed-read and live-region states. Tests ran ×3.7 production, because every
+existing dialog test moved onto URL-aware fetch mocks once opening the dialog started a request,
+and the reviews added the paused, focus and announcement cases.
 
 **Acceptance Criteria:**
 
@@ -1339,17 +1340,20 @@ existing dialog test moved onto URL-aware fetch mocks once opening the dialog st
 - `DeleteJournalDialog` reads the count each time it opens. For N > 0 it says *"N tasks on a list
   link to this journal and will lose that link. Any due here will have no due date."* (1 → *"…If
   it's due here, it will have no due date."*). Zero says nothing. "Delete journal" waits for the
-  count, with a `role="status"` "Checking linked tasks…" line. A failed read says it couldn't
+  count. One `role="status"` live region, mounted while the confirmation is open, holds "Checking
+  linked tasks…", then the count, the failure line, or nothing. A failed read says it couldn't
   check and enables the confirm. The refusal view adds *"Once these are cleared, N tasks on a
   list will also lose their link to this journal."*
-- The count is part of the dialog's accessible description (`AlertDialogDescription asChild`), so
-  it is announced on open.
+- The count arrives after the dialog opens, so it is announced through that live region. The
+  region sits inside the dialog's accessible description (`AlertDialogDescription asChild`).
 
 **Tests:**
 - Unit, `DeleteJournalDialog.test.tsx` (nothing mocked below `fetch`; the preview and each `DELETE`
   are answered by URL): one / several, accessible description, zero says nothing, confirm held
-  until the count is read, the confirm held while the read is paused offline, a failed read lets
-  the delete go ahead, refusal plus count, and a reopen reads afresh without showing the old count.
+  until the count is read, the count and a failed read both landing in the live region that was
+  mounted while loading, the confirm held while the read is paused offline (first open and a
+  reopen with a cached count), a failed read lets the delete go ahead, refusal plus count, and a
+  reopen reads afresh without showing the old count.
 - Unit, `journals.test.ts` (`useJournalDeletePreview`): reads the count with credentials, does
   not refetch on window focus, sends nothing while disabled, and fails on a 404. `JournalDetailView.test.tsx`'s module mock stubs the
   new hook.
@@ -1359,8 +1363,8 @@ existing dialog test moved onto URL-aware fetch mocks once opening the dialog st
   - a typed `page.route` stub of N = 2 at 390px: the sentence and accessible description are
     shown, there is no horizontal scroll in the page or the dialog, and declining keeps the
     journal.
-- Gates run locally: `pnpm quality:check`, full jest (3,213 passed), and Playwright
-  `journal-tasks.spec.ts` + `journal-delete-blocked.spec.ts` on Firefox and Mobile Chrome (35
+- Gates run locally: `pnpm quality:check`, full jest (3,230 passed), and Playwright
+  `journal-tasks.spec.ts` + `journal-delete-blocked.spec.ts` on Firefox and Mobile Chrome (37
   passed; the new tests also passed `--repeat-each 3`). Backend, as a regression check (no backend
   change): ruff and mypy, unit (5,719 passed), and the journal-delete integration files (250
   passed).
@@ -1371,10 +1375,13 @@ existing dialog test moved onto URL-aware fetch mocks once opening the dialog st
   proves the route and the wire shape. The stub's body is typed as `JournalDeletePreviewResponse`.
 - **Zero says nothing**, and **a failed preview does not block the delete**: the delete is safe
   whatever links exist, so the count informs rather than gates.
-- **The count is shown only when settled**: not fetching, and succeeded or failed. The hook
-  lives in the dialog body, which outlives the Radix content, so a reopen would otherwise flash
-  the last visit's count. A read paused offline counts as unsettled, and window focus does not
-  refetch; both came from the phase's independent review.
+- **The count is shown only when settled**: `fetchStatus === 'idle'`, and succeeded or failed.
+  The hook lives in the dialog body, which outlives the Radix content, so a reopen would
+  otherwise flash the last visit's count. A read paused offline is unsettled even with a cached
+  success, and window focus does not refetch. These came from the phase's independent review and
+  the PR review.
+- **The count is announced through a mounted live region** (PR review): it arrives after the
+  dialog opens, so being part of the description alone would not announce it.
 - **No client timeout on the preview read** (review finding, not taken): a hung request holds the
   confirm until the browser gives up. Every other read in `lib/api` leaves timeouts to the browser
   too.

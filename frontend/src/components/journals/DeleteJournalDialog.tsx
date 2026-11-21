@@ -151,10 +151,11 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
   // close: the observer persists, so a reopen holds the last count while it
   // refetches, and only a settled read (`!isFetching`) is shown or trusted.
   const preview = useJournalDeletePreview(journal.id, { enabled: open });
-  // Settled means an answer: not fetching *and* succeeded or failed. A read
-  // paused offline is neither, and must keep the confirm held.
+  // Settled means a fresh answer: the fetch is idle *and* it succeeded or
+  // failed. A read paused offline is not fetching, and a cached success from
+  // the last open still reads `isSuccess`, so neither flag alone will do.
   const previewSettled =
-    !preview.isFetching && (preview.isSuccess || preview.isError);
+    preview.fetchStatus === 'idle' && (preview.isSuccess || preview.isError);
   const listTasksLosingLink =
     previewSettled && preview.isSuccess ? preview.data : null;
   const previewFailed = previewSettled && preview.isError;
@@ -327,33 +328,29 @@ export function DeleteJournalDialog({ journal }: DeleteJournalDialogProps) {
                     Deleting “{journal.title}” is permanent and takes its
                     content, tags and relationships with it.
                   </p>
-                  {listTasksLosingLink ? (
-                    <p
-                      className='text-foreground'
-                      data-testid='delete-journal-list-tasks'
-                    >
-                      {describeListTasksLosingLink(listTasksLosingLink)}
-                    </p>
-                  ) : null}
-                  {previewFailed ? (
-                    <p data-testid='delete-journal-preview-status'>
-                      Couldn’t check whether tasks on a list link to this
-                      journal.
-                    </p>
-                  ) : null}
+                  {/*
+                   * One live region, mounted for as long as the confirmation
+                   * is: the count arrives after the dialog opens, so it must
+                   * land somewhere already being watched to be announced.
+                   * Empty when no list task links here.
+                   */}
+                  <p role='status' data-testid='delete-journal-preview-status'>
+                    {awaitingPreview ? 'Checking linked tasks…' : null}
+                    {listTasksLosingLink ? (
+                      <span
+                        className='text-foreground'
+                        data-testid='delete-journal-list-tasks'
+                      >
+                        {describeListTasksLosingLink(listTasksLosingLink)}
+                      </span>
+                    ) : null}
+                    {previewFailed
+                      ? 'Couldn’t check whether tasks on a list link to this journal.'
+                      : null}
+                  </p>
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
-
-            {awaitingPreview ? (
-              <p
-                role='status'
-                className='text-muted-foreground text-sm'
-                data-testid='delete-journal-preview-status'
-              >
-                Checking linked tasks…
-              </p>
-            ) : null}
 
             <p
               className='text-muted-foreground text-sm'

@@ -1301,9 +1301,9 @@ export function useJournal(id: string) {
  * (`staleTime: 0`): links change between visits, and the count is the user's
  * basis for deciding. The observer outlives the dialog's content, so a reopen
  * still holds the last answer while it refetches; a caller that must not show
- * a stale count gates on `!isFetching` as well as `isSuccess`. A read paused
- * offline is neither fetching nor settled, so "not fetching" alone is not an
- * answer either.
+ * a stale count gates on `fetchStatus === 'idle'` as well as `isSuccess`. A
+ * read paused offline is not fetching, and keeps the last open's cached
+ * success, so neither `!isFetching` nor `isSuccess` alone means fresh.
  */
 export function useJournalDeletePreview(
   id: string,
