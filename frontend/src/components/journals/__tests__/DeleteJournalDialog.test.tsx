@@ -105,6 +105,23 @@ function refusal(...blockers: ReturnType<typeof blocker>[]) {
   } as Response;
 }
 
+/** A refusal naming one blocker per role: due, creating, and both at once. */
+function refusalInEveryRole() {
+  return refusal(
+    blocker({ task_id: 7, blocking_roles: ['due'] }),
+    blocker({
+      task_id: 8,
+      text: 'book the ferry',
+      blocking_roles: ['creating'],
+    }),
+    blocker({
+      task_id: 9,
+      text: 'pack the ropes',
+      blocking_roles: ['creating', 'due'],
+    })
+  );
+}
+
 const deleted = () => ({ ok: true, json: async () => ({}) }) as Response;
 
 /** The body `GET /api/journals/{id}/delete-preview` really sends. */
@@ -307,21 +324,7 @@ describe('DeleteJournalDialog', () => {
       // creating anchor cannot be moved at all — no service method other than
       // `create_task` accepts one — so deleting the task is the only way out.
       const user = userEvent.setup();
-      queueDelete(
-        refusal(
-          blocker({ task_id: 7, blocking_roles: ['due'] }),
-          blocker({
-            task_id: 8,
-            text: 'book the ferry',
-            blocking_roles: ['creating'],
-          }),
-          blocker({
-            task_id: 9,
-            text: 'pack the ropes',
-            blocking_roles: ['creating', 'due'],
-          })
-        )
-      );
+      queueDelete(refusalInEveryRole());
       renderDialog();
 
       await confirmDelete(user);
@@ -389,21 +392,7 @@ describe('DeleteJournalDialog', () => {
 
     it('says why each task blocks, including one holding both anchors', async () => {
       const user = userEvent.setup();
-      queueDelete(
-        refusal(
-          blocker({ task_id: 7, blocking_roles: ['due'] }),
-          blocker({
-            task_id: 8,
-            text: 'book the ferry',
-            blocking_roles: ['creating'],
-          }),
-          blocker({
-            task_id: 9,
-            text: 'pack the ropes',
-            blocking_roles: ['creating', 'due'],
-          })
-        )
-      );
+      queueDelete(refusalInEveryRole());
       renderDialog();
 
       await confirmDelete(user);
@@ -533,6 +522,23 @@ describe('DeleteJournalDialog', () => {
       return confirm;
     }
 
+    /** Open once reading a count of 2, then decline, so a test can reopen. */
+    async function openWithTwoThenKeep(
+      user: ReturnType<typeof userEvent.setup>
+    ) {
+      answerPreview = async () => preview(2);
+      renderDialog();
+
+      await openSettled(user);
+      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
+        /^2 tasks/
+      );
+      await user.click(screen.getByRole('button', { name: /keep/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
+    }
+
     it('states that one list task will lose its link', async () => {
       const user = userEvent.setup();
       answerPreview = async () => preview(1);
@@ -642,17 +648,7 @@ describe('DeleteJournalDialog', () => {
       // and a paused read is not fetching — so neither flag alone says the
       // answer is fresh. Only an idle fetch status does.
       const user = userEvent.setup();
-      answerPreview = async () => preview(2);
-      renderDialog();
-
-      await openSettled(user);
-      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
-        /^2 tasks/
-      );
-      await user.click(screen.getByRole('button', { name: /keep/i }));
-      await waitFor(() => {
-        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-      });
+      await openWithTwoThenKeep(user);
 
       answerPreview = async () => preview(5);
       onlineManager.setOnline(false);
@@ -759,18 +755,7 @@ describe('DeleteJournalDialog', () => {
 
     it('reads the count afresh each time it opens, never showing the old one', async () => {
       const user = userEvent.setup();
-      answerPreview = async () => preview(2);
-      renderDialog();
-
-      await openSettled(user);
-      expect(screen.getByTestId('delete-journal-list-tasks')).toHaveTextContent(
-        /^2 tasks/
-      );
-
-      await user.click(screen.getByRole('button', { name: /keep/i }));
-      await waitFor(() => {
-        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-      });
+      await openWithTwoThenKeep(user);
 
       const pending = deferred();
       answerPreview = () => pending.promise;
