@@ -27,6 +27,7 @@ import pytest
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
+    TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
@@ -159,6 +160,19 @@ class TestRestMapping:
         assert error.status == "404"
         assert error.detail == "Task list with ID 7 not found"
         assert error.meta is None
+
+    def test_a_list_that_changed_underneath_a_write_is_a_conflict(self) -> None:
+        """A reorder whose task or neighbour was closed or moved while it waited
+        for the list's lock is a 409 the caller can retry after re-reading,
+        never a 500."""
+        response = create_domain_error_response(TaskListChangedConcurrentlyError(7))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_CHANGED"
+        assert error.status == "409"
+        assert error.detail == (
+            "Task 7 is no longer an open task on this list. Read the list again and retry."
+        )
 
     def test_another_task_error_gains_no_meta(self):
         """The no-regression guard: one task error opted in, and only one."""

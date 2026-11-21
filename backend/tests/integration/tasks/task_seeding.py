@@ -66,21 +66,33 @@ COUNT_INTERMEDIATE_JOURNALS = "SELECT COUNT(*) FROM task_intermediate_journals"
 
 # Built here rather than inside the seeding functions, whose ``text`` keyword
 # argument — the task's own text — would otherwise shadow ``sqlalchemy.text``.
-_INSERT_TASK = text("""
-    INSERT INTO tasks (user_id, text, status, creating_journal_id, due_journal_id)
-    VALUES (:user_id, :text, :status, :creating_journal_id, :due_journal_id)
+#
+# Both inserts stamp ``closed_at`` from the status, as ``SqlTaskRepository.save``
+# does: ``ck_tasks_closed_at_matches_status`` refuses a closed task without one.
+_CLOSED_AT_FROM_STATUS = (
+    "CASE WHEN CAST(:status AS VARCHAR) = 'not_done' THEN NULL ELSE now() END"
+)
+_INSERT_TASK = text(f"""
+    INSERT INTO tasks (
+        user_id, text, status, creating_journal_id, due_journal_id, closed_at
+    )
+    VALUES (
+        :user_id, :text, :status, :creating_journal_id, :due_journal_id,
+        {_CLOSED_AT_FROM_STATUS}
+    )
     RETURNING id
 """)
 # A list task is seeded as a row for the reason ``create_task`` gives, and
 # because no write path can put a task on a list yet.
-_INSERT_LIST_TASK = text("""
+_INSERT_LIST_TASK = text(f"""
     INSERT INTO tasks (
         user_id, text, status, task_list_id, position,
-        creating_journal_id, due_journal_id, due_date, flagged, icon
+        creating_journal_id, due_journal_id, due_date, flagged, icon, closed_at
     )
     VALUES (
         :user_id, :text, :status, :task_list_id, :position,
-        :creating_journal_id, :due_journal_id, :due_date, :flagged, :icon
+        :creating_journal_id, :due_journal_id, :due_date, :flagged, :icon,
+        {_CLOSED_AT_FROM_STATUS}
     )
     RETURNING id
 """)
@@ -416,6 +428,38 @@ async def stored_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
         )
     ).scalar_one()
     return stored
+
+
+async def stored_closed_at(conn: AsyncConnection, task_id: int) -> datetime | None:
+    """The ``closed_at`` column as the database holds it.
+
+    Not on the entity: it only orders a list's closed tasks. Like
+    ``stored_updated_at`` it is only meaningful after ``backdate_closed_at``,
+    because ``now()`` is the same value for the whole test transaction.
+    """
+    stored: datetime | None = (
+        await conn.execute(
+            text("SELECT closed_at FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).scalar_one()
+    return stored
+
+
+async def backdate_closed_at(
+    conn: AsyncConnection, task_id: int, moved_to: datetime = FIXED_PAST_INSTANT
+) -> datetime:
+    """Move a closed task's ``closed_at`` to ``moved_to`` and return it.
+
+    The close-order counterpart of ``backdate_updated_at``: it gives each closed
+    task a close time ``now()`` cannot produce, so an order or a re-stamp is
+    observable inside one transaction.
+    """
+    await conn.execute(
+        text("UPDATE tasks SET closed_at = :moved_to WHERE id = :task_id"),
+        {"moved_to": moved_to, "task_id": task_id},
+    )
+    return moved_to
 
 
 async def stored_text(conn: AsyncConnection, task_id: int) -> str:

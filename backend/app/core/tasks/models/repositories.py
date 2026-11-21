@@ -34,6 +34,7 @@ from core_shared.models.tasks import (
     TaskJournalRepointing,
     TaskList,
     TaskListArchiveFilter,
+    TaskPage,
 )
 
 
@@ -44,6 +45,24 @@ class TaskRepository(ABC):
     the anchors are read and written as part of the entity. Intermediate
     journals and contacts are separate rows in link tables and have their own
     methods.
+
+    **List membership** — which list a task is on and its position there — is
+    written only by the membership methods (:meth:`add_to_list`,
+    :meth:`move_within_list`, :meth:`remove_from_list`), never by :meth:`save`,
+    so an edit carrying a stale position cannot undo a reorder.
+
+    **Lock order.** Every membership write, and any later write that spans a
+    whole list, locks the **list row first and then task rows, each in
+    ascending id**. A reorder locks every open task on its list, so a
+    transaction that held one of them and *then* asked for the list would
+    deadlock against it. A service that must check a task's state before a
+    membership write therefore locks the list(s) first, then the task, then
+    calls the method; re-locking a row the same transaction holds is free. A
+    plain edit (text, status, flag) locks only its own task and never a list
+    afterwards, so it can only wait, never deadlock. The rule covers list-side
+    writers; a journal merge re-points task anchors by journal without a list
+    lock, so a merge overlapping a reorder of the same tasks can deadlock, and
+    PostgreSQL aborts one of them for its caller to retry.
     """
 
     @abstractmethod
@@ -477,6 +496,143 @@ class TaskRepository(ABC):
             A mapping of journal id to its count. **Journals with none are
             absent** rather than present with a zero, as the batched link reads
             are, so callers read through ``.get(journal_id, 0)``.
+        """
+
+    @abstractmethod
+    async def add_to_list(self, task_id: int, task_list_id: int, user_id: str) -> Task:
+        """Put one of the user's tasks at the bottom of one of their lists.
+
+        One operation for every way a task arrives on a list (spec *Moving
+        tasks*): a journal-only task joining one, a task moving from another
+        list, and a task rejoining its own list — which moves it to the bottom.
+        Only the list and position change; the task's journals, due date,
+        status, flag and icon are kept.
+
+        The bottom is one past the highest position of any of the owner's tasks
+        on the list, **closed ones included**, so a task closed and later
+        reopened keeps its slot relative to the open tasks around it.
+
+        Locks the list row first (see the class's lock order), so concurrent
+        joins and moves on one list queue rather than computing the same
+        bottom. Whether the list may take the task — not archived, say — is the
+        caller's to check, under that same lock.
+
+        Raises:
+            TaskListNotFoundError: When the list is not one of the user's.
+            TaskNotFoundError: When the task is not one of the user's.
+        """
+
+    @abstractmethod
+    async def move_within_list(
+        self, task_id: int, user_id: str, *, after_task_id: int | None
+    ) -> list[Task]:
+        """Move an open task to just after another on its list, or to the top.
+
+        The order is the rule ``reorder_open_tasks`` decides: the list's open
+        tasks take their existing positions again in the new order, and closed
+        tasks keep theirs. Only rows whose position changes are written.
+
+        **Not an edit.** No event is emitted and no task's ``updated_at``
+        moves: the spec does not record reordering in history, and moving one
+        task must not look like an edit of its neighbours.
+
+        Locks the task's list and then every open task on it, in id order.
+
+        Args:
+            task_id: The open task to move.
+            user_id: The acting user.
+            after_task_id: The open task on the same list it should follow, or
+                ``None`` for the top.
+
+        Returns:
+            The list's open tasks in their new order.
+
+        Raises:
+            TaskNotFoundError: When the task is not one of the user's.
+            TaskListChangedConcurrentlyError: When, once the list's lock is
+                held, the task or ``after_task_id`` is not an open task on that
+                list. A caller can check both first, but a plain edit locks only
+                its own task, so either can still close in between — a 409 to
+                re-read and retry.
+            ValueError: When the task is on no list, or is asked to follow
+                itself — a caller's bug.
+        """
+
+    @abstractmethod
+    async def remove_from_list(self, task_id: int, user_id: str) -> Task:
+        """Take one of the user's tasks off its list, making it journal-only.
+
+        Clears the list, the position and the due date in one statement — the
+        table's CHECKs are row-level, and a due date may only sit on a list
+        task. Locks the task's list first (see the class's lock order).
+
+        Only a task holding both a creating and a due journal may leave (spec
+        *Moving tasks*); that is the caller's to check under lock, and the
+        table's ``ck_tasks_journal_only_has_both_anchors`` refuses the write —
+        an ``IntegrityError``, with nothing written — if it is not.
+
+        Raises:
+            TaskNotFoundError: When the task is not one of the user's.
+            TaskListChangedConcurrentlyError: When the task left its list
+                between being read and its list being locked.
+            ValueError: When the task is on no list.
+        """
+
+    @abstractmethod
+    async def find_open_tasks_on_list(
+        self, task_list_id: int, user_id: str
+    ) -> list[Task]:
+        """The user's not-done tasks on a list, in their manual order.
+
+        Ordered by ``(position, id)``; the id makes the order total, because
+        positions are not unique. Unpaged: the list page shows every open task.
+
+        A list that is not the user's reads as an empty one; callers resolve the
+        list first to tell the two apart. The tasks are owner-scoped too, since
+        the table allows a task to reference another owner's list.
+        """
+
+    @abstractmethod
+    async def find_closed_tasks_on_list(
+        self, task_list_id: int, user_id: str, *, limit: int, offset: int = 0
+    ) -> TaskPage:
+        """One page of the user's done and cancelled tasks on a list.
+
+        Most recently closed first (``closed_at`` descending, then the newest
+        id), the order of the list's Completed group. Editing a closed task
+        does not move it; reopening it removes it.
+
+        Args:
+            task_list_id: The list to read.
+            user_id: The acting user; a list that is not theirs reads as empty.
+            limit: The page size, at least 1.
+            offset: How many tasks to skip, at least 0.
+
+        Returns:
+            The page and the total across every page — reported even for a page
+            past the end.
+
+        Raises:
+            ValueError: When ``limit`` is below 1 or ``offset`` below 0.
+        """
+
+    @abstractmethod
+    async def count_open_tasks_by_list(
+        self, task_list_ids: list[int], user_id: str
+    ) -> dict[int, int]:
+        """How many not-done tasks each of these lists holds, in one statement.
+
+        For the list listing and the sidebar. Only the user's tasks count.
+
+        Args:
+            task_list_ids: The lists to count. An empty list reads nothing.
+            user_id: The acting user.
+
+        Returns:
+            A mapping of list id to its count. **Lists with none are absent**
+            rather than present with a zero, as in
+            :meth:`count_not_done_tasks_by_due_journal`, so callers read through
+            ``.get(task_list_id, 0)``.
         """
 
 

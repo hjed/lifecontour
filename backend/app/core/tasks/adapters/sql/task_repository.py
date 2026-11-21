@@ -17,7 +17,16 @@ and never "was that your task".
 from datetime import datetime
 from typing import Any
 
-from core_shared.models.tasks import Task, TaskIcon, TaskNotFoundError, TaskStatus
+from core_shared.models.tasks import (
+    Task,
+    TaskIcon,
+    TaskListChangedConcurrentlyError,
+    TaskListNotFoundError,
+    TaskNotFoundError,
+    TaskPage,
+    TaskStatus,
+    reorder_open_tasks,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -79,6 +88,158 @@ _TASKS_DUE_IN_JOURNALS = text(
     ORDER BY j.event_date_range_start, t.id
     """
 )
+
+
+# ``closed_at`` orders a list's Completed group, most recently closed first, and
+# is not on the entity. ``save`` is the only writer of a task's status, so it is
+# where the close time is kept: stamped when a task enters a closed status
+# (done -> cancelled included, a fresh close), cleared when it is reopened, and
+# left alone by any other edit. In the UPDATE the bare ``status`` and
+# ``closed_at`` on the right-hand side are the row's values *before* the write.
+# ``:status`` is cast because asyncpg deduces one type per parameter, and the
+# column comparison alone would deduce ``varchar`` beside the literal's ``text``.
+_CLOSED_AT_ON_INSERT = (
+    "CASE WHEN CAST(:status AS VARCHAR) = 'not_done' THEN NULL ELSE now() END"
+)
+_CLOSED_AT_ON_UPDATE = """CASE
+                    WHEN CAST(:status AS VARCHAR) = 'not_done' THEN NULL
+                    WHEN status IS DISTINCT FROM CAST(:status AS VARCHAR) THEN now()
+                    ELSE closed_at
+                END"""
+
+
+# --- List membership and list reads ------------------------------------------
+#
+# Every statement below scopes the *tasks* to the owner as well as naming the
+# list: the list foreign key is single-column, so the table would let a task
+# reference another owner's list, and such a row must never be read, counted or
+# moved on this owner's behalf.
+
+# The first lock of every membership write (see the port's lock order). ``FOR
+# NO KEY UPDATE``, as list renames take: joins and moves on one list queue on
+# it, while a foreign-key check against the list (``KEY SHARE``) is not blocked.
+_LOCK_LIST = text(
+    """
+    SELECT 1 FROM task_lists
+    WHERE id = :task_list_id AND user_id = :user_id
+    FOR NO KEY UPDATE
+    """
+)
+
+# The bottom of a list: one past the owner's highest position on it, closed
+# tasks included so a reopened task keeps its slot. Shared with the list-task
+# insert. The casts are there because asyncpg deduces one type per parameter,
+# and the parameters appear again in the statements that embed this.
+_BOTTOM_OF_LIST = """(
+        SELECT COALESCE(MAX(bottom.position) + 1, 0)
+        FROM tasks bottom
+        WHERE bottom.task_list_id = CAST(:task_list_id AS INTEGER)
+          AND bottom.user_id = CAST(:user_id AS VARCHAR)
+    )"""
+
+_ADD_TO_LIST = text(
+    f"""
+    UPDATE tasks
+    SET task_list_id = CAST(:task_list_id AS INTEGER),
+        position = {_BOTTOM_OF_LIST},
+        updated_at = now()
+    WHERE id = :task_id AND user_id = CAST(:user_id AS VARCHAR)
+    RETURNING {_TASK_COLUMNS}
+    """
+)
+
+_FIND_MEMBERSHIP = text(
+    "SELECT task_list_id FROM tasks WHERE id = :task_id AND user_id = :user_id"
+)
+
+# Locked in id order — the port's lock order — and sorted into display order
+# afterwards, because ``FOR NO KEY UPDATE`` takes its locks in the order rows
+# are returned.
+_LOCK_OPEN_POSITIONS = text(
+    """
+    SELECT id, position FROM tasks
+    WHERE task_list_id = :task_list_id
+      AND user_id = :user_id
+      AND status = :status
+    ORDER BY id
+    FOR NO KEY UPDATE
+    """
+).bindparams(status=TaskStatus.NOT_DONE.value)
+
+# One statement for every moved row, as two arrays rather than a parameter per
+# row. ``updated_at`` is deliberately untouched: reordering is not an edit.
+_WRITE_POSITIONS = text(
+    """
+    UPDATE tasks
+    SET position = moved.position
+    FROM unnest(
+        CAST(:ids AS integer[]), CAST(:positions AS integer[])
+    ) AS moved(id, position)
+    WHERE tasks.id = moved.id AND tasks.user_id = :user_id
+    """
+)
+
+# All three list columns at once: every CHECK is row-level, and a due date may
+# only sit on a list task.
+_REMOVE_FROM_LIST = text(
+    f"""
+    UPDATE tasks
+    SET task_list_id = NULL,
+        position = NULL,
+        due_date = NULL,
+        updated_at = now()
+    WHERE id = :task_id AND user_id = :user_id AND task_list_id = :task_list_id
+    RETURNING {_TASK_COLUMNS}
+    """
+)
+
+_OPEN_TASKS_ON_LIST = text(
+    f"""
+    SELECT {_TASK_COLUMNS}
+    FROM tasks
+    WHERE task_list_id = :task_list_id
+      AND user_id = :user_id
+      AND status = :status
+    ORDER BY position, id
+    """
+).bindparams(status=TaskStatus.NOT_DONE.value)
+
+# Served by ``ix_tasks_task_list_id_closed_at``. ``closed_at`` is set on every
+# closed task (``ck_tasks_closed_at_matches_status``), so it is the filter too.
+_CLOSED_TASKS_ON_LIST = text(
+    f"""
+    SELECT {_TASK_COLUMNS}
+    FROM tasks
+    WHERE task_list_id = :task_list_id
+      AND user_id = :user_id
+      AND closed_at IS NOT NULL
+    ORDER BY closed_at DESC, id DESC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+# Counted separately rather than with ``COUNT(*) OVER ()``: a page past the end
+# returns no rows to carry a window total, and must still report it.
+_COUNT_CLOSED_TASKS_ON_LIST = text(
+    """
+    SELECT COUNT(*)
+    FROM tasks
+    WHERE task_list_id = :task_list_id
+      AND user_id = :user_id
+      AND closed_at IS NOT NULL
+    """
+)
+
+_COUNT_OPEN_BY_LIST = text(
+    """
+    SELECT task_list_id, COUNT(*) AS open_count
+    FROM tasks
+    WHERE task_list_id = ANY(CAST(:ids AS integer[]))
+      AND user_id = :user_id
+      AND status = :status
+    GROUP BY task_list_id
+    """
+).bindparams(status=TaskStatus.NOT_DONE.value)
 
 
 def _row_to_task(row: Any) -> Task:
@@ -146,11 +307,11 @@ class SqlTaskRepository(TaskRepository):
             f"""
             INSERT INTO tasks (
                 user_id, text, status, creating_journal_id, due_journal_id,
-                flagged, icon
+                flagged, icon, closed_at
             )
             VALUES (
                 :user_id, :text, :status, :creating_journal_id, :due_journal_id,
-                :flagged, :icon
+                :flagged, :icon, {_CLOSED_AT_ON_INSERT}
             )
             RETURNING {_TASK_COLUMNS}
             """
@@ -185,6 +346,10 @@ class SqlTaskRepository(TaskRepository):
         entity whose task has since left its list fails a CHECK rather than
         writing a shape the table forbids.
 
+        ``closed_at`` is derived from the status change (see
+        ``_CLOSED_AT_ON_UPDATE``), so an edit that leaves the status alone keeps
+        a closed task's place in its list's Completed group.
+
         The id is passed alongside the task because ``save`` has already
         established it is not ``None``.
         """
@@ -192,6 +357,7 @@ class SqlTaskRepository(TaskRepository):
             f"""
             UPDATE tasks
             SET text = :text,
+                closed_at = {_CLOSED_AT_ON_UPDATE},
                 status = :status,
                 creating_journal_id = :creating_journal_id,
                 due_journal_id = :due_journal_id,
@@ -510,6 +676,156 @@ class SqlTaskRepository(TaskRepository):
             _COUNT_DUE_BY_JOURNAL, {"ids": journal_ids, "user_id": user_id}
         )
         return {int(row.due_journal_id): int(row.due_count) for row in result}
+
+    async def add_to_list(self, task_id: int, task_list_id: int, user_id: str) -> Task:
+        """Put one of the user's tasks at the bottom of one of their lists.
+
+        The list is locked first and the task's row second, by the ``UPDATE``
+        itself — the port's lock order — so the bottom cannot be computed twice
+        for one list by overlapping joins.
+        """
+        await self._lock_list(task_list_id, user_id)
+        result = await self.conn.execute(
+            _ADD_TO_LIST,
+            {"task_id": task_id, "task_list_id": task_list_id, "user_id": user_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            raise TaskNotFoundError(task_id)
+        return _row_to_task(row)
+
+    async def move_within_list(
+        self, task_id: int, user_id: str, *, after_task_id: int | None
+    ) -> list[Task]:
+        """Move an open task after another on its list, or to the top.
+
+        Reads which list the task is on without a lock, locks that list, then
+        locks its open tasks in id order and re-checks both the task and its
+        neighbour among them — either one closed or moved in between is refused
+        as a conflict rather than moved.
+        """
+        task_list_id = await self._require_list_membership(task_id, user_id)
+        await self._lock_list(task_list_id, user_id)
+
+        rows = (
+            await self.conn.execute(
+                _LOCK_OPEN_POSITIONS,
+                {"task_list_id": task_list_id, "user_id": user_id},
+            )
+        ).fetchall()
+        order = sorted(
+            ((int(row.id), int(row.position)) for row in rows),
+            key=lambda pair: (pair[1], pair[0]),
+        )
+        # Plain edits lock only their task, so either task may have closed or
+        # left the list while this waited for the locks: a conflict to re-read
+        # and retry, not a caller's bug.
+        open_ids = {open_id for open_id, _ in order}
+        for named in (task_id, after_task_id):
+            if named is not None and named not in open_ids:
+                raise TaskListChangedConcurrentlyError(named)
+
+        moved = reorder_open_tasks(order, task_id, after_task_id)
+        if moved:
+            await self.conn.execute(
+                _WRITE_POSITIONS,
+                {
+                    "ids": list(moved),
+                    "positions": list(moved.values()),
+                    "user_id": user_id,
+                },
+            )
+        return await self.find_open_tasks_on_list(task_list_id, user_id)
+
+    async def remove_from_list(self, task_id: int, user_id: str) -> Task:
+        """Take one of the user's tasks off its list.
+
+        The ``UPDATE`` names the list it locked, so a task that moved to another
+        list in between is not taken off that one under the wrong lock.
+        """
+        task_list_id = await self._require_list_membership(task_id, user_id)
+        await self._lock_list(task_list_id, user_id)
+        result = await self.conn.execute(
+            _REMOVE_FROM_LIST,
+            {"task_id": task_id, "user_id": user_id, "task_list_id": task_list_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            # It left this list between the unlocked read and the lock.
+            raise TaskListChangedConcurrentlyError(task_id)
+        return _row_to_task(row)
+
+    async def find_open_tasks_on_list(
+        self, task_list_id: int, user_id: str
+    ) -> list[Task]:
+        """The user's not-done tasks on a list, in ``(position, id)`` order."""
+        result = await self.conn.execute(
+            _OPEN_TASKS_ON_LIST, {"task_list_id": task_list_id, "user_id": user_id}
+        )
+        return [_row_to_task(row) for row in result.fetchall()]
+
+    async def find_closed_tasks_on_list(
+        self, task_list_id: int, user_id: str, *, limit: int, offset: int = 0
+    ) -> TaskPage:
+        """One page of a list's closed tasks, most recently closed first."""
+        if limit < 1:
+            raise ValueError(f"limit must be at least 1, not {limit}")
+        if offset < 0:
+            raise ValueError(f"offset must be at least 0, not {offset}")
+
+        scope = {"task_list_id": task_list_id, "user_id": user_id}
+        rows = (
+            await self.conn.execute(
+                _CLOSED_TASKS_ON_LIST, {**scope, "limit": limit, "offset": offset}
+            )
+        ).fetchall()
+        total = (
+            await self.conn.execute(_COUNT_CLOSED_TASKS_ON_LIST, scope)
+        ).scalar_one()
+        return TaskPage(tasks=tuple(_row_to_task(row) for row in rows), total=total)
+
+    async def count_open_tasks_by_list(
+        self, task_list_ids: list[int], user_id: str
+    ) -> dict[int, int]:
+        """How many not-done tasks each list holds; lists with none are absent."""
+        if not task_list_ids:
+            return {}
+
+        result = await self.conn.execute(
+            _COUNT_OPEN_BY_LIST,
+            {"ids": list(dict.fromkeys(task_list_ids)), "user_id": user_id},
+        )
+        return {int(row.task_list_id): int(row.open_count) for row in result}
+
+    async def _lock_list(self, task_list_id: int, user_id: str) -> None:
+        """Lock one of the user's lists — the first lock of a membership write."""
+        result = await self.conn.execute(
+            _LOCK_LIST, {"task_list_id": task_list_id, "user_id": user_id}
+        )
+        if result.fetchone() is None:
+            raise TaskListNotFoundError(task_list_id)
+
+    async def _require_list_membership(self, task_id: int, user_id: str) -> int:
+        """The list one of the user's tasks is on, read without a lock.
+
+        Unlocked on purpose: the list must be locked before the task (the port's
+        lock order), and which list to lock is what this finds out. Callers
+        re-check the answer once they hold the list.
+
+        Raises:
+            TaskNotFoundError: When the task is not one of the user's.
+            ValueError: When the task is on no list.
+        """
+        row = (
+            await self.conn.execute(
+                _FIND_MEMBERSHIP, {"task_id": task_id, "user_id": user_id}
+            )
+        ).fetchone()
+        if row is None:
+            raise TaskNotFoundError(task_id)
+        if row.task_list_id is None:
+            raise ValueError(f"task {task_id} is not on a list")
+        return int(row.task_list_id)
 
     async def _require_task_owned(self, task_id: int, user_id: str) -> None:
         """Fail unless the task exists and belongs to the acting user.

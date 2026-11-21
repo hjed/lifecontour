@@ -20,6 +20,7 @@ create one yet. The CHECKs themselves are proven in
 
 from dataclasses import replace
 from datetime import date
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -30,13 +31,16 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from tests.integration.tasks.task_seeding import (
     COUNT_TASKS,
+    FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
+    backdate_closed_at,
     count,
     create_journal,
     create_list_task,
     create_task,
     seed_task_list,
+    stored_closed_at,
 )
 
 DUE_DATE = date(2027, 3, 1)
@@ -387,3 +391,126 @@ class TestListTaskOwnerScoping:
 
         found = await _read(task_repository, task_id)
         assert found.flagged is False
+
+
+@pytest.mark.integration
+class TestSaveMaintainsClosedAt:
+    """``save`` records when a task was closed, which orders a list's Completed.
+
+    ``now()`` is the transaction's timestamp and the fixture shares one
+    transaction, so every case that must tell a fresh stamp from a kept one
+    backdates ``closed_at`` first.
+    """
+
+    async def test_inserting_a_done_task_stamps_closed_at(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        journal_ids: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = journal_ids
+
+        saved = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="returned the book",
+                status=TaskStatus.DONE,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+            )
+        )
+
+        assert saved.id is not None
+        assert await stored_closed_at(async_connection, saved.id) is not None
+
+    async def test_inserting_a_not_done_task_leaves_closed_at_empty(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        journal_ids: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = journal_ids
+
+        saved = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="return the book",
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+            )
+        )
+
+        assert saved.id is not None
+        assert await stored_closed_at(async_connection, saved.id) is None
+
+    async def test_closing_a_task_stamps_closed_at(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        list_id: int,
+    ) -> None:
+        task_id = await create_list_task(async_connection, task_list_id=list_id)
+        task = await _read(task_repository, task_id)
+
+        await task_repository.save(replace(task, status=TaskStatus.DONE))
+
+        assert await stored_closed_at(async_connection, task_id) is not None
+
+    async def test_reopening_a_task_clears_closed_at(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        list_id: int,
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection, task_list_id=list_id, status=TaskStatus.DONE
+        )
+        task = await _read(task_repository, task_id)
+
+        await task_repository.save(replace(task, status=TaskStatus.NOT_DONE))
+
+        assert await stored_closed_at(async_connection, task_id) is None
+
+    async def test_cancelling_a_done_task_is_a_fresh_close(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        list_id: int,
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection, task_list_id=list_id, status=TaskStatus.DONE
+        )
+        await backdate_closed_at(async_connection, task_id)
+        task = await _read(task_repository, task_id)
+
+        await task_repository.save(replace(task, status=TaskStatus.CANCELLED))
+
+        restamped = await stored_closed_at(async_connection, task_id)
+        assert restamped is not None
+        assert restamped != FIXED_PAST_INSTANT
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            pytest.param({"text": "packed the head torch"}, id="text"),
+            pytest.param({"flagged": True}, id="flag"),
+            pytest.param({"icon": TaskIcon.STAR}, id="icon"),
+            pytest.param({"due_date": DUE_DATE}, id="due-date"),
+        ],
+    )
+    async def test_editing_a_closed_task_keeps_its_close_time(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        list_id: int,
+        edit: dict[str, Any],
+    ) -> None:
+        task_id = await create_list_task(
+            async_connection, task_list_id=list_id, status=TaskStatus.DONE
+        )
+        await backdate_closed_at(async_connection, task_id)
+        task = await _read(task_repository, task_id)
+
+        await task_repository.save(replace(task, **edit))
+
+        assert await stored_closed_at(async_connection, task_id) == FIXED_PAST_INSTANT

@@ -11,6 +11,7 @@ from .exceptions import (
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
     TaskListArchivedError,
+    TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
@@ -35,6 +36,7 @@ from .list_dates import (
     is_list_task_overdue,
     list_task_due,
 )
+from .list_order import reorder_open_tasks
 from .read_model import (
     TaskContactRef,
     TaskJournalRef,
@@ -44,6 +46,7 @@ from .read_model import (
 from .task_icon import TaskIcon
 from .task_list import MAX_TASK_LIST_NAME_LENGTH, TaskList, TaskListArchiveFilter
 from .task_list_order import reorder_task_lists
+from .task_page import TaskPage
 from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
@@ -80,9 +83,11 @@ __all__ = [
     "TaskList",
     "TaskListArchiveFilter",
     "TaskListArchivedError",
+    "TaskListChangedConcurrentlyError",
     "TaskListNotFoundError",
     "TaskListValidationError",
     "TaskNotFoundError",
+    "TaskPage",
     "TaskReadModel",
     "TaskReopenNotAcknowledgedError",
     "TaskStatus",
@@ -98,6 +103,7 @@ __all__ = [
     "is_due_date_allowed",
     "is_list_task_overdue",
     "is_status_transition_allowed",
+    "reorder_open_tasks",
     "list_task_due",
     "reorder_task_lists",
     "select_upcoming_tasks",

@@ -102,6 +102,29 @@ class TaskListArchivedError(TaskDomainError):
         self.task_list_id = task_list_id
 
 
+class TaskListChangedConcurrentlyError(TaskDomainError):
+    """A list membership write found the list changed while it waited.
+
+    A reorder names a task and the neighbour it should follow, but a plain edit
+    — closing a task, say — locks only that task and never its list. So between
+    the request and the moment the write holds the list's lock, either task can
+    be closed, or move to another list. The write then refuses rather than
+    guessing where the task should go.
+
+    **409, like** :class:`TaskStatusTransitionError`: the request was well
+    formed and conflicts with the list's current state. Re-reading the list and
+    retrying against what it now holds succeeds.
+    """
+
+    def __init__(self, task_id: int):
+        super().__init__(
+            f"Task {task_id} is no longer an open task on this list. "
+            "Read the list again and retry.",
+            409,
+        )
+        self.task_id = task_id
+
+
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 

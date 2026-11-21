@@ -551,7 +551,8 @@ Introduced by migration `0105` (create/drop round-trip).
   `updated_at`. Indexed by `user_id` and by each anchor. Since migration `0146` (ITER21-001) also
   `task_list_id` (int, nullable, FK → `task_lists.id`), `position` (int, nullable), `due_date`
   (date, nullable — a calendar day in the user's timezone), `flagged` (boolean, default `false`) and
-  `icon` (varchar 50, nullable); indexed by `(task_list_id, position)`. See *Tasks on a list* below.
+  `icon` (varchar 50, nullable); indexed by `(task_list_id, position)`. Since migration `0147` also
+  `closed_at` (timestamptz, nullable — when the task was last closed). See *Tasks on a list* below.
 - `task_intermediate_journals` — `task_id` (FK → `tasks.id`), `journal_id` (FK → `journals.id`),
   `created_at`; `PRIMARY KEY (task_id, journal_id)`, indexed by `journal_id`. Journals where the
   task was discussed, revisited, or previously due.
@@ -805,6 +806,46 @@ refused row.
   `task_lists.position` is, so an edit with a stale position cannot undo a reorder. Until the
   list-task creation path exists, `save()` refuses to insert a task on a list rather than store it
   as a journal-only task.
+
+**Membership, order and close time** (ITER21-001 Phase 14). The list membership operations live on
+`TaskRepository` beside `save()`:
+
+| Method | What it does |
+|---|---|
+| `add_to_list` | Puts a task at the **bottom** of a list (a journal-only task joining, a move from another list, or rejoining its own): one past the owner's highest position on it, closed tasks included, so a reopened task keeps its slot. Keeps the journals, due date, status, flag and icon. |
+| `move_within_list` | Moves an open task to just after another open task on its list, or to the top (`after_task_id=None`). The pure rule `core_shared.models.tasks.reorder_open_tasks` hands the open tasks' **existing** positions out again in the new order, so no new value appears and closed tasks keep theirs; only changed rows are written. **Not an edit**: no event, no `updated_at` change. |
+| `remove_from_list` | Clears `task_list_id`, `position` and `due_date` in one statement. A task without both journals is refused by `ck_tasks_journal_only_has_both_anchors`. |
+| `find_open_tasks_on_list` | Not-done tasks in `(position, id)` order, unpaged. |
+| `find_closed_tasks_on_list` | Done and cancelled tasks, `closed_at DESC, id DESC`, as a `TaskPage` (`limit`/`offset` and a total from a separate `COUNT`, so a page past the end still reports it). |
+| `count_open_tasks_by_list` | Open-task counts for a set of lists in one statement; a list with none is absent. |
+
+Every one of them scopes the **tasks** to the owner as well as the list: the list FK is single-column,
+so the table would let a task reference another owner's list.
+
+- **Lock order.** Every membership write, and any later write spanning a whole list (archive freeze,
+  list delete), locks the **`task_lists` row first and then `tasks` rows, each in ascending id**.
+  A reorder locks every open task on its list (`FOR NO KEY UPDATE ... ORDER BY id`), so a
+  transaction holding one of them that then asked for the list would deadlock against it. A service
+  that must check a task under lock before a membership write locks the list(s) first, then the
+  task. Plain edits lock only their task and never a list afterwards, so a reorder's neighbour can
+  still close while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError`
+  (409, `TASK_LIST_CHANGED`). The rule covers list-side writers; a journal merge's anchor re-point
+  (`task_anchor_repository.py`) updates tasks by journal without a list lock, so a merge overlapping
+  a reorder of the same tasks can deadlock and PostgreSQL aborts one side. The overlap tests in
+  `tests/integration/tasks/test_task_repository_list_queries_integration.py` prove joins and moves
+  on one list queue on the list lock.
+- **`closed_at`** (migration `0147`) orders a list's Completed group. `updated_at` cannot: every
+  text, flag or icon edit moves it. `SqlTaskRepository.save()` — the only writer of a task's status
+  — stamps it when a task enters a closed status (done → cancelled included, a fresh close), clears
+  it on reopening, and leaves it alone otherwise. `ck_tasks_closed_at_matches_status`
+  (`(status = 'not_done') = (closed_at IS NULL)`) ties it to the status, and the partial index
+  `ix_tasks_task_list_id_closed_at` (`(task_list_id, closed_at DESC, id DESC) WHERE closed_at IS NOT
+  NULL`) serves the page. Existing closed tasks were backfilled from `updated_at`. It is not on the
+  `Task` entity. Seed rows that set a closed status by hand must set `closed_at` too.
+- **No event yet for joining or leaving.** The repository never publishes; the services that call
+  `add_to_list` (Phase 26) and `remove_from_list` (Phase 27) publish the list-membership event, and
+  until then both are named exclusions in `test_task_event_completeness_integration.py`.
+  `move_within_list` is excluded permanently — the spec gives reordering no event.
 
 ### Photo Integration (Iteration 4)
 ```sql
