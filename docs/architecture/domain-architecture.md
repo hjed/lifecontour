@@ -448,10 +448,17 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `changed_fields` is `{field: (old, new)}`: archive state travels as `archived_at`, an ISO instant
   or `null` (`(null, ts)` archives, `(ts, null)` unarchives). Archive and unarchive are idempotent —
   a list already in the asked-for state is answered unchanged and nothing is published.
-  **No consumer subscribes to a list event yet** — pinned by
-  `tests/unit/infrastructure/events/test_task_list_event_subscriptions.py` — so the list history
-  projection (ITER21-001 Phase 7) adds the subscription deliberately, under an `entity_type` of its
-  own, and lists created before it lands have no "created" row unless that phase backfills one.
+  **A list's history is projected from these events** (ITER21-001 Phase 7): the
+  `history-projection` group subscribes to `TASK_LIST_EVENT_TYPES` and `HistoryService` files the
+  rows under `entity_type='task_list'`, keyed on the list id — never `task`, since a list id can
+  equal a task id. The vocabulary is `__created__` (carrying the name; the icon is not itemised),
+  then one row per `changed_fields` key: `name` (renamed), `icon` (set, changed, or cleared as
+  `[old, null]`) and `archived_at` (`[null, ts]` archived, `[ts, null]` unarchived). Rows carry
+  their owner in `field_history.user_id`, as task rows do, because lists are hard-deleted too.
+  The startup `TaskHistoryBackfill` re-projects the list types as well, so lists created before
+  the subscription landed recover their history from the retained outbox. Wording these rows for
+  people is the web app's job (ITER21-002 Phase 17); no other consumer reads a list event yet,
+  pinned by `tests/unit/infrastructure/events/test_task_list_event_subscriptions.py`.
   **A task's history is readable, and the deleted case is what shapes the read.** `TaskHistoryService`
   mirrors `JournalHistoryService` — a paginated read through the registered `"task"` aggregation
   strategy, served by `GET /api/tasks/{id}/history` and the `get_task_history` MCP tool — with one

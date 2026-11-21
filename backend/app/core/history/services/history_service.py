@@ -17,6 +17,14 @@ task the absorbed journal held. Nothing a task write announces is written to the
 stream and then never read — including the one write that no task write path
 performs.
 
+Task lists (ITER21-001 Phase 7): a list is a second top-level aggregate in the
+tasks domain, filed under ``("task_list", list_id)`` with the same marker
+convention. ``TaskListCreated`` opens the history with a ``__created__`` row
+carrying the name; ``TaskListUpdated`` projects one row per ``changed_fields``
+key — ``name``, ``icon`` and ``archived_at`` (``[null, ts]`` archived,
+``[ts, null]`` unarchived). Reordering publishes nothing and so projects
+nothing. List rows carry their owner, as task rows do.
+
 Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
 synchronous dual-write (``ContactHistoryService.record_*``) writes today, keyed to
 the same ``(entity_type, entity_id)`` pairs the contact aggregation strategy reads
@@ -62,6 +70,17 @@ _JOURNAL_ENTITY_TYPE = "journal"
 # gear, whose UUID ids are why those events are filed under their journal.
 _TASK_ENTITY_TYPE = "task"
 
+# The task-list aggregate (ITER21-001 Phase 7). A list is its own aggregate,
+# keyed by its own integer id, so it gets an entity type of its own: a list id
+# can equal a task id, and filing list rows under ``task`` would put them on a
+# task's feed.
+_TASK_LIST_ENTITY_TYPE = "task_list"
+
+# Entity types whose rows carry their owner. Tasks are hard-deleted and lists
+# will be (list delete is a later phase), so a read cannot rely on authorising
+# against the live row — see ``_owner_for``.
+_OWNED_ENTITY_TYPES = frozenset({_TASK_ENTITY_TYPE, _TASK_LIST_ENTITY_TYPE})
+
 # Contact entity types — must match the contact aggregation strategy in
 # ``app/core/history/models.py`` and the dual-write's ``record_*`` entity types.
 _CONTACT_ENTITY_TYPE = "contact"
@@ -87,7 +106,7 @@ _SUBENTITY_PREFIX_ENTITY_TYPE = {
 
 
 class HistoryService:
-    """Maps journal and contact domain events to field-history rows."""
+    """Maps journal, contact, task and task-list domain events to history rows."""
 
     def project_event(self, event: OutboxEvent) -> list[FieldHistoryEntry]:
         """Return the history rows for ``event`` (empty for irrelevant events)."""
@@ -785,6 +804,53 @@ class HistoryService:
             )
         ]
 
+    # -- task list handlers -------------------------------------------------
+
+    def _project_task_list_created(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The marker that opens a list's history, carrying its name.
+
+        **The icon is not itemised.** A later icon change publishes a
+        self-describing ``(old, new)`` pair, so it reads correctly with no
+        opening value — the reason ``_project_task_created`` does not itemise a
+        task's status either. ``contact_ids`` is the exception there because an
+        unlink publishes only ``(id, None)``; a list has nothing like it.
+        """
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_TASK_LIST_ENTITY_TYPE,
+                entity_id=data["task_list_id"],
+                field_name="__created__",
+                old_value=None,
+                new_value=data.get("name"),
+            )
+        ]
+
+    def _project_task_list_updated(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """One row per changed field, named as the event names it.
+
+        ``TaskListUpdated`` carries ``changed_fields`` for exactly the fields
+        that moved, so the keys are the list's history vocabulary: ``name``
+        (renamed), ``icon`` (set, changed or cleared — a cleared icon is
+        ``[old, null]``) and ``archived_at``, an ISO instant, where ``[null,
+        ts]`` is an archive and ``[ts, null]`` an unarchive. The instant is
+        kept rather than rewritten to a flag, so the row says what the event
+        said. A key a later phase adds to the event (the journal association)
+        projects here with no change.
+        """
+        return self._rows_from_changed_fields(
+            event,
+            data,
+            entity_type=_TASK_LIST_ENTITY_TYPE,
+            entity_id=data["task_list_id"],
+            changed_fields=data.get("changed_fields"),
+        )
+
     # -- helpers -------------------------------------------------------------
 
     def _rows_from_changed_fields(
@@ -847,7 +913,7 @@ class HistoryService:
 
 
 def _owner_for(entity_type: str, data: dict[str, Any]) -> str | None:
-    """The owner to stamp on a row, which today means: the task's, or nothing.
+    """The owner to stamp on a row: the task's or the list's, or nothing.
 
     ``field_history`` has no ownership column for most of its rows and needs
     none. Journal and contact history reads authorise by loading the aggregate
@@ -867,8 +933,12 @@ def _owner_for(entity_type: str, data: dict[str, Any]) -> str | None:
     somebody forgot an argument. A payload missing ``user_id`` (a replay from
     before the key existed) leaves the column NULL: unreadable rather than
     readable by the wrong person, which is the safe direction to fail.
+
+    **A task list is owned for the same reason** (ITER21-001 Phase 7): lists
+    will be hard-deleted too, and every list event carries ``user_id``, so the list
+    history read can authorise a list that is already gone.
     """
-    if entity_type != _TASK_ENTITY_TYPE:
+    if entity_type not in _OWNED_ENTITY_TYPES:
         return None
     owner = data.get("user_id")
     return None if owner is None else str(owner)
@@ -958,4 +1028,9 @@ _HANDLERS = {
     # task field change becomes a row.
     "TaskJournalLinksRepointed": HistoryService._project_task_updated,
     "TaskDeleted": HistoryService._project_task_deleted,
+    # Task-list events (ITER21-001 Phase 7), filed under ``task_list``. They move
+    # with ``TASK_LIST_HISTORY_EVENT_TYPES`` in the consumer, both directions
+    # asserted against the list events module.
+    "TaskListCreated": HistoryService._project_task_list_created,
+    "TaskListUpdated": HistoryService._project_task_list_updated,
 }

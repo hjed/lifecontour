@@ -538,14 +538,81 @@ ids, `update_task_list` on an archived list). No E2E: no UI.
 - *ITER21-002 Phases 13–14:* archive and unarchive send `POST /api/task-lists/{id}/archive` and
   `/unarchive` with no body; replace the cached list with the response.
 
-#### Phase 7: List history projection
+#### Phase 7: List history projection ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 4, Phase 6.
-**Estimated diff:** ~130 production → **~800 tracked**
+**Estimated diff:** ~130 production → **~800 tracked** · **Actual:** ~120 production → **~930 tracked**
+(~930 insertions, ~50 deletions excluding this document: ~120 production — history service handlers and
+owner rule ~80, backfill ~17, consumer subscription ~14, docstrings and comments across the list events
+module and history models; ~795 tests, of which the projection e2e file is 338; ~14 architecture docs).
+Production landed on the estimate; tracked lines ×1.2, the integration file pricing above the ×6
+multiplier for a phase with no REST/MCP surface. Phase 8's ~900 stands.
 
 **Acceptance Criteria:**
 
-- [ ] Created, renamed, icon, archived and unarchived projected into field history with labels.
+- [x] Created, renamed, icon, archived and unarchived projected into field history with labels.
+
+**Delivered:** `HistoryService._project_task_list_created` / `_project_task_list_updated`
+(`app/core/history/services/history_service.py`), filing rows under `entity_type='task_list'`,
+`entity_id` = list id; `_owner_for` stamps `field_history.user_id` on list rows as on task rows.
+`TASK_LIST_HISTORY_EVENT_TYPES` (`app/infrastructure/events/history_projection_consumer.py`, derived
+from `TASK_LIST_EVENT_TYPES`) joins the `history-projection` subscription. `TaskHistoryBackfill`
+re-projects the list types too, so lists created since Phase 3 recover their history at startup.
+
+**The vocabulary ("labels")** — the contract Phase 8 returns and ITER21-002 Phase 17 words:
+
+| Event | `field_name` | old → new | Reads as |
+|---|---|---|---|
+| `TaskListCreated` | `__created__` | `null` → name | Created |
+| `TaskListUpdated` | `name` | old → new | Renamed |
+| `TaskListUpdated` | `icon` | key/`null` → key/`null` | Icon set / changed / cleared |
+| `TaskListUpdated` | `archived_at` | `null` → ISO instant | Archived |
+| `TaskListUpdated` | `archived_at` | ISO instant → `null` | Unarchived |
+
+**Tests:** unit `tests/unit/history/test_history_service.py` (`TestTaskListCreated` 4,
+`TestTaskListUpdated` 11, `TestTaskListHistoryCarriesItsOwner` 4,
+`TestEveryTaskListEventTypeIsProjected` 5: created marker with and without an icon, rename, icon
+set/replaced/cleared, archive, unarchive, two fields in one write, empty/missing/non-pair changes,
+provenance, actor, event id and event time, owner stamped or NULL, inventory ↔ handlers both ways,
+never filed under `task` or `journal`);
+`tests/unit/infrastructure/events/test_history_projection_consumer.py` (list types in the exact
+subscription set and the handler check); `test_task_list_event_subscriptions.py` flipped for history
+only (search, summary invalidation and inbound still match no list event); `tests/task_event_inventory.py`
+gains `task_list_event_types()`. Integration
+`tests/integration/infrastructure/events/test_task_list_history_projection_e2e.py` (7: real
+`TaskListService` writes relayed and projected — create with provenance and owner and no task/journal
+row for the id, rename, icon set/replace/clear, archive/unarchive with the stored instant, no-op patch,
+repeat archive/unarchive and move write nothing, stream redelivery writes no second row, a second
+user's rows carry that user) and `TestTheBackfillRepairsTaskListHistory` in
+`test_task_history_backfill_integration.py` (skip-acknowledged list events repaired with provenance
+and owner; a second run writes nothing). No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **Labels are stable field names; wording lives in the web app** (user decision, plan OQ1 = A). The
+  rows keep the event's keys; ITER21-002 Phase 17 adds the wording.
+- **`archived_at` keeps the event's key and instant** rather than becoming a synthetic flag, so the row
+  says what the event said; direction is which side is null.
+- **The created marker does not itemise the icon**: a later icon change is a self-describing pair (the
+  reason a task's create does not itemise its status).
+- **List rows carry their owner**: lists will be hard-deleted (Phase 29), so the read must not depend
+  on the live row. The backfill's owner fill stays task-only — list rows were owned from the first.
+- **Backfill: yes** (the question Phase 3 left open) — the retained outbox holds every list event, so
+  the existing idempotent repair re-projects them rather than synthesising "created" rows.
+- **No `"task_list"` aggregation strategy yet** — it belongs with the read (Phase 8); tests read with
+  `get_entity_history("task_list", id)`.
+
+**Notes for later phases:**
+- *Phase 8:* register a `"task_list"` aggregation strategy (`entity_type = 'task_list' AND entity_id =
+  :root_id`, no join to `task_lists`), and authorise on `field_history.user_id` as `TaskHistoryService`
+  does for deleted tasks; never reach list rows from the contact strategy.
+- *Phase 29 (list delete):* publish a deletion event carrying `user_id` and add a `__deleted__` handler
+  under `task_list`; the inventory tests fail until both the handler and the subscription exist.
+- *ITER21-005 (journal association):* a new `TaskListUpdated` key projects through the existing handler
+  with no code change; only its wording is new.
+- *ITER21-002 Phase 17:* add `taskListEntryDescription` in `frontend/src/lib/history-display.ts`,
+  gated on `entity_type === 'task_list'` — the generic `ActivityItem` path would read an archive as
+  "created" and an unarchive as "deleted".
 
 #### Phase 8: List history read
 

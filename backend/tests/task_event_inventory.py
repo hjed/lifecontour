@@ -15,12 +15,14 @@ missing a change.
 
 import inspect
 from collections.abc import Mapping, Sequence
+from types import ModuleType
 from typing import Any, get_origin
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskJournalRepointing, TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskJournalRepointing, TaskStatus
 
 from app.core.tasks.models import events as task_events
+from app.core.tasks.models import task_list_events
 from app.core.tasks.models.events import DomainEvent, TaskJournalLinkOrigin
 
 # Sample values by annotation, used to build one of each event class. Anything
@@ -32,6 +34,8 @@ _SAMPLE_ARGUMENTS: dict[Any, Any] = {
     TaskStatus: TaskStatus.NOT_DONE,
     TaskJournalLinkOrigin: TaskJournalLinkOrigin.MANUAL,
     Provenance: Provenance.SYSTEM,
+    # A list's icon, optional on ``TaskListCreated``.
+    TaskIcon | None: None,
     # A merge's summary for one task. It has to record *something* — the value
     # object refuses one that records nothing — so the sample names the plainest
     # outcome rather than an all-default instance.
@@ -41,24 +45,41 @@ _SAMPLE_ARGUMENTS: dict[Any, Any] = {
 }
 
 
-def task_event_classes() -> list[type[DomainEvent]]:
-    """Every ``DomainEvent`` subclass **defined in** the tasks events module.
+def _event_classes_defined_in(module: ModuleType) -> list[type[DomainEvent]]:
+    """Every ``DomainEvent`` subclass **defined in** ``module``.
 
     The ``__module__`` check is what makes "defined in" true rather than
     "visible from". The tasks module declares its own local ``DomainEvent`` base,
     so an imported journal or contact event would not match today — but the three
     bases are identical and the duplication is recorded as deliberate, so the day
     they are unified an import would quietly enter this inventory and every claim
-    made about it would widen without anybody choosing that.
+    made about it would widen without anybody choosing that. The same check keeps
+    the task-list module's events out of the task inventory and the task events
+    it imports out of the list one.
     """
     return [
         member
-        for member in vars(task_events).values()
+        for member in vars(module).values()
         if isinstance(member, type)
         and issubclass(member, DomainEvent)
         and member is not DomainEvent
-        and member.__module__ == task_events.__name__
+        and member.__module__ == module.__name__
     ]
+
+
+def task_event_classes() -> list[type[DomainEvent]]:
+    """Every event class the tasks events module defines — task history."""
+    return _event_classes_defined_in(task_events)
+
+
+def task_list_event_classes() -> list[type[DomainEvent]]:
+    """Every event class the task-list events module defines — list history.
+
+    A list is its own aggregate, filed under ``entity_type='task_list'``, so its
+    events are inventoried separately rather than widening the task set every
+    task-history claim is made about.
+    """
+    return _event_classes_defined_in(task_list_events)
 
 
 def _argument_for(parameter: inspect.Parameter) -> Any:
@@ -76,7 +97,7 @@ def _argument_for(parameter: inspect.Parameter) -> Any:
     )
 
 
-def task_event_types_by_class() -> dict[str, str]:
+def _event_types_by_class(classes: list[type[DomainEvent]]) -> dict[str, str]:
     """Each task event class name mapped to the ``event_type`` it publishes.
 
     ``event_type`` is a constructor argument rather than a class attribute, so
@@ -85,7 +106,7 @@ def task_event_types_by_class() -> dict[str, str]:
     docstring gives.
     """
     built: dict[str, str] = {}
-    for cls in task_event_classes():
+    for cls in classes:
         parameters = inspect.signature(cls.__init__).parameters
         kwargs = {
             name: _argument_for(parameter)
@@ -96,6 +117,21 @@ def task_event_types_by_class() -> dict[str, str]:
     return built
 
 
+def task_event_types_by_class() -> dict[str, str]:
+    """Each task event class name mapped to the ``event_type`` it publishes."""
+    return _event_types_by_class(task_event_classes())
+
+
 def task_event_types() -> set[str]:
     """The ``event_type`` string of every task domain event."""
     return set(task_event_types_by_class().values())
+
+
+def task_list_event_types_by_class() -> dict[str, str]:
+    """Each task-list event class name mapped to the ``event_type`` it publishes."""
+    return _event_types_by_class(task_list_event_classes())
+
+
+def task_list_event_types() -> set[str]:
+    """The ``event_type`` string of every task-list domain event."""
+    return set(task_list_event_types_by_class().values())

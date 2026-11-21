@@ -55,8 +55,9 @@ class FieldHistoryEntry:
         self.event_id = event_id
         self.created_at = created_at
         # Who owns the entity this row describes, for the reads that cannot ask
-        # the entity itself. Set for task rows only — see ``_owner_for`` in the
-        # history service for why the column is deliberately half-populated.
+        # the entity itself. Set for task and task-list rows only — see
+        # ``_owner_for`` in the history service for why the column is
+        # deliberately half-populated.
         # Do not confuse it with ``changed_by``, which records who *acted*: a
         # row can be owned by one person and changed by an integration.
         self.user_id = user_id
@@ -246,8 +247,10 @@ def contact_owned_history_predicate(
 # **Both task branches are owner-scoped, and they are the only branches here that
 # are.** Every other branch reaches contact-domain rows, which carry no owner of
 # their own: the caller reads the contact under its owner before this predicate
-# runs. Task rows are the one kind that record an owner (``field_history.user_id``,
-# stamped by ``HistoryService._owner_for``), so they are filtered by the reader.
+# runs. Task rows are the one kind this predicate reaches that record an owner
+# (``field_history.user_id``, stamped by ``HistoryService._owner_for``; task-list
+# rows record one too, but no branch here reaches them), so they are filtered by
+# the reader.
 #
 # ``:reader_user_id`` defaults to ``None`` at the repository, and that is the
 # safety property rather than an oversight: ``user_id = NULL`` is never true, so a
