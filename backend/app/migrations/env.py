@@ -5,7 +5,6 @@ Handles database migrations with proper configuration loading
 and metadata registration for all domain tables.
 """
 
-import asyncio
 import os
 from logging.config import fileConfig
 
@@ -36,9 +35,15 @@ target_metadata = metadata
 
 
 def get_database_url() -> str:
-    """Get database URL from settings."""
-    # First try to get from environment (for tests)
-    database_url = os.environ.get("DATABASE_URL")
+    """Get the database URL to migrate.
+
+    A caller running alembic in-process (the migration tests) passes it as
+    ``config.attributes["database_url"]``; the CLI sets ``DATABASE_URL``, and
+    otherwise it comes from settings.
+    """
+    database_url = config.attributes.get("database_url") or os.environ.get(
+        "DATABASE_URL"
+    )
     if not database_url:
         settings = get_settings()
         database_url = str(settings.database_url)
@@ -82,8 +87,13 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-async def run_async_migrations() -> None:
-    """Run migrations in async mode."""
+def run_migrations_online() -> None:
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context. The engine is synchronous,
+    so this runs on the calling thread, including inside a running event loop.
+    """
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = get_database_url()
 
@@ -97,16 +107,6 @@ async def run_async_migrations() -> None:
         do_run_migrations(connection)
 
     connectable.dispose()
-
-
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-    asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

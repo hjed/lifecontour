@@ -36,7 +36,7 @@ from tests.integration.migration_helpers import (
     MigrationTemplates,
     RunAlembic,
     drop_stale_templates,
-    run_alembic_subprocess,
+    run_alembic_in_process,
 )
 from tests.integration.sse_helpers import reset_sse_starlette_appstatus_event
 
@@ -1264,8 +1264,8 @@ def run_alembic(migration_templates: MigrationTemplates) -> RunAlembic:
     """Return a helper that runs ``alembic [-x k=v ...] <command> <target>``.
 
     Shared by migration round-trip tests so each does not re-implement the
-    subprocess invocation; ``x_args`` become alembic ``-x`` arguments. Returns
-    alembic's output (stdout then stderr, where its log lines go).
+    invocation; ``x_args`` become alembic ``-x`` arguments. Alembic runs
+    in-process (see ``run_alembic_in_process``). Returns alembic's log output.
 
     The first ``upgrade`` of a fresh ``throwaway_database``, when it carries no
     ``x_args``, is served by cloning a template already migrated to that
@@ -1287,7 +1287,7 @@ def run_alembic(migration_templates: MigrationTemplates) -> RunAlembic:
                 migration_templates.clone_into(db_name, target)
                 return f"cloned {db_name} from the template at {target}"
             migration_templates.forget(db_name)
-        return run_alembic_subprocess(database_url, command, target, x_args=x_args)
+        return run_alembic_in_process(database_url, command, target, x_args=x_args)
 
     return _run
 

@@ -11,6 +11,7 @@
 """
 
 import copy
+import logging
 import os
 from collections.abc import Callable, Iterator
 from contextlib import AbstractAsyncContextManager
@@ -259,3 +260,93 @@ class TestMigrationTemplates:
         assert migration_templates.clones == clones
         assert "Running upgrade 0001 -> 0002" in output
         assert await _revision(url) == "0002"
+
+
+def _no_subprocess(*args: object, **kwargs: object) -> None:
+    raise AssertionError("alembic ran in a subprocess")
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestInProcessAlembic:
+    """``run_alembic`` runs alembic inside the test process.
+
+    Starting an interpreter and importing the app cost about a second per
+    command; in-process it must still target the right database, return the
+    CLI's log lines and leave the session's logging as it found it.
+    """
+
+    async def test_run_alembic_runs_in_process(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", "0133")
+        monkeypatch.setattr("subprocess.run", _no_subprocess)
+
+        output = run_alembic(url, "upgrade", "0134")
+
+        assert "Running upgrade 0133 -> 0134" in output
+        assert await _revision(url) == "0134"
+
+    async def test_the_url_passed_in_wins_over_database_url(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fixtures point ``DATABASE_URL`` at the shared session database."""
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", "0133")
+        monkeypatch.setenv(
+            "DATABASE_URL", "postgresql://nobody:nothing@127.0.0.1:1/nowhere"
+        )
+
+        run_alembic(url, "upgrade", "0134")
+
+        assert await _revision(url) == "0134"
+
+    async def test_logging_survives_an_in_process_migration(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``alembic.ini``'s ``fileConfig`` would disable every existing logger."""
+        probe = logging.getLogger("app.in_process_alembic_probe")
+        alembic_logger = logging.getLogger("alembic")
+        before = (
+            alembic_logger.level,
+            list(alembic_logger.handlers),
+            alembic_logger.propagate,
+        )
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", "0133")
+
+        run_alembic(url, "upgrade", "0134")
+
+        assert not probe.disabled
+        with caplog.at_level(logging.WARNING, logger=probe.name):
+            probe.warning("still logging")
+        assert [r.getMessage() for r in caplog.records if r.name == probe.name] == [
+            "still logging"
+        ]
+        assert (
+            alembic_logger.level,
+            list(alembic_logger.handlers),
+            alembic_logger.propagate,
+        ) == before
+
+    async def test_the_alembic_cli_still_migrates(
+        self, throwaway_database: URL, run_alembic: RunAlembic
+    ) -> None:
+        """The path operators use: a real ``python -m alembic`` subprocess."""
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", "0133")
+
+        output = run_alembic_subprocess(url, "upgrade", "0134")
+
+        assert "Running upgrade 0133 -> 0134" in output
+        assert await _revision(url) == "0134"
