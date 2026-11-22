@@ -284,3 +284,60 @@ def test_an_instance_id_names_its_slot() -> None:
     )
     assert instance_slot("not-an-instance", SYDNEY) is None
     assert instance_slot(f"{R}_R20261214T030000", SYDNEY) is None
+
+
+def test_a_retired_link_beside_a_live_sibling_is_superseded_by_it() -> None:
+    """Both sets already journalled: the old journal on each day is a
+    duplicate of the live one, which it should be merged into."""
+    links = [
+        _link(OLD_TIMES[0], 100),
+        _link(NEW_TIMES[0], 200, external_event_id=_instance_id(NEW_TIMES[0])),
+    ]
+
+    plan = plan_rekeyed_instances(
+        [_live(NEW_TIMES[0])], links, _google_has(NEW_TIMES[0]), SYDNEY
+    )
+
+    assert plan.targets == {}
+    assert plan.retired == (
+        RetiredInstance(
+            external_event_id=_instance_id(OLD_TIMES[0]),
+            recurring_event_id=R,
+            journal_id=100,
+            superseded_by_journal_id=200,
+        ),
+    )
+
+
+def test_an_ambiguous_or_distant_sibling_supersedes_nothing() -> None:
+    morning = NEW_TIMES[0] - timedelta(hours=2)
+    links = [
+        _link(OLD_TIMES[0], 100),
+        _link(NEW_TIMES[0], 200, external_event_id=_instance_id(NEW_TIMES[0])),
+        _link(morning, 201, external_event_id=_instance_id(morning)),
+        _link(OLD_TIMES[1], 101),
+        _link(
+            NEW_TIMES[1] + timedelta(days=1),
+            202,
+            external_event_id=_instance_id(NEW_TIMES[1] + timedelta(days=1)),
+        ),
+    ]
+    live = _google_has(NEW_TIMES[0], morning, NEW_TIMES[1] + timedelta(days=1))
+
+    plan = plan_rekeyed_instances([_live(NEW_TIMES[0])], links, live, SYDNEY)
+
+    assert {r.journal_id: r.superseded_by_journal_id for r in plan.retired} == {
+        100: None,
+        101: None,
+    }
+
+
+def test_an_unlinked_candidate_adopts_rather_than_supersedes() -> None:
+    links = [_link(OLD_TIMES[0], 100)]
+
+    plan = plan_rekeyed_instances(
+        [_live(NEW_TIMES[0])], links, _google_has(NEW_TIMES[0]), SYDNEY
+    )
+
+    assert plan.targets[_instance_id(NEW_TIMES[0])].journal_id == 100
+    assert plan.retired[0].superseded_by_journal_id is None

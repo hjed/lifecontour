@@ -220,6 +220,15 @@ class JournalSyncEventData(BaseModel):
             "instead of starting another. Null for every other event."
         ),
     )
+    superseded_by_journal_id: int | None = Field(
+        default=None,
+        description=(
+            "Set on a cancellation of a re-keyed instance whose day already has "
+            "a live journal of the same recurrence: that journal's id. The "
+            "consumer merges the cancelled journal into it instead of keeping "
+            "a cancelled duplicate beside it. Null for every other event."
+        ),
+    )
     rekeyed_from: str | None = Field(
         default=None,
         description=(
@@ -268,6 +277,15 @@ class JournalStatusEventData(BaseModel):
     integration_source: str | None = Field(
         default=None,
         description="Source integration (e.g., 'google'); used for provenance",
+    )
+    superseded_by_journal_id: int | None = Field(
+        default=None,
+        description=(
+            "Set on a cancellation of a re-keyed instance whose day already has "
+            "a live journal of the same recurrence: that journal's id. The "
+            "consumer merges the cancelled journal into it instead of keeping "
+            "a cancelled duplicate beside it. Null for every other event."
+        ),
     )
 
 

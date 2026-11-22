@@ -386,6 +386,11 @@ retired in one of two ways:
   created instead.
 - **Cancelled:** otherwise the worker cancels the old instance, as if Google
   had sent the cancellation.
+- **Merged:** when the old instance's day already has exactly one live journal
+  of the same recurrence, the cancellation names it in
+  `superseded_by_journal_id`. The backend merges the old journal into it,
+  keeping notes, tasks and contacts and recording the old id as a merged
+  alias, rather than leaving a cancelled duplicate beside it.
 
 Cancelled calendar events are never offered as duplicate candidates for a new
 journal: what is left of an occurrence that is off duplicates nothing.

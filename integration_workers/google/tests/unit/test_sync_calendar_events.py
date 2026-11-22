@@ -2582,3 +2582,62 @@ class TestRekeyedRecurrence:
         )
 
         assert _no_rekeyed_instances.call_args.kwargs["listing_time_min"] is not None
+
+    @pytest.mark.asyncio
+    async def test_a_superseded_retirement_names_its_sibling_even_in_the_past(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """A duplicate beside a live journal is merged into it, which keeps
+        both journals' notes, so a past one is not left behind."""
+        from dataclasses import replace
+
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            retired=(replace(self._retired(7, 100), superseded_by_journal_id=200),)
+        )
+        old_link, _ = self._old_link(100)
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            old_link,  # the retired id's link; no end-date read for a merge
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._sync(mock_ctx, [])
+
+        assert result["status"] == "success"
+        [cancelled] = [call.args[0] for call in mock_session.add.call_args_list]
+        assert cancelled.event_type == "journal_event.cancelled"
+        assert cancelled.event_data["existing_journal_id"] == 100
+        assert cancelled.event_data["superseded_by_journal_id"] == 200
+
+    @pytest.mark.asyncio
+    async def test_a_plain_retirement_in_the_past_is_still_skipped(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            retired=(self._retired(7, 100),)
+        )
+        old_link, past_end = self._old_link(100)
+        past_end.scalar.return_value = datetime.now(UTC) - timedelta(days=30)
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            old_link,
+            past_end,
+            MagicMock(),
+        ]
+
+        result = await self._sync(mock_ctx, [])
+
+        assert result["status"] == "success"
+        mock_session.add.assert_not_called()

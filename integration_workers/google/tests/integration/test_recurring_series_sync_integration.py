@@ -900,3 +900,33 @@ class TestRekeyedRecurrenceIntegration:
         ]
         assert rejected_journal not in cancelled
         assert result.get("errors") == 1
+
+    async def test_a_doubled_set_is_merged_into_its_live_journals(
+        self, db_session
+    ) -> None:
+        """Both the old and the new instances were journalled before anything
+        could adopt: each old journal is sent to be merged into the live one
+        on its day, not cancelled beside it."""
+        calendar_uuid = await self._calendar(db_session)
+        olds = [self._day(weeks) for weeks in (1, 2)]
+        news = [self._day(weeks, minute=30) for weeks in (1, 2)]
+        old_journals = [
+            await self._linked_journal(db_session, calendar_uuid, start)
+            for start in olds
+        ]
+        new_journals = [
+            await self._linked_journal(db_session, calendar_uuid, start)
+            for start in news
+        ]
+
+        result, _ = await self._sync(
+            db_session, [self._instance(start) for start in news], sync_type="full"
+        )
+
+        assert result["status"] == "success"
+        cancelled = sorted(
+            (data["existing_journal_id"], data["superseded_by_journal_id"])
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.cancelled"
+        )
+        assert cancelled == sorted(zip(old_journals, new_journals, strict=True))

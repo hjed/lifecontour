@@ -4958,6 +4958,13 @@ async def _sync_calendar_inbound(
         ),
     )
     adoptions = {**rekeyed.targets, **split_pairing.targets}
+    # A retired duplicate of a live journal on its day: the backend merges it
+    # into that journal rather than cancelling it beside it.
+    superseded_by = {
+        retired.external_event_id: retired.superseded_by_journal_id
+        for retired in rekeyed.retired
+        if retired.superseded_by_journal_id is not None
+    }
     all_raw_events = [
         *all_raw_events,
         *(
@@ -5202,7 +5209,10 @@ async def _sync_calendar_inbound(
                 # Check if the event already ended (past event)
                 # Use a 1-day buffer to avoid edge cases with all-day
                 # events where event_date_range_end is midnight-normalised.
-                if existing_journal_id is not None:
+                # A duplicate to merge is sent even when past: the merge keeps
+                # both journals' notes, so nothing is lost by folding it in.
+                merge_into = superseded_by.get(google_event.id)
+                if existing_journal_id is not None and merge_into is None:
                     end_date_stmt = text("""
                         SELECT event_date_range_end
                         FROM journals
@@ -5242,6 +5252,7 @@ async def _sync_calendar_inbound(
                     series_recurring_event_id=root_recurring_event_id(
                         google_event.recurring_event_id
                     ),
+                    superseded_by_journal_id=merge_into,
                 )
                 session.add(outbox_event)
                 metrics["events_cancelled"] = metrics.get("events_cancelled", 0) + 1

@@ -119,6 +119,7 @@ from app.infrastructure.unit_of_work import savepoint
 
 if TYPE_CHECKING:
     from app.core.journal.services.journal_date_resolver import JournalDateResolver
+    from app.core.journal.services.journal_merge_service import JournalMergeService
 
 logger = structlog.get_logger()
 
@@ -1230,6 +1231,76 @@ class JournalOutboxEventProcessor:
             )
         return await self.link_repo.find_by_journal(journal_id, calendar_id)
 
+    async def _merge_into_sibling(
+        self,
+        linked: SeriesLinkedJournal,
+        sibling_id: int,
+        payload: JournalStatusEventData,
+        recurring_event_id: str,
+    ) -> bool:
+        """Merge a re-keyed duplicate into the live journal of its day.
+
+        The worker names the sibling when the old instance's day already has
+        a live journal of the same recurrence (``rekeyed_recurrence``). It is
+        merged into only while that still holds - the sibling's link here is
+        live and in this recurrence, it is another journal, and both belong
+        to one user - so the duplicate's notes, tasks and contacts survive
+        and its old id becomes a merged alias. Called under the recurrence
+        lock. ``False`` leaves the ordinary cancellation to run.
+        """
+        if sibling_id == linked.journal_id:
+            return False
+        sibling = await self.link_repo.find_by_journal(sibling_id, linked.calendar_id)
+        if (
+            sibling is None
+            or sibling.user_id != linked.user_id
+            or sibling.recurring_event_id != recurring_event_id
+            or sibling.link_sync_status == ExternalEventLinkSyncStatus.CANCELLED.value
+        ):
+            return False
+        await self._journal_merge_service().merge_journals(
+            target_id=sibling_id,
+            source_id=linked.journal_id,
+            transaction=self.connection,
+            source=_provenance_for_source(payload.integration_source),
+            changed_by=payload.integration_source or "system",
+        )
+        logger.info(
+            "Merged a re-keyed duplicate into its live sibling",
+            journal_id=sibling_id,
+            merged_journal_id=linked.journal_id,
+            external_event_id=payload.external_event_id,
+        )
+        return True
+
+    def _journal_merge_service(self) -> JournalMergeService:
+        """A merge service over this connection, built as the merge tool builds it."""
+        from app.core.journal.adapters.sql.journal_repository import (
+            SqlJournalRepository,
+        )
+        from app.core.journal.services.journal_merge_service import (
+            JournalMergeService,
+        )
+        from app.core.tasks.adapters.sql.task_anchor_repository import (
+            SqlTaskAnchorRepository,
+        )
+        from app.core.tasks.services.task_journal_merge_service import (
+            TaskJournalMergeService,
+        )
+        from app.infrastructure.events.outbox_event_publisher import (
+            OutboxEventPublisher,
+        )
+
+        publisher = OutboxEventPublisher(self.connection)
+        return JournalMergeService(
+            SqlJournalRepository(self.connection),
+            publisher,
+            TaskJournalMergeService(
+                task_anchor_repo=SqlTaskAnchorRepository(self.connection),
+                event_publisher=publisher,
+            ),
+        )
+
     async def _link_moved_on(
         self, journal_id: int, calendar_id: UUID, external_event_id: str
     ) -> bool:
@@ -1442,6 +1513,23 @@ class JournalOutboxEventProcessor:
                 "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
                 "reason": "link_moved_on",
                 "journal_id": existing_journal_id,
+            }
+
+        if (
+            payload.superseded_by_journal_id is not None
+            and linked is not None
+            and recurring_event_id
+            and await self._merge_into_sibling(
+                linked, payload.superseded_by_journal_id, payload, recurring_event_id
+            )
+        ):
+            return {
+                "status": "success",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "journal_id": payload.superseded_by_journal_id,
+                "merged_journal_id": existing_journal_id,
+                "external_event_id": external_event_id,
+                "action": "merged",
             }
 
         await self._mark_journal_cancelled(

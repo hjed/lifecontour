@@ -135,11 +135,18 @@ class LiveInstances:
 
 @dataclass(frozen=True)
 class RetiredInstance:
-    """A linked instance Google no longer has."""
+    """A linked instance Google no longer has.
+
+    ``superseded_by_journal_id`` is the one other journal linked to a live
+    instance of the same recurrence on its local day, when nothing adopts it:
+    the old journal duplicates that one and is merged into it, not cancelled
+    beside it.
+    """
 
     external_event_id: str
     recurring_event_id: str
     journal_id: int
+    superseded_by_journal_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +213,7 @@ def plan_rekeyed_instances(
         ):
             new_by_key[(recurrence, moment.astimezone(zone).date())].append(event)
 
+    siblings = _live_siblings(links, live, zone)
     targets: dict[str, InstanceAdoption] = {}
     for key, olds in old_by_key.items():
         news = new_by_key.get(key, [])
@@ -215,6 +223,20 @@ def plan_rekeyed_instances(
                 old_event_id=olds[0].external_event_id,
                 rekeyed=True,
             )
+    adopted = {target.old_event_id for target in targets.values()}
+
+    def superseded_by(link: RecurrenceLink) -> int | None:
+        key = (link.recurring_event_id or "", link.start.astimezone(zone).date())
+        live_journals = siblings.get(key, set()) - {link.journal_id}
+        if (
+            link.external_event_id in adopted
+            or new_by_key.get(key)
+            or len(old_by_key[key]) != 1
+            or len(live_journals) != 1
+        ):
+            return None
+        return next(iter(live_journals))
+
     return RekeyedPlan(
         targets=targets,
         retired=tuple(
@@ -222,10 +244,26 @@ def plan_rekeyed_instances(
                 external_event_id=link.external_event_id,
                 recurring_event_id=link.recurring_event_id or "",
                 journal_id=link.journal_id,
+                superseded_by_journal_id=superseded_by(link),
             )
             for link in retired
         ),
     )
+
+
+def _live_siblings(
+    links: Sequence[RecurrenceLink],
+    live: Mapping[str, LiveInstances],
+    zone: ZoneInfo,
+) -> dict[tuple[str, date], set[int]]:
+    """Per recurrence and local day, the journals linked to an instance Google has."""
+    siblings: dict[tuple[str, date], set[int]] = defaultdict(set)
+    for link in links:
+        instances = live.get(link.recurring_event_id or "")
+        if instances is not None and link.external_event_id in instances.event_ids:
+            day = link.start.astimezone(zone).date()
+            siblings[(link.recurring_event_id or "", day)].add(link.journal_id)
+    return siblings
 
 
 _LINKS = text("""
