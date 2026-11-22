@@ -7,6 +7,7 @@ import { render } from '@testing-library/react';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -34,5 +35,33 @@ describe('SelectContent', () => {
     expect(
       document.querySelector('[data-radix-popper-content-wrapper]')
     ).not.toBeNull();
+  });
+
+  /**
+   * Local to this app: Vega pads SelectGroup instead of the list, but most
+   * callers render items without a group, so the inset lives on the
+   * viewport and a group adds none of its own.
+   */
+  it('insets the options whether or not they are grouped', () => {
+    render(
+      <Select open defaultValue='a'>
+        <SelectTrigger aria-label='Pick'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value='a'>A</SelectItem>
+          <SelectGroup data-testid='group'>
+            <SelectItem value='b'>B</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    );
+
+    expect(document.querySelector('[data-radix-select-viewport]')).toHaveClass(
+      'p-1'
+    );
+    expect(document.querySelector('[data-slot=select-group]')).not.toHaveClass(
+      'p-1'
+    );
   });
 });
