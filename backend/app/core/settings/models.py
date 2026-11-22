@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Final, Protocol
 
 
@@ -17,20 +17,29 @@ class _Unset(Enum):
 UNSET: Final = _Unset.UNSET
 
 
+class ThemePalette(StrEnum):
+    """A colour palette the frontend ships; mode (light/dark) is separate."""
+
+    DEFAULT = "default"
+    EMERALD = "emerald"
+
+
 @dataclass
 class UserSettings:
     """Per-user application settings.
 
     ``timezone`` renders dates/times (including in AI prompts) in the user's
     local time. ``default_country`` (ISO 3166-1 alpha-2) fills in addresses
-    imported without a country (#1820). Either is ``None`` when the user has not
-    chosen one; callers wanting a zone to resolve with use
+    imported without a country (#1820). ``theme_palette`` is the app's colour
+    palette, following the user across devices. Each is ``None`` when the user
+    has not chosen one; callers wanting a zone to resolve with use
     ``UserSettingsRepository.get_timezone``, which applies the default.
     """
 
     user_id: str
     timezone: str | None = None
     default_country: str | None = None
+    theme_palette: ThemePalette | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -39,11 +48,13 @@ class UserSettings:
 class UserSettingsChanges:
     """The fields a partial update writes; ``UNSET`` ones are left as they are.
 
-    The timezone can be set but not cleared. ``None`` clears the country.
+    The timezone can be set but not cleared. ``None`` clears the country or
+    returns the palette to the default.
     """
 
     timezone: str | _Unset = UNSET
     default_country: str | None | _Unset = UNSET
+    theme_palette: ThemePalette | None | _Unset = UNSET
 
 
 class ContactsReimport(Protocol):

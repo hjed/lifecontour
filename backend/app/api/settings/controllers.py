@@ -98,6 +98,7 @@ async def update_user_settings(
             user_id=user.id,
             timezone=saved.timezone,
             default_country=saved.default_country,
+            theme_palette=saved.theme_palette,
         )
 
         return _response(str(user.id), saved)
@@ -122,6 +123,7 @@ def _response(user_id: str, settings: UserSettings | None) -> UserSettingsRespon
             attributes=UserSettingsAttributes(
                 timezone=settings.timezone if settings else None,
                 default_country=settings.default_country if settings else None,
+                theme_palette=settings.theme_palette if settings else None,
             ),
         )
     )

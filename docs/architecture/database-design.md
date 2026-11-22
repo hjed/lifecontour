@@ -39,9 +39,11 @@ table's DDL:
 | Integrations | `sync_metadata`, `sync_jobs`, `pending_entity_mappings`, `strava_athlete_mappings`, `calendar_sync_tokens`, and the per-user credentials and settings: `user_google_auth`, `user_google_integration`, `user_strava_auth`, `user_snipe_it_auth`, `snipeit_settings`, `user_immich_auth` |
 | Settings | `user_settings` |
 
-`user_settings` holds one row per user: `timezone` (IANA name) and `default_country` (ISO 3166-1
-alpha-2, filled in for imported addresses that have no country — #1820). Both are nullable, and NULL
-means "not chosen", the same as no row (#1401).
+`user_settings` holds one row per user: `timezone` (IANA name), `default_country` (ISO 3166-1
+alpha-2, filled in for imported addresses that have no country — #1820) and `theme_palette` (the
+frontend colour palette, e.g. `emerald`; a plain string the API validates against `ThemePalette`, so a
+new palette needs no migration). All are nullable, and NULL means "not chosen", the same as no row
+(#1401); for the palette that renders the default.
 
 `contact_import_issues` holds what an integration import left out of a contact for the user to
 review (#1820) - today, a Google address whose AU/US/CA region names no state, province or

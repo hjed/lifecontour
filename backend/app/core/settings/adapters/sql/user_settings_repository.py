@@ -7,14 +7,19 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.settings.models import UNSET, UserSettings, UserSettingsChanges
+from app.core.settings.models import (
+    UNSET,
+    ThemePalette,
+    UserSettings,
+    UserSettingsChanges,
+)
 from app.core.settings.timezone_utils import DEFAULT_TIMEZONE
 
-_COLUMNS = "user_id, timezone, default_country, created_at, updated_at"
+_COLUMNS = "user_id, timezone, default_country, theme_palette, created_at, updated_at"
 
 
 class SqlUserSettingsRepository:
-    """Repository for managing per-user settings (timezone, default country)."""
+    """Repository for per-user settings (timezone, default country, palette)."""
 
     def __init__(self, connection: AsyncConnection) -> None:
         self.connection = connection
@@ -41,12 +46,13 @@ class SqlUserSettingsRepository:
         stmt = text(
             f"""
             INSERT INTO user_settings
-                (user_id, timezone, default_country, updated_at)
-            VALUES (:user_id, :timezone, :default_country, NOW())
+                (user_id, timezone, default_country, theme_palette, updated_at)
+            VALUES (:user_id, :timezone, :default_country, :theme_palette, NOW())
             ON CONFLICT (user_id)
             DO UPDATE SET
                 timezone = EXCLUDED.timezone,
                 default_country = EXCLUDED.default_country,
+                theme_palette = EXCLUDED.theme_palette,
                 updated_at = NOW()
             RETURNING {_COLUMNS}
             """
@@ -57,6 +63,7 @@ class SqlUserSettingsRepository:
                 "user_id": settings.user_id,
                 "timezone": settings.timezone,
                 "default_country": settings.default_country,
+                "theme_palette": settings.theme_palette,
             },
         )
 
@@ -69,8 +76,8 @@ class SqlUserSettingsRepository:
         stmt = text(
             f"""
             INSERT INTO user_settings
-                (user_id, timezone, default_country, updated_at)
-            VALUES (:user_id, :timezone, :default_country, NOW())
+                (user_id, timezone, default_country, theme_palette, updated_at)
+            VALUES (:user_id, :timezone, :default_country, :theme_palette, NOW())
             ON CONFLICT (user_id)
             DO UPDATE SET
                 timezone = CASE WHEN :set_timezone
@@ -78,6 +85,9 @@ class SqlUserSettingsRepository:
                 default_country = CASE WHEN :set_default_country
                     THEN EXCLUDED.default_country
                     ELSE user_settings.default_country END,
+                theme_palette = CASE WHEN :set_theme_palette
+                    THEN EXCLUDED.theme_palette
+                    ELSE user_settings.theme_palette END,
                 updated_at = NOW()
             RETURNING {_COLUMNS}
             """
@@ -94,6 +104,10 @@ class SqlUserSettingsRepository:
                     else changes.default_country
                 ),
                 "set_default_country": changes.default_country is not UNSET,
+                "theme_palette": (
+                    None if changes.theme_palette is UNSET else changes.theme_palette
+                ),
+                "set_theme_palette": changes.theme_palette is not UNSET,
             },
         )
 
@@ -120,6 +134,17 @@ def _to_settings(row: Any) -> UserSettings:
         user_id=str(row.user_id),
         timezone=row.timezone,
         default_country=row.default_country,
+        theme_palette=_to_palette(row.theme_palette),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _to_palette(value: str | None) -> ThemePalette | None:
+    """The stored palette; one the app no longer ships reads as the default."""
+    if value is None:
+        return None
+    try:
+        return ThemePalette(value)
+    except ValueError:
+        return None

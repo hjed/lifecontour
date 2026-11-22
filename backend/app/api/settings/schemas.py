@@ -11,7 +11,7 @@ import pycountry
 from core_shared.models.contacts.value_objects import CountryCode
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.settings.models import UNSET, UserSettingsChanges
+from app.core.settings.models import UNSET, ThemePalette, UserSettingsChanges
 
 
 def _validate_timezone(value: str) -> str:
@@ -27,7 +27,8 @@ class UserSettingsRequest(BaseModel):
     """Request body for a partial update of user settings.
 
     A field the body omits is left as it is. ``default_country: null`` clears
-    the country; the timezone can be changed but not cleared.
+    the country and ``theme_palette: null`` returns to the default palette;
+    the timezone can be changed but not cleared.
     """
 
     timezone: str | None = Field(
@@ -39,6 +40,13 @@ class UserSettingsRequest(BaseModel):
         description=(
             "ISO 3166-1 alpha-2 country, e.g. 'AU', used for imported addresses "
             "with no country; null clears it"
+        ),
+    )
+    theme_palette: ThemePalette | None = Field(
+        default=None,
+        description=(
+            "Colour palette for the app, e.g. 'emerald'; null returns to the "
+            "default palette"
         ),
     )
 
@@ -72,6 +80,11 @@ class UserSettingsRequest(BaseModel):
                 if "default_country" in self.model_fields_set
                 else UNSET
             ),
+            theme_palette=(
+                self.theme_palette
+                if "theme_palette" in self.model_fields_set
+                else UNSET
+            ),
         )
 
 
@@ -93,6 +106,10 @@ class UserSettingsAttributes(BaseModel):
     default_country: str | None = Field(
         default=None,
         description="ISO 3166-1 alpha-2 country, or null when the user has not set one",
+    )
+    theme_palette: ThemePalette | None = Field(
+        default=None,
+        description="Colour palette, or null when the user has not chosen one",
     )
 
 
