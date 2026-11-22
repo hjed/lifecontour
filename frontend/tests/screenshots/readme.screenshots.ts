@@ -352,6 +352,13 @@ test('capture README screenshots', async ({ authenticatedPage: page }) => {
   // Screens — alternating light and dark mode
   await capture(page, '/', 'light', 'home-dashboard.png', async p => {
     await expect(p.getByTestId('home-dashboard-ready')).toBeVisible();
+    // That marks only the shell: each section loads on its own, and the
+    // summary card drops its skeleton while the summary is still generating.
+    // Wait for the content every section is meant to show.
+    await expect(p.getByText(DAILY_SUMMARY)).toBeVisible();
+    await expect(p.getByText('Climbing at the gym with Sam')).toBeVisible();
+    await expect(p.getByText('Lend Sam the foam roller')).toBeVisible();
+    await expect(p.getByText(/Birthday · turns/)).toBeVisible();
   });
 
   await capture(
