@@ -2,6 +2,8 @@
  * User settings types matching backend API schemas (JSON:API).
  */
 
+import type { ThemePalette } from '@/lib/theme/palettes';
+
 export interface UserSettingsAttributes {
   /**
    * The timezone the user has configured, or `null` if they never have.
@@ -18,15 +20,22 @@ export interface UserSettingsAttributes {
    * none, or `null` if the user has not chosen one.
    */
   default_country?: string | null;
+  /**
+   * The colour palette the user picked, or `null` if they never have (the
+   * default palette renders).
+   */
+  theme_palette?: ThemePalette | null;
 }
 
 /**
- * A partial settings update: an omitted field is left as it is, and
- * `default_country: null` clears the country. The timezone cannot be cleared.
+ * A partial settings update: an omitted field is left as it is,
+ * `default_country: null` clears the country and `theme_palette: null`
+ * returns to the default palette. The timezone cannot be cleared.
  */
 export interface UserSettingsPatch {
   timezone?: string;
   default_country?: string | null;
+  theme_palette?: ThemePalette | null;
 }
 
 export interface UserSettingsResource {
