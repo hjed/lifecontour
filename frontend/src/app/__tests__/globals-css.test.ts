@@ -61,10 +61,43 @@ const TOKEN_UTILITIES = [
   'text-muted-foreground',
 ];
 
+/**
+ * Status tokens. shadcn ships no success/warning/info colours, so the app
+ * defines them alongside `destructive`; feature code uses these instead of
+ * raw palette classes such as `text-green-600`.
+ */
+const STATUS_TOKEN_UTILITIES = [
+  'bg-success',
+  'text-success',
+  'text-success-foreground',
+  'border-success',
+  'bg-warning',
+  'text-warning',
+  'text-warning-foreground',
+  'border-warning',
+  'bg-info',
+  'text-info',
+  'text-info-foreground',
+];
+
+/**
+ * Radius steps the current shadcn styles use (e.g. Vega's pill badges).
+ * Tailwind ships fixed-rem defaults for these; shadcn derives them from
+ * `--radius` so the whole scale follows one knob.
+ */
+const DERIVED_RADII = ['2xl', '3xl', '4xl'];
+const RADIUS_UTILITIES = DERIVED_RADII.map(step => `rounded-${step}`);
+
+/** Probe for how the `dark:` variant compiles. */
+const DARK_VARIANT_PROBE = 'dark:bg-primary';
+
 const ALL_UTILITIES = [
   ...ANIMATION_UTILITIES,
   ...TYPOGRAPHY_UTILITIES,
   ...TOKEN_UTILITIES,
+  ...STATUS_TOKEN_UTILITIES,
+  ...RADIUS_UTILITIES,
+  DARK_VARIANT_PROBE,
 ];
 
 /**
@@ -129,6 +162,45 @@ describe('globals.css', () => {
   describe('semantic theme tokens', () => {
     it.each(TOKEN_UTILITIES)(EMITS_A_RULE, utility => {
       expect(emitsRule(css, utility)).toBe(true);
+    });
+  });
+
+  describe('status theme tokens', () => {
+    it.each(STATUS_TOKEN_UTILITIES)(EMITS_A_RULE, utility => {
+      expect(emitsRule(css, utility)).toBe(true);
+    });
+  });
+
+  describe('radius scale', () => {
+    it.each(RADIUS_UTILITIES)(EMITS_A_RULE, utility => {
+      expect(emitsRule(css, utility)).toBe(true);
+    });
+
+    it.each(DERIVED_RADII)('derives rounded-%s from --radius', step => {
+      // `@theme inline` inlines the value into the utility itself.
+      const start = css.indexOf(`.rounded-${step}`);
+      const rule = css.slice(start, css.indexOf('}', start));
+      expect(rule).toContain('calc(var(--radius)');
+    });
+  });
+
+  describe('dark variant', () => {
+    /** The CSS Tailwind emits for the `dark:` probe, selector onwards. */
+    function darkProbeRule(): string {
+      const start = css.indexOf(String.raw`.dark\:bg-primary`);
+      expect(start).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf('}', start) + 1);
+    }
+
+    it('keys `dark:` off the `.dark` class that next-themes toggles', () => {
+      // shadcn's standard: `@custom-variant dark (&:is(.dark *))`. Tailwind
+      // v4's default is `prefers-color-scheme`, which follows the OS and
+      // ignores the in-app Light/Dark toggle.
+      expect(darkProbeRule()).toMatch(/:is\(\.dark \*\)/);
+    });
+
+    it('never compiles `dark:` to a prefers-color-scheme media query', () => {
+      expect(css).not.toContain('prefers-color-scheme');
     });
   });
 

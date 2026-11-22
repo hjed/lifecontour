@@ -128,14 +128,12 @@ globals (it still emits, but a clean exit is worth having).
 
 ## Verified upstream bugs (present in the app, not artefacts of the sync)
 
-1. **`dark:` variants are broken app-wide.** `globals.css:5` says the dark
-   `@custom-variant` was "replaced for SonarQube compatibility", but nothing
-   replaced it. Tailwind v4 therefore compiles `dark:*` to
-   `@media (prefers-color-scheme: dark)` — following the OS — while the app
-   toggles dark mode with a `.dark` **class** via next-themes. All 38 `dark:`
-   utilities key off the wrong signal. Semantic token classes are unaffected
-   (`.dark` redefines the variables), which is why `conventions.md` tells the
-   design agent to use tokens and never write `dark:`.
+1. ~~**`dark:` variants are broken app-wide.**~~ — **fixed.** `globals.css` now
+   declares `@custom-variant dark (&:is(.dark *))`, so `dark:*` follows the
+   `.dark` class next-themes toggles instead of `prefers-color-scheme`. Previews
+   captured before the fix showed OS-driven `dark:` styling; the next re-sync
+   may differ. `conventions.md` still steers the agent to tokens over `dark:`
+   for colour, because tokens also follow the palette.
 2. ~~**`animate-in` / `animate-out` generate no CSS**~~ — **fixed in #1186.**
    Neither `tailwindcss-animate` (v3-only, listed in the then-dead
    `tailwind.config.cjs`) nor `tw-animate-css` (its v4 replacement, a dependency
@@ -228,9 +226,9 @@ Everything else falls through to the real `fetch`.
 
 ## Known render warns
 
-- `ThemeToggle` can only ever be captured in light theme (the moon glyph is
-  behind a `dark:` variant — see upstream bug 1). Its cells are "bare" and
-  "in context"; it takes no props.
+- `ThemeToggle` shows its moon glyph only inside a `.dark` ancestor (a `dark:`
+  variant, now class-driven — upstream bug 1). Wrap a cell in `class="dark"` to
+  capture it. Its cells are "bare" and "in context"; it takes no props.
 - `ButtonLoading` hard-codes `h-4` for its spinner, so a size axis only varies
   the surrounding Button — a `variants render identically` warn here is legitimate.
 
