@@ -220,6 +220,39 @@ describe('AuthProvider', () => {
     );
   });
 
+  /**
+   * Logout clears every query, so no settings read is left to say "default";
+   * the palette has to be reset on logout itself rather than whenever the
+   * next session check happens to settle.
+   */
+  it('resets the palette on logout without waiting for a session check', async () => {
+    const user = userEvent.setup();
+    (fetch as jest.Mock)
+      .mockResolvedValueOnce(createMockResponses.sessionNotAuthenticated())
+      .mockResolvedValueOnce(createMockResponses.logoutSuccess())
+      // Any later session check never settles.
+      .mockReturnValue(new Promise(() => {}));
+
+    renderWithProviders(<TestComponent />);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(TEST_CONSTANTS.TEST_IDS.LOADING_STATUS)
+      ).toHaveTextContent('not-loading')
+    );
+    // The signed-in account's palette, as PaletteProvider would leave it.
+    localStorage.setItem(PALETTE_STORAGE_KEY, 'emerald');
+    document.documentElement.setAttribute(PALETTE_ATTRIBUTE, 'emerald');
+
+    await user.click(screen.getByTestId(TEST_CONSTANTS.TEST_IDS.LOGOUT));
+
+    await waitFor(() =>
+      expect(document.documentElement.hasAttribute(PALETTE_ATTRIBUTE)).toBe(
+        false
+      )
+    );
+    expect(localStorage.getItem(PALETTE_STORAGE_KEY)).toBeNull();
+  });
+
   it('should clear error when clearError is called', async () => {
     const user = userEvent.setup();
 

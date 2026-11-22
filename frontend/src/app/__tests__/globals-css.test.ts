@@ -253,6 +253,63 @@ describe('globals.css', () => {
       );
     });
 
+    /** WCAG relative luminance of an `oklch(L C h)` token value. */
+    function luminance(value: string): number {
+      const match = /oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)/.exec(value);
+      expect(match).not.toBeNull();
+      const [L, C, h] = match!.slice(1).map(Number);
+      const a = C * Math.cos((h * Math.PI) / 180);
+      const b = C * Math.sin((h * Math.PI) / 180);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+      const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+      const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+      const clamp = (x: number) => Math.min(Math.max(x, 0), 1);
+      const r = clamp(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s);
+      const g = clamp(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s);
+      const bl = clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    }
+
+    function contrast(a: string, b: string): number {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    const DEFAULT_LIGHT = declaredVars(':root');
+    const DEFAULT_DARK = new Map([...DEFAULT_LIGHT, ...declaredVars('.dark')]);
+    const MODES = {
+      'default light': DEFAULT_LIGHT,
+      'default dark': DEFAULT_DARK,
+      'emerald light': new Map([...DEFAULT_LIGHT, ...declaredVars(LIGHT)]),
+      'emerald dark': new Map([...DEFAULT_DARK, ...declaredVars(DARK)]),
+    };
+    /** Text tokens on the surfaces they are drawn on (WCAG AA, 4.5:1). */
+    const TEXT_ON_SURFACE: [text: string, surface: string][] = [
+      ...['foreground', 'primary', 'muted-foreground', 'destructive'].flatMap(
+        text =>
+          ['background', 'card', 'popover'].map(
+            surface => [text, surface] as [string, string]
+          )
+      ),
+      ...['success', 'warning', 'info'].flatMap(text =>
+        ['background', 'card'].map(
+          surface => [text, surface] as [string, string]
+        )
+      ),
+      ['primary-foreground', 'primary'],
+      ['secondary-foreground', 'secondary'],
+      ['accent-foreground', 'accent'],
+      ['sidebar-primary-foreground', 'sidebar-primary'],
+    ];
+
+    describe.each(Object.entries(MODES))('%s', (_mode, vars) => {
+      it.each(TEXT_ON_SURFACE)('keeps %s readable on %s', (text, surface) => {
+        expect(
+          contrast(vars.get(`--${text}`)!, vars.get(`--${surface}`)!)
+        ).toBeGreaterThanOrEqual(4.5);
+      });
+    });
+
     it('ships the palette selectors in the compiled stylesheet', () => {
       expect(css).toMatch(/:root\[data-palette=['"]?emerald['"]?\]/);
       expect(css).toMatch(/:root\.dark\[data-palette=['"]?emerald['"]?\]/);

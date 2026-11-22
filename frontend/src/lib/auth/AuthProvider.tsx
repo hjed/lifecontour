@@ -283,8 +283,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // has a localStorage one, and that is keyed by browser rather than by
       // account. The session effect clears it on every unauthenticated
       // settlement too, but that runs a refetch later — clearing here closes
-      // the window rather than waiting for it.
+      // the window rather than waiting for it. The palette is the same: with
+      // the queries cleared nothing else would put the default back.
       clearCachedTimezone();
+      resetPalette();
       toast.success(SUCCESS_MESSAGES.SIGNED_OUT);
     },
     onError: error => {
