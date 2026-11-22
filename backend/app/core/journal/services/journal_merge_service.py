@@ -162,6 +162,12 @@ async def _drop_event_links_to(
         )
 
 
+# Flags a merge keeps set when either journal sets them, whichever survives.
+_STICKY_TRUE_COLUMNS: frozenset[tuple[str, str]] = frozenset(
+    {("journal_calendar_info", "private_description")}
+)
+
+
 class JournalMergeService:
     """Service for handling journal merges in Phase 1."""
 
@@ -1281,6 +1287,14 @@ class JournalMergeService:
 
             s_val = source_dict[col]
             t_val = target_dict[col]
+
+            if (table_name, col) in _STICKY_TRUE_COLUMNS:
+                # Notes either side kept off the calendar stay off it: the
+                # merged journal would push them on its next edit otherwise.
+                if s_val and not t_val:
+                    updates.append(f"{col} = :{col}")
+                    update_params[col] = True
+                continue
 
             if s_val is not None and (
                 t_val is None or (default_survivor is source and t_val != s_val)

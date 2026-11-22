@@ -930,3 +930,43 @@ class TestRekeyedRecurrenceIntegration:
             if event_type == "journal_event.cancelled"
         )
         assert cancelled == sorted(zip(old_journals, new_journals, strict=True))
+
+    async def test_a_re_time_back_reclaims_an_id_a_merge_aliased(
+        self, db_session
+    ) -> None:
+        """14:00 was merged into 14:30, then the organiser moved it back: the
+        14:00 id Google re-issues is a merged alias of the 14:30 journal, and
+        the adoption takes it back instead of skipping it."""
+        from core_shared.repositories.merged_alias_repository import (
+            ExternalRecord,
+            MergedAliasRepository,
+        )
+
+        calendar_uuid = await self._calendar(db_session)
+        old_slot, new_slot = self._day(1), self._day(1, minute=30)
+        journal_id = await self._linked_journal(db_session, calendar_uuid, new_slot)
+        await MergedAliasRepository(db_session).record_aliases(
+            journal_id=journal_id,
+            user_id=TEST_USER,
+            records=[
+                ExternalRecord(
+                    integration_source="google_calendar",
+                    external_id=self._instance_id(old_slot),
+                    calendar_id=uuid.UUID(calendar_uuid),
+                    recurring_event_id=self.RECURRENCE,
+                )
+            ],
+        )
+        await db_session.commit()
+
+        result, _ = await self._sync(
+            db_session, [self._instance(old_slot)], sync_type="full"
+        )
+
+        assert result["status"] == "success"
+        assert result.get("events_skipped_merged", 0) == 0
+        [(event_type, data)] = await self._outbox(db_session)
+        assert event_type == "journal_event.updated"
+        assert data["existing_journal_id"] == journal_id
+        assert data["external_event_id"] == self._instance_id(old_slot)
+        assert data["rekeyed_from"] == self._instance_id(new_slot)

@@ -198,6 +198,28 @@ class MergedAliasRepository:
                 },
             )
 
+    async def release(self, alias: MergedAlias) -> None:
+        """Stop ``alias`` standing for its record: it is the journal's live link again.
+
+        Only for the journal the alias already answers for - a re-key adoption
+        taking back an id a merge absorbed into it.
+        """
+        await self._conn.execute(
+            text("""
+                DELETE FROM journal_merged_aliases
+                WHERE journal_id = :journal_id
+                  AND user_id = :user_id
+                  AND integration_source = :integration_source
+                  AND external_id = :external_id
+            """),
+            {
+                "journal_id": alias.journal_id,
+                "user_id": alias.user_id,
+                "integration_source": alias.integration_source,
+                "external_id": alias.external_id,
+            },
+        )
+
     async def repoint_aliases(
         self, *, source_journal_id: int, target_journal_id: int
     ) -> None:

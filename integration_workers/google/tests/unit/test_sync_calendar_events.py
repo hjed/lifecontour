@@ -2641,3 +2641,64 @@ class TestRekeyedRecurrence:
 
         assert result["status"] == "success"
         mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_an_alias_of_the_journal_it_adopts_is_not_skipped(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+        _no_merged_aliases: MagicMock,
+    ) -> None:
+        """Re-timed back after a merge, Google re-issues ids the journal holds
+        as merged aliases: adopting its own journal takes the id back."""
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            targets={self._instance(7): self._adoption(7, 100)},
+            retired=(self._retired(7, 100),),
+        )
+        _no_merged_aliases.return_value.find_alias.return_value = MagicMock(
+            journal_id=100
+        )
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            self._no_link(),
+            MagicMock(),
+        ]
+
+        result = await self._sync(mock_ctx, [self._new_event(7)])
+
+        assert result["status"] == "success"
+        [adopted] = [call.args[0] for call in mock_session.add.call_args_list]
+        assert adopted.event_type == "journal_event.updated"
+        assert adopted.event_data["existing_journal_id"] == 100
+        assert adopted.event_data["rekeyed_from"] == self._instance(7, minute=0)
+
+    @pytest.mark.asyncio
+    async def test_an_alias_of_another_journal_is_still_skipped(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+        _no_merged_aliases: MagicMock,
+    ) -> None:
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            targets={self._instance(7): self._adoption(7, 100)}
+        )
+        _no_merged_aliases.return_value.find_alias.return_value = MagicMock(
+            journal_id=999
+        )
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            self._no_link(),
+            MagicMock(),
+        ]
+
+        result = await self._sync(mock_ctx, [self._new_event(7)])
+
+        assert result["status"] == "success"
+        mock_session.add.assert_not_called()
+        assert result.get("events_skipped_merged") == 1

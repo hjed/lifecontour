@@ -268,3 +268,130 @@ class TestSupersededDuplicateMerge:
 
         assert result["status"] == "skipped"
         assert await event_state(async_connection, old) == "confirmed"
+
+    async def test_private_notes_stay_private_in_the_merged_journal(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The duplicate's notes were never pushed to Google; folded into a
+        journal that pushes its description, they would be on the next edit."""
+        processor, calendar_id, old, sibling = await _pair(async_connection)
+        await async_connection.execute(
+            text(
+                "UPDATE journal_calendar_info SET private_description = true"
+                " WHERE journal_id = :id"
+            ),
+            {"id": old},
+        )
+
+        await processor.process_event(
+            _superseded_cancellation(calendar_id, old, sibling)
+        )
+
+        private = (
+            await async_connection.execute(
+                text(
+                    "SELECT private_description FROM journal_calendar_info"
+                    " WHERE journal_id = :id"
+                ),
+                {"id": sibling},
+            )
+        ).scalar()
+        assert private is True
+
+    async def test_a_re_time_back_reclaims_an_id_the_merge_aliased(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Merged 14:00 into 14:30, then the organiser moves it back: Google
+        re-issues the 14:00 ids, which the journal holds as merged aliases.
+        The adoption takes the id back as the journal's link."""
+        processor, calendar_id, old, sibling = await _pair(async_connection)
+        await processor.process_event(
+            _superseded_cancellation(calendar_id, old, sibling)
+        )
+        back = sync_event(
+            "journal_event.updated",
+            calendar_id=calendar_id,
+            external_event_id=OLD_ID,
+            title="Retro",
+            start=OLD_START,
+            etag='"etag-back"',
+            existing_journal_id=sibling,
+            recurring_event_id=RECURRENCE,
+            series_recurring_event_id=RECURRENCE,
+        )
+        back.event_data["rekeyed_from"] = NEW_ID
+
+        result = await processor.process_event(back)
+
+        assert result["status"] == "success"
+        assert await _link_id(async_connection, sibling) == OLD_ID
+        assert await _alias_owner(async_connection, OLD_ID) is None
+        journal_start = (
+            await async_connection.execute(
+                text("SELECT event_date_range_start FROM journals WHERE id = :id"),
+                {"id": sibling},
+            )
+        ).scalar()
+        assert journal_start == OLD_START
+
+
+async def test_a_manual_merge_keeps_a_private_description_private(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """The same rule for any merge: either side private makes the result
+    private, so no notes the user kept off Google are pushed there."""
+    from core_shared.models.history import Provenance
+
+    from app.core.journal.adapters.sql.journal_repository import (
+        SqlJournalRepository,
+    )
+    from app.core.journal.services.journal_merge_service import JournalMergeService
+    from app.core.tasks.adapters.sql.task_anchor_repository import (
+        SqlTaskAnchorRepository,
+    )
+    from app.core.tasks.services.task_journal_merge_service import (
+        TaskJournalMergeService,
+    )
+    from app.infrastructure.events.outbox_event_publisher import (
+        OutboxEventPublisher,
+    )
+
+    _, _, old, sibling = await _pair(async_connection)
+    await async_connection.execute(
+        text(
+            "UPDATE journal_calendar_info SET private_description = true"
+            " WHERE journal_id = :id"
+        ),
+        {"id": old},
+    )
+    publisher = OutboxEventPublisher(async_connection)
+    await JournalMergeService(
+        SqlJournalRepository(async_connection),
+        publisher,
+        TaskJournalMergeService(
+            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
+            event_publisher=publisher,
+        ),
+    ).merge_journals(
+        target_id=sibling,
+        source_id=old,
+        transaction=async_connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+
+    private = (
+        await async_connection.execute(
+            text(
+                "SELECT private_description FROM journal_calendar_info"
+                " WHERE journal_id = :id"
+            ),
+            {"id": sibling},
+        )
+    ).scalar()
+    assert private is True
