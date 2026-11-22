@@ -1,9 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import * as PopoverPrimitive from '@radix-ui/react-popover';
-
 import { cn } from '@/lib/utils';
+import { Popover as PopoverPrimitive } from 'radix-ui';
 
 function Popover({
   ...props
@@ -30,16 +29,7 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          // ``max-h`` + ``overflow-y-auto`` mirror what ``SelectContent``,
-          // ``DropdownMenuContent`` and ``ContextMenuContent`` already do; this
-          // primitive was the one overlay in the kit without them, and an
-          // overlay with no height bound does not degrade gracefully — it goes
-          // off the bottom of the screen with no way to reach what is down
-          // there. A phone-sized viewport meets that on the journal filters'
-          // date range: the calendar stacks its two months vertically below
-          // ``md``, so the second month sat below the fold, unreachable, and a
-          // user could not select a date in it at all.
-          'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-(--radix-popover-content-available-height) w-72 origin-(--radix-popover-content-transform-origin) overflow-y-auto rounded-md border p-4 shadow-md outline-hidden',
+          'bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 z-50 flex max-h-(--radix-popover-content-available-height) w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-4 overflow-y-auto rounded-md p-4 text-sm shadow-md ring-1 outline-hidden duration-100',
           className
         )}
         {...props}
@@ -54,4 +44,45 @@ function PopoverAnchor({
   return <PopoverPrimitive.Anchor data-slot='popover-anchor' {...props} />;
 }
 
-export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor };
+function PopoverHeader({ className, ...props }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot='popover-header'
+      className={cn('flex flex-col gap-1 text-sm', className)}
+      {...props}
+    />
+  );
+}
+
+function PopoverTitle({ className, ...props }: React.ComponentProps<'h2'>) {
+  return (
+    <div
+      data-slot='popover-title'
+      className={cn('font-medium', className)}
+      {...props}
+    />
+  );
+}
+
+function PopoverDescription({
+  className,
+  ...props
+}: React.ComponentProps<'p'>) {
+  return (
+    <p
+      data-slot='popover-description'
+      className={cn('text-muted-foreground', className)}
+      {...props}
+    />
+  );
+}
+
+export {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+};
