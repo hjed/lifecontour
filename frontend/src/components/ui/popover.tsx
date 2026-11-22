@@ -54,7 +54,10 @@ function PopoverHeader({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function PopoverTitle({ className, ...props }: React.ComponentProps<'h2'>) {
+// Stock Vega types this as an h2 but renders a div; the type now matches
+// the element. A popover's heading level depends on where it opens, so a
+// caller that needs a heading passes one as the child.
+function PopoverTitle({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot='popover-title'
