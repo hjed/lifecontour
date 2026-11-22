@@ -1284,12 +1284,16 @@ worker copies a known-good pattern rather than an arbitrary existing one. All fo
 
 FROM pms-python-base
 
-# Copy worker pyproject.toml for dependency caching
-COPY ./integration_workers/<worker>/pyproject.toml .
+# Install dependencies from uv.lock, before the source so code edits keep this
+# layer cached (the full Dockerfiles explain each flag)
+COPY ./integration_workers/<worker>/pyproject.toml ./integration_workers/<worker>/uv.lock /integration_workers/<worker>/
+RUN uv export -q --locked --no-dev --no-emit-project --no-emit-package core_shared \
+        --project /integration_workers/<worker> -o /tmp/requirements.txt \
+ && uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt
 
-# Copy worker source code before install so the package is complete
+# Copy the worker source and install the worker itself (dependencies above)
 COPY ./integration_workers/<worker>/ .
-RUN uv pip install --system --no-cache-dir --no-sources .
+RUN uv pip install --system --no-cache-dir --no-deps --no-sources .
 
 # Health check — Python reads REDIS_URL from the environment at runtime
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -1303,13 +1307,20 @@ CMD ["python", "worker.py"]
 ```
 
 Key invariants (enforced by
-`core_shared/tests/unit/test_worker_tooling_standardisation.py`):
+`core_shared/tests/unit/test_worker_tooling_standardisation.py` and
+`core_shared/tests/unit/test_locked_dependency_installs.py`):
 
 - **`FROM pms-python-base`** — the shared base image supplies Python 3.14, system deps, `uv`,
   the `core_shared` package, and the non-root `appuser` account.
-- **Copy `pyproject.toml`, then the source, then `uv pip install … --no-sources .`** — the
-  source must be present before install so the worker package is actually installed (rather
-  than an empty wheel).
+- **Dependencies come from `uv.lock`.**
+  - Copy `pyproject.toml` and `uv.lock` to `/integration_workers/<worker>/`, because from
+    `/app` the lock's `../../core_shared` path source would climb above `/`.
+  - `uv export --locked --no-dev` there, and install the export with `--no-deps`. A stale
+    lock fails the build, and dev tools never ship.
+  - See [CI/CD Setup → Locked Python installs](../ci-cd-setup.md#locked-python-installs).
+- **Then the source, then `uv pip install … --no-deps --no-sources .`**: the source must be
+  present before install so the worker package is actually installed rather than an empty
+  wheel.
 - **Redis-ping `HEALTHCHECK`** via `os.environ['REDIS_URL']` (not a bare `${REDIS_URL}`).
 - **`USER appuser`** — run as non-root.
 - **`CMD ["python", "worker.py"]`** — start the ARQ consumer.

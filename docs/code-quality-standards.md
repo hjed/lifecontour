@@ -145,7 +145,7 @@ Notes:
   (`pytest`, `pytest-asyncio`, `ruff`, `mypy`) is intentionally kept identical in each
   worker: `uv` cannot share dependency groups across projects without a workspace, and a
   workspace would neither share `[tool.*]` config nor play well with the workers'
-  standalone `uv pip install --no-sources .` Docker builds. This is the canonical dev set.
+  standalone, per-lock Docker builds. This is the canonical dev set.
 - **Coverage** config was removed from the workers — CI never runs `--cov` for a worker,
   so it was dead configuration (coverage.py does not read `pytest.ini`; add a root
   `.coveragerc` only if worker coverage is ever needed).
@@ -234,8 +234,7 @@ This creates:
 ```bash
 # Backend virtual environment
 cd backend
-uv venv
-uv pip install -e .[dev]
+uv sync --locked --extra dev
 
 # Frontend dependencies
 cd frontend

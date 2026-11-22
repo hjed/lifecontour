@@ -652,7 +652,7 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: cd backend && uv sync
+        run: cd backend && uv sync --locked --extra dev
 
       - name: Run backend tests
         run: cd backend && uv run pytest

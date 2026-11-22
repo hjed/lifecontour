@@ -141,10 +141,10 @@ Notes on the counts:
 
 ## Caveats
 
-- **Python images resolve from `pyproject.toml`, not `uv.lock`.** The images run
-  `uv pip install --system .` (`docker/backend/Dockerfile`, `docker/python-base/Dockerfile`).
-  This audit covers the lockfile versions. A newer release that changes its licence is not caught
-  until the audit is re-run.
+- **Lockfile versions.** The Python images install exactly the `uv.lock` versions (see
+  [CI/CD Setup → Locked Python installs](../ci-cd-setup.md#locked-python-installs)), so this
+  audit covers what ships. A lock update that brings in a release with a changed licence is not
+  caught until the audit is re-run.
 - **Package metadata only.** The tools read each package's declared licence and do not see
   content bundled inside wheels. The notable bundled content, checked by hand:
   - `psycopg2-binary` ships `libpq` (PostgreSQL), OpenSSL 3 (Apache-2.0), MIT Kerberos,

@@ -111,20 +111,35 @@ class TestWorkerDockerfileCanonical:
             f"{worker}: HEALTHCHECK must not use bare ${{REDIS_URL}}"
         )
 
-    def test_copy_before_install(self, worker: str) -> None:
+    def test_locked_dependencies_install_before_source(self, worker: str) -> None:
+        """Dependencies come from the lock, in a layer that source edits don't bust.
+
+        The manifest and lock are copied to the repo-shaped path
+        ``/integration_workers/<worker>/`` because the lock's
+        ``../../core_shared`` path source cannot be resolved from ``/app``.
+        """
         content = _read_dockerfile(worker)
         # Use find() (not index()) so a missing marker fails as a readable
         # assertion rather than a raised ValueError.
-        pyproject_copy = content.find(
-            f"COPY ./integration_workers/{worker}/pyproject.toml"
-        )
-        source_copy = content.find(f"COPY ./integration_workers/{worker}/ .")
-        install = content.find("uv pip install --system --no-cache-dir --no-sources .")
-        assert pyproject_copy != -1, f"{worker}: missing COPY of pyproject.toml"
-        assert source_copy != -1, f"{worker}: missing COPY of worker source"
-        assert install != -1, f"{worker}: missing 'uv pip install … --no-sources .'"
-        assert pyproject_copy < source_copy < install, (
-            f"{worker}: must COPY pyproject, then source, then install"
+        markers = {
+            "COPY of pyproject.toml and uv.lock": (
+                f"COPY ./integration_workers/{worker}/pyproject.toml "
+                f"./integration_workers/{worker}/uv.lock /integration_workers/{worker}/"
+            ),
+            "uv export of the lock": "RUN uv export",
+            "install of the exported requirements": (
+                "uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt"
+            ),
+            "COPY of worker source": f"COPY ./integration_workers/{worker}/ .",
+            "install of the worker itself": (
+                "uv pip install --system --no-cache-dir --no-deps --no-sources ."
+            ),
+        }
+        positions = {name: content.find(marker) for name, marker in markers.items()}
+        missing = [name for name, position in positions.items() if position == -1]
+        assert not missing, f"{worker}: missing {missing}"
+        assert list(positions.values()) == sorted(positions.values()), (
+            f"{worker}: must run {list(markers)} in that order"
         )
 
     def test_runs_as_appuser(self, worker: str) -> None:

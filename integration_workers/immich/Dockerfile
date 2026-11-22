@@ -4,12 +4,22 @@
 
 FROM pms-python-base
 
-# Copy worker pyproject.toml for dependency caching
-COPY ./integration_workers/immich/pyproject.toml .
+# Install dependencies from uv.lock, before the source so code edits keep this
+# layer cached. The manifest and lock go to the repo-shaped path because the
+# lock's `../../core_shared` path source can't be resolved from /app; from here
+# it resolves to the /core_shared copy the base image installed.
+# `uv export --locked` fails the build when the lock is stale against
+# pyproject.toml, and the exported hashes are verified on install. --no-deps:
+# the export is the complete locked closure, and re-resolving it would drop the
+# lock's `override-dependencies` (redis>=8 over arq's redis<6 pin).
+COPY ./integration_workers/immich/pyproject.toml ./integration_workers/immich/uv.lock /integration_workers/immich/
+RUN uv export -q --locked --no-dev --no-emit-project --no-emit-package core_shared \
+        --project /integration_workers/immich -o /tmp/requirements.txt \
+ && uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt
 
-# Copy worker source code before install so the package is complete
+# Copy the worker source and install the worker itself (dependencies above)
 COPY ./integration_workers/immich/ .
-RUN uv pip install --system --no-cache-dir --no-sources .
+RUN uv pip install --system --no-cache-dir --no-deps --no-sources .
 
 # Health check — Python reads REDIS_URL from the environment at runtime
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

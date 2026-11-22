@@ -27,7 +27,10 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
 - `backend-integration-test`: Runs `pytest tests/integration/` against the
   Docker services
 - `core-shared-unit-test`: Runs the `core_shared` unit suite (includes the worker
-  tooling-standardisation governance test); runs on every PR
+  tooling-standardisation and locked-install governance tests); runs on every PR
+- `python-locks`: Runs `uv lock --check` for all six uv projects (backend, `core_shared`,
+  the four workers) whenever any `pyproject.toml` or `uv.lock` changes. See
+  [Locked Python installs](#locked-python-installs)
 - `worker-lint`: Per-worker matrix — `ruff check`, `ruff format --check`, and
   `mypy --config-file ../../mypy.ini .` against the shared tooling config
 - `worker-unit-test` / `worker-integration-test`: Per-worker matrix running
@@ -63,10 +66,41 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
   these shared files so a change to them re-runs the dependent worker jobs. See
   [Code Quality Standards → Shared Worker Tooling Configuration](code-quality-standards.md#shared-worker-tooling-configuration).
 - **Canonical worker Dockerfile:** all workers build from the same template
-  (`FROM pms-python-base`, copy `pyproject.toml` then source, `uv pip install --system
-  --no-cache-dir --no-sources .`, Redis-ping `HEALTHCHECK` via `os.environ['REDIS_URL']`,
-  `USER appuser`, `CMD ["python", "worker.py"]`). See
+  (`FROM pms-python-base`, copy `pyproject.toml` and `uv.lock`, install the exported lock,
+  then copy the source and `uv pip install --system --no-cache-dir --no-deps --no-sources .`,
+  Redis-ping `HEALTHCHECK` via `os.environ['REDIS_URL']`, `USER appuser`,
+  `CMD ["python", "worker.py"]`). See
   [Integration Architecture → Canonical Worker Dockerfile](architecture/integration-architecture.md#canonical-worker-dockerfile).
+
+#### Locked Python installs
+
+Every Python install, in the Docker images and in CI, comes from the project's `uv.lock`,
+so what CI tests is what ships, and a new upstream release can't change either until a lock
+update merges. A lock that disagrees with its `pyproject.toml` fails the build rather than
+being silently re-resolved.
+
+- **Docker images:** the base, backend and worker Dockerfiles run
+  `uv export --locked --no-emit-project`. They install the export with
+  `uv pip install --system --no-deps -r`, then install the project itself with `--no-deps`.
+  - The installs stay in the system site-packages, so the `alembic`/`uvicorn` entrypoints
+    and the worker `CMD`s are unchanged.
+  - `--no-deps` matters: re-resolving the export would drop a lock's
+    `override-dependencies` (the workers' `redis>=8` over arq's `redis<6`).
+  - Production exports pass `--no-dev`, and the dev backend image adds `--extra dev`.
+  - `core_shared` is left out of the backend and worker exports
+    (`--no-emit-package core_shared`) because the base image installs it.
+- **CI:** every job installs with `uv sync --locked` (`--extra dev` for the backend and
+  `core_shared`). The `python-locks` job checks all six locks at once, because a
+  `core_shared/pyproject.toml` change also invalidates the five locks that record
+  `core_shared`'s requirements.
+- **Security scan:** `security.yml` runs `pip-audit` over each project's
+  `uv export --locked` (dev groups and extras included), not over a fresh resolution.
+- **Changing dependencies:** edit `pyproject.toml`, then run `uv lock` in that project. After
+  editing `core_shared/pyproject.toml`, also run `uv lock` in `backend/` and each
+  `integration_workers/<name>/`. Commit the locks with the manifest.
+- **Updates:** the locks only move when a PR moves them, and Dependabot's weekly `uv` updates
+  (see [Dependabot](#dependabot-githubdependabotyml)) are how security and bug fixes reach
+  production.
 
 #### Stacked PRs
 
@@ -139,7 +173,7 @@ verified against `GITLEAKS_SHA256`) and runs `scripts/secret_scan.py` over a
 **Triggers:** Push/PR to main branches + weekly schedule
 
 **Jobs:**
-- `backend-security`: Safety and Bandit security scans
+- `backend-security`: `pip-audit` over every project's exported `uv.lock`, and Bandit
 - `frontend-security`: npm audit and ESLint security rules
 - `codeql-analysis`: GitHub's CodeQL analysis
 - `docker-security`: Trivy vulnerability scanning
@@ -180,6 +214,9 @@ that is `ghcr.io/hjed/lifecontour-*`, e.g. `ghcr.io/hjed/lifecontour-backend:v1.
 ### Dependabot (`.github/dependabot.yml`)
 - Automated dependency updates for Python, npm, GitHub Actions, and Docker
 - Weekly schedule with PR limits
+- The Python (`uv`) updates bump the `uv.lock` files, which are what the images install
+  (see [Locked Python installs](#locked-python-installs)), so a merged lock PR is what
+  reaches production
 - Ignores major version updates for critical packages
 
 ### SonarCloud
