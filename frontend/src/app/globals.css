@@ -4,6 +4,10 @@
    by the Radix-backed ui/ primitives. Tailwind v4's replacement for the v3-only
    `tailwindcss-animate` plugin — pure CSS, no plugin system involved. */
 @import 'tw-animate-css';
+/* shadcn's base for its current styles (Vega): the state variants the ui/
+   primitives use — `data-checked:`, `data-open:`, ... map onto Radix's
+   `data-state` — plus a few utilities. */
+@import 'shadcn/tailwind.css';
 @plugin '@tailwindcss/typography';
 
 /* `dark:` follows the `.dark` class next-themes toggles on <html>, as shadcn

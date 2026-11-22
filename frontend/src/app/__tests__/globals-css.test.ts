@@ -89,6 +89,18 @@ const STATUS_TOKEN_UTILITIES = [
 const DERIVED_RADII = ['2xl', '3xl', '4xl'];
 const RADIUS_UTILITIES = DERIVED_RADII.map(step => `rounded-${step}`);
 
+/**
+ * State variants the shadcn Vega primitives use (`data-checked:bg-primary`).
+ * Radix marks state as `data-state="checked"`, which Tailwind's built-in
+ * `data-*` variant does not match; `shadcn/tailwind.css` maps them.
+ */
+const STATE_VARIANT_PROBES: [utility: string, state: string][] = [
+  ['data-checked:bg-primary', 'checked'],
+  ['data-unchecked:bg-input', 'unchecked'],
+  ['data-open:animate-in', 'open'],
+  ['data-closed:animate-out', 'closed'],
+];
+
 /** Probe for how the `dark:` variant compiles. */
 const DARK_VARIANT_PROBE = 'dark:bg-primary';
 
@@ -99,6 +111,7 @@ const ALL_UTILITIES = [
   ...STATUS_TOKEN_UTILITIES,
   ...RADIUS_UTILITIES,
   DARK_VARIANT_PROBE,
+  ...STATE_VARIANT_PROBES.map(([utility]) => utility),
 ];
 
 /**
@@ -201,6 +214,18 @@ describe('globals.css', () => {
       expect(layer).toBeGreaterThan(-1);
       expect(source.indexOf('.touch-target', layer)).toBeGreaterThan(layer);
     });
+  });
+
+  describe('shadcn state variants', () => {
+    it.each(STATE_VARIANT_PROBES)(
+      'maps %s onto Radix\'s data-state="%s"',
+      (utility, state) => {
+        const start = css.indexOf(`.${utility.replace(':', String.raw`\:`)}`);
+        expect(start).toBeGreaterThan(-1);
+        const rule = css.slice(start, css.indexOf('}', start));
+        expect(rule).toContain(`[data-state="${state}"]`);
+      }
+    );
   });
 
   describe('dark variant', () => {
