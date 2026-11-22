@@ -1267,6 +1267,15 @@ test.describe('Journal List Page', () => {
         .click();
       await dateResponsePromise;
 
+      // The range popover stays open after the second date. Close it before
+      // touching the filters: on a phone the first outside tap only dismisses
+      // it, and the focus it returns to the trigger can shift the layout under
+      // the next tap.
+      await page.keyboard.press('Escape');
+      await expect(
+        page.getByTestId('journal-date-range-trigger')
+      ).toHaveAttribute('aria-expanded', 'false');
+
       // Apply type filter (Note)
       const filtersSection = page.locator('[data-testid="journal-filters"]');
       const noteCheckbox = filtersSection.getByLabel('Note', { exact: true });
