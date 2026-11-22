@@ -14,6 +14,7 @@
  * #1178 both went unnoticed. These assertions are the tripwire.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import tailwindcss from '@tailwindcss/postcss';
@@ -201,6 +202,60 @@ describe('globals.css', () => {
 
     it('never compiles `dark:` to a prefers-color-scheme media query', () => {
       expect(css).not.toContain('prefers-color-scheme');
+    });
+  });
+
+  describe('palettes', () => {
+    const source = fs.readFileSync(path.join(APP_DIR, 'globals.css'), 'utf8');
+
+    /** The custom properties a top-level block declares, name → value. */
+    function declaredVars(selector: string): Map<string, string> {
+      const start = source.indexOf(`\n${selector} {`);
+      expect(start).toBeGreaterThan(-1);
+      const body = source.slice(start, source.indexOf('\n}', start));
+      return new Map(
+        [...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1], m[2]])
+      );
+    }
+
+    const LIGHT = ":root[data-palette='emerald']";
+    const DARK = ":root.dark[data-palette='emerald']";
+    /** Shared by every palette: status meaning and chart categories. */
+    const SHARED = /^--(success|warning|info|chart-\d)/;
+
+    it('gives Emerald light and dark the same variables', () => {
+      expect([...declaredVars(DARK).keys()].sort()).toEqual(
+        [...declaredVars(LIGHT).keys()].sort()
+      );
+    });
+
+    it('overrides every palette colour the default palette defines', () => {
+      const paletteColours = [...declaredVars(':root').keys()].filter(
+        name => name !== '--radius' && !SHARED.test(name)
+      );
+
+      expect([...declaredVars(LIGHT).keys()].sort()).toEqual(
+        paletteColours.sort()
+      );
+    });
+
+    it('leaves status and chart colours to the default palette', () => {
+      const overridden = [...declaredVars(LIGHT).keys()];
+
+      expect(overridden.filter(name => SHARED.test(name))).toEqual([]);
+    });
+
+    it('lets Emerald dark outrank Emerald light whatever the order', () => {
+      // (0,3,0) beats (0,2,0), so the light block can never leak into dark.
+      expect(source.indexOf(DARK)).toBeGreaterThan(source.indexOf(LIGHT));
+      expect(source.indexOf(LIGHT)).toBeGreaterThan(
+        source.indexOf('\n.dark {')
+      );
+    });
+
+    it('ships the palette selectors in the compiled stylesheet', () => {
+      expect(css).toMatch(/:root\[data-palette=['"]?emerald['"]?\]/);
+      expect(css).toMatch(/:root\.dark\[data-palette=['"]?emerald['"]?\]/);
     });
   });
 

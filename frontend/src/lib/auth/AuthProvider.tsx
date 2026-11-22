@@ -31,6 +31,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { clearCachedTimezone } from '@/lib/api/settings';
+import { resetPalette } from '@/lib/theme/palettes';
 
 // Initial auth state
 const initialState: AuthState = {
@@ -190,6 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'SESSION_EXPIRED' });
       dispatch({ type: 'CLEAR_ERROR' });
       clearCachedTimezone();
+      resetPalette();
       return;
     }
 
@@ -203,8 +205,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // an unauthenticated first load all land here without going near the
       // logout mutation — and the cache is keyed by browser rather than by
       // account, so anything left behind would stand in for whoever signs in
-      // next while their own settings read is still in flight.
+      // next while their own settings read is still in flight. The palette
+      // mirror is browser-keyed the same way.
       clearCachedTimezone();
+      resetPalette();
     }
   }, [sessionUser, isSessionLoading, sessionError]);
 

@@ -6,6 +6,7 @@ import { Header, DesktopSidebar } from '@/components/layout';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { Breadcrumb } from '@/components/navigation/Breadcrumb';
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants';
+import { PALETTE_BOOTSTRAP_SCRIPT } from '@/lib/theme/palettes';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -27,6 +28,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang='en-AU' suppressHydrationWarning>
+      <head>
+        {/* Paints the cached colour palette before first paint so a returning
+            visit never flashes the default one; the account's value replaces
+            it once the settings read lands (PaletteProvider). */}
+        <script
+          dangerouslySetInnerHTML={{ __html: PALETTE_BOOTSTRAP_SCRIPT }}
+        />
+      </head>
       <body className={inter.className}>
         <div className='bg-background min-h-screen font-sans antialiased'>
           <Providers>
