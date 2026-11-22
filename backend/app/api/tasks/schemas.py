@@ -57,6 +57,7 @@ from pydantic import (
 
 from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
+    JsonApiCollectionResponse,
     JsonApiCreateRequest,
     JsonApiLinks,
     JsonApiMeta,
@@ -75,6 +76,9 @@ CONTACT_RESOURCE_TYPE: Literal["contacts"] = "contacts"
 # retarget body is an instruction with its own preconditions, not a task's
 # attributes.
 TASK_RETARGET_RESOURCE_TYPE: Literal["task-retarget"] = "task-retarget"
+# An operation too: a reorder rewrites other tasks' positions and records
+# nothing, so it is not an edit of the task's attributes.
+TASK_REORDER_RESOURCE_TYPE: Literal["task-reorders"] = "task-reorders"
 JOURNAL_RESOURCE_TYPE: Literal["journals"] = "journals"
 
 
@@ -618,6 +622,45 @@ class TaskResponse(JsonApiResponse[TaskResource]):
     """Response model for a single task."""
 
     pass
+
+
+class TaskCollectionResponse(JsonApiCollectionResponse[TaskResource]):
+    """Response model for several tasks, in an order the route defines."""
+
+
+class TaskReorderAttributes(BaseModel):
+    """Where a task should go among its list's open tasks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    after_task_id: int | None = Field(
+        ...,
+        ge=1,
+        le=INT32_MAX,
+        strict=True,
+        description=(
+            "The open task on the same list it should now follow, or null for "
+            "the top. Required: leaving it out is refused rather than read as "
+            "the top."
+        ),
+    )
+
+
+class TaskReorderData(BaseModel):
+    """Data for reordering a task; the operation type is pinned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["task-reorders"] = Field(
+        default=TASK_REORDER_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: TaskReorderAttributes = Field(..., description="Where it goes")
+
+
+class TaskReorderRequest(JsonApiCreateRequest[TaskReorderData]):
+    """Request model for moving a task within its list."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 def persisted_task_id(task: Task) -> int:

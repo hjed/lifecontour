@@ -56,6 +56,15 @@ class TaskMCP(BaseModel):
     updated_at: str | None = Field(description="ISO 8601 instant")
 
 
+class TaskListOrderMCP(BaseModel):
+    """A list's open tasks in their manual order, after a reorder."""
+
+    task_list_id: int
+    open_tasks: list[TaskMCP] = Field(
+        description="Every open task on the list, top first; closed tasks are left out"
+    )
+
+
 class TaskContactLinkResponse(BaseModel):
     """The outcome of linking or unlinking a task and a contact."""
 

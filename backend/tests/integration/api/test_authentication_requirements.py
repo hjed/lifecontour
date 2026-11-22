@@ -164,11 +164,21 @@ class TestAuthenticationRequirements:
             ("POST", "/api/task-lists/1/unarchive", None),
             ("GET", "/api/task-lists/1/tasks", None),
             ("GET", "/api/task-lists/1/tasks/completed", None),
+            (
+                "POST",
+                "/api/tasks/1/reorder",
+                {
+                    "data": {
+                        "type": "task-reorders",
+                        "attributes": {"after_task_id": None},
+                    }
+                },
+            ),
         ],
     )
     def test_task_list_endpoints_require_auth(self, client, method, path, body):
         """Listing, reading, creating, updating, moving, archiving and unarchiving
-        task lists need a session.
+        task lists, and reordering the tasks on one, need a session.
 
         Each body is valid for its method, so a 401 cannot be a 400 in disguise.
         """

@@ -405,6 +405,21 @@ async def task_list_events(
     return [event for event in events if event.aggregate_id == task_list_id]
 
 
+async def stored_positions(conn: AsyncConnection, ids: list[int]) -> list[int | None]:
+    """Each task's stored list position, in the order the ids are given.
+
+    For the reorder tests, which assert where every task sits and that a
+    refused reorder moved none of them.
+    """
+    rows = (
+        await conn.execute(
+            text("SELECT id, position FROM tasks WHERE id = ANY(:ids)"), {"ids": ids}
+        )
+    ).all()
+    by_id = {int(row.id): row.position for row in rows}
+    return [by_id[task_id] for task_id in ids]
+
+
 async def stored_status(conn: AsyncConnection, task_id: int) -> str:
     """The status column as the database holds it, bypassing every layer above."""
     return str(

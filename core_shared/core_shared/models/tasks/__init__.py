@@ -37,7 +37,7 @@ from .list_dates import (
     is_list_task_overdue,
     list_task_due,
 )
-from .list_order import reorder_open_tasks
+from .list_order import arrange_open_tasks, reorder_open_tasks
 from .read_model import (
     TaskContactRef,
     TaskJournalRef,
@@ -115,6 +115,7 @@ __all__ = [
     "is_due_date_allowed",
     "is_list_task_overdue",
     "is_status_transition_allowed",
+    "arrange_open_tasks",
     "reorder_open_tasks",
     "list_task_due",
     "reorder_task_lists",

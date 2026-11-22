@@ -14,6 +14,7 @@ first, the ``bool`` the link methods return only ever means "was there a change"
 and never "was that your task".
 """
 
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +27,10 @@ from core_shared.models.tasks import (
     TaskPage,
     TaskStatus,
     reorder_open_tasks,
+)
+from core_shared.models.tasks import (
+    # Aliased: the repository method of the same name applies this rule.
+    arrange_open_tasks as arrange_block_rule,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -123,6 +128,20 @@ _LOCK_LIST = text(
     SELECT 1 FROM task_lists
     WHERE id = :task_list_id AND user_id = :user_id
     FOR NO KEY UPDATE
+    """
+)
+
+# A reorder's list lock. ``FOR SHARE``, not the membership writes
+# ``FOR NO KEY UPDATE``: every task write takes this same share lock on its
+# list *after* locking its own task row, so an exclusive lock here, followed by
+# the reorder's task locks, would deadlock against it. Share still conflicts
+# with the exclusive lock creates, joins and archives take — none of which
+# holds a task lock first — so a reorder never interleaves with those.
+_SHARE_LIST = text(
+    """
+    SELECT 1 FROM task_lists
+    WHERE id = :task_list_id AND user_id = :user_id
+    FOR SHARE
     """
 )
 
@@ -740,13 +759,56 @@ class SqlTaskRepository(TaskRepository):
     ) -> list[Task]:
         """Move an open task after another on its list, or to the top.
 
-        Reads which list the task is on without a lock, locks that list, then
-        locks its open tasks in id order and re-checks both the task and its
-        neighbour among them — either one closed or moved in between is refused
-        as a conflict rather than moved.
+        Reads which list the task is on without a lock, then rearranges that
+        list (see :meth:`_rearrange`).
         """
         task_list_id = await self._require_list_membership(task_id, user_id)
-        await self._lock_list(task_list_id, user_id)
+        return await self._rearrange(
+            task_list_id,
+            user_id,
+            named=(task_id, after_task_id),
+            rule=lambda order: reorder_open_tasks(order, task_id, after_task_id),
+        )
+
+    async def arrange_open_tasks(
+        self,
+        task_list_id: int,
+        user_id: str,
+        *,
+        task_ids: Sequence[int],
+        after_task_id: int | None,
+        before_task_id: int | None,
+    ) -> list[Task]:
+        """Move a block of the list's open tasks to the top, or beside an anchor."""
+        return await self._rearrange(
+            task_list_id,
+            user_id,
+            named=(*task_ids, after_task_id, before_task_id),
+            rule=lambda order: arrange_block_rule(
+                order,
+                task_ids,
+                after_task_id=after_task_id,
+                before_task_id=before_task_id,
+            ),
+        )
+
+    async def _rearrange(
+        self,
+        task_list_id: int,
+        user_id: str,
+        *,
+        named: Sequence[int | None],
+        rule: Callable[[list[tuple[int, int]]], dict[int, int]],
+    ) -> list[Task]:
+        """Lock a list for a reorder, re-check what it names, and apply ``rule``.
+
+        The list is taken ``FOR SHARE`` — owner-checked, so another user's list
+        is not found — and then its open tasks ``FOR NO KEY UPDATE`` in id
+        order. Every task the reorder names (``None`` entries are skipped) is
+        re-checked among them: one that closed or left the list while this
+        waited is a conflict to re-read and retry, not a caller's bug.
+        """
+        await self._share_list(task_list_id, user_id)
 
         rows = (
             await self.conn.execute(
@@ -758,15 +820,14 @@ class SqlTaskRepository(TaskRepository):
             ((int(row.id), int(row.position)) for row in rows),
             key=lambda pair: (pair[1], pair[0]),
         )
-        # Plain edits lock only their task, so either task may have closed or
-        # left the list while this waited for the locks: a conflict to re-read
-        # and retry, not a caller's bug.
+        # Plain edits lock only their task, so a named task may have closed or
+        # left the list while this waited for the locks.
         open_ids = {open_id for open_id, _ in order}
-        for named in (task_id, after_task_id):
-            if named is not None and named not in open_ids:
-                raise TaskListChangedConcurrentlyError(named)
+        for each in named:
+            if each is not None and each not in open_ids:
+                raise TaskListChangedConcurrentlyError(each)
 
-        moved = reorder_open_tasks(order, task_id, after_task_id)
+        moved = rule(order)
         if moved:
             await self.conn.execute(
                 _WRITE_POSITIONS,
@@ -837,6 +898,14 @@ class SqlTaskRepository(TaskRepository):
             {"ids": list(dict.fromkeys(task_list_ids)), "user_id": user_id},
         )
         return {int(row.task_list_id): int(row.open_count) for row in result}
+
+    async def _share_list(self, task_list_id: int, user_id: str) -> None:
+        """Share-lock one of the user's lists — a reorder's first lock."""
+        result = await self.conn.execute(
+            _SHARE_LIST, {"task_list_id": task_list_id, "user_id": user_id}
+        )
+        if result.fetchone() is None:
+            raise TaskListNotFoundError(task_list_id)
 
     async def _lock_list(self, task_list_id: int, user_id: str) -> None:
         """Lock one of the user's lists — the first lock of a membership write."""

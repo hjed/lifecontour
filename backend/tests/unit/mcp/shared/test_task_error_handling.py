@@ -19,6 +19,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskListArchivedError,
+    TaskListChangedConcurrentlyError,
     TaskNotFoundError,
     TaskStatus,
     TaskStatusTransitionError,
@@ -108,6 +109,17 @@ class TestTaskErrorsReachTheClient:
         assert response["error"] == "Task error"
         assert "archived" in response["message"]
         assert "unarchive" in response["message"].lower()
+
+    async def test_a_list_that_changed_under_a_reorder_says_to_read_it_again(
+        self,
+    ) -> None:
+        """The race a reorder's checks cannot close: a named task closed or
+        left the list while the write waited for its locks."""
+        response = await _render(TaskListChangedConcurrentlyError(9))
+
+        assert response["error"] == "Task error"
+        assert "Task 9 is no longer an open task on this list" in response["message"]
+        assert "retry" in response["message"]
 
 
 class TestTheBranchIsNotTooBroad:

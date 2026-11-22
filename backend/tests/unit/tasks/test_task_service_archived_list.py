@@ -585,3 +585,53 @@ class TestAJournalOnlyTaskNeverReadsAList:
         await write(service, mock_transaction)
 
         task_list_repo.find_by_id_for_share.assert_not_awaited()
+
+
+async def _reorder(service: TaskService, tx: AsyncMock) -> object:
+    return await service.reorder_task(
+        user_id=USER_ID, task_id=TASK_ID, after_task_id=None, transaction=tx
+    )
+
+
+async def _arrange(service: TaskService, tx: AsyncMock) -> object:
+    return await service.reorder_list_tasks(
+        user_id=USER_ID,
+        task_list_id=TASK_LIST_ID,
+        task_ids=[TASK_ID],
+        transaction=tx,
+    )
+
+
+# The reorders publish nothing and refuse a journal-only task outright, so they
+# sit outside ``WRITES``, whose active-list and journal-only cases assume an
+# event and a write that goes through.
+REORDERS: list[tuple[str, Write]] = [
+    ("reorder_task", _reorder),
+    ("reorder_list_tasks", _arrange),
+]
+
+
+class TestTheReordersAreRefusedToo:
+    """Reordering is a write, so an archived list refuses it — a move that would
+    change nothing included, since the task is already at the top."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "write", [w for _, w in REORDERS], ids=[n for n, _ in REORDERS]
+    )
+    async def test_the_reorder_is_refused_under_the_share_lock(
+        self,
+        write: Write,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task_list_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        with pytest.raises(TaskListArchivedError):
+            await write(service, mock_transaction)
+
+        task_list_repo.find_by_id_for_share.assert_awaited_once_with(
+            TASK_LIST_ID, USER_ID
+        )
+        task_repo.move_within_list.assert_not_awaited()
+        task_repo.arrange_open_tasks.assert_not_awaited()

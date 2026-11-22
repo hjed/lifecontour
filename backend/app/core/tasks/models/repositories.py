@@ -49,23 +49,36 @@ class TaskRepository(ABC):
 
     **List membership** — which list a task is on and its position there — is
     changed only by the membership methods (:meth:`add_to_list`,
-    :meth:`move_within_list`, :meth:`remove_from_list`), never by an update
+    :meth:`move_within_list`, :meth:`arrange_open_tasks`,
+    :meth:`remove_from_list`), never by an update
     through :meth:`save`, so an edit carrying a stale position cannot undo a
     reorder. The one exception is the *insert* of a task on a list, which
     :meth:`save` places at the bottom of that list under the list's lock.
 
-    **Lock order.** Every membership write, and any later write that spans a
-    whole list, locks the **list row first and then task rows, each in
-    ascending id**. A reorder locks every open task on its list, so a
-    transaction that held one of them and *then* asked for the list would
-    deadlock against it. A service that must check a task's state before a
-    membership write therefore locks the list(s) first, then the task, then
-    calls the method; re-locking a row the same transaction holds is free. A
-    plain edit (text, status, flag) locks only its own task and never a list
-    afterwards, so it can only wait, never deadlock. The rule covers list-side
-    writers; a journal merge re-points task anchors by journal without a list
-    lock, so a merge overlapping a reorder of the same tasks can deadlock, and
-    PostgreSQL aborts one of them for its caller to retry.
+    **Lock order.** Membership writes and any later write that spans a whole
+    list lock the **list row first and then task rows, each in ascending id**.
+    What makes that safe is the *mode* of the list lock:
+
+    - Every task write takes its list ``FOR SHARE`` (``TaskService``'s
+      ``_hold_list_writable``): text, status, flag and retarget after locking
+      their own task; the link writes after a plain read, before their
+      ``FOR KEY SHARE`` on the task, which a reorder's lock does not conflict
+      with.
+    - A reorder (:meth:`move_within_list`, :meth:`arrange_open_tasks`) takes the
+      list ``FOR SHARE`` too, then every open task on it. Share locks never wait
+      on each other, so a reorder and a task write meet only on task rows and
+      cannot form a cycle. (An exclusive list lock here did deadlock against
+      them; ITER21-001 Phase 25 changed it.)
+    - Joins, removals and creates on a list take it ``FOR NO KEY UPDATE``. That
+      conflicts with the share lock, so they queue against a reorder — and none
+      of them holds a task lock before it, which is what keeps that pairing
+      safe. A later writer that locks a task and then asks for its list
+      exclusively would break this, and must not.
+
+    Re-locking a row the same transaction holds is free. A journal merge
+    re-points task anchors by journal without a list lock, so a merge
+    overlapping a reorder of the same tasks can deadlock, and PostgreSQL aborts
+    one of them for its caller to retry.
     """
 
     @abstractmethod
@@ -548,7 +561,8 @@ class TaskRepository(ABC):
         moves: the spec does not record reordering in history, and moving one
         task must not look like an edit of its neighbours.
 
-        Locks the task's list and then every open task on it, in id order.
+        Takes the task's list ``FOR SHARE`` and then every open task on it, in
+        id order (see the class's lock order).
 
         Args:
             task_id: The open task to move.
@@ -568,6 +582,50 @@ class TaskRepository(ABC):
                 re-read and retry.
             ValueError: When the task is on no list, or is asked to follow
                 itself — a caller's bug.
+        """
+
+    @abstractmethod
+    async def arrange_open_tasks(
+        self,
+        task_list_id: int,
+        user_id: str,
+        *,
+        task_ids: Sequence[int],
+        after_task_id: int | None,
+        before_task_id: int | None,
+    ) -> list[Task]:
+        """Move a block of a list's open tasks, in the order given, to one place.
+
+        The rule ``arrange_open_tasks`` decides the order: the named tasks leave
+        their places, the other open tasks keep their relative order, and the
+        block lands at the top, directly after ``after_task_id`` or directly
+        before ``before_task_id``. As with :meth:`move_within_list`, the open
+        tasks take their existing positions again, closed tasks keep theirs,
+        only changed rows are written, and it is **not an edit**: no event, no
+        ``updated_at``.
+
+        Takes the list ``FOR SHARE``, then every open task on it in id order
+        (see the class's lock order).
+
+        Args:
+            task_list_id: The list to arrange.
+            user_id: The acting user.
+            task_ids: The block, in order: open tasks on the list, none twice.
+            after_task_id: An open task outside the block to follow, or ``None``.
+            before_task_id: An open task outside the block to precede, or
+                ``None``; never together with ``after_task_id``.
+
+        Returns:
+            The list's open tasks in their new order.
+
+        Raises:
+            TaskListNotFoundError: When the list is not one of the user's.
+            TaskListChangedConcurrentlyError: When, once the locks are held, a
+                named task or the anchor is not an open task on the list — one
+                that closed or left it in between, or one that never was. The
+                caller checks first; this is the race the check cannot close.
+            ValueError: A malformed block (empty, repeated, both anchors, an
+                anchor inside it) — a caller's bug.
         """
 
     @abstractmethod

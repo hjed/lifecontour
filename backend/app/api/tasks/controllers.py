@@ -79,10 +79,12 @@ from app.api.tasks.schemas import (
     JournalTasksResponse,
     ListTaskCreateRequest,
     TaskAttributes,
+    TaskCollectionResponse,
     TaskContactLinkRequest,
     TaskCreateRequest,
     TaskIntermediateJournalLinkRequest,
     TaskReadResponse,
+    TaskReorderRequest,
     TaskResource,
     TaskResponse,
     TaskRetargetRequest,
@@ -572,6 +574,45 @@ async def retarget_task(
     )
     return TaskResponse(
         data=_to_resource(retargeted, trail, get_request_base_url(request))
+    )
+
+
+@router.post("/tasks/{task_id}/reorder")
+@inject
+async def reorder_task(
+    task_id: DatabaseIdPath,
+    reorder_request: TaskReorderRequest,
+    request: Request,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskCollectionResponse:
+    """Move an open task on a list to the top, or just after another open task.
+
+    The list page's drag and keyboard move. ``after_task_id`` names the open
+    task on the same list it should follow, or is ``null`` for the top. One move
+    changes other tasks' positions too, so the answer is the list's open tasks
+    in their new order. Reordering records no history.
+
+    Raises:
+        400: The task is on no list or is closed; the anchor is the task itself,
+             closed or on another list (``TASK_VALIDATION_ERROR`` with
+             ``meta.field``); or a malformed body or an out-of-range id.
+        404: The task or the anchor does not exist or is not yours —
+             indistinguishably.
+        409: The list is archived (``TASK_LIST_ARCHIVED``), or a task closed or
+             left the list while the move waited (``TASK_LIST_CHANGED``): read
+             the list again and retry.
+    """
+    reordered = await task_service.reorder_task(
+        user_id=user.id,
+        task_id=task_id,
+        after_task_id=reorder_request.data.attributes.after_task_id,
+        transaction=connection,
+    )
+    base_url = get_request_base_url(request)
+    return TaskCollectionResponse(
+        data=[_to_resource(task, trail, base_url) for task, trail in reordered]
     )
 
 

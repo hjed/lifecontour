@@ -18,8 +18,9 @@ repository to the spec's list rules (*The list page*, *Moving tasks*):
 foreign key is single-column), so every case is proven against a second user,
 including a row of theirs seeded straight onto this user's list.
 
-**Concurrency.** Joins and moves on one list serialise on the list's row lock,
-which is taken before any task lock. The overlap tests commit real rows under a
+**Concurrency.** A join and a move on one list queue on the list's row lock
+(the join takes it exclusively, the move ``FOR SHARE``), which is taken before
+any task lock; two moves share it and queue on the open tasks' locks instead. The overlap tests commit real rows under a
 one-off owner — two connections cannot share the savepoint fixture — and delete
 them afterwards.
 """
@@ -491,6 +492,203 @@ class TestMoveWithinList:
 
 
 @pytest.mark.integration
+class TestArrangeOpenTasks:
+    """A block of open tasks moved at once: top, after one anchor, before another."""
+
+    @pytest_asyncio.fixture
+    async def tasks(self, async_connection: AsyncConnection, list_id: int) -> list[int]:
+        """Four open tasks at positions 1, 3, 5 and 6, around a closed one at 2."""
+        ids = [
+            await create_list_task(
+                async_connection, task_list_id=list_id, position=position
+            )
+            for position in (1, 3, 5, 6)
+        ]
+        await create_list_task(
+            async_connection, task_list_id=list_id, position=2, status=TaskStatus.DONE
+        )
+        return ids
+
+    async def test_naming_every_task_sets_the_whole_order(
+        self, repo: SqlTaskRepository, list_id: int, tasks: list[int]
+    ) -> None:
+        first, second, third, fourth = tasks
+
+        arranged = await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=[fourth, second, first, third],
+            after_task_id=None,
+            before_task_id=None,
+        )
+
+        assert [task.id for task in arranged] == [fourth, second, first, third]
+        assert await _open_ids(repo, list_id) == [fourth, second, first, third]
+
+    async def test_a_prefix_goes_first_and_the_rest_keep_their_order(
+        self, repo: SqlTaskRepository, list_id: int, tasks: list[int]
+    ) -> None:
+        first, second, third, fourth = tasks
+
+        await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=[third, fourth],
+            after_task_id=None,
+            before_task_id=None,
+        )
+
+        assert await _open_ids(repo, list_id) == [third, fourth, first, second]
+
+    async def test_the_block_lands_after_an_anchor(
+        self, repo: SqlTaskRepository, list_id: int, tasks: list[int]
+    ) -> None:
+        first, second, third, fourth = tasks
+
+        await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=[fourth, first],
+            after_task_id=second,
+            before_task_id=None,
+        )
+
+        assert await _open_ids(repo, list_id) == [second, fourth, first, third]
+
+    async def test_the_block_lands_before_an_anchor(
+        self, repo: SqlTaskRepository, list_id: int, tasks: list[int]
+    ) -> None:
+        first, second, third, fourth = tasks
+
+        await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=[first],
+            after_task_id=None,
+            before_task_id=fourth,
+        )
+
+        assert await _open_ids(repo, list_id) == [second, third, first, fourth]
+
+    async def test_closed_tasks_keep_their_positions_and_nothing_is_an_edit(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        tasks: list[int],
+    ) -> None:
+        closed_id = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=4,
+            status=TaskStatus.CANCELLED,
+        )
+        for task_id in tasks:
+            await backdate_updated_at(async_connection, task_id)
+        outbox_before = await count(async_connection, _COUNT_OUTBOX, {})
+
+        await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=list(reversed(tasks)),
+            after_task_id=None,
+            before_task_id=None,
+        )
+
+        assert await _position(async_connection, closed_id) == 4
+        positions = [await _position(async_connection, task_id) for task_id in tasks]
+        assert sorted(p for p in positions if p is not None) == [1, 3, 5, 6]
+        for task_id in tasks:
+            assert await stored_updated_at(async_connection, task_id) == (
+                FIXED_PAST_INSTANT
+            )
+        assert await count(async_connection, _COUNT_OUTBOX, {}) == outbox_before
+
+    async def test_an_arrangement_already_in_effect_writes_nothing(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        tasks: list[int],
+    ) -> None:
+        arranged = await repo.arrange_open_tasks(
+            list_id,
+            USER_ID,
+            task_ids=tasks[:2],
+            after_task_id=None,
+            before_task_id=None,
+        )
+
+        assert [task.id for task in arranged] == tasks
+        assert [await _position(async_connection, t) for t in tasks] == [1, 3, 5, 6]
+
+    @pytest.mark.parametrize("role", ["named", "after", "before"])
+    async def test_a_closed_task_named_anywhere_is_a_conflict(
+        self,
+        role: str,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        tasks: list[int],
+    ) -> None:
+        closed_id = await create_list_task(
+            async_connection, task_list_id=list_id, position=7, status=TaskStatus.DONE
+        )
+        task_ids = [tasks[0], closed_id] if role == "named" else [tasks[0]]
+
+        with pytest.raises(TaskListChangedConcurrentlyError, match=str(closed_id)):
+            await repo.arrange_open_tasks(
+                list_id,
+                USER_ID,
+                task_ids=task_ids,
+                after_task_id=closed_id if role == "after" else None,
+                before_task_id=closed_id if role == "before" else None,
+            )
+
+        assert [await _position(async_connection, t) for t in tasks] == [1, 3, 5, 6]
+
+    async def test_another_users_list_is_not_found(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository
+    ) -> None:
+        their_list = await _list_id(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        their_task = await create_list_task(
+            async_connection, task_list_id=their_list, user_id=OTHER_USER_ID
+        )
+
+        with pytest.raises(TaskListNotFoundError):
+            await repo.arrange_open_tasks(
+                their_list,
+                USER_ID,
+                task_ids=[their_task],
+                after_task_id=None,
+                before_task_id=None,
+            )
+
+    async def test_another_users_row_on_the_list_is_a_conflict_and_not_moved(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        tasks: list[int],
+    ) -> None:
+        intruder = await create_list_task(
+            async_connection, task_list_id=list_id, position=0, user_id=OTHER_USER_ID
+        )
+
+        with pytest.raises(TaskListChangedConcurrentlyError, match=str(intruder)):
+            await repo.arrange_open_tasks(
+                list_id,
+                USER_ID,
+                task_ids=[tasks[3], intruder],
+                after_task_id=None,
+                before_task_id=None,
+            )
+
+        assert await _position(async_connection, intruder) == 0
+        assert [await _position(async_connection, t) for t in tasks] == [1, 3, 5, 6]
+
+
+@pytest.mark.integration
 class TestRemoveFromList:
     """A task leaves its list only with both journals, clearing every list column."""
 
@@ -854,7 +1052,7 @@ async def _committed_open_order(
 @pytest.mark.integration
 @pytest.mark.slow
 class TestConcurrentMembershipWrites:
-    """Joins and moves on one list queue on its row lock and never collide."""
+    """Joins and moves on one list queue on its locks and never collide."""
 
     async def test_overlapping_joins_take_distinct_positions(
         self, async_engine: AsyncEngine, racing_owner: str

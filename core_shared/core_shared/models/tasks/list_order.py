@@ -60,6 +60,79 @@ def reorder_open_tasks(
     reordered = [open_task_id for open_task_id in ids if open_task_id != task_id]
     insert_at = 0 if after_task_id is None else reordered.index(after_task_id) + 1
     reordered.insert(insert_at, task_id)
+    return _assign_slots(current, ids, reordered)
+
+
+def arrange_open_tasks(
+    order: Sequence[tuple[int, int]],
+    task_ids: Sequence[int],
+    *,
+    after_task_id: int | None = None,
+    before_task_id: int | None = None,
+) -> dict[int, int]:
+    """Move a block of open tasks, in the order given, to one place on the list.
+
+    The named tasks leave their old places and every other open task keeps its
+    relative order. The block then lands at the top, directly after
+    ``after_task_id``, or directly before ``before_task_id``. Naming every open
+    task with no anchor sets the whole order; naming one task with
+    ``after_task_id`` is :func:`reorder_open_tasks`'s single move.
+
+    Args:
+        order: The list's open tasks as ``(id, position)`` pairs, in display
+            order — ``(position, id)`` ascending.
+        task_ids: The block, in the order it should take.
+        after_task_id: The open task, outside the block, it should follow.
+        before_task_id: The open task, outside the block, it should precede.
+
+    Returns:
+        The new position of every task whose position changes, keyed by id —
+        the existing positions handed out again, as :func:`reorder_open_tasks`
+        does. Empty when the tasks are already arranged so.
+
+    Raises:
+        ValueError: When the block is empty or repeats a task, a task or anchor
+            is not in ``order``, an anchor is in the block, or both anchors are
+            given. Callers check all of these first; reaching this is a bug.
+    """
+    current = dict(order)
+    ids = [open_task_id for open_task_id, _ in order]
+    block = list(task_ids)
+    if not block:
+        raise ValueError("an arrangement needs at least one task")
+    if after_task_id is not None and before_task_id is not None:
+        raise ValueError(
+            "an arrangement takes after_task_id or before_task_id, not both"
+        )
+    seen: set[int] = set()
+    for named in block:
+        if named in seen:
+            raise ValueError(f"task {named} is named twice")
+        if named not in current:
+            raise ValueError(f"task {named} is not an open task in this order")
+        seen.add(named)
+    anchor = after_task_id if after_task_id is not None else before_task_id
+    if anchor is not None and (anchor in seen or anchor not in current):
+        raise ValueError(f"task {anchor} cannot anchor this arrangement")
+
+    rest = [open_task_id for open_task_id in ids if open_task_id not in seen]
+    if anchor is None:
+        insert_at = 0
+    else:
+        insert_at = rest.index(anchor) + (1 if after_task_id is not None else 0)
+    reordered = rest[:insert_at] + block + rest[insert_at:]
+    return _assign_slots(current, ids, reordered)
+
+
+def _assign_slots(
+    current: dict[int, int], ids: list[int], reordered: list[int]
+) -> dict[int, int]:
+    """Hand the existing positions out again in ``reordered``'s order.
+
+    The positions are the current ones, sorted; only where two share a value is
+    each raised to one past the one before, so the new order is total. Returns
+    the rows whose position changes, and nothing when the order is unchanged.
+    """
     if reordered == ids:
         return {}
 

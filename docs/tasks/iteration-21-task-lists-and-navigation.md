@@ -1174,6 +1174,8 @@ entity. No REST, MCP, event or UI contract changed.
   - Lock the list(s) by ascending id, then the task(s), then call the repository. Re-locking in
     the same transaction is free.
   - Never take a task lock and then ask for its list.
+  - *(Superseded by Phase 25: task writes now lock the task, then share the list; see Phase 25's
+    lock-order decision and `database-design.md` before writing a list-wide write.)*
 - *Phase 15:* read `count_open_tasks_by_list(...).get(id, 0)` for the list listing.
 - *Phase 19:* reuse `_BOTTOM_OF_LIST` in the list-task INSERT, and lock the list first.
 - *Phase 21:* `find_open_tasks_on_list` / `find_closed_tasks_on_list` return `[]` / an empty page
@@ -1190,7 +1192,8 @@ entity. No REST, MCP, event or UI contract changed.
   `test_task_event_completeness_integration.py`.
 - *Phase 27:* check both anchors under lock, then call `remove_from_list`. **Delete its
   `NAMED_EXCLUSIONS` entry** and add a `WritePath`.
-- *Phase 29:* lock the list, then its tasks in id order, before settling each task.
+- *Phase 29:* lock the list, then its tasks in id order, before settling each task. *(Superseded
+  by Phases 18 and 25: lock the list's tasks first, then the list.)*
 
 #### Phase 15: Task reads carry list, due date, flag, icon, overdue ✅ DONE
 
@@ -1570,7 +1573,8 @@ full backend integration suite in chunks (about 4,650 passed, 7 pre-existing ski
 - **Lock order is the task, then its list** (the share lock is taken after the task is read or
   locked). It keeps every pinned journal-only test as it was — the delete's "no read precedes it",
   status and text's "only the locked read" — and it is the order a move needs, since the task names
-  its list. No list writer holds a task lock, so nothing can deadlock today. The retarget keeps it
+  its list. No list writer holds a task lock, so nothing can deadlock today. *(Not so once the
+  reorder existed: Phase 25 found and fixed the deadlock by making its list lock `FOR SHARE`.)* The retarget keeps it
   too (journals → task → list): it refuses early on a *plain* read of the list — so the no-op and a
   list task without a due journal are refused before anything is locked — and takes the share lock
   after its task lock (found in review: the first cut took the share lock ahead of the task row).
@@ -1886,15 +1890,185 @@ tasks most-recently-closed first, paged".
 
 - [ ] Done or cancelled → not done without retarget, on the existing endpoints and tool.
 
-#### Phase 25: Reorder tasks in a list
+#### Phase 25: Reorder tasks in a list ✅ DONE
 
-**Prerequisites:** Phase 21.
-**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together
+**Status:** ✅ DONE
+**Prerequisites:** Phase 21 (not needed in the end: the answer is built from Phase 14's
+`find_open_tasks_on_list`, so this phase was built in parallel with it).
+**Estimated diff:** ~100 production → **~900 tracked** · one capability on REST and MCP together ·
+**Actual:** ~580 production → **~2,760 tracked** (about 2,780 insertions and 50 deletions, excluding this
+document). Of that, about 580 is production code across 10 files:
+- service 183;
+- repository adapter 81 and port 70;
+- MCP tool 76;
+- pure arrangement rule 73;
+- REST route and schemas 84;
+- MCP answer model and guidance 10.
+
+The rest is about 2,120 test lines across 16 files and 40 lines of architecture docs. Production ran ×5.8
+on the estimate, for three reasons:
+- the user's bulk MCP tool added a second service method, port method and pure rule;
+- the lock fix below;
+- the docstrings.
+
+Tests ran ×3.7 on production, mostly in refusal tables on both surfaces and the four concurrency
+scenarios.
 
 **Acceptance Criteria:**
 
-- [ ] Position change; no event.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Position change; no event.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** an open task on a list can be reordered, over REST one move at a time and over MCP a
+block at a time. Nothing is recorded: no event, no history, no `updated_at`.
+- **Service.**
+  - `TaskService.reorder_task(*, user_id, task_id, after_task_id, transaction)` is the list page's
+    single move: to the top (`None`) or directly after another open task on the same list.
+  - `TaskService.reorder_list_tasks(*, user_id, task_list_id, task_ids, after_task_id=None,
+    before_task_id=None, transaction)` is the agent's move. The named open tasks move as one block,
+    in the order given, to the top, or directly after or before one anchor. Every other open task
+    keeps its relative order.
+  - Both are `@transactional`, publish nothing, and answer the list's open tasks in their new
+    order, each with its trail (one batched `list_intermediate_journal_ids_for_tasks`).
+- **Refusals.** Anything the caller could see in what it read is a 400 `TASK_VALIDATION_ERROR` with
+  `meta.field`:
+  - `reorder_task`: self as anchor; a task on no list or closed; an anchor that is closed or on
+    another list.
+  - `reorder_list_tasks`: an empty or repeating block; both anchors; an anchor inside the block;
+    any named id or anchor that is not an open task on this list. Another user's task gets the
+    same answer, indistinguishably.
+
+  Then:
+  - 404 for an unknown or foreign task, anchor or list;
+  - 409 `TASK_LIST_ARCHIVED`, even for a no-op;
+  - 409 `TASK_LIST_CHANGED` for a race between the check and the locks.
+- **Rule.** `core_shared.models.tasks.arrange_open_tasks` is the pure block rule. It shares the
+  extracted `_assign_slots` with `reorder_open_tasks`, whose behaviour is unchanged: existing
+  positions are handed out again, and only changed rows are returned.
+- **Repository.** `TaskRepository.arrange_open_tasks` is a new port method. `move_within_list` and
+  it share `SqlTaskRepository._rearrange`:
+  1. list `FOR SHARE`;
+  2. the open tasks `FOR NO KEY UPDATE` in id order;
+  3. a re-check of every named id → `TaskListChangedConcurrentlyError`;
+  4. the rule, then the changed rows written.
+- **REST.** `POST /api/tasks/{task_id}/reorder`, with body type `task-reorders` and a required,
+  nullable `after_task_id` (strict int, 1..INT32_MAX). It answers 200 with a
+  `TaskCollectionResponse` of the open tasks in order.
+- **MCP.** `reorder_list_tasks(task_list_id, task_ids, after_task_id?, before_task_id?)` in
+  `task_list_tools.py`, `IDEMPOTENT_WRITE`:
+  - `JsonIntOnly` on every id, including each `task_ids` item;
+  - `task_ids` takes 1–500 ids;
+  - it answers `TaskListOrderMCP(task_list_id, open_tasks)`;
+  - the server's Task lists guidance names it.
+- **Docs.** `database-design.md` (*Tasks on a list*: the lock order rewritten, an
+  `arrange_open_tasks` row), `api-design.md` (the route row, the MCP tool, the `TASK_LIST_CHANGED`
+  callers), `domain-architecture.md` (the lock order).
+
+**Tests:** unit:
+- `tests/unit/tasks/test_arrange_open_tasks.py` (22): every placement — whole order, prefix, top,
+  after, before, beside the old place — plus no-ops, slot reuse, tie healing and refusals.
+- `test_task_service_reorder.py` (27):
+  - delegation and the answer with trails;
+  - nothing published;
+  - share lock only, with no task lock;
+  - every refusal and its precedence.
+- `test_task_service_archived_list.py`: both reorders refused under the share lock.
+- `api/test_task_reorder_schemas.py` (13).
+- `mcp/domains/test_task_tools_schema.py`: the input bounds, the nullable anchors, the description,
+  the annotations, and the output shape including every task field.
+- `mcp/shared/test_task_error_handling.py`: the race error reaches an agent as a "Task error" with
+  its retry message.
+- `mcp/test_server.py`: the guidance names the tool.
+
+Integration:
+- `test_task_repository_list_queries_integration.py`: Phase 14's tests unchanged, plus 11 for
+  `arrange_open_tasks`:
+  - placements, with closed tasks untouched;
+  - `updated_at` and the outbox unchanged;
+  - no-op rows not rewritten;
+  - a closed task named anywhere → conflict;
+  - another user's list → not found; their row → conflict, unmoved.
+- `test_task_service_reorder_integration.py` (17):
+  - both methods: the stored order, not an edit, no-op, foreign ids, archived;
+  - **the deadlock interleave for each method**, verified red against the old exclusive list lock
+    (`DeadlockDetectedError`);
+  - a create overlapping each reorder, in both orders: the new task lands at the bottom;
+  - a reopen during each: the reopened task keeps its position.
+- `api/test_task_reorder_endpoints.py` (19):
+  - 200 order, `null` = top, nothing recorded;
+  - every 400 with its field;
+  - foreign task and anchor identical to missing ones;
+  - malformed bodies and out-of-range ids.
+- The reorder route added to `test_authentication_requirements.py` (401) and to
+  `test_task_archived_list_endpoints.py` (409, a no-op).
+- `mcp/test_task_list_tools_mcp.py` `TestReorderListTasksTool` (24):
+  - six placements, and a task created since the read stays at the bottom;
+  - five refusals naming why, and another list's task refused;
+  - another user's list "Not found", identical to a missing one; another user's task reads as one on
+    another list;
+  - nine malformed arguments (empty, 501 ids, coerced items and ids).
+- `reorder_list_tasks` added to `test_task_tools_archived_list_mcp.py`.
+- `NAMED_EXCLUSIONS` pins `arrange_open_tasks` permanently beside `move_within_list`.
+- The race Phase 14 asked MCP to cover is pinned by the error-rendering unit test and the
+  service-level overlap tests; no MCP integration test drives it, since the tool adds no logic
+  between the service and the shared error handler.
+- No E2E: no UI (the list page is ITER21-002).
+
+Gates run locally:
+- ruff format/check and mypy (backend 1,344 files, core_shared 174);
+- the backend unit suite (5,951 passed) and core_shared (868);
+- the full backend integration suite in foreground chunks (about 5,000 passed, the 7 existing skips);
+- pre-commit on the changed files.
+
+**Decisions (recorded during implementation):**
+- **The MCP tool reorders any number of tasks** (user decision in plan review: *"It feels like for the
+  MCP it would be more logical to support reordering any number of tasks in a list?"*).
+  - The block semantics (named tasks first, the rest keeping their order) were the plan's option A.
+  - The user added *"an optional 'after task X, or before task Y' which places the ordered tasks there
+    instead of at the start"*.
+  - REST keeps the single neighbour move the UI's drag and keyboard send. Parity holds, because one
+    task with `after_task_id` is that move.
+- **The reorder's list lock is `FOR SHARE`, which fixes a latent deadlock.**
+  - Phase 14 took the list `FOR NO KEY UPDATE` and then its open tasks. Phase 18 made every task write
+    lock its task and then share the list. A reorder waiting on task X while an edit holding X waited
+    for the list deadlocked; the interleave test reproduced it.
+  - Share locks never wait on each other, so the two now meet only on task rows.
+  - Joins, creates and archives still take the list exclusively and queue against a reorder. None of
+    them holds a task lock first.
+  - The Phase 14 note "lock the list first, then the task" and the Phase 18 note "no list writer holds
+    a task lock" are superseded by the corrected rule in the port docstring and `database-design.md`.
+- **A reopen during a reorder is not excluded any more**, and it needs no exclusion. The reopened task
+  was not in the set the reorder reordered, and positions are reused rather than renumbered, so it
+  keeps its own place (pinned by a test).
+- **400 for what the caller could have seen, 409 only for the race** (Phase 14's note). The archived
+  refusal comes before the open/closed checks, as in Phase 19.
+- **`after_task_id` is required on REST**: `null` is the top, and a missing key is a 400, never a
+  silent move.
+- **The route is `/reorder`**, not `/move`, leaving `move` for Phase 26.
+- **Deviations from the plan:**
+  - the MCP tool first sat in `tools.py`, because `task_list_tools.py` could not reach the task
+    answer builder without an import cycle; Phase 21's shared `read_models` module removed the
+    cycle, and the tool now lives in `task_list_tools.py` as planned;
+  - the route is not in `CROSS_USER_REQUESTS`, which covers only `/task-lists/{list_id}` routes;
+    second-user isolation is proved in `test_task_reorder_endpoints.py` instead.
+
+**Notes for later phases:**
+- *Phase 21* (merged first; this phase was rebased onto it): agents read a list's full order with
+  `list_task_list_tasks`, and `reorder_list_tasks` answers the new order after every call. The
+  reorder answers the **write** shape (`TaskResource` / `TaskMCP`), as every task write does, while
+  Phase 21's read answers the richer read shape (`TaskReadResource` / `TaskReadMCP`).
+  `reorder_list_tasks` moved to `task_list_tools.py` beside `list_task_list_tasks`, now that Phase 21's
+  `read_models.task_mcp_fields` removed the import cycle; that reverses the first deviation below.
+- *Phase 26 (move between lists):* refuse a same-list move, or make it a no-op. Otherwise it would
+  lock the task and then the list `NO KEY UPDATE`, against a reorder holding the list `SHARE` and
+  waiting on that task.
+- *Phase 29 (list delete):* the list's tasks must be locked before the list, as Phase 18 noted. The
+  reorder holds the list `SHARE` while it waits on task rows.
+- *ITER21-002 (list page):* a drag sends `after_task_id` = the task above the drop point, or `null`.
+  Keyboard down is the next task; keyboard up is the task two above, or `null`. The response's ids
+  are the new order: re-sort the cached `GET /api/task-lists/{list_id}/tasks` read models by them
+  (the response itself is the write shape, without journal refs or overdue). On a 409
+  `TASK_LIST_CHANGED`, re-read and retry.
 
 #### Phase 26: Move a task onto or between lists
 

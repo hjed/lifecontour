@@ -94,6 +94,26 @@ class TestEveryWriteRouteAnswers409:
         _assert_archived(response)
         assert await _snapshot(async_connection, seeded) == before
 
+    async def test_reordering_even_where_it_already_is(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        seeded: Seeded,
+    ) -> None:
+        """The task is alone on its list, so the move to the top changes nothing
+        — and is refused anyway: read-only means not writable."""
+        before = await _snapshot(async_connection, seeded)
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{seeded.task_id}/reorder",
+            json={
+                "data": {"type": "task-reorders", "attributes": {"after_task_id": None}}
+            },
+        )
+
+        _assert_archived(response)
+        assert await _snapshot(async_connection, seeded) == before
+
     @pytest.mark.parametrize(
         "attributes",
         [{"flagged": True}, {"icon": "tent"}, {"icon": None}],
