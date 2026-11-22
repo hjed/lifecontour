@@ -297,9 +297,10 @@ def _rekey_moved_within(
     """Whether another re-key of this recurrence has moved the link meanwhile.
 
     The link names neither the old id nor this event but another instance of
-    the same recurrence. Which adoption is Google's current one is decided by
-    when each was synced (``_rekeyed_after``). A link moved anywhere else (or
-    gone) leaves this event live but unjournalled, so it is created instead.
+    the same recurrence: an adoption synced earlier (``_rekeyed_after`` has
+    already skipped this one if any was synced later), so this one applies.
+    A link moved anywhere else (or gone) leaves this event live but
+    unjournalled, so it is created instead.
     """
     return (
         link is not None
@@ -773,9 +774,9 @@ class JournalOutboxEventProcessor:
         rekeyed_link_synced_at: datetime | None = None
         if payload.rekeyed_from is not None:
             rekeyed_link = await self._locked_rekey_link(existing_journal_id, payload)
-            if _rekey_moved_within(rekeyed_link, payload) and (
-                await self._rekeyed_after(existing_journal_id, payload)
-            ):
+            # An adoption synced after this one has already moved the link,
+            # whichever instance it names now.
+            if await self._rekeyed_after(existing_journal_id, payload):
                 logger.info(
                     "Re-key adoption skipped - a later instance has adopted it",
                     journal_id=existing_journal_id,
@@ -1196,6 +1197,13 @@ class JournalOutboxEventProcessor:
                     END || jsonb_build_object(CAST(:key AS text), CAST(:at AS text))
                 )::text
                 WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+                  -- Never back in time, whatever order adoptions land in.
+                  AND NOT COALESCE(
+                      reference_data IS JSON OBJECT
+                      AND (reference_data::jsonb ->> CAST(:key AS text))::timestamptz
+                          >= CAST(CAST(:at AS text) AS timestamptz),
+                      false
+                  )
             """),
             {
                 "key": _REKEYED_AT_KEY,

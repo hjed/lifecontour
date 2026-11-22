@@ -483,3 +483,36 @@ class TestRekeyedAdoption:
         journal = await _journal(async_connection, journal_id)
         assert journal.external_event_id == latest_id
         assert journal.event_date_range_start == latest
+
+    async def test_an_older_adoption_never_rewinds_the_recorded_time(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Queued A->B (t1), A->C (t2), A->B (t3) and delivered t3, t1, t2:
+        Google is on B, and the journal must stay there."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journal_id = await _seed(processor, calendar_id)
+        other = NEW_START + timedelta(minutes=30)
+        other_id = f"{RECURRENCE}_{other:%Y%m%dT%H%M%SZ}"
+        t1 = _adoption(calendar_id, journal_id)
+        t2 = _event(
+            "journal_event.updated",
+            calendar_id,
+            other_id,
+            other,
+            etag='"etag-other"',
+            existing_journal_id=journal_id,
+            rekeyed_from=OLD_ID,
+        )
+        t3 = _adoption(calendar_id, journal_id)
+        t3.event_data["etag"] = '"etag-new-again"'
+
+        for event in (t3, t1, t2):
+            await processor.process_event(event)
+
+        assert await _journal_ids(async_connection) == [journal_id]
+        assert (await _journal(async_connection, journal_id)).external_event_id == (
+            NEW_ID
+        )
