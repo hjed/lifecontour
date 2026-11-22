@@ -185,6 +185,24 @@ describe('globals.css', () => {
     });
   });
 
+  describe('touch-target floor', () => {
+    const source = fs.readFileSync(path.join(APP_DIR, 'globals.css'), 'utf8');
+
+    it('raises controls to 40px on a coarse pointer only', () => {
+      expect(css).toMatch(
+        /@media \(pointer: coarse\)\s*\{\s*\.touch-target\s*\{\s*min-height: 2\.5rem/
+      );
+    });
+
+    it("sits below utilities so a call site's own size wins", () => {
+      // A floor in the utilities layer would be emitted after `min-h-11` and
+      // shrink a 44px call site on phones.
+      const layer = source.indexOf('@layer components');
+      expect(layer).toBeGreaterThan(-1);
+      expect(source.indexOf('.touch-target', layer)).toBeGreaterThan(layer);
+    });
+  });
+
   describe('dark variant', () => {
     /** The CSS Tailwind emits for the `dark:` probe, selector onwards. */
     function darkProbeRule(): string {

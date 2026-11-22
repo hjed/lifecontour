@@ -215,6 +215,22 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Touch-target floor for the ui/ controls (see button.tsx). It lives in the
+   components layer so any utility a call site sets — `min-h-11`, `size-11` —
+   outranks it: a floor, never a cap. A `pointer-coarse:min-h-10` utility
+   would be emitted after plain utilities and shrink those call sites. */
+@layer components {
+  @media (pointer: coarse) {
+    .touch-target {
+      min-height: 2.5rem;
+    }
+    .touch-target-square {
+      min-height: 2.5rem;
+      min-width: 2.5rem;
+    }
+  }
+}
+
 @layer base {
   /* Preflight leaves borders at `0 solid` (currentColor). The pseudo-element
      selectors are not covered by `*`, so they are listed explicitly. */
