@@ -1,6 +1,7 @@
 'use client';
 
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 import { CalendarSettings } from '@/components/settings/CalendarSettings';
 import { LocalisationSettings } from '@/components/settings/LocalisationSettings';
 import { TemplateSettings } from '@/components/settings/TemplateSettings';
@@ -20,6 +21,7 @@ export default function SettingsPage() {
         <div className='grid gap-6 lg:grid-cols-2'>
           <CalendarSettings />
           <LocalisationSettings />
+          <AppearanceSettings />
           <TemplateSettings />
         </div>
       </div>

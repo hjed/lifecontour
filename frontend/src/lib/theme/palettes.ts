@@ -12,6 +12,34 @@ export type ThemePalette = (typeof THEME_PALETTES)[number];
 
 export const DEFAULT_PALETTE: ThemePalette = 'default';
 
+interface PaletteDetails {
+  label: string;
+  description: string;
+  /**
+   * Preview colours for the picker, light mode. They are literals because a
+   * swatch has to show a palette that is not the one currently applied.
+   */
+  swatch: readonly [primary: string, accent: string, surface: string];
+}
+
+/** Picker copy for each palette; a new palette fails to type-check without it. */
+export const PALETTE_DETAILS: Record<ThemePalette, PaletteDetails> = {
+  default: {
+    label: 'Default',
+    description: 'Neutral greys that keep the focus on your content.',
+    swatch: ['oklch(0.205 0 0)', 'oklch(0.97 0 0)', 'oklch(1 0 0)'],
+  },
+  emerald: {
+    label: 'Emerald',
+    description: 'Emerald accents on cool, mist-tinted surfaces.',
+    swatch: [
+      'oklch(0.508 0.118 165.612)',
+      'oklch(0.963 0.002 197.1)',
+      'oklch(1 0 0)',
+    ],
+  },
+};
+
 /** The attribute on <html> the `globals.css` palette blocks select on. */
 export const PALETTE_ATTRIBUTE = 'data-palette';
 

@@ -12,6 +12,7 @@ import {
   fetchUserSettings,
   journalTimezone,
   updateUserSettings,
+  useUpdateAppearance,
   useUpdateLocalisation,
   useUserSettings,
   useUserTimezone,
@@ -19,6 +20,7 @@ import {
 import { userSettingsKeys } from '../settings';
 import { journalKeys } from '../journal-keys';
 import { taskKeys } from '../tasks';
+import { PALETTE_ATTRIBUTE } from '@/lib/theme/palettes';
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -301,6 +303,125 @@ describe('settings API', () => {
       // A settings read on the login page is a guaranteed 401.
       await waitFor(() => expect(result.current.fetchStatus).toBe('idle'));
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('useUpdateAppearance', () => {
+    const root = document.documentElement;
+
+    function settingsResponse(themePalette: string | null) {
+      return {
+        data: {
+          id: 'user-1',
+          type: 'user_settings',
+          attributes: {
+            timezone: 'Australia/Sydney',
+            default_country: 'AU',
+            theme_palette: themePalette,
+          },
+        },
+      };
+    }
+
+    function renderAppearance() {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      queryClient.setQueryData(
+        userSettingsKeys.detail(),
+        settingsResponse(null)
+      );
+      const invalidate = jest.spyOn(queryClient, 'invalidateQueries');
+      const hook = renderHook(() => useUpdateAppearance(), {
+        wrapper: wrapper(queryClient),
+      });
+      return { queryClient, invalidate, ...hook };
+    }
+
+    beforeEach(() => {
+      root.removeAttribute(PALETTE_ATTRIBUTE);
+    });
+
+    it('PATCHes only the palette and seeds the settings query', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => settingsResponse('emerald'),
+      } as Response);
+      const { result, queryClient } = renderAppearance();
+
+      result.current.mutate('emerald');
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/user-settings',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ theme_palette: 'emerald' }),
+        })
+      );
+      expect(queryClient.getQueryData(userSettingsKeys.detail())).toEqual(
+        settingsResponse('emerald')
+      );
+    });
+
+    it('repaints at once, before the save lands', () => {
+      mockFetch.mockReturnValueOnce(new Promise(() => {}));
+      const { result } = renderAppearance();
+
+      result.current.mutate('emerald');
+
+      return waitFor(() =>
+        expect(root.getAttribute(PALETTE_ATTRIBUTE)).toBe('emerald')
+      );
+    });
+
+    it('sends the default palette as null', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => settingsResponse(null),
+      } as Response);
+      const { result } = renderAppearance();
+
+      result.current.mutate('default');
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/user-settings',
+        expect.objectContaining({
+          body: JSON.stringify({ theme_palette: null }),
+        })
+      );
+    });
+
+    it('leaves the journal and task reads alone', async () => {
+      // Unlike a timezone change, a palette changes nothing the server derives.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => settingsResponse('emerald'),
+      } as Response);
+      const { result, invalidate } = renderAppearance();
+
+      result.current.mutate('emerald');
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it('puts the previous palette back when the save fails', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ errors: [{ detail: 'boom' }] }),
+      } as Response);
+      const { result } = renderAppearance();
+
+      result.current.mutate('emerald');
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(root.hasAttribute(PALETTE_ATTRIBUTE)).toBe(false);
     });
   });
 

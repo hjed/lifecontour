@@ -11,6 +11,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import {
+  DEFAULT_PALETTE,
+  applyPalette,
+  isThemePalette,
+  type ThemePalette,
+} from '@/lib/theme/palettes';
 import type { JsonApiErrorResponse } from '@/types/api';
 import type { UserSettingsPatch, UserSettingsResponse } from '@/types/settings';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
@@ -249,6 +255,41 @@ export function useUpdateLocalisation() {
       toast.success('Localisation settings saved');
     },
     onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Save the colour palette on the account.
+ *
+ * Repaints at once rather than waiting for the PATCH, and puts the previous
+ * palette back if it fails. On success the settings query is seeded, and
+ * `PaletteProvider` mirrors the saved value to localStorage from there.
+ * Nothing else is invalidated: unlike the timezone, the palette changes no
+ * answer the server derives.
+ */
+export function useUpdateAppearance() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (palette: ThemePalette) =>
+      updateUserSettings(
+        { theme_palette: palette === DEFAULT_PALETTE ? null : palette },
+        'Failed to save the colour palette'
+      ),
+    onMutate: (palette: ThemePalette) => {
+      const stored = queryClient.getQueryData<UserSettingsResponse>(
+        userSettingsKeys.detail()
+      )?.data.attributes.theme_palette;
+      applyPalette(palette);
+      return { previous: isThemePalette(stored) ? stored : DEFAULT_PALETTE };
+    },
+    onSuccess: response => {
+      queryClient.setQueryData(userSettingsKeys.detail(), response);
+    },
+    onError: (error: Error, _palette, context) => {
+      applyPalette(context?.previous ?? DEFAULT_PALETTE);
       toast.error(error.message);
     },
   });

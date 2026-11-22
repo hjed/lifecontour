@@ -49,8 +49,42 @@ There is no `tailwind.config.js`/`.cjs` — v4 only loads one via an explicit
   `@import 'tw-animate-css';`. The v3-only `tailwindcss-animate` plugin is not
   compatible with v4.
 - **Source detection**: automatic. There is no `content` array to maintain.
-- Prefer the semantic token classes (`bg-background`, `text-muted-foreground`,
-  `border-border`) over raw colours so light and dark both work.
+- **Use semantic token classes only** (`bg-background`, `text-muted-foreground`,
+  `border-border`, `text-destructive`, and the status tokens `text-success`,
+  `text-warning`, `text-info` with tints such as `bg-success/10`). Raw palette
+  classes (`text-green-600`) ignore both the palette and the mode, and
+  `src/__tests__/theme/no-raw-palette-classes.test.ts` fails on them. Don't
+  write `dark:` colour overrides either: the tokens already switch. User-chosen
+  data colours (calendar/tag hex values) are inline styles and are exempt.
+- **`dark:` follows the `.dark` class** next-themes toggles, through shadcn's
+  `@custom-variant dark (&:is(.dark *))`, not `prefers-color-scheme`.
+
+#### Colour palettes and mode
+
+Two independent choices meet on `<html>`:
+
+| Choice | Where it lives | How it is applied |
+| --- | --- | --- |
+| Mode (light / dark / system) | per device: next-themes, localStorage | the `.dark` class |
+| Palette (`default`, `emerald`) | the account: `user_settings.theme_palette` | `data-palette` (absent for the default) |
+
+- `PaletteProvider` (`src/lib/theme/`, inside `AuthProvider`) applies the
+  account's palette once the settings read lands and mirrors it to
+  localStorage. A blocking `<head>` script in the root layout paints that mirror
+  before first paint, so a returning visit never flashes the default.
+  `AuthProvider` resets the palette whenever no one is signed in.
+- Palette blocks follow the default ones: `:root[data-palette='x']`
+  (specificity 0,2,0, beating `.dark`) and `:root.dark[data-palette='x']`
+  (0,3,0). Both must declare the same variables and override every palette
+  colour; the compile test enforces it. Status (`success`/`warning`/`info`) and
+  `chart-1..5` are shared across palettes and never overridden: status keeps
+  one meaning, and the dashboard uses the charts as distinct categories.
+- **Adding a palette:** run `shadcn apply <preset> --only theme` in a scratch
+  copy (never in the repo; it overwrites the default blocks and
+  `components.json`), copy its `:root`/`.dark` colours minus charts into new
+  `[data-palette]` blocks, then add the name to `THEME_PALETTES` /
+  `PALETTE_DETAILS` (`src/lib/theme/palettes.ts`) and to the backend
+  `ThemePalette` enum. No migration is needed.
 
 A missing `@import` or `@plugin` does **not** fail the build — the affected
 utilities just emit no CSS and the UI renders silently unstyled. Utilities the UI
