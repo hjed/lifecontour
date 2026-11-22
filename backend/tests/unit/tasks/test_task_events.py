@@ -24,7 +24,7 @@ task and the service tests' idea of one cannot drift apart.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -60,6 +60,7 @@ from tests.unit.tasks.task_doubles import (
     OTHER_CONTACT_ID,
     SURVIVING_JOURNAL_ID,
     TASK_ID,
+    TASK_LIST_ID,
     UPDATED_TEXT,
     USER_ID,
 )
@@ -85,7 +86,7 @@ def make_created(
     contact_ids: list[int] | None = None,
     transaction: AsyncMock | None = None,
 ) -> TaskCreated:
-    """A ``TaskCreated`` over the shared task constants.
+    """A journal-only ``TaskCreated`` over the shared task constants.
 
     ``contact_ids`` defaults to *none linked*, which is the ordinary create. The
     argument is defaulted **here** rather than on the event, which requires it
@@ -97,6 +98,8 @@ def make_created(
         user_id=USER_ID,
         text=ORIGINAL_TEXT,
         status=status,
+        task_list_id=None,
+        due_date=None,
         creating_journal_id=CREATING_JOURNAL_ID,
         due_journal_id=DUE_JOURNAL_ID,
         contact_ids=[] if contact_ids is None else contact_ids,
@@ -307,12 +310,60 @@ class TestTaskCreated:
             "user_id": USER_ID,
             "text": ORIGINAL_TEXT,
             "status": TaskStatus.NOT_DONE.value,
+            "task_list_id": None,
+            "due_date": None,
             "creating_journal_id": CREATING_JOURNAL_ID,
             "due_journal_id": DUE_JOURNAL_ID,
             "contact_ids": [],
             "source": Provenance.SYSTEM.value,
             "changed_by": "system",
         }
+
+    def test_a_task_created_on_a_list_carries_the_list_and_its_due_date(
+        self,
+    ) -> None:
+        """The list and the date travel; the absent journals are ``None``.
+
+        The date is the ISO string rather than a ``date``, because the payload
+        is a wire format and a subscriber reading it back through Redis only
+        ever sees JSON.
+        """
+        event = TaskCreated(
+            task_id=TASK_ID,
+            user_id=USER_ID,
+            text=ORIGINAL_TEXT,
+            status=TaskStatus.NOT_DONE,
+            task_list_id=TASK_LIST_ID,
+            due_date=date(2026, 11, 30),
+            creating_journal_id=None,
+            due_journal_id=None,
+            contact_ids=[],
+        )
+
+        assert event.event_data["task_list_id"] == TASK_LIST_ID
+        assert event.event_data["due_date"] == "2026-11-30"
+        assert event.event_data["creating_journal_id"] is None
+        assert event.event_data["due_journal_id"] is None
+
+    def test_the_list_and_due_date_must_be_stated_rather_than_defaulted(
+        self,
+    ) -> None:
+        """No default, for the reason ``contact_ids`` has none.
+
+        ``None`` is right for a journal-only create and a lie for a task made on
+        a list, and the failure would be silent: a list task whose own creation
+        event says it is on no list.
+        """
+        with pytest.raises(TypeError):
+            TaskCreated(  # type: ignore[call-arg]
+                task_id=TASK_ID,
+                user_id=USER_ID,
+                text=ORIGINAL_TEXT,
+                status=TaskStatus.NOT_DONE,
+                creating_journal_id=CREATING_JOURNAL_ID,
+                due_journal_id=DUE_JOURNAL_ID,
+                contact_ids=[],
+            )
 
     def test_status_is_stored_as_its_string_value(self) -> None:
         """The enum is the argument; JSON is what the payload has to hold."""
@@ -361,6 +412,8 @@ class TestTaskCreated:
                 user_id=USER_ID,
                 text=ORIGINAL_TEXT,
                 status=TaskStatus.NOT_DONE,
+                task_list_id=None,
+                due_date=None,
                 creating_journal_id=CREATING_JOURNAL_ID,
                 due_journal_id=DUE_JOURNAL_ID,
             )
@@ -371,6 +424,8 @@ class TestTaskCreated:
             user_id=USER_ID,
             text=ORIGINAL_TEXT,
             status=TaskStatus.NOT_DONE,
+            task_list_id=None,
+            due_date=None,
             creating_journal_id=CREATING_JOURNAL_ID,
             due_journal_id=DUE_JOURNAL_ID,
             contact_ids=[],

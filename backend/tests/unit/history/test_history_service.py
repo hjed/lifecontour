@@ -1133,6 +1133,30 @@ def _task_created_payload(**overrides: Any) -> dict[str, Any]:
 
 
 class TestTaskCreated:
+    def test_a_task_created_on_a_list_projects_the_same_marker(
+        self, service: HistoryService
+    ) -> None:
+        """No journal, a list and a due date: still one marker, nothing else.
+
+        The list and the date are itemised by the events that change them, so
+        the created marker stays the one line that opens a task's history.
+        """
+        rows = service.project_event(
+            _task_event(
+                "TaskCreated",
+                _task_created_payload(
+                    task_list_id=9,
+                    due_date="2026-11-30",
+                    creating_journal_id=None,
+                    due_journal_id=None,
+                ),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "__created__", None, TASK_TEXT)
+        ]
+
     def test_projects_a_created_marker_carrying_the_text(
         self, service: HistoryService
     ) -> None:

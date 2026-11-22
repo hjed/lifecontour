@@ -1600,8 +1600,9 @@ full backend integration suite in chunks (about 4,650 passed, 7 pre-existing ski
 - *Phase 29 (list delete):* lock the list's tasks before the list, or a task write holding its task
   lock and waiting for the list share lock will deadlock against it.
 
-#### Phase 19: Create a task on a list
+#### Phase 19: Create a task on a list 🚧 IN PROGRESS
 
+**Status:** 🚧 IN PROGRESS
 **Prerequisites:** Phase 12, Phase 15, Phase 16, Phase 18.
 **Estimated diff:** ~170 production → **~1,500 tracked** · one capability on REST and MCP together
 

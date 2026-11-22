@@ -148,6 +148,36 @@ _ADD_TO_LIST = text(
     """
 )
 
+_INSERT_JOURNAL_TASK = text(
+    f"""
+    INSERT INTO tasks (
+        user_id, text, status, creating_journal_id, due_journal_id,
+        flagged, icon, closed_at
+    )
+    VALUES (
+        :user_id, :text, :status, :creating_journal_id, :due_journal_id,
+        :flagged, :icon, {_CLOSED_AT_ON_INSERT}
+    )
+    RETURNING {_TASK_COLUMNS}
+    """
+)
+
+# A task on a list joins at the bottom. The list is locked before this runs.
+_INSERT_LIST_TASK = text(
+    f"""
+    INSERT INTO tasks (
+        user_id, text, status, creating_journal_id, due_journal_id,
+        task_list_id, position, due_date, flagged, icon, closed_at
+    )
+    VALUES (
+        CAST(:user_id AS VARCHAR), :text, :status, :creating_journal_id,
+        :due_journal_id, CAST(:task_list_id AS INTEGER), {_BOTTOM_OF_LIST},
+        :due_date, :flagged, :icon, {_CLOSED_AT_ON_INSERT}
+    )
+    RETURNING {_TASK_COLUMNS}
+    """
+)
+
 _FIND_MEMBERSHIP = text(
     "SELECT task_list_id FROM tasks WHERE id = :task_id AND user_id = :user_id"
 )
@@ -289,15 +319,18 @@ class SqlTaskRepository(TaskRepository):
         """Insert a new task or update an existing one.
 
         Writes the task's own values — text, status, anchors, due date, flag and
-        icon — but never its **list membership** (``task_list_id``,
-        ``position``). Joining, leaving, moving and reordering are operations of
+        icon. An **update** never writes its list membership (``task_list_id``,
+        ``position``): joining, leaving, moving and reordering are operations of
         their own, as ``TaskList.position`` is, so an edit carrying a stale
         position cannot undo a reorder that landed after the caller's read.
 
+        An **insert** of a task on a list places it at the bottom of that list,
+        whatever ``position`` the entity carries, after locking the list — so
+        overlapping creates on one list take consecutive places.
+
         Raises:
-            ValueError: When inserting a task on a list. A list task is placed at
-                the bottom of its list by the list-task creation path; inserting
-                one here would store it as a journal-only task or fail a CHECK.
+            TaskListNotFoundError: When inserting a task on a list that is not
+                one of ``task.user_id``'s.
         """
         if task.id is None:
             return await self._insert(task)
@@ -306,40 +339,31 @@ class SqlTaskRepository(TaskRepository):
     async def _insert(self, task: Task) -> Task:
         """Insert a new task, letting the database assign id and timestamps.
 
-        Only a journal-only task reaches the INSERT. The entity allows a
-        position or a due date only on a list task, so refusing list tasks
-        refuses those too.
+        A task on a list is placed at the bottom of it: the list is locked first
+        (the port's lock order; free when the caller already holds it) and the
+        bottom is computed inside the INSERT itself.
         """
-        if task.task_list_id is not None:
-            raise ValueError(
-                "save() cannot insert a task on a list; list membership is "
-                "written by the list-task operations"
+        params = {
+            "user_id": task.user_id,
+            "text": task.text,
+            "status": task.status.value,
+            "creating_journal_id": task.creating_journal_id,
+            "due_journal_id": task.due_journal_id,
+            "flagged": task.flagged,
+            "icon": _icon_value(task),
+        }
+        if task.task_list_id is None:
+            result = await self.conn.execute(_INSERT_JOURNAL_TASK, params)
+        else:
+            await self._lock_list(task.task_list_id, task.user_id)
+            result = await self.conn.execute(
+                _INSERT_LIST_TASK,
+                {
+                    **params,
+                    "task_list_id": task.task_list_id,
+                    "due_date": task.due_date,
+                },
             )
-        query = text(
-            f"""
-            INSERT INTO tasks (
-                user_id, text, status, creating_journal_id, due_journal_id,
-                flagged, icon, closed_at
-            )
-            VALUES (
-                :user_id, :text, :status, :creating_journal_id, :due_journal_id,
-                :flagged, :icon, {_CLOSED_AT_ON_INSERT}
-            )
-            RETURNING {_TASK_COLUMNS}
-            """
-        )
-        result = await self.conn.execute(
-            query,
-            {
-                "user_id": task.user_id,
-                "text": task.text,
-                "status": task.status.value,
-                "creating_journal_id": task.creating_journal_id,
-                "due_journal_id": task.due_journal_id,
-                "flagged": task.flagged,
-                "icon": _icon_value(task),
-            },
-        )
         return _row_to_task(result.fetchone())
 
     async def _update(self, task: Task, task_id: int) -> Task:

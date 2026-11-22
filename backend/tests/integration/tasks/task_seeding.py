@@ -87,8 +87,8 @@ _INSERT_TASK = text(f"""
     )
     RETURNING id
 """)
-# A list task is seeded as a row for the reason ``create_task`` gives, and
-# because no write path can put a task on a list yet.
+# A list task is seeded as a row for the reason ``create_task`` gives, and so
+# a test can choose its position, anchors and status directly.
 _INSERT_LIST_TASK = text(f"""
     INSERT INTO tasks (
         user_id, text, status, task_list_id, position,
@@ -219,9 +219,9 @@ async def create_list_task(
 ) -> int:
     """Insert a task on a list directly and return its id.
 
-    A row rather than a service call: until a list task can be created through
-    the product, this is the only way to put one in front of the readers and
-    guards that must cope with it. The table's CHECKs still apply, so only a
+    A row rather than a service call, so a test can seed any shape the table
+    allows — a chosen position, either anchor, a closed task — without driving
+    the writes that would produce it. The table's CHECKs still apply, so only a
     shape the product allows can be seeded.
     """
     task_id = (
@@ -774,8 +774,8 @@ async def seed_archived_list_task(
 ) -> ArchivedListTask:
     """Seed an :class:`ArchivedListTask` as rows, on the test's connection.
 
-    Rows rather than service calls because nothing creates a list task yet,
-    and because the list has to be archived *with* its task already on it.
+    Rows rather than service calls because the list has to be archived *with*
+    its task already on it, which no product write can produce directly.
     """
     creating_id, due_id = task_anchors
     later_id = await create_journal(journal_repository, title="Later", days_offset=14)
@@ -876,3 +876,60 @@ async def delete_task_list_row(conn: AsyncConnection, task_list_id: int) -> None
     await conn.execute(
         text("DELETE FROM task_lists WHERE id = :id"), {"id": task_list_id}
     )
+
+
+@asynccontextmanager
+async def committed_task_list(
+    async_engine: AsyncEngine, *, with_task: bool = False
+) -> AsyncIterator[tuple[str, int]]:
+    """An active list committed for real under a one-off owner, deleted after.
+
+    For the concurrency tests, whose two connections can only overlap on rows
+    both can see — which the savepoint fixture's rows are not. ``with_task``
+    puts one task at the top of the list first. Everything the owner leaves
+    behind is deleted afterwards, the outbox rows it published included.
+
+    Yields:
+        ``(owner, task_list_id)``.
+    """
+    owner = f"list-race-{uuid4()}"
+    async with async_engine.begin() as setup:
+        task_list = await seed_task_list(setup, "Packing", user_id=owner)
+        assert task_list.id is not None
+        if with_task:
+            await create_list_task(setup, task_list_id=task_list.id, user_id=owner)
+    try:
+        yield owner, task_list.id
+    finally:
+        async with async_engine.begin() as cleanup:
+            await cleanup.execute(
+                text(
+                    "DELETE FROM outbox_events "
+                    "WHERE event_data::jsonb ->> 'user_id' = :user_id"
+                ),
+                {"user_id": owner},
+            )
+            await cleanup.execute(
+                text("DELETE FROM tasks WHERE user_id = :user_id"), {"user_id": owner}
+            )
+            await cleanup.execute(
+                text("DELETE FROM task_lists WHERE user_id = :user_id"),
+                {"user_id": owner},
+            )
+
+
+async def seed_task_list_id(
+    conn: AsyncConnection, *, user_id: str = USER_ID, archived: bool = False
+) -> int:
+    """:func:`seed_task_list` named "Packing", answering only its id.
+
+    ``archived`` archives it at :data:`FIXED_PAST_INSTANT`, for the refusals.
+    """
+    task_list = await seed_task_list(
+        conn,
+        "Packing",
+        user_id=user_id,
+        archived_at=FIXED_PAST_INSTANT if archived else None,
+    )
+    assert task_list.id is not None
+    return task_list.id

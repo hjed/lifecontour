@@ -9,8 +9,8 @@ caller may learn.
 
 The rule itself, its lock and the rollback of a refused delete are proved in
 ``tests/integration/tasks/test_task_service_archived_list_integration.py``; this
-file is about what reaches the client. Nothing creates a list task through the
-product yet, so the task is seeded as a row.
+file is about what reaches the client. The task is seeded as a row on an
+already-archived list, which no product write can produce directly.
 """
 
 import pytest
