@@ -64,11 +64,13 @@ from app.core.tasks.models.events import (
     contact_field_name,
 )
 from app.infrastructure.unit_of_work import savepoint, transactional
+from app.shared.patch import UNSET, Unset
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from core_shared.models.journals import Journal
+    from core_shared.models.tasks import TaskIcon
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.core.contacts.models.repositories import ContactRepository
@@ -309,18 +311,20 @@ class TaskService:
         transaction: AsyncConnection,
         text: str | None = None,
         status: TaskStatus | None = None,
+        flagged: bool | None = None,
+        icon: TaskIcon | None | Unset = UNSET,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> Task:
-        """Change one of the user's tasks: its text, its status, or both.
+        """Change one of the user's tasks: its text, status, flag or icon.
 
-        **One method owns both fields** because a ``PATCH`` may carry both, and
-        JSON:API says a request is one change. Applying them as two calls would
+        **One method owns every field** because a ``PATCH`` may carry several,
+        and JSON:API says a request is one change. Applying them as two calls would
         be two units of work and two read-decide-write sequences, so a client
         that reworded and completed a task in one request could have half of it
         applied. Here it is one read, one decision and one write.
 
-        **No journal is involved**, on either half. The due journal is not read,
+        **No journal is involved**, for any field. The due journal is not read,
         which is what keeps a *lapsed* task both completable and editable: the
         future-dated rule is a write-time rule about *setting* a due journal, and
         re-applying it here would make exactly the tasks a user most needs to
@@ -328,12 +332,12 @@ class TaskService:
 
         A call that changes nothing is a no-op: nothing is written, so
         ``updated_at`` does not move, **no event is published** and no change is
-        recorded that did not happen. That covers the status a task already has,
-        the text it already has, and — for a caller that is not a JSON:API
-        surface — naming neither.
+        recorded that did not happen. That covers the status, text, flag or icon a
+        task already has (clearing an icon it does not have included), and — for
+        a caller that is not a JSON:API surface — naming nothing.
 
         **One write publishes one** ``TaskUpdated``, carrying ``changed_fields``
-        for whichever of the two moved. Not one event per field: a ``PATCH`` may
+        for whichever fields moved. Not one event per field: a ``PATCH`` may
         reword a task and complete it, and that is a single unit of work, so
         splitting it into two announcements would report two changes where one
         happened. The pairs are what the method already decided — the old value
@@ -349,6 +353,12 @@ class TaskService:
                 entity rather than here, so there is one definition of an
                 acceptable task rather than two that can drift apart.
             status: The status to move to, or ``None`` to leave it alone
+            flagged: Flag or unflag the task, or ``None`` to leave it alone. A
+                task is always one or the other, so there is no third value.
+            icon: An icon from the fixed set, ``None`` to **clear** it, or
+                ``UNSET`` (the default) to leave it alone — the one argument
+                where ``None`` is a value rather than "not named", because an
+                icon is optional on the task.
             source: Where the change came from, recorded on the event
             changed_by: The actor, as the other domains write it
 
@@ -404,6 +414,21 @@ class TaskService:
             # ``TaskStatus`` is a ``StrEnum`` and serialises to the same
             # ``"done"``, so the comment that used to stand here was wrong.
             changed_fields["status"] = (task.status.value, status.value)
+
+        # Flag and icon apply to every task, journal-only ones included, and in
+        # any status: nothing here reads a journal or a list rule. Neither moves
+        # the task — ``save`` never writes list membership or position.
+        if flagged is not None and flagged != task.flagged:
+            updated = replace(updated, flagged=flagged)
+            changed_fields["flagged"] = (task.flagged, flagged)
+
+        if not isinstance(icon, Unset) and icon != task.icon:
+            updated = replace(updated, icon=icon)
+            # The plain key, as ``TaskListUpdated`` carries a list's icon.
+            changed_fields["icon"] = (
+                None if task.icon is None else task.icon.value,
+                None if icon is None else icon.value,
+            )
 
         if updated is task:
             return task
@@ -1277,6 +1302,8 @@ class TaskService:
         transaction: AsyncConnection,
         text: str | None = None,
         status: TaskStatus | None = None,
+        flagged: bool | None = None,
+        icon: TaskIcon | None | Unset = UNSET,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> tuple[Task, list[int]]:
@@ -1293,6 +1320,8 @@ class TaskService:
             transaction=transaction,
             text=text,
             status=status,
+            flagged=flagged,
+            icon=icon,
             source=source,
             changed_by=changed_by,
         )

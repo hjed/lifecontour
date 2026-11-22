@@ -1271,6 +1271,58 @@ class TestTaskUpdated:
             assert row.changed_by == "mcp"
             assert row.created_at == OCCURRED_AT
 
+    @pytest.mark.parametrize(
+        ("changed_fields", "expected"),
+        [
+            ({"flagged": [False, True]}, [("flagged", "False", "True")]),
+            ({"flagged": [True, False]}, [("flagged", "True", "False")]),
+            ({"icon": [None, "tent"]}, [("icon", None, "tent")]),
+            ({"icon": ["tent", "star"]}, [("icon", "tent", "star")]),
+            ({"icon": ["tent", None]}, [("icon", "tent", None)]),
+            (
+                {"flagged": [False, True], "icon": [None, "tent"]},
+                [("flagged", "False", "True"), ("icon", None, "tent")],
+            ),
+        ],
+        ids=[
+            "flagged",
+            "unflagged",
+            "icon-set",
+            "icon-changed",
+            "icon-cleared",
+            "both",
+        ],
+    )
+    def test_the_flag_and_the_icon_land_one_owned_row_each(
+        self,
+        service: HistoryService,
+        changed_fields: dict[str, list[Any]],
+        expected: list[tuple[str, str | None, str | None]],
+    ) -> None:
+        """ITER21-001 Phase 28: the field names are the history labels.
+
+        The flag's values are stored as ``str(bool)``, the vocabulary the contact
+        ``is_primary`` and ``is_archived`` rows already use, and the web app
+        words them. The row carries the task's owner, as every task row does.
+        """
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": changed_fields,
+                "source": Provenance.MCP.value,
+                "changed_by": "mcp",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, field, old, new) for field, old, new in expected
+        ]
+        assert all(row.user_id == "u1" for row in rows)
+
     def test_a_contact_link_lands_one_row_naming_the_contact(
         self, service: HistoryService
     ) -> None:

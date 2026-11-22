@@ -94,6 +94,29 @@ class TestEveryWriteRouteAnswers409:
         _assert_archived(response)
         assert await _snapshot(async_connection, seeded) == before
 
+    @pytest.mark.parametrize(
+        "attributes",
+        [{"flagged": True}, {"icon": "tent"}, {"icon": None}],
+        ids=["flag", "icon", "clear-icon-it-does-not-have"],
+    )
+    async def test_patching_the_flag_or_icon(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        seeded: Seeded,
+        attributes: dict[str, object],
+    ) -> None:
+        """Including a no-op: read-only means not writable."""
+        before = await _snapshot(async_connection, seeded)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{seeded.task_id}",
+            json=_task_body(seeded.task_id, **attributes),
+        )
+
+        _assert_archived(response)
+        assert await _snapshot(async_connection, seeded) == before
+
     async def test_retargeting(
         self,
         authenticated_client: AsyncClient,

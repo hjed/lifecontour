@@ -101,8 +101,8 @@ Apply the preset with whichever registration pattern the domain uses:
 ```python
 # Module-level tool registered via mcp.add_tool() — journals, series, tasks
 @tool(annotations=IDEMPOTENT_WRITE)
-@mcp_unified_error_handler("update_task_text", "task")
-async def update_task_text(...) -> TaskMCP: ...
+@mcp_unified_error_handler("update_task", "task")
+async def update_task(...) -> TaskMCP: ...
 
 # Closure registered inside register_*_tools() — contacts, integrations
 @mcp.tool(annotations=DESTRUCTIVE_WRITE)
@@ -893,10 +893,10 @@ a capped span of days. Neither can be widened into a task browser.
 | `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
 | `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
 | `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded, and so are tasks on a list (journal-only for now) | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
-| `PATCH /api/tasks/{task_id}` | Change a task's text, its status, or both. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`) — both optional, at least one required | 200; 400 unknown status, blank text, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `PATCH /api/tasks/{task_id}` | Change a task's text, status, flag or icon, in one write. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`), `flagged` (a JSON boolean; `null` refused), `icon` (a fixed-set key, or `null` to clear; absent keeps it) — each optional, at least one required. Flag and icon apply to every task, journal-only ones included, in any status | 200; 400 unknown status, blank text, a null or non-boolean flag, an icon outside the fixed set, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
-| `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
+| `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. A flag change is field `flagged` with `"False"`/`"True"` values; an icon change is field `icon` with fixed-set keys, `null` being "no icon" (set `null → key`, cleared `key → null`). Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `DELETE /api/tasks/{task_id}/relationships/contacts/{contact_id}` | Remove a contact link | 204; 404 task unknown/not-owned; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `POST /api/tasks/{task_id}/relationships/intermediate-journals` | Attach an intermediate journal. Body: a resource identifier, `{"data": {"type": "journals", "id": "9"}}` | 204; 400 unknown field, a role attribute, another resource type, or a non-integer id; 404 task or journal unknown/not-owned; 409 the journal is already the creating or due journal; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
@@ -1244,16 +1244,19 @@ Conventions this surface pins down:
   `task_intermediate_journals` cascades from the journal side, and the
   specification permits deleting a journal that is only an intermediate link.
 - The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
-  `update_task_text`, `delete_task`, `link_task_to_contact`,
+  `update_task`, `delete_task`, `link_task_to_contact`,
   `unlink_task_from_contact`, `attach_intermediate_journal_to_task`,
   `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks`,
   `list_upcoming_tasks` and `get_task_history`
   (documented in their docstrings and
-  parameter schemas, per the MCP documentation convention). `update_task_text`
-  offers no `status` parameter and `set_task_status` no `text`: a model gets one
-  tool per intent, so it never has to reason about what leaving a field out will
-  do — the combined write exists for the `PATCH` body that genuinely carries
-  both. The four link tools return the resulting state — `linked` or `attached` —
+  parameter schemas, per the MCP documentation convention). **A task's own
+  independent fields share `update_task`** — text, flag and icon, every argument
+  optional and only what is supplied changed, mirroring the `PATCH` body. `clear_icon=true` removes the icon, because a
+  tool cannot tell a null argument from an omitted one, and naming no change is
+  refused. **Lifecycle moves and links keep their own tools**: `update_task`
+  offers no `status` parameter and `set_task_status` no `text`, because a status
+  move has its own transition rules and refusals, and the same holds for
+  retargeting and the link tools. The four link tools return the resulting state — `linked` or `attached` —
   beside `changed` (whether a row moved), which is the one thing the 204
   withholds and an agent may want. The trail is on every task-returning answer,
   which mattered more over MCP than over HTTP while nothing read a task back —
@@ -1329,7 +1332,7 @@ Conventions this surface pins down:
   the bottom — so concurrent moves and creates serialize.
 - **An archived list is read-only, and so are its tasks**: every write to one
   but unarchive — the update and the move — and every write to a task on one —
-  `PATCH /api/tasks/{task_id}` (text and status), retarget, delete, and the
+  `PATCH /api/tasks/{task_id}` (text, status, flag and icon), retarget, delete, and the
   contact and intermediate-journal relationship routes, with their MCP tools —
   answers 409 `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message
   naming unarchiving as the way out. Each list write checks

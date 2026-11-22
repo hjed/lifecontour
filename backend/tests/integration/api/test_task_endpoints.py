@@ -75,8 +75,10 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     linked_contact_ids,
     mark_journal_as_event,
+    mark_task,
     seed_task_list,
     stored_anchors,
+    stored_marks,
     stored_status,
     stored_text,
     stored_updated_at,
@@ -1004,6 +1006,183 @@ class TestUpdateTaskTextEndpoint:
             absent_error["detail"]
         ).replace("999999", "X")
         assert await stored_text(async_connection, foreign_task) == "not yours"
+
+
+@pytest.mark.integration
+class TestFlagAndIconOnAnyTask:
+    """``PATCH /api/tasks/{task_id}``: the flag and the icon, on any task.
+
+    The specification's *Flag and icon*: both "apply to every task, including
+    journal-only tasks". ``"icon": null`` clears the icon; an absent icon keeps
+    it, as the list ``PATCH`` reads it.
+    """
+
+    async def _task(self, conn: AsyncConnection, task_anchors: tuple[int, int]) -> int:
+        creating_id, due_id = task_anchors
+        return await create_task(
+            conn, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+    async def test_flagging_a_journal_only_task(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(async_connection, task_anchors)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, flagged=True)
+        )
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert (attributes["flagged"], attributes["icon"]) == (True, None)
+        assert attributes["task_list_id"] is None
+        assert await stored_marks(async_connection, task_id) == (True, None)
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {"flagged": [False, True]}
+        assert event.payload["source"] == "ui"
+
+    @pytest.mark.parametrize(
+        ("before", "sent", "after"),
+        [
+            (None, "tent", "tent"),
+            ("tent", "star", "star"),
+            ("tent", None, None),
+        ],
+        ids=["set", "changed", "cleared"],
+    )
+    async def test_the_icon_is_set_changed_and_cleared(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        before: str | None,
+        sent: str | None,
+        after: str | None,
+    ):
+        task_id = await self._task(async_connection, task_anchors)
+        await mark_task(async_connection, task_id, flagged=False, icon=before)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, icon=sent)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["attributes"]["icon"] == after
+        assert await stored_marks(async_connection, task_id) == (False, after)
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["changed_fields"] == {"icon": [before, after]}
+
+    async def test_an_absent_icon_is_kept(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(async_connection, task_anchors)
+        await mark_task(async_connection, task_id, flagged=False, icon="tent")
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, flagged=True)
+        )
+
+        assert response.status_code == 200
+        assert await stored_marks(async_connection, task_id) == (True, "tent")
+
+    async def test_text_and_flag_in_one_body_are_one_event(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(async_connection, task_anchors)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json=_update_body(task_id, text="reworded", flagged=True, icon="star"),
+        )
+
+        assert response.status_code == 200
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert set(event.payload["changed_fields"]) == {"text", "flagged", "icon"}
+
+    async def test_a_lapsed_task_can_still_be_flagged(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=past_id, due_journal_id=past_id
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, flagged=True)
+        )
+
+        assert response.status_code == 200
+        assert await stored_marks(async_connection, task_id) == (True, None)
+
+    @pytest.mark.parametrize(
+        "attributes",
+        [
+            {"icon": "rocket-ship"},
+            {"flagged": None},
+            {"flagged": "true"},
+            {"flagged": 1},
+        ],
+        ids=["unknown icon", "null flag", "string flag", "integer flag"],
+    )
+    async def test_a_rejected_body_changes_nothing(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+        attributes: dict[str, object],
+    ):
+        task_id = await self._task(async_connection, task_anchors)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_update_body(task_id, **attributes)
+        )
+
+        assert response.status_code == 400
+        assert await stored_marks(async_connection, task_id) == (False, None)
+        assert await task_events(async_connection, task_id=task_id) == []
+
+    async def test_another_users_task_is_404_and_left_alone(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            async_connection,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{foreign_task}",
+            json=_update_body(foreign_task, flagged=True, icon="tent"),
+        )
+
+        assert response.status_code == 404
+        assert await stored_marks(async_connection, foreign_task) == (False, None)
+        assert await task_events(async_connection, task_id=foreign_task) == []
 
 
 @pytest.mark.integration

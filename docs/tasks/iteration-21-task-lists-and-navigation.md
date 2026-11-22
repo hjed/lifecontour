@@ -1692,15 +1692,90 @@ full backend integration suite in chunks (about 4,650 passed, 7 pre-existing ski
 - [ ] `remove_from_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 28: Flag and icon on any task
+#### Phase 28: Flag and icon on any task ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 15.
-**Estimated diff:** ~120 production → **~1,100 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~120 production → **~1,100 tracked** · one capability on REST and MCP together ·
+**Actual:** ~230 production → **~1,550 tracked** (about 1,430 insertions, 120 deletions excluding
+this document: about 230 production lines across 8 files — the service, the REST schema and
+controller, the MCP tool and its docstring about 60, the history wording 16; about 1,280 test lines
+across 12 files; 35 architecture docs). Production ran ×1.9 on the estimate: replacing
+`update_task_text` with a general `update_task` (user decision) priced in a whole tool, and the
+history wording shipped here rather than in ITER21-002. Tests sat at ×5.6 production, because the
+removed tool's tests moved across unchanged and each surface got its own rejection, isolation and
+archived cases.
 
 **Acceptance Criteria:**
 
-- [ ] Journal-only tasks included; carried on the task-updated event with history labels.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Journal-only tasks included; carried on the task-updated event with history labels.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a task's flag and icon are set and cleared on any task, journal-only ones included,
+in any status.
+- `TaskService.update_task` / `update_task_with_trail` take `flagged: bool | None` and
+  `icon: TaskIcon | None | Unset = UNSET` (`None` clears). One locked read, the archived-list guard
+  first (a no-op on an archived list is refused), one save, one `TaskUpdated` carrying
+  `flagged: (old, new)` and `icon: (old_key | None, new_key | None)`; a resent value writes nothing.
+  The flag never touches list membership or position.
+- REST `PATCH /api/tasks/{id}`: `TaskUpdateAttributes` gains `flagged` (`StrictBool`, null refused)
+  and `icon` (`"icon": null` clears, an absent icon keeps — `icon_change()` over
+  `model_fields_set`); a body naming no change is still refused, and `{"icon": null}` alone is a
+  change.
+- MCP: **`update_task(task_id, text?, flagged?, icon?, clear_icon?)` replaces `update_task_text`**
+  (user decision). Every argument optional; icon with `clear_icon`, and a call naming nothing, are
+  refused; `status` stays on `set_task_status`. Server task guidance names it.
+- History: no projection change (`_rows_from_changed_fields`); rows are `flagged` `"False"`/`"True"`
+  and `icon` keys. The web app words them in `taskEntryDescription`
+  (`frontend/src/lib/history-display.ts`): *Flagged* / *Unflagged*, *Icon set* / *Icon changed* /
+  *Icon cleared*, named with the task on a contact's feed.
+- `api-design.md` (*Task Endpoints* PATCH row, history vocabulary, the MCP tool list and the
+  fields-share-one-tool rule) and `domain-architecture.md` (`TaskUpdated`) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_service_flag_and_icon.py` (flag/unflag, icon
+set/changed/cleared as plain keys, absent icon kept, one save and one event for flag + icon + text,
+resent and absent-clear no-ops, every status of a journal-only task with nothing else changed, a list
+task not moved, not found, provenance through the trail wrapper),
+`test_task_service_archived_list.py` (flag and icon in every guard case, the no-op refused),
+`api/test_task_schemas.py::TestTheUpdateRequestCarriesFlagAndIcon`,
+`history/test_history_service.py` (six flag/icon projections with owner),
+`mcp/domains/test_task_tools_schema.py` (`update_task`'s properties, nullable icon enum and flag,
+`clear_icon`, no status/now/journal, its description, `update_task_text` gone, answer shape), jest
+`history-display.test.ts` (the five wordings, named on a contact's feed, a `task_list` icon row left
+alone). Integration: REST `api/test_task_endpoints.py::TestFlagAndIconOnAnyTask` (flag a journal-only
+task, icon set/changed/cleared, absent icon kept, one event for three fields, lapsed task, unknown icon
+/ null / string / integer flag 400 with nothing written, another user's task 404 with no event),
+`test_task_archived_list_endpoints.py` (flag, icon, a no-op icon clear: 409), MCP
+`mcp/test_task_tools_mcp.py::TestUpdateTaskFlagAndIcon` (set, unset and clear, one event, lapsed,
+four malformed calls refused unchanged, another user's task not found) with the former
+`update_task_text` tests re-pointed at `update_task` with their assertions kept,
+`test_task_tools_archived_list_mcp.py` (text, flag, icon, clear-icon), the completeness inventory's
+"flag and icon" `WritePath`, and `test_task_history_projection_e2e.py` (a real flag + icon set then
+cleared, relayed and projected with provenance and owner). `task_state` now includes the flag and
+icon, so every refusal test asserts they stayed put. E2E `task-activity-history.spec.ts` "a flag and
+icon set on a journal-only task read as history lines" (Firefox and Mobile Chrome). Gates run
+locally: ruff and mypy, backend unit suite (5,809), the full backend integration suite in chunks
+(about 4,990 passed, 7 pre-existing skips), `pnpm quality:check`, jest (3,237), the Playwright spec
+and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **One MCP tool for a task's own fields** (user decision: "Shouldn't the flag and icon be part of a
+  update task mcp?"): `update_task` takes text, flag and icon; lifecycle moves (status, retarget)
+  and links keep their own tools.
+- **`update_task_text` is removed** (user decision: "yes remove if its covered by update_task");
+  its behaviour is carried by `update_task(text=…)` and its tests were moved, not rewritten.
+- **The history wording ships here**, unlike the list history (Phase 7), because task history
+  already renders on the journal page and an agent can flag a task as soon as this lands.
+- **The flag is stored in history as `str(bool)`**, the contact `is_primary`/`is_archived`
+  precedent, rather than a bespoke vocabulary.
+
+**Notes for later phases:**
+- *Phase 22/23 (due date / due journal):* add the field to `TaskUpdateAttributes` (the validator
+  counts set fields), to `TaskService.update_task`, and as an argument of MCP `update_task`.
+- *Phase 19 or whichever phase gives MCP a due date:* `server.py`'s task guidance still ends "a task
+  is due in a journal, never on a bare date" (true for MCP today) — rewrite it then.
+- *ITER21-002:* the details panel and journal rows edit flag and icon through the same `PATCH`; the
+  history wording is already in place.
 
 #### Phase 29: Delete a list
 

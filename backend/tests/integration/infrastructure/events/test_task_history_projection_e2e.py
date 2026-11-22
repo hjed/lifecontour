@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 
 import pytest
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskStatus
 from core_shared.stream_client import StreamClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -278,6 +278,68 @@ class TestTaskLifecycleProjection:
         changed = {e.field_name: e for e in entries}
         assert changed["text"].source == Provenance.MCP
         assert changed["text"].changed_by == "mcp"
+
+    @pytest.mark.asyncio
+    async def test_a_flag_and_an_icon_are_projected_and_owned(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A journal-only task's flag and icon, set then the icon cleared.
+
+        The field names are the history labels; the flag's values read
+        ``"False"``/``"True"`` and the icon's are the plain keys.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+            flagged=True,
+            icon=TaskIcon.TENT,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+            icon=None,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-marks"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            ("flagged", "False", "True"),
+            ("icon", None, "tent"),
+            ("icon", "tent", None),
+        }
+        flagged = next(e for e in entries if e.field_name == "flagged")
+        assert (flagged.source, flagged.changed_by) == (Provenance.MCP, "mcp")
+        cleared = next(
+            e for e in entries if e.field_name == "icon" and e.new_value is None
+        )
+        assert cleared.source == Provenance.UI
+        assert all(e.user_id == USER_ID for e in entries)
 
     @pytest.mark.asyncio
     async def test_a_link_and_an_unlink_project_the_pair_opposite_ways_round(

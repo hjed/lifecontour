@@ -278,3 +278,54 @@ describe('taskEntryDescription — the task’s name', () => {
     ).toBe('Linked a contact');
   });
 });
+
+describe('a task’s flag and icon rows', () => {
+  // The backend stores the flag as `str(bool)` ("False"/"True") and the icon as
+  // its fixed-set key, with null meaning "no icon".
+  it.each([
+    ['False', 'True', 'Flagged'],
+    ['True', 'False', 'Unflagged'],
+  ])('a flag %s → %s reads as “%s”', (oldValue, newValue, expected) => {
+    expect(
+      taskEntryDescription(taskRow('flagged', oldValue, newValue), 'task')
+    ).toBe(expected);
+  });
+
+  it.each([
+    [null, 'tent', 'Icon set'],
+    ['tent', 'star', 'Icon changed'],
+    ['tent', null, 'Icon cleared'],
+  ])('an icon %s → %s reads as “%s”', (oldValue, newValue, expected) => {
+    expect(
+      taskEntryDescription(taskRow('icon', oldValue, newValue), 'task')
+    ).toBe(expected);
+  });
+
+  it('names the task when the row reaches a contact’s feed', () => {
+    expect(
+      taskEntryDescription(
+        {
+          ...taskRow('flagged', 'False', 'True'),
+          entity_label: 'Pack the stove',
+        },
+        'contact'
+      )
+    ).toBe('Flagged: “Pack the stove”');
+  });
+
+  it('leaves another domain’s rows of the same name alone', () => {
+    // A task list records its own icon under `icon`; that wording is not this
+    // function's to give.
+    expect(
+      taskEntryDescription(
+        {
+          entity_type: 'task_list',
+          field_name: 'icon',
+          old_value: null,
+          new_value: 'tent',
+        },
+        'task'
+      )
+    ).toBeNull();
+  });
+});

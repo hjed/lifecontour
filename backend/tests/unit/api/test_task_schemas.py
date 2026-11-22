@@ -17,7 +17,7 @@ invite a journal to be created implicitly.
 from datetime import UTC, datetime
 
 import pytest
-from core_shared.models.tasks import Task, TaskStatus
+from core_shared.models.tasks import Task, TaskIcon, TaskStatus
 from pydantic import ValidationError
 
 from app.api.common.identifiers import INT32_MAX
@@ -35,6 +35,7 @@ from app.api.tasks.schemas import (
     TaskUpdateAttributes,
     TaskUpdateRequest,
 )
+from app.shared.patch import UNSET
 
 
 def _valid_link_body(**overrides: object) -> dict[str, object]:
@@ -315,8 +316,70 @@ class TestTheUpdateRequestCarriesTextAndStatus:
         assert request.data.attributes.text == ""
 
 
+class TestTheUpdateRequestCarriesFlagAndIcon:
+    """The flag and the icon, on any task (ITER21-001 Phase 28).
+
+    Each alone is a change. The two differ on ``null``, as the list ``PATCH``
+    does: ``"icon": null`` clears the icon while an absent icon leaves it alone,
+    whereas a task is always flagged or not, so ``"flagged": null`` is refused
+    rather than read as "not sent".
+    """
+
+    def test_the_flag_alone_is_a_change(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(flagged=True)
+        ).data.attributes
+
+        assert attributes.flagged is True
+        assert attributes.icon_change() is UNSET
+
+    def test_an_icon_alone_is_a_change(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(icon="tent")
+        ).data.attributes
+
+        assert attributes.icon_change() == TaskIcon.TENT
+        assert attributes.flagged is None
+
+    def test_a_null_icon_alone_is_a_change_that_clears_it(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(icon=None)
+        ).data.attributes
+
+        assert attributes.icon_change() is None
+
+    def test_an_absent_icon_is_left_alone(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(text="rewritten")
+        ).data.attributes
+
+        assert attributes.icon_change() is UNSET
+
+    def test_every_field_together_is_one_body(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(text="rewritten", status="done", flagged=False, icon="star")
+        ).data.attributes
+
+        assert attributes.flagged is False
+        assert attributes.icon_change() == TaskIcon.STAR
+
+    def test_a_null_flag_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="flagged"):
+            TaskUpdateRequest.model_validate(_update_body(flagged=None))
+
+    @pytest.mark.parametrize("value", ["true", 1, 0, "yes"])
+    def test_the_flag_must_be_a_real_boolean(self, value: object) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body(flagged=value))
+
+    @pytest.mark.parametrize("value", ["rocket-ship", "", "Tent", 3])
+    def test_an_icon_outside_the_fixed_set_is_refused(self, value: object) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body(icon=value))
+
+
 class TestTheUpdateRequestChangesNothingElse:
-    """Text and status are the whole of it; everything else is refused.
+    """Text, status, flag and icon are the whole of it; everything else is refused.
 
     The due journal (Phase 8) and contact links (Phase 11) are edited through
     their own surfaces; accepting either here now would ship a half-implemented
