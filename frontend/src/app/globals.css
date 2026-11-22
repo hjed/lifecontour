@@ -99,7 +99,8 @@
 
 /* Emerald palette — colours from shadcn preset b2BWx6KYq (mist base, emerald
    theme), generated with `shadcn apply b2BWx6KYq --only theme` in a scratch
-   copy. PaletteProvider sets `data-palette` on <html>; next-themes owns the
+   copy, with the colours that fell short lifted to WCAG AA (marked below; the compile test
+   checks every text-on-surface pair). PaletteProvider sets `data-palette` on <html>; next-themes owns the
    `.dark` class, so the two choices combine freely. Status (`success`,
    `warning`, `info`) and chart colours are not overridden: status reads the
    same in every palette and the dashboard relies on chart-1..5 being distinct
@@ -126,7 +127,8 @@
   --ring: oklch(0.723 0.014 214.4);
   --sidebar: oklch(0.987 0.002 197.1);
   --sidebar-foreground: oklch(0.148 0.004 228.8);
-  --sidebar-primary: oklch(0.596 0.145 163.225);
+  /* The preset's 0.596 leaves white text at 3.6:1; primary's emerald passes. */
+  --sidebar-primary: oklch(0.508 0.118 165.612);
   --sidebar-primary-foreground: oklch(0.979 0.021 166.113);
   --sidebar-accent: oklch(0.963 0.002 197.1);
   --sidebar-accent-foreground: oklch(0.218 0.008 223.9);
@@ -141,8 +143,11 @@
   --card-foreground: oklch(0.987 0.002 197.1);
   --popover: oklch(0.218 0.008 223.9);
   --popover-foreground: oklch(0.987 0.002 197.1);
-  --primary: oklch(0.432 0.095 166.913);
-  --primary-foreground: oklch(0.979 0.021 166.113);
+  /* The preset's 0.432 primary is 2.6:1 as `text-primary` on this background.
+     The preset's own dark sidebar pairing (lighter emerald, dark text) keeps
+     links readable and filled controls at 6:1. */
+  --primary: oklch(0.696 0.17 162.48);
+  --primary-foreground: oklch(0.262 0.051 172.552);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.275 0.011 216.9);
