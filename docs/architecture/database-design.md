@@ -813,7 +813,10 @@ refused row.
   own, as `task_lists.position` is, so an edit with a stale position cannot undo a reorder. An
   **insert** of a task on a list (ITER21-001 Phase 19) locks the list `FOR NO KEY UPDATE` and
   places the task at the bottom in the same statement, through the `_BOTTOM_OF_LIST` subquery
-  `add_to_list` uses, so overlapping creates on one list take consecutive positions.
+  `add_to_list` uses, so overlapping creates on one list take consecutive positions. A list task
+  created **due in a journal** (Phase 20) has its due journal held `FOR KEY SHARE` by the service
+  *before* the list lock, so the journal → list order matches a retarget's and a journal delete's
+  (see *Task Domain* in `domain-architecture.md`).
 
 **Membership, order and close time** (ITER21-001 Phase 14). The list membership operations live on
 `TaskRepository` beside `save()`:

@@ -2,8 +2,9 @@
 
 One tool creates a task either **in journals** — the journal it arose in and the
 future journal it is due in, as it always has — or **on a list**, optionally
-with a due date. A JSON schema cannot say "these two, or that one", so this
-decides, and refuses any other mix by naming the argument at fault. It reads
+with a due date or a due journal, never both. A JSON schema cannot say "these
+two, or that one", so this decides, and refuses any other mix by naming the
+argument at fault. It reads
 nothing and writes nothing, so a refusal costs no query.
 
 The two results are separate types so the tool hands each service method only
@@ -27,10 +28,15 @@ class InJournals:
 
 @dataclass(frozen=True, kw_only=True)
 class OnList:
-    """A task on a list, with no journal, undated or due on ``due_date``."""
+    """A task on a list, with no creating journal.
+
+    Undated, due on ``due_date``, or due in ``due_journal_id`` — at most one of
+    the two, which :func:`resolve_create_placement` has already made sure of.
+    """
 
     task_list_id: int
     due_date: datetime.date | None
+    due_journal_id: int | None
 
 
 def resolve_create_placement(
@@ -52,13 +58,19 @@ def resolve_create_placement(
                 "creating_journal_id",
                 "a task on a list has no creating journal; omit it",
             )
-        if due_journal_id is not None:
+        if due_date is not None and due_journal_id is not None:
+            # Named ``due_date``, as the task entity names it on every other
+            # surface, so REST and MCP refuse the pair in the same words.
             raise TaskValidationError(
-                "due_journal_id",
-                "a due journal on a list is not supported yet; give a due_date "
-                "or leave the task undated",
+                "due_date",
+                "a task on a list is due on a date or in a journal, never both; "
+                "omit due_date or due_journal_id",
             )
-        return OnList(task_list_id=task_list_id, due_date=due_date)
+        return OnList(
+            task_list_id=task_list_id,
+            due_date=due_date,
+            due_journal_id=due_journal_id,
+        )
 
     if due_date is not None:
         raise TaskValidationError(

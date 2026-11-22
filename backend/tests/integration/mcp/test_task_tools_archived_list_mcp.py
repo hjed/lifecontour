@@ -26,6 +26,7 @@ from tests.integration.mcp.http_helpers import (
 from tests.integration.tasks.task_seeding import (
     ArchivedListTask,
     count,
+    create_journal,
     seed_archived_list_task,
     task_events,
     task_state,
@@ -172,6 +173,39 @@ class TestCreatingOnAnArchivedListIsRefused:
             for event in await task_events(clean_database)
             if event.event_type == "TaskCreated"
             and event.payload.get("task_list_id") == seeded.task_list_id
+        ] == []
+
+    async def test_a_create_due_in_a_past_journal_is_refused_as_archived_first(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        seeded: ArchivedListTask,
+    ) -> None:
+        """Unarchiving is the way out; correcting the journal would not be."""
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "create_task",
+                {
+                    "task_list_id": seeded.task_list_id,
+                    "due_journal_id": past_id,
+                    "text": "pack the spare torch",
+                },
+            )
+
+        refused = extract_mcp_tool_error(response.text)
+        assert refused["error"] == "Task error"
+        assert "unarchive" in refused["message"]
+        assert "future" not in refused["message"]
+        assert [
+            event
+            for event in await task_events(clean_database)
+            if event.event_type == "TaskCreated"
         ] == []
 
 

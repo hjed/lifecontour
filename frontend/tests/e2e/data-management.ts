@@ -76,6 +76,8 @@ export interface ListTaskCreateRequest {
   text: string;
   /** `YYYY-MM-DD`, today or later. Omitted means an undated task. */
   dueDate?: string;
+  /** A future journal the task is due in. Never together with `dueDate`. */
+  dueJournalId?: string;
 }
 
 /** A task list as the fixtures track it. */
@@ -90,6 +92,7 @@ export interface TestListTask {
   text: string;
   taskListId: string;
   dueDate: string | null;
+  dueJournalId: string | null;
 }
 
 /**
@@ -105,6 +108,7 @@ interface ListWriteResponse {
       text?: string;
       task_list_id?: number | null;
       due_date?: string | null;
+      due_journal_id?: number | null;
     };
   };
 }
@@ -1709,8 +1713,9 @@ export class TestDataManager {
   }
 
   /**
-   * Create a task on a list through the API: it has no journal, and joins the
-   * bottom of the list. Tracked with the other tasks, so cleanup deletes it
+   * Create a task on a list through the API: it has no creating journal, is
+   * undated, due on `dueDate` or due in `dueJournalId`, and joins the bottom
+   * of the list. Tracked with the other tasks, so cleanup deletes it
    * before the journals it may since have been linked to.
    */
   async createListTask(taskData: ListTaskCreateRequest): Promise<TestListTask> {
@@ -1724,6 +1729,9 @@ export class TestDataManager {
             attributes: {
               text: taskData.text,
               ...(taskData.dueDate ? { due_date: taskData.dueDate } : {}),
+              ...(taskData.dueJournalId
+                ? { due_journal_id: Number(taskData.dueJournalId) }
+                : {}),
             },
           },
         }),
@@ -1748,6 +1756,10 @@ export class TestDataManager {
       text: resource.attributes.text ?? taskData.text,
       taskListId: String(resource.attributes.task_list_id),
       dueDate: resource.attributes.due_date ?? null,
+      dueJournalId:
+        resource.attributes.due_journal_id == null
+          ? null
+          : String(resource.attributes.due_journal_id),
     };
   }
 

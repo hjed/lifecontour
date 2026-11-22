@@ -3,7 +3,8 @@
 A task is created either *from* a journal or *on* a list. From a journal, the
 creating journal is the path journal and never a body field — the body says only
 what the commitment is, when it is due, and who it involves. On a list, the list
-is the path and the task has no journal; the body may name the day it is due.
+is the path and the task has no creating journal; the body may name the day it
+is due or the future journal it is due in.
 
 The controller is deliberately thin. Every invariant — both anchors exist and
 belong to the acting user, the due journal is future-dated, referenced contacts
@@ -426,16 +427,20 @@ async def create_list_task(
 ) -> TaskResponse:
     """Create a task at the bottom of one of your lists.
 
-    The task has no journal. The body says what it is, optionally the day it is
-    due — today or later in your timezone — and who it involves.
+    The task has no creating journal. The body says what it is, optionally when
+    it is due — a day, today or later in your timezone, or a journal of yours
+    dated in the future, never both — and who it involves.
 
     Raises:
-        400: Empty text, an unknown attribute (a due journal included, which
-             this create does not take yet), a due date that is not a
-             ``YYYY-MM-DD`` string, or a due date before today
-             (``TASK_DUE_DATE_IN_PAST``, naming both days).
-        404: The list does not exist or is not yours, or a referenced contact
-             does not exist.
+        400: Empty text, an unknown attribute (a creating journal included), a
+             due date that is not a ``YYYY-MM-DD`` string, a due date before
+             today (``TASK_DUE_DATE_IN_PAST``, naming both days), a due journal
+             not in the future (``TASK_DUE_JOURNAL_NOT_FUTURE``, naming both
+             days), or both a due date and a due journal
+             (``TASK_VALIDATION_ERROR``, ``meta.field`` = ``due_date``).
+        404: The list does not exist or is not yours; the due journal does not
+             exist or is not yours (``TASK_ANCHOR_JOURNAL_NOT_FOUND``,
+             ``meta.anchor`` = ``due``); or a referenced contact does not exist.
         409: The list is archived (``TASK_LIST_ARCHIVED``); unarchive it first.
     """
     attributes = task_request.data.attributes
@@ -445,6 +450,7 @@ async def create_list_task(
         text=attributes.text,
         transaction=connection,
         due_date=attributes.due_date,
+        due_journal_id=attributes.due_journal_id,
         contact_ids=attributes.contact_ids,
         source=Provenance.UI,
         changed_by="ui",
@@ -560,7 +566,10 @@ async def retarget_task(
         409: The task is *done* and the reopen was not acknowledged. Its own
              code, ``TASK_REOPEN_NOT_ACKNOWLEDGED``, so a surface can offer
              "reopen it anyway" rather than showing a generic failure. Nothing
-             is written: not the status, not the anchor, not the link.
+             is written: not the status, not the anchor, not the link. Or the
+             task is on a list and done or cancelled
+             (``TASK_LIST_TASK_CLOSED``): a list task's date change never
+             reopens it, so no acknowledgement makes this succeed.
     """
     attributes = retarget_request.data.attributes
     retargeted, trail = await task_service.retarget_due_journal_with_trail(

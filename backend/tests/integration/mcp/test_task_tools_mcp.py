@@ -4363,6 +4363,188 @@ class TestCreateTaskOnAList:
 
 
 @pytest.mark.integration
+class TestCreateTaskOnAListDueInAJournal:
+    """``create_task`` with ``task_list_id`` and ``due_journal_id``."""
+
+    async def test_creates_a_task_due_in_the_journal_at_the_bottom_of_the_list(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        await create_list_task(clean_database, task_list_id=list_id, position=0)
+        journal_id = await create_journal(
+            journal_repository, title="Beach weekend", days_offset=5
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _create_task(
+                client,
+                task_list_id=list_id,
+                due_journal_id=journal_id,
+                due_date=None,
+                text="pack the tent",
+            )
+
+        assert "error" not in payload
+        assert payload["task_list_id"] == list_id
+        assert payload["due_journal_id"] == journal_id
+        assert payload["creating_journal_id"] is None
+        assert payload["due_date"] is None
+        task_id = int(payload["id"])
+        row = (
+            await clean_database.execute(
+                sa_text("SELECT position FROM tasks WHERE id = :id"), {"id": task_id}
+            )
+        ).one()
+        assert row.position == 1
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.payload["due_journal_id"] == journal_id
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_journal_not_in_the_future_is_refused_with_both_dates(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                due_journal_id=past_id,
+                text="too late",
+            )
+
+        assert payload["error"] == "Task error"
+        assert "not after today" in payload["message"]
+        assert "must be a journal dated in the future" in payload["message"]
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await task_events(clean_database) == []
+
+    async def test_a_due_date_beside_it_is_refused_naming_the_date(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        journal_id = await create_journal(
+            journal_repository, title="Beach weekend", days_offset=5
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                due_journal_id=journal_id,
+                due_date="2099-12-31",
+                text="pack the tent",
+            )
+
+        assert payload["error"] == "Task error"
+        assert payload["field"] == "due_date"
+        assert "never both" in payload["message"]
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_another_users_journal_reads_as_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Indistinguishable from a journal that never existed, nothing written."""
+        list_id = await seed_task_list_id(clean_database)
+        foreign_id = await create_journal(
+            journal_repository,
+            title="Somebody else's trip",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        absent_id = foreign_id + 1_000_000
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                due_journal_id=foreign_id,
+                text="mine now",
+            )
+            absent = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                due_journal_id=absent_id,
+                text="mine now",
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["anchor"] == absent["anchor"] == "due"
+        assert foreign["message"] == absent["message"].replace(
+            str(absent_id), str(foreign_id)
+        )
+        for owner in (USER_ID, OTHER_USER_ID):
+            assert await count(clean_database, COUNT_TASKS, {"user_id": owner}) == 0
+        assert await task_events(clean_database) == []
+
+
+@pytest.mark.integration
+class TestRetargetingAClosedListTask:
+    """``retarget_task`` refuses a done or cancelled task on a list.
+
+    Temporary, until a list task's due journal can be changed under list rules,
+    which never reopen it.
+    """
+
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    async def test_is_refused_naming_why_and_left_as_it_was(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        status: TaskStatus,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        due_id = await create_journal(journal_repository, title="Trip", days_offset=5)
+        later_id = await create_journal(
+            journal_repository, title="Later trip", days_offset=9
+        )
+        task_id = await create_list_task(
+            clean_database, task_list_id=list_id, due_journal_id=due_id, status=status
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "retarget_task",
+                task_id=task_id,
+                due_journal_id=later_id,
+                acknowledge_reopen=True,
+            )
+
+        assert payload["error"] == "Task error"
+        assert "never reopens it" in payload["message"]
+        row = (
+            await clean_database.execute(
+                sa_text("SELECT status, due_journal_id FROM tasks WHERE id = :id"),
+                {"id": task_id},
+            )
+        ).one()
+        assert (row.status, row.due_journal_id) == (status.value, due_id)
+        assert await task_events(clean_database, task_id=task_id) == []
+
+
+@pytest.mark.integration
 class TestCreateTaskOnAListRefusals:
     """Each refusal is actionable, and nothing is written."""
 
@@ -4479,13 +4661,13 @@ class TestCreateTaskOnAListRefusals:
                 id="a list and a creating journal",
             ),
             pytest.param(
-                {"due_journal_id": "DUE"},
-                "due_journal_id",
-                id="a list and a due journal",
+                {"creating_journal_id": "CREATING", "due_journal_id": "DUE"},
+                "creating_journal_id",
+                id="a list and both journals",
             ),
         ],
     )
-    async def test_a_journal_beside_a_list_is_refused_naming_it(
+    async def test_a_creating_journal_beside_a_list_is_refused_naming_it(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,

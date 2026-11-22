@@ -184,6 +184,45 @@ class TaskReopenNotAcknowledgedError(TaskDomainError):
         self.task_id = task_id
 
 
+class TaskListTaskClosedError(TaskDomainError):
+    """Exception raised when a closed task on a list is retargeted.
+
+    Retargeting applies the journal-only rules: it leaves a task *not done*, so
+    a done task needs the reopen acknowledgement and a cancelled one is revived.
+    A task on a list follows other rules — changing its date is a plain edit
+    that never changes its status — and the operation that will apply them is a
+    due-journal change of a list task's own, which does not exist yet. Until it
+    does, a done or cancelled list task is refused here rather than reopened by
+    a date move.
+    A not-done one is retargeted as before: the date moves, the old journal is
+    kept as a mention and the status is untouched, which already obeys the list
+    rules.
+
+    **Temporary.** The list-task due-journal change keeps a closed list task
+    closed when its date moves; when it lands, this error and its REST code go.
+
+    **409 rather than 400**, as :class:`TaskReopenNotAcknowledgedError` is: the
+    request is well formed and what it conflicts with is the task's state.
+    """
+
+    def __init__(self, task_id: int, status: TaskStatus):
+        # A done task can be set back to not done today; a cancelled one cannot
+        # be reopened at all yet, so only the first is told how.
+        way_out = (
+            "Set it back to not done first, then change its due journal."
+            if status is TaskStatus.DONE
+            else "A cancelled task on a list cannot have its date changed yet."
+        )
+        super().__init__(
+            f"Task {task_id} is on a list and {status}, so its due journal cannot "
+            f"be changed while it is closed: changing a list task's date never "
+            f"reopens it. {way_out}",
+            409,
+        )
+        self.task_id = task_id
+        self.status = status
+
+
 class TaskAnchorJournalNotFoundError(TaskDomainError):
     """Exception raised when one of a task's journal anchors is unreachable.
 

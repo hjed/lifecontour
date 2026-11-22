@@ -1,10 +1,12 @@
 """Unit tests for the body of ``POST /api/task-lists/{list_id}/tasks``.
 
-A task created on a list names its text, optionally a due date and contacts.
-The list is the path, so it is never a body field; a due journal arrives in a
-later phase, so until then it is refused rather than silently dropped. The due
-date is a calendar day sent as an ISO string: a JSON number would otherwise be
-read as a timestamp and cut to its UTC day.
+A task created on a list names its text, optionally a due date or a due
+journal, and contacts. The list is the path, so it is never a body field, and a
+task on a list has no creating journal, so that is refused rather than silently
+dropped. The due date is a calendar day sent as an ISO string: a JSON number
+would otherwise be read as a timestamp and cut to its UTC day. Sending both a
+date and a journal is the domain's refusal, not the schema's: it passes here and
+is answered with the entity's ``meta.field``.
 """
 
 import datetime
@@ -31,7 +33,35 @@ def test_text_alone_is_a_valid_body() -> None:
     attributes = request.data.attributes
     assert attributes.text == "pack the tent"
     assert attributes.due_date is None
+    assert attributes.due_journal_id is None
     assert attributes.contact_ids is None
+
+
+def test_a_due_journal_is_accepted_as_an_id() -> None:
+    request = ListTaskCreateRequest.model_validate(_body(due_journal_id=42))
+
+    assert request.data.attributes.due_journal_id == 42
+
+
+@pytest.mark.parametrize("due_journal_id", [0, -1, 2**31, "abc"], ids=repr)
+def test_a_due_journal_that_is_not_a_database_id_is_refused(
+    due_journal_id: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        ListTaskCreateRequest.model_validate(_body(due_journal_id=due_journal_id))
+
+
+def test_a_due_date_and_a_due_journal_together_reach_the_domain() -> None:
+    """The entity refuses the pair, naming ``due_date``, on every surface alike."""
+    request = ListTaskCreateRequest.model_validate(
+        _body(due_date="2026-11-30", due_journal_id=42)
+    )
+
+    attributes = request.data.attributes
+    assert (attributes.due_date, attributes.due_journal_id) == (
+        datetime.date(2026, 11, 30),
+        42,
+    )
 
 
 def test_an_iso_due_date_is_read_as_that_day() -> None:
@@ -59,7 +89,6 @@ def test_anything_but_an_iso_calendar_date_is_refused(due_date: object) -> None:
 @pytest.mark.parametrize(
     "attribute",
     [
-        "due_journal_id",
         "creating_journal_id",
         "task_list_id",
         "position",

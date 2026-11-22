@@ -1,15 +1,15 @@
 """Tasks domain MCP tools.
 
-A task is a short commitment, either on one of the user's lists — undated or due
-on a date — or anchored to two of their journals: the one it arose in, and the
-future-dated one where it matters. ``create_task`` takes either placement, and
-both journal anchors are its arguments because an AI client has no path to take
-the first from, unlike the REST surface.
+A task is a short commitment, either on one of the user's lists — undated, due
+on a date, or due in a future journal — or anchored to two of their journals:
+the one it arose in, and the future-dated one where it matters. ``create_task``
+takes either placement, and both journal anchors are its arguments because an
+AI client has no path to take the first from, unlike the REST surface.
 
 The tools are controller-equivalent and stay that way: they open **no**
 transaction and enforce **no** invariant of their own — only which placement a
 create's arguments describe, which is argument parsing, not a rule. Every rule —
-the list or both anchors exist and are the acting user's, the list is not
+the list and any journal named exist and are the acting user's, the list is not
 archived, a due date is today or later, the due journal is future-dated at the moment
 it is set, referenced contacts exist, and the status transition is one the
 lifecycle permits — belongs to ``TaskService``, which owns the commit. That is
@@ -144,8 +144,9 @@ async def create_task(
         Field(
             description=(
                 "The list to put the task on, at the bottom. A task on a list has "
-                "no creating or due journal: give a due_date instead, or leave it "
-                "undated. The list must be yours and not archived."
+                "no creating journal: give it a due_date or a due_journal_id "
+                "(never both), or leave it undated. The list must be yours and "
+                "not archived."
             )
         ),
     ] = None,
@@ -154,8 +155,8 @@ async def create_task(
         Field(
             description=(
                 "Only for a task on a list: the day it is due, as YYYY-MM-DD. "
-                "Must be today or later in the user's timezone. Omit for an "
-                "undated task."
+                "Must be today or later in the user's timezone. Never together "
+                "with due_journal_id. Omit for an undated task."
             )
         ),
     ] = None,
@@ -177,11 +178,12 @@ async def create_task(
             ge=1,
             le=INT32_MAX,
             description=(
-                "For a task in journals: the journal the task is due in. Must be "
-                "an existing journal of yours dated in the future: today is not "
-                "the future, and a multi-day journal already under way is dated "
-                "by the day it started. Create the journal first if the day you "
-                "want has none. Give it with creating_journal_id."
+                "The journal the task is due in. Must be an existing journal of "
+                "yours dated in the future: today is not the future, and a "
+                "multi-day journal already under way is dated by the day it "
+                "started. Create the journal first if the day you want has none. "
+                "For a task in journals, give it with creating_journal_id; for a "
+                "task on a list, give it with task_list_id instead of a due_date."
             ),
         ),
     ] = None,
@@ -202,10 +204,12 @@ async def create_task(
 
     Say where it goes in one of two ways:
 
-    - **On a list:** task_list_id, and optionally a due_date (YYYY-MM-DD, today
-      or later). The task joins the bottom of the list and has no journal. Use
-      this for anything not tied to a particular journal entry, such as a
-      packing list or a shopping list.
+    - **On a list:** task_list_id, and optionally either a due_date
+      (YYYY-MM-DD, today or later) or a due_journal_id (a future journal of
+      yours, such as the trip a packing list is for) — never both. The task
+      joins the bottom of the list and has no creating journal. Use this for
+      anything not tied to the journal entry it came up in, such as a packing
+      list or a shopping list.
     - **In journals:** creating_journal_id (where it came up) and due_journal_id
       (the future journal it is due in), with no list and no due_date. To make
       such a task due on a particular day, that day's journal must already
@@ -239,6 +243,7 @@ async def create_task(
                 text=text,
                 transaction=db_connection,
                 due_date=placement.due_date,
+                due_journal_id=placement.due_journal_id,
                 contact_ids=contact_ids,
                 source=Provenance.MCP,
                 changed_by="mcp",
@@ -451,6 +456,10 @@ async def retarget_task(
 
     A task on an archived list is read-only, as the list is: this is refused,
     even when it would change nothing, until the list is unarchived.
+
+    A task on a list that is done or cancelled is refused too, acknowledgement
+    or not: changing a list task's date never reopens it. A not-done task on a
+    list is moved as usual and stays not done.
     """
     user_id = await get_current_user_id()
 

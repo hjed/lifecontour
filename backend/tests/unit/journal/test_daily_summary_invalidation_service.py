@@ -592,6 +592,39 @@ class TestATaskChangeFollowsItsDueJournal:
         summary_repo.invalidate_for_range.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_a_task_created_on_a_list_due_in_a_journal_makes_today_stale(
+        self,
+        service: DailySummaryInvalidationService,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """Deliberate over-invalidation: keyed on the due journal, list or not.
+
+        The summary leaves list tasks out until ITER21-004, so regenerating
+        today changes nothing yet. It is kept because a list task's later
+        updates already invalidate through the row's due journal, and the
+        create answering otherwise would make the two disagree.
+        """
+        journal_repo.find_by_id.return_value = _journal(
+            start=_instant(30), end=_instant(30, 10)
+        )
+
+        await service.invalidate_for_event(
+            "TaskCreated",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "task_list_id": 9,
+                "due_date": None,
+                "creating_journal_id": None,
+                "due_journal_id": JOURNAL_ID,
+            },
+        )
+
+        journal_repo.find_by_id.assert_awaited_once_with(JOURNAL_ID)
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
     async def test_a_task_due_beyond_the_week_makes_nothing_stale(
         self,
         service: DailySummaryInvalidationService,

@@ -269,10 +269,18 @@ the *creating* journal where it arose and the *due* journal where it matters.
   order: it has no task row yet, and its insert computes the bottom of the list, so it reads the
   list with `find_by_id_for_update` (`FOR NO KEY UPDATE`) **first** and calls `ensure_writable()`
   itself. Taking share first and update second would be a lock upgrade two concurrent creates
-  deadlock on. Refusals come entity rules → list not found → contact not found → archived → due
-  date before today. REST's `POST /api/task-lists/{list_id}/tasks` and MCP's `create_task` (with
-  `task_list_id`; `app/mcp/domains/tasks/placement.py` decides which create its arguments
-  describe) both call it.
+  deadlock on. A create **due in a journal** (ITER21-001 Phase 20) takes one lock before the list:
+  the due journal `FOR KEY SHARE` (`JournalRepository.find_and_lock_by_ids_for_user`, owner-scoped),
+  the order a retarget (journals → task → list) and a journal delete's detach (journal → tasks)
+  take it in, so the three cannot close a cycle. A delete that holds the journal first makes the
+  create wait and then answer the due journal not found; a create that holds it first is detached
+  by the delete and becomes undated. Refusals come entity rules (a due date *and* a due journal is
+  `TaskValidationError` on `due_date`) → list not found → due journal not found
+  (`TaskAnchorJournalNotFoundError`, anchor `due`) → contact not found → archived → due date
+  before today / due journal not in the future (`is_future_dated`, the journal-only rule). REST's
+  `POST /api/task-lists/{list_id}/tasks` and MCP's `create_task` (with `task_list_id`;
+  `app/mcp/domains/tasks/placement.py` decides which create its arguments describe and refuses a
+  due date beside a due journal, naming `due_date`) both call it.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below; the
   date rules a task on a list follows instead — due date, overdue, never lapsing — see

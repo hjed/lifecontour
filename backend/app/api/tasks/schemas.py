@@ -228,8 +228,10 @@ class ListTaskCreateAttributes(BaseModel):
     """Attributes a client may send to create a task on a list.
 
     The list is the path, so it is never a body field, and a task on a list has
-    no creating journal. The due journal is not accepted yet; ``extra="forbid"``
-    refuses it rather than dropping it, so no client believes it was applied.
+    no creating journal; ``extra="forbid"`` refuses one rather than dropping it,
+    so no client believes it was applied. A due date and a due journal are each
+    optional and never both: that pair passes here and is refused by the task
+    entity, naming ``due_date``, so the rule has one home on every surface.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -239,7 +241,17 @@ class ListTaskCreateAttributes(BaseModel):
         default=None,
         description=(
             "The day it is due, as YYYY-MM-DD. Must be today or later in your "
-            "timezone. Omit for an undated task."
+            "timezone. Omit for an undated task. Never together with "
+            "due_journal_id."
+        ),
+    )
+    due_journal_id: DatabaseId | None = Field(
+        default=None,
+        description=(
+            "The journal it is due in, dated in the future: today is not the "
+            "future, and a multi-day journal already under way is dated by the "
+            "day it started. Must be one of your journals. Never together with "
+            "due_date."
         ),
     )
     contact_ids: list[DatabaseId] | None = Field(

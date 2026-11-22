@@ -123,7 +123,7 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] Listing lists supports an archived filter and returns each list's open-task count; reading one list returns its open tasks in manual order and its closed tasks most-recently-closed first, paged.
 
 **Acceptance Criteria — tasks on a list:**
-- [ ] A task can be created on a list with no journal at all, with a due date, or with a due journal; never with both a due date and a due journal, and never with neither a list nor a due journal (invariants 1–5 hold in the domain and in the database).
+- [x] A task can be created on a list with no journal at all, with a due date, or with a due journal; never with both a due date and a due journal, and never with neither a list nor a due journal (invariants 1–5 hold in the domain and in the database). *(Phases 10, 19, 20)*
 - [ ] A due date must be today or later in the user's timezone when set; a due journal must be future-dated when set.
 - [ ] A list task never lapses. Past its date it reads as **overdue**; when the date comes from a multi-day journal it is overdue only once the journal's last day has ended.
 - [ ] Changing or clearing a list task's date is a plain edit with no acknowledgement and no status change; a replaced or cleared due journal becomes an intermediate journal.
@@ -1717,15 +1717,128 @@ tests 3 repeats each); pre-commit.
 - *Phase 29 (list delete):* `TestDataManager` archives the lists it created, since they cannot be
   deleted yet; switch its cleanup to a delete.
 
-#### Phase 20: Create on a list with a due journal
+#### Phase 20: Create on a list with a due journal ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 19.
-**Estimated diff:** ~90 production → **~800 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~90 production → **~800 tracked** · one capability on REST and MCP together ·
+**Actual:** ~245 production → **~1,700 tracked** (1,698 insertions, 121 deletions excluding this
+document: 245 production — the service's create and its lock 97, the closed-list-task retarget
+refusal and its error 60, MCP placement, tool and guidance 50, REST schema and controller 26, about
+half of it docstrings; 1,435 tests across backend unit, integration and E2E; 25 architecture docs).
+Production ran ×2.7 on the estimate: the lock-order change found in plan review and the retarget
+refusal found in the phase's review were not priced. Tracked ran ×2.1, under the capability band's
+upper end.
 
 **Acceptance Criteria:**
 
-- [ ] Future-dated journal; never together with a due date.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Future-dated journal; never together with a due date.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a task can be created on one of the user's lists due in one of their journals,
+dated in the future (strictly after today in the user's timezone, the journal-only rule
+`is_future_dated` unchanged), with no creating journal and never beside a due date.
+- `TaskService.create_list_task` / `create_list_task_with_trail` take `due_journal_id`. **Lock
+  order: due journal, then list, then the insert.** The due journal is held `FOR KEY SHARE` through
+  the new `_lock_due_journal` (`JournalRepository.find_and_lock_by_ids_for_user`, owner-scoped)
+  *before* the list's `FOR NO KEY UPDATE`: the order a retarget (journals → task → list) and a
+  journal delete's detach (journal → tasks) take, so no create closes a cycle with them. Refusals:
+  entity rules (a due date with a due journal is `TaskValidationError` on `due_date`) → list not
+  found → due journal not found (`TaskAnchorJournalNotFoundError`, anchor `due`) → contact → list
+  archived → due date before today / due journal not in the future. `_save(task)` now reads the
+  anchor ids off the task, so the list insert keeps the foreign-key backstop (a vanished journal is
+  the 404, not a 500).
+- **REST** `POST /api/task-lists/{list_id}/tasks` accepts `due_journal_id` (`DatabaseId`); a
+  `creating_journal_id` is still refused by `extra="forbid"`. 404 `TASK_ANCHOR_JOURNAL_NOT_FOUND`
+  (`meta.anchor` = `due`) for a missing or another user's journal, byte-identical; 400
+  `TASK_DUE_JOURNAL_NOT_FUTURE`; 400 `TASK_VALIDATION_ERROR` `meta.field` = `due_date` for both.
+- **MCP** `create_task`: `resolve_create_placement` accepts `task_list_id` + `due_journal_id`
+  (`OnList.due_journal_id`) and refuses it beside a `due_date`, naming `due_date` as the entity
+  does; a creating journal with a list stays refused. Tool, parameter and server guidance say a
+  task on a list may be due in a future journal.
+- **Retarget refuses a done or cancelled task on a list** (user decision, from the phase's
+  review): `TaskListTaskClosedError` (409, REST `TASK_LIST_TASK_CLOSED`, MCP "Task error"),
+  decided from the locked read after the archived check and the no-op answer, whatever
+  `acknowledge_reopen` says, writing nothing. This phase is the first to let a list task reach
+  retarget in production; retarget's journal-only rules would reopen a closed one, and a list
+  task's date change never changes its status. A not-done list task still retargets — the date
+  moves, the old journal becomes a mention, the status is untouched — which already matches the
+  spec. The web app never offered retarget on such a task (`canRetarget` needs both journals).
+  **Lifted in Phase 23** (see its acceptance criteria).
+
+**Tests:** unit `test_task_service_create_on_list.py` (`TestCreatingWithADueJournal`: saved shape,
+event payload, the journal locked before the list and never the share lock, tomorrow accepted and
+today refused in Sydney, UTC fallback, not found as the `due` anchor, the pair refused before any
+read, precedence list → journal → contact and archived → not future, the FK violation mapped; a
+dated create takes no journal lock), `test_task_service_retarget.py`
+(`TestAClosedTaskOnAListIsNotRetargeted`: done and cancelled, with and without the
+acknowledgement, nothing written; decided from the locked read; a not-done list task moves and
+stays not done; a done journal-only task still asks for the acknowledgement),
+`test_task_error_mapping.py`, `test_task_create_placement.py` (the Phase 19 "not supported yet"
+case replaced by the accepted placement, the pair refusal and a list with both journals),
+`test_list_task_create_schemas.py`, `test_task_tools_schema.py`, `test_server.py`, and
+`test_daily_summary_invalidation_service.py` (a list task created due in a journal makes today
+stale — deliberate over-invalidation, see below). Integration
+`test_task_service_create_on_list_integration.py` (`TestCreatingDueInAJournal`: stored at the
+bottom with the journal and no other date, one event; reads back due there, on its list, neither
+lapsed nor overdue, in the journal's *due* group; lights the journal's tasks-due badge; stays out of
+the upcoming window; another user's journal → not found, nothing written; today in Sydney refused
+naming both days; UTC fallback; and `TestAJournalDeleteRacingTheCreate`, two committed connections
+through `overlap`: a create during the delete waits and is told the journal is gone, a delete during
+the create waits and leaves the task undated with `TaskJournalLinksRemoved`), the event-completeness
+inventory (a "create on a list due in a journal" write path, ports `{"save"}`),
+`api/test_list_task_create_endpoints.py` (201; 400 not future, the pair, a creating journal, out of
+range ids; 404 unknown; 409 archived before a past journal; a second user's journal identical to a
+missing one, nothing written; retarget of a closed list task → 409 `TASK_LIST_TASK_CLOSED`, left as
+it was), `mcp/test_task_tools_mcp.py` (`TestCreateTaskOnAListDueInAJournal`: created at the bottom
+with MCP provenance; not future with both dates; the pair naming `due_date`; another user's journal
+reads as an absent one, nothing written; `TestRetargetingAClosedListTask`), and
+`test_task_tools_archived_list_mcp.py` (archived wins over a past journal). E2E
+(`journal-tasks.spec.ts`, new describe *a task on a list due here*, 390px): the first real list task
+in a journal's *Due* group — no lapsed marker, no retarget, **Mark done** awaited on its PATCH and
+read back after a reload, no horizontal scroll, no page errors; `TestDataManager.createListTask`
+takes `dueJournalId`. No journal-only test's assertions changed. Gates run locally: ruff
+format/check and mypy (backend, core_shared); backend unit (5,911 passed); core_shared (868); the
+full backend integration suite in chunks (4,950 passed, 7 pre-existing skips) and the task, REST
+and MCP chunks again after the retarget refusal; `pnpm quality:check`; jest (3,237 passed);
+`journal-tasks.spec.ts` on Firefox and Mobile Chrome (27 passed; the new test 3 repeats each);
+pre-commit.
+
+**Decisions (recorded during implementation):**
+- **The due journal is locked before the list** (found in plan review): taking it through the
+  insert's foreign key *after* the list lock let a create, a journal delete queued on the journal
+  and a retarget holding it while waiting on the list form a cycle (40P01, an unmapped 500).
+- **"Never both" has one home per surface and one field name:** the entity on REST, the placement on
+  MCP (so the refusal costs no query), both naming `due_date`. No REST `model_validator`.
+- **MCP journal ids stay plain `int`** (Phase 19's suggestion not taken): `JsonIntOnly` would
+  change the journal-only contract, which this sub-iteration must keep unchanged.
+- **Daily-summary invalidation: deliberate over-invalidation.** `TaskCreated` with a due journal
+  marks that journal's day stale although the summary leaves list tasks out, so the regeneration
+  changes nothing yet — as list-task updates already do through the row's due journal; ITER21-004
+  needs it.
+- **The tasks-due badge counts a list task due in the journal** (Phase 15's decision), now proven
+  through a real create.
+- **Retarget refuses a closed list task** (user decision: "refuse … but ensure the task document
+  documents exactly when and how the refusal is lifted in a phase"). A 409 of its own rather than
+  `TaskReopenNotAcknowledgedError`, so no acknowledgement can buy the reopen; its message tells a
+  done task's caller to set it back to not done first, and says plainly that a cancelled one's date
+  cannot be changed yet (cancelled → not done is still refused until Phase 24).
+
+**Notes for later phases:**
+- *Phase 23 (change a list task's due journal):* **lifts Phase 20's refusal.** Retarget — or the
+  list-task due-journal change that replaces it for tasks on a list — must accept a done or
+  cancelled list task, keep its status and ask for no acknowledgement; delete
+  `TaskListTaskClosedError`, its `TASK_LIST_TASK_CLOSED` mapping and the `retarget_due_journal`
+  check that raises it, and rewrite `TestAClosedTaskOnAListIsNotRetargeted`, the REST
+  `TestRetargetingAClosedListTaskDueInAJournal` and the MCP `TestRetargetingAClosedListTask` to
+  assert the change lands with the status kept. Update the `retarget_task` tool docstring, the
+  controller docstring and `api-design.md`'s retarget row. Reuse `_lock_due_journal` for the new
+  due journal, before the task and list locks.
+- *Phase 24 (direct reopen):* the closed-list-task refusal's message names "set it back to not
+  done" only for a done task; once a cancelled list task can be reopened directly, reword it (or,
+  if Phase 23 lands first, it is already gone).
+- *Phase 30 and ITER21-002:* `TestDataManager.createListTask` takes `dueJournalId`; a list task due
+  in a journal sits in that journal's *Due* group, the place its overdue marker and direct reopen go.
 
 #### Phase 21: Read a list's tasks ✅ DONE
 
@@ -1879,6 +1992,7 @@ tasks most-recently-closed first, paged".
 **Acceptance Criteria:**
 
 - [ ] Set, change, clear; the replaced journal becomes intermediate.
+- [ ] Lifts Phase 20's closed-list-task retarget refusal: a done or cancelled task on a list can have its due journal changed, keeping its status and asking for no acknowledgement; `TaskListTaskClosedError` and `TASK_LIST_TASK_CLOSED` are removed and Phase 20's refusal tests rewritten to assert the change (see Phase 20's notes).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 24: Direct reopen of list tasks
