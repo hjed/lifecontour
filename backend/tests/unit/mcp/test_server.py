@@ -107,6 +107,11 @@ class TestTheTaskGuidanceDescribesListTasks:
         assert "on a list" in instructions
         assert "due date" in instructions
 
+    def test_says_a_task_on_a_list_can_be_due_in_a_journal(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "due in a future journal" in instructions
+
     def test_no_longer_says_tasks_cannot_be_placed_on_a_list(self) -> None:
         instructions = create_mcp_server().instructions or ""
 

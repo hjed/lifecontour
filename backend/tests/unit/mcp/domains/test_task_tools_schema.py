@@ -159,6 +159,18 @@ class TestTheToolDocumentsItself:
 
         assert "future" in description.lower()
 
+    def test_the_due_journal_parameter_names_both_placements(
+        self, create_task_schema: dict[str, Any]
+    ) -> None:
+        """It is the date of a task on a list as well as of a task in journals."""
+        description = create_task_schema["input_schema"]["properties"][
+            "due_journal_id"
+        ]["description"]
+
+        assert "task_list_id" in description
+        assert "creating_journal_id" in description
+        assert "due_date" in description
+
 
 def _enum_values(input_schema: dict[str, Any], parameter: str) -> list[str]:
     """The values a parameter admits, however the generator chose to express them.

@@ -280,6 +280,23 @@ async def _act_create_on_a_list(
     )
 
 
+async def _act_create_on_a_list_due_in_a_journal(
+    fixtures: _Fixtures, seeded: Seeded
+) -> None:
+    task_list = await seed_task_list(fixtures.connection, "Packing")
+    assert task_list.id is not None
+    due_journal_id = await create_journal(
+        fixtures.journals, title="Beach weekend", days_offset=3
+    )
+    await fixtures.service.create_list_task(
+        user_id=USER_ID,
+        task_list_id=task_list.id,
+        text="pack the tent",
+        due_journal_id=due_journal_id,
+        transaction=fixtures.connection,
+    )
+
+
 async def _act_create_on_a_list_with_contacts(
     fixtures: _Fixtures, seeded: Seeded
 ) -> None:
@@ -542,6 +559,13 @@ WRITE_PATHS: list[WritePath] = [
         ports=frozenset({"save"}),
         seed=_seed_nothing,
         act=_act_create_on_a_list,
+        expects=["created"],
+    ),
+    WritePath(
+        name="create on a list due in a journal",
+        ports=frozenset({"save"}),
+        seed=_seed_nothing,
+        act=_act_create_on_a_list_due_in_a_journal,
         expects=["created"],
     ),
     WritePath(

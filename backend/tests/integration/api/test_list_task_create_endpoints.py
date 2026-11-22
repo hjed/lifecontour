@@ -16,12 +16,14 @@ from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from tests.integration.tasks.task_seeding import (
     COUNT_TASKS,
     OTHER_USER_ID,
     USER_ID,
     count,
     create_contact,
+    create_journal,
     create_list_task,
     linked_contact_ids,
     seed_task_list_id,
@@ -151,7 +153,7 @@ class TestRefusals:
     @pytest.mark.parametrize(
         "attributes",
         [
-            pytest.param({"due_journal_id": 1}, id="a due journal"),
+            pytest.param({"creating_journal_id": 1}, id="a creating journal"),
             pytest.param({"position": 0}, id="a position"),
             pytest.param({"task_list_id": 1}, id="a list in the body"),
             pytest.param({"due_date": 20991231}, id="a numeric due date"),
@@ -240,6 +242,213 @@ class TestRefusals:
         assert error["code"] == "TASK_LIST_ARCHIVED"
         assert "unarchive" in error["detail"].lower()
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await task_events(async_connection) == []
+
+
+class TestCreatingDueInAJournal:
+    async def test_answers_201_with_the_task_due_in_the_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+        journal_id = await create_journal(journal_repository, days_offset=5)
+
+        response = await _create(
+            authenticated_client, list_id, due_journal_id=journal_id
+        )
+
+        assert response.status_code == 201
+        attributes = response.json()["data"]["attributes"]
+        assert attributes["task_list_id"] == list_id
+        assert attributes["due_journal_id"] == journal_id
+        assert attributes["creating_journal_id"] is None
+        assert attributes["due_date"] is None
+        task_id = int(response.json()["data"]["id"])
+        (event,) = await task_events(async_connection, task_id=task_id)
+        assert event.payload["due_journal_id"] == journal_id
+        assert event.payload["source"] == Provenance.UI.value
+
+    async def test_a_journal_that_is_not_in_the_future_is_refused_naming_both_days(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+        journal_id = await create_journal(journal_repository, days_offset=-2)
+
+        response = await _create(
+            authenticated_client, list_id, due_journal_id=journal_id
+        )
+
+        assert response.status_code == 400
+        error = _error(response)
+        assert error["code"] == "TASK_DUE_JOURNAL_NOT_FUTURE"
+        assert "today" in error["detail"].lower()
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+        assert await task_events(async_connection) == []
+
+    async def test_a_due_date_beside_it_is_refused_naming_the_date(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+        journal_id = await create_journal(journal_repository, days_offset=5)
+
+        response = await _create(
+            authenticated_client,
+            list_id,
+            due_date=FUTURE.isoformat(),
+            due_journal_id=journal_id,
+        )
+
+        assert response.status_code == 400
+        error = _error(response)
+        assert error["code"] == "TASK_VALIDATION_ERROR"
+        assert error["meta"] == {"field": "due_date"}
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_an_unknown_journal_is_not_found_as_the_due_anchor(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+
+        response = await _create(authenticated_client, list_id, due_journal_id=999_999)
+
+        assert response.status_code == 404
+        error = _error(response)
+        assert error["code"] == "TASK_ANCHOR_JOURNAL_NOT_FOUND"
+        assert error["meta"] == {"anchor": "due"}
+        assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    @pytest.mark.parametrize("journal_id", [0, INT32_MAX + 1, "abc"], ids=repr)
+    async def test_an_out_of_range_journal_id_is_a_validation_error(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_id: object,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+
+        response = await _create(
+            authenticated_client, list_id, due_journal_id=journal_id
+        )
+
+        assert response.status_code == 400
+        assert _error(response)["code"] == "VALIDATION_ERROR"
+
+    async def test_an_archived_list_is_reported_before_a_past_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection, archived=True)
+        journal_id = await create_journal(journal_repository, days_offset=-2)
+
+        response = await _create(
+            authenticated_client, list_id, due_journal_id=journal_id
+        )
+
+        assert response.status_code == 409
+        assert _error(response)["code"] == "TASK_LIST_ARCHIVED"
+
+
+class TestRetargetingAClosedListTaskDueInAJournal:
+    """A list task this create makes due in a journal reaches the retarget route.
+
+    Retarget follows the journal-only rules, which would reopen a closed task;
+    a list task's date change never does, so a closed one is refused until list
+    tasks get a due-journal change of their own.
+    """
+
+    @pytest.mark.parametrize("status", ["done", "cancelled"])
+    async def test_a_closed_one_is_a_conflict_and_is_left_as_it_was(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        status: str,
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+        due_id = await create_journal(journal_repository, days_offset=5)
+        later_id = await create_journal(journal_repository, days_offset=9)
+        created = await _create(authenticated_client, list_id, due_journal_id=due_id)
+        task_id = int(created.json()["data"]["id"])
+        closed = await authenticated_client.patch(
+            f"/api/tasks/{task_id}",
+            json={
+                "data": {
+                    "type": "tasks",
+                    "id": str(task_id),
+                    "attributes": {"status": status},
+                }
+            },
+        )
+        assert closed.status_code == 200
+        events_before = len(await task_events(async_connection, task_id=task_id))
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json={
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {
+                        "due_journal_id": later_id,
+                        "acknowledge_reopen": True,
+                    },
+                }
+            },
+        )
+
+        assert response.status_code == 409
+        error = _error(response)
+        assert error["code"] == "TASK_LIST_TASK_CLOSED"
+        assert "never reopens it" in error["detail"]
+        read = (await authenticated_client.get(f"/api/tasks/{task_id}")).json()
+        attributes = read["data"]["attributes"]
+        assert (attributes["status"], attributes["due_journal_id"]) == (
+            status,
+            due_id,
+        )
+        assert len(await task_events(async_connection, task_id=task_id)) == (
+            events_before
+        )
+
+
+class TestAnotherUsersJournal:
+    async def test_reads_as_an_absent_one_and_nothing_is_written(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Byte-identical to a journal that does not exist, so nothing is probed."""
+        list_id = await seed_task_list_id(async_connection)
+        foreign_journal_id = await create_journal(
+            journal_repository, days_offset=5, user_id=OTHER_USER_ID
+        )
+        absent_journal_id = foreign_journal_id + 1_000_000
+
+        foreign = await _create(
+            authenticated_client, list_id, due_journal_id=foreign_journal_id
+        )
+        absent = await _create(
+            authenticated_client, list_id, due_journal_id=absent_journal_id
+        )
+
+        assert foreign.status_code == absent.status_code == 404
+        assert _error(foreign)["code"] == _error(absent)["code"]
+        assert _error(foreign)["meta"] == _error(absent)["meta"] == {"anchor": "due"}
+        assert _error(foreign)["detail"] == _error(absent)["detail"].replace(
+            str(absent_journal_id), str(foreign_journal_id)
+        )
+        for owner in (USER_ID, OTHER_USER_ID):
+            assert await count(async_connection, COUNT_TASKS, {"user_id": owner}) == 0
         assert await task_events(async_connection) == []
 
 

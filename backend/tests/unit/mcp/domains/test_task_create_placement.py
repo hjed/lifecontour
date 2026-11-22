@@ -1,7 +1,7 @@
 """Unit tests for where ``create_task`` puts a task, decided from its arguments.
 
 One tool creates a task either **in journals** (both anchors, as before) or **on
-a list** (the list, optionally a due date). A JSON schema cannot say "these two,
+a list** (the list, optionally a due date or a due journal, never both). A JSON schema cannot say "these two,
 or that one", so the tool decides, and refuses any other mix by naming the
 argument at fault — before anything is read or written.
 """
@@ -42,7 +42,7 @@ def test_a_list_alone_places_an_undated_task_on_it() -> None:
         due_date=None,
     )
 
-    assert placement == OnList(task_list_id=LIST, due_date=None)
+    assert placement == OnList(task_list_id=LIST, due_date=None, due_journal_id=None)
 
 
 def test_a_list_and_a_due_date_place_a_dated_task_on_it() -> None:
@@ -53,7 +53,18 @@ def test_a_list_and_a_due_date_place_a_dated_task_on_it() -> None:
         due_date=DAY,
     )
 
-    assert placement == OnList(task_list_id=LIST, due_date=DAY)
+    assert placement == OnList(task_list_id=LIST, due_date=DAY, due_journal_id=None)
+
+
+def test_a_list_and_a_due_journal_place_a_task_due_in_it_on_the_list() -> None:
+    placement = resolve_create_placement(
+        creating_journal_id=None,
+        due_journal_id=DUE,
+        task_list_id=LIST,
+        due_date=None,
+    )
+
+    assert placement == OnList(task_list_id=LIST, due_date=None, due_journal_id=DUE)
 
 
 @pytest.mark.parametrize(
@@ -66,10 +77,20 @@ def test_a_list_and_a_due_date_place_a_dated_task_on_it() -> None:
             id="a list and a creating journal",
         ),
         pytest.param(
-            {"due_journal_id": DUE, "task_list_id": LIST},
-            "due_journal_id",
-            "not supported yet",
-            id="a list and a due journal",
+            {"due_journal_id": DUE, "task_list_id": LIST, "due_date": DAY},
+            "due_date",
+            "never both",
+            id="a list with both a due date and a due journal",
+        ),
+        pytest.param(
+            {
+                "creating_journal_id": CREATING,
+                "due_journal_id": DUE,
+                "task_list_id": LIST,
+            },
+            "creating_journal_id",
+            "no creating journal",
+            id="a list with both journals",
         ),
         pytest.param(
             {"creating_journal_id": CREATING, "due_journal_id": DUE, "due_date": DAY},

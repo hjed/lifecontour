@@ -9,9 +9,13 @@ timezone. What is pinned here, against mocked ports:
 - the list is read with the **update** lock, never the share lock: the insert
   then computes the bottom of that list, and taking share first and update
   second would be a lock upgrade two concurrent creates deadlock on;
-- the refusals come in a fixed order: entity rules, an unknown list,
-  an unknown contact, an archived list, then a past due date — and a refused
-  create writes and publishes nothing.
+- the refusals come in a fixed order: entity rules, an unknown list, an
+  unknown due journal, an unknown contact, an archived list, then a past due
+  date or a due journal that is not in the future — and a refused create
+  writes and publishes nothing;
+- a due journal is held ``FOR KEY SHARE`` **before** the list's update lock,
+  the order a retarget and a journal delete take, so no create can close a
+  lock cycle with them.
 
 ``JournalDateResolver`` is the real collaborator over a mocked settings
 repository, because the timezone rule is part of the behaviour under test. The
@@ -23,15 +27,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 from core_shared.models.history import Provenance
+from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.tasks import (
     Task,
+    TaskAnchorJournalNotFoundError,
     TaskDueDateInPastError,
+    TaskDueJournalNotFutureError,
     TaskList,
     TaskListArchivedError,
     TaskListNotFoundError,
     TaskStatus,
     TaskValidationError,
 )
+from sqlalchemy.exc import IntegrityError
 
 from app.core.contacts.models.exceptions import ContactNotFoundError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
@@ -40,6 +48,7 @@ from app.core.tasks.models.repositories import TaskListRepository
 from app.core.tasks.services.task_service import TaskService
 from tests.unit.tasks.task_doubles import (
     CONTACT_ID,
+    DUE_JOURNAL_ID,
     ORIGINAL_TEXT,
     OTHER_CONTACT_ID,
     TASK_LIST_ID,
@@ -57,6 +66,26 @@ SYDNEY = "Australia/Sydney"
 NOW = datetime.datetime(2026, 8, 5, 14, 30, tzinfo=datetime.UTC)
 UTC_TODAY = datetime.date(2026, 8, 5)
 SYDNEY_TODAY = datetime.date(2026, 8, 6)
+
+
+def journal_on(day: datetime.date) -> Journal:
+    """The acting user's journal, starting at 09:00 UTC on ``day``.
+
+    09:00 UTC is 19:00 in Sydney, so the journal's local day is ``day`` in both
+    zones and only "today" moves with the timezone.
+    """
+    start = datetime.datetime.combine(day, datetime.time(9, 0), tzinfo=datetime.UTC)
+    return Journal(
+        id=DUE_JOURNAL_ID,
+        user_id=USER_ID,
+        title="Beach weekend",
+        content="content",
+        event_date_range=EventDateRange(start=start, end=start),
+    )
+
+
+#: Future in every zone at ``NOW``.
+DAY_AFTER_SYDNEY_TODAY = SYDNEY_TODAY + datetime.timedelta(days=1)
 
 
 def active_list() -> TaskList:
@@ -114,8 +143,15 @@ def mock_task_list_repo() -> AsyncMock:
 
 @pytest.fixture
 def mock_journal_repo() -> AsyncMock:
-    """A journal repository a create on a list never touches."""
-    return AsyncMock()
+    """A journal repository holding one future journal, for a due-journal create.
+
+    An undated or due-date create never touches it.
+    """
+    repo = AsyncMock()
+    repo.find_and_lock_by_ids_for_user.return_value = [
+        journal_on(DAY_AFTER_SYDNEY_TODAY)
+    ]
+    return repo
 
 
 @pytest.fixture
@@ -175,6 +211,7 @@ async def create_on_list(
     *,
     text: str = ORIGINAL_TEXT,
     due_date: datetime.date | None = None,
+    due_journal_id: int | None = None,
     contact_ids: list[int] | None = None,
     source: Provenance = Provenance.SYSTEM,
     changed_by: str = "system",
@@ -185,6 +222,7 @@ async def create_on_list(
         task_list_id=TASK_LIST_ID,
         text=text,
         due_date=due_date,
+        due_journal_id=due_journal_id,
         contact_ids=contact_ids,
         transaction=transaction,
         now=NOW,
@@ -319,6 +357,16 @@ class TestCreatingWithADueDate:
         assert raised.value.due_date == UTC_TODAY
         assert raised.value.today == SYDNEY_TODAY
         assert_nothing_written(mock_task_repo, mock_event_publisher)
+
+    async def test_a_dated_task_takes_no_journal_lock(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await create_on_list(service, mock_transaction, due_date=SYDNEY_TODAY)
+
+        assert mock_journal_repo.mock_calls == []
 
     async def test_an_undated_task_does_not_need_a_timezone(
         self,
@@ -460,3 +508,245 @@ class TestContacts:
 
         [event] = published_events(mock_event_publisher)
         assert event.event_data["contact_ids"] == [OTHER_CONTACT_ID]
+
+
+class TestCreatingWithADueJournal:
+    """A due journal on a list: future-dated, and never beside a due date."""
+
+    async def test_saves_the_due_journal_and_no_other_date(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await create_on_list(service, mock_transaction, due_journal_id=DUE_JOURNAL_ID)
+
+        saved: Task = mock_task_repo.save.await_args.args[0]
+        assert saved.task_list_id == TASK_LIST_ID
+        assert saved.due_journal_id == DUE_JOURNAL_ID
+        assert saved.creating_journal_id is None
+        assert saved.due_date is None
+        assert saved.position is None
+
+    async def test_the_created_event_carries_the_due_journal(
+        self,
+        service: TaskService,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        await create_on_list(service, mock_transaction, due_journal_id=DUE_JOURNAL_ID)
+
+        [event] = published_events(mock_event_publisher)
+        assert isinstance(event, TaskCreated)
+        assert event.event_data["task_list_id"] == TASK_LIST_ID
+        assert event.event_data["due_journal_id"] == DUE_JOURNAL_ID
+        assert event.event_data["creating_journal_id"] is None
+        assert event.event_data["due_date"] is None
+
+    async def test_holds_the_due_journal_before_the_list(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_list_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Journal, then list: the order a retarget and a journal delete take.
+
+        The other way round, a create holding the list and waiting on the
+        journal could close a cycle with a delete queued on that journal and a
+        retarget holding it while it waits on the list.
+        """
+        order: list[str] = []
+        journals = [journal_on(DAY_AFTER_SYDNEY_TODAY)]
+        lists = active_list()
+
+        async def lock_journals(_user_id: str, _ids: list[int]) -> list[Journal]:
+            order.append("journal")
+            return journals
+
+        async def lock_list(_list_id: int, _user_id: str) -> TaskList:
+            order.append("list")
+            return lists
+
+        mock_journal_repo.find_and_lock_by_ids_for_user.side_effect = lock_journals
+        mock_task_list_repo.find_by_id_for_update.side_effect = lock_list
+
+        await create_on_list(service, mock_transaction, due_journal_id=DUE_JOURNAL_ID)
+
+        assert order == ["journal", "list"]
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, [DUE_JOURNAL_ID]
+        )
+        mock_task_list_repo.find_by_id_for_share.assert_not_awaited()
+
+    async def test_tomorrow_in_the_users_timezone_is_accepted(
+        self,
+        service: TaskService,
+        mock_settings_repo: AsyncMock,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_settings_repo.get_timezone.return_value = SYDNEY
+
+        await create_on_list(service, mock_transaction, due_journal_id=DUE_JOURNAL_ID)
+
+        mock_task_repo.save.assert_awaited_once()
+
+    async def test_today_in_the_users_timezone_is_not_the_future(
+        self,
+        service: TaskService,
+        mock_settings_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Tomorrow in UTC, but already today in Sydney: refused, naming both days."""
+        mock_settings_repo.get_timezone.return_value = SYDNEY
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
+            journal_on(SYDNEY_TODAY)
+        ]
+
+        with pytest.raises(TaskDueJournalNotFutureError) as raised:
+            await create_on_list(
+                service, mock_transaction, due_journal_id=DUE_JOURNAL_ID
+            )
+
+        assert raised.value.journal_id == DUE_JOURNAL_ID
+        assert raised.value.journal_date == SYDNEY_TODAY
+        assert raised.value.today == SYDNEY_TODAY
+        assert_nothing_written(mock_task_repo, mock_event_publisher)
+
+    async def test_the_same_journal_is_the_future_in_utc(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Without a timezone of their own the user's day is UTC's."""
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
+            journal_on(SYDNEY_TODAY)
+        ]
+
+        await create_on_list(service, mock_transaction, due_journal_id=DUE_JOURNAL_ID)
+
+        mock_task_repo.save.assert_awaited_once()
+
+    async def test_a_journal_that_is_not_found_is_refused_as_the_due_anchor(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Missing and another user's are one answer: the read is owner-scoped."""
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as raised:
+            await create_on_list(
+                service, mock_transaction, due_journal_id=DUE_JOURNAL_ID
+            )
+
+        assert raised.value.anchor == "due"
+        assert raised.value.journal_id == DUE_JOURNAL_ID
+        assert_nothing_written(mock_task_repo, mock_event_publisher)
+
+    async def test_a_due_date_beside_it_is_refused_before_any_read(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_list_repo: AsyncMock,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Invariant 4: a due date or a due journal, never both."""
+        with pytest.raises(TaskValidationError) as raised:
+            await create_on_list(
+                service,
+                mock_transaction,
+                due_date=DAY_AFTER_SYDNEY_TODAY,
+                due_journal_id=DUE_JOURNAL_ID,
+            )
+
+        assert raised.value.field == "due_date"
+        assert mock_journal_repo.mock_calls == []
+        mock_task_list_repo.find_by_id_for_update.assert_not_awaited()
+        assert_nothing_written(mock_task_repo, mock_event_publisher)
+
+    async def test_a_missing_list_is_reported_before_a_missing_journal(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_list_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
+        mock_task_list_repo.find_by_id_for_update.return_value = None
+
+        with pytest.raises(TaskListNotFoundError):
+            await create_on_list(
+                service, mock_transaction, due_journal_id=DUE_JOURNAL_ID
+            )
+
+    async def test_a_missing_journal_is_reported_before_an_unknown_contact(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
+
+        with pytest.raises(TaskAnchorJournalNotFoundError):
+            await create_on_list(
+                service,
+                mock_transaction,
+                due_journal_id=DUE_JOURNAL_ID,
+                contact_ids=[12345],
+            )
+
+    async def test_an_archived_list_is_reported_before_a_journal_not_in_the_future(
+        self,
+        service: TaskService,
+        mock_journal_repo: AsyncMock,
+        mock_task_list_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
+            journal_on(UTC_TODAY - datetime.timedelta(days=3))
+        ]
+        mock_task_list_repo.find_by_id_for_update.return_value = archived_list()
+
+        with pytest.raises(TaskListArchivedError):
+            await create_on_list(
+                service, mock_transaction, due_journal_id=DUE_JOURNAL_ID
+            )
+
+    async def test_a_journal_deleted_before_the_insert_is_still_the_due_anchor(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The foreign key's violation keeps the promised 404 rather than a 500."""
+        mock_task_repo.save.side_effect = IntegrityError(
+            "INSERT INTO tasks (user_id, text, creating_journal_id, due_journal_id, "
+            "task_list_id) VALUES ($1, $2, $3, $4, $5)",
+            {},
+            Exception(
+                'insert or update on table "tasks" violates foreign key '
+                'constraint "tasks_due_journal_id_fkey"'
+            ),
+        )
+
+        with pytest.raises(TaskAnchorJournalNotFoundError) as raised:
+            await create_on_list(
+                service, mock_transaction, due_journal_id=DUE_JOURNAL_ID
+            )
+
+        assert raised.value.anchor == "due"
+        assert raised.value.journal_id == DUE_JOURNAL_ID
+        mock_event_publisher.publish.assert_not_awaited()

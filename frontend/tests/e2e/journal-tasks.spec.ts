@@ -640,6 +640,88 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
   });
 });
 
+/**
+ * A task on a list that is **due** in this journal.
+ *
+ * The first real task to reach a journal's *Due* group with no creating
+ * journal. A list task never lapses, and the web app offers retargeting only
+ * to a task holding both journals, so the row must offer neither — only its
+ * direct status actions.
+ */
+test.describe('Journal Task Surface — a task on a list due here', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('shows a list task due here under Due, never lapsed, with no retarget, and marks it done', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    // Two UTC days out, so it is in the future whatever the clock says.
+    const journal = await dataManager.createFutureJournal({
+      title: 'Beach weekend',
+      daysAhead: 2,
+    });
+    const list = await dataManager.createTaskList(taskText('Beach packing'));
+    const text = taskText('Pack the tent');
+    const listTask = await dataManager.createListTask({
+      taskListId: list.id,
+      text,
+      dueJournalId: journal.id,
+    });
+    expect(listTask.dueJournalId).toBe(journal.id);
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', error => pageErrors.push(error));
+
+    await openJournal(page, journal);
+
+    const row = page
+      .getByTestId('journal-tasks-group-due')
+      .getByTestId(`journal-task-${listTask.id}`);
+    await expect(row.getByTestId('journal-task-text')).toHaveText(text);
+    await expect(row.getByText('Not done', { exact: true })).toBeVisible();
+    await expect(row.getByTestId('journal-task-lapsed')).toHaveCount(0);
+
+    const actions = row.getByRole('group', { name: 'Task actions' });
+    await expect(
+      actions.getByTestId('journal-task-action-retarget')
+    ).toHaveCount(0);
+
+    // The row flips optimistically, so the write itself is awaited before the
+    // reload: navigating away first could cut the PATCH off.
+    const statusWrite = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/tasks/${listTask.id}`) &&
+        response.request().method() === 'PATCH'
+    );
+    await actions.getByRole('button', { name: 'Mark done' }).click();
+    expect((await statusWrite).ok()).toBe(true);
+    await expect(row.getByText('Done', { exact: true })).toBeVisible();
+
+    // The reload proves the change was written rather than merely drawn.
+    await openJournal(page, journal);
+    await expect(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect(
+      actions.getByRole('button', { name: 'Return to not done' })
+    ).toBeVisible();
+
+    // On a phone the page still fits: nothing widens it sideways.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true);
+    expect(pageErrors).toEqual([]);
+  });
+});
+
 // A guard on the fixtures rather than on the product: every date in this file
 // comes from `utcDayOffset`, and the specs above only mean what they say while
 // it really is anchored to UTC days.

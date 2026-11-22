@@ -40,6 +40,7 @@ from core_shared.models.tasks import (
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
     TaskListNotFoundError,
+    TaskListTaskClosedError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -299,7 +300,7 @@ class TaskService:
         await self._require_future_dated(user_id, due_journal_id, due_journal, now)
         contacts = await self._resolve_contacts(contact_ids, user_id=user_id)
 
-        created = await self._save(task, creating_journal_id, due_journal_id)
+        created = await self._save(task)
         # This path only ever makes a journal-only task, so both anchors are
         # set; a saved row without one is a broken invariant, not a list task.
         created.require_anchor("creating")
@@ -322,6 +323,7 @@ class TaskService:
         text: str,
         transaction: AsyncConnection,
         due_date: datetime.date | None = None,
+        due_journal_id: int | None = None,
         contact_ids: Sequence[int] | None = None,
         now: datetime.datetime | None = None,
         source: Provenance = Provenance.SYSTEM,
@@ -329,34 +331,49 @@ class TaskService:
     ) -> Task:
         """Create a task on one of the user's lists, at the bottom of it.
 
-        The task has no journal (spec *Core invariants* 1 and 5) and is either
-        undated or due on ``due_date``, which must be today or later in the
-        user's timezone. It joins the bottom of the list, closed tasks included.
+        The task has no creating journal and is undated, due on ``due_date``
+        (today or later in the user's timezone), or due in ``due_journal_id``
+        (dated in the future, the rule a journal-only task's due journal
+        follows) — never both, which is spec *Core invariant* 4 and the
+        entity's own refusal. It joins the bottom of the list, closed tasks
+        included.
 
-        **Lock order: the list first, with the update lock.** The list is read
-        ``FOR NO KEY UPDATE`` — not the share lock the other task writes take
-        through :meth:`_hold_list_writable` — because the insert then computes
-        the list's bottom under that same lock. Taking share first and update
-        second would be a lock upgrade, and two creates on one list would each
-        wait for the other's share lock. Holding the update lock from the start
-        also holds off an archive, which takes the same lock, and serialises
-        creates so each computes the bottom once.
+        **Lock order: the due journal, then the list, then the new row.** A due
+        journal is read ``FOR KEY SHARE`` first — the lock the insert's foreign
+        key would take anyway — because a retarget holds journals before its
+        task and list, and a journal delete holds the journal before its tasks;
+        taking the journal *after* the list would let a create close a cycle
+        with them. The list is then read ``FOR NO KEY UPDATE`` — not the share
+        lock the other task writes take through :meth:`_hold_list_writable` —
+        because the insert computes the list's bottom under that same lock.
+        Taking share first and update second would be a lock upgrade, and two
+        creates on one list would each wait for the other's share lock. Holding
+        the update lock also holds off an archive, which takes the same lock,
+        and serialises creates so each computes the bottom once.
+
+        A journal delete racing the create is therefore settled by the journal
+        row: one that got there first makes the create wait and then find no
+        journal; a create that got there first makes the delete wait, and its
+        detach then finds the new task and unlinks it (it becomes undated).
 
         Refusals come in this order, and a refused create writes and publishes
-        nothing: the entity's own rules (no I/O), the list not found, a contact
-        not found, the list archived, then the due date before today. An
-        archived list comes before the date because correcting the date would
-        not make the create succeed.
+        nothing: the entity's own rules (no I/O), the list not found, the due
+        journal not found, a contact not found, the list archived, then the due
+        date before today or the due journal not in the future. An archived
+        list comes before the dates because correcting a date would not make
+        the create succeed.
 
         Publishes :class:`~app.core.tasks.models.events.TaskCreated`, carrying
-        the list and the due date, in this unit of work.
+        the list, the due date and the due journal, in this unit of work.
 
         Args:
-            user_id: The acting user; the list and contacts must be theirs
+            user_id: The acting user; the list, the due journal and contacts
+                must be theirs
             task_list_id: The list to create the task on
             text: The commitment, as plain text
             transaction: The request connection; the unit of work commits here
-            due_date: The day it is due, or ``None`` for an undated task
+            due_date: The day it is due, or ``None``
+            due_journal_id: The future journal it is due in, or ``None``
             contact_ids: Optional contacts to reference; duplicates are ignored
             now: The instant "today" is derived from, defaulting to the real
                 clock. **Never bind this from client input**, for the reason
@@ -372,29 +389,43 @@ class TaskService:
             TaskValidationError: When the text is empty.
             TaskListNotFoundError: When the list does not exist or is not the
                 acting user's.
+            TaskAnchorJournalNotFoundError: When the due journal does not exist
+                or is not the acting user's (anchor ``"due"``).
             ContactNotFoundError: When a referenced contact does not exist.
             TaskListArchivedError: When the list is archived.
             TaskDueDateInPastError: When the due date is before today in the
                 user's timezone.
+            TaskDueJournalNotFutureError: When the due journal's date is not
+                after today in the user's timezone.
         """
         task = Task(
             user_id=user_id,
             text=text,
             task_list_id=task_list_id,
             due_date=due_date,
+            due_journal_id=due_journal_id,
         )
 
+        due_journal = (
+            None
+            if due_journal_id is None
+            else await self._lock_due_journal(user_id, due_journal_id)
+        )
         task_list = await self.task_list_repo.find_by_id_for_update(
             task_list_id, user_id
         )
         if task_list is None:
             raise TaskListNotFoundError(task_list_id)
+        if due_journal_id is not None and due_journal is None:
+            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
         contacts = await self._resolve_contacts(contact_ids, user_id=user_id)
         task_list.ensure_writable()
         if due_date is not None:
             await self._require_due_date_allowed(user_id, due_date, now)
+        if due_journal_id is not None and due_journal is not None:
+            await self._require_future_dated(user_id, due_journal_id, due_journal, now)
 
-        created = await self.task_repo.save(task)
+        created = await self._save(task)
         await self._link_and_announce_created(
             created,
             contacts,
@@ -456,6 +487,7 @@ class TaskService:
         text: str,
         transaction: AsyncConnection,
         due_date: datetime.date | None = None,
+        due_journal_id: int | None = None,
         contact_ids: Sequence[int] | None = None,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
@@ -472,6 +504,7 @@ class TaskService:
             text=text,
             transaction=transaction,
             due_date=due_date,
+            due_journal_id=due_journal_id,
             contact_ids=contact_ids,
             source=source,
             changed_by=changed_by,
@@ -1314,6 +1347,8 @@ class TaskService:
                 after today in the user's timezone.
             TaskReopenNotAcknowledgedError: When the task is *done* and the
                 caller has not acknowledged that retargeting reopens it.
+            TaskListTaskClosedError: When the task is on a list and done or
+                cancelled: a list task's date change never reopens it.
             TaskListArchivedError: When the task is on an archived list —
                 retargeting onto the journal it is already due in included.
         """
@@ -1333,8 +1368,9 @@ class TaskService:
         if peeked.due_journal_id == due_journal_id:
             return peeked
 
-        # Retargeting is the journal-only operation: a list task with no due
-        # journal cannot exist yet, and gets its own rules when one can.
+        # Retargeting applies the journal-only rules. A list task that has a due
+        # journal reaches it too; an undated one has no journal to leave, and
+        # gets a due-journal change of its own when list tasks have one.
         journals = await self._lock_retarget_journals(
             user_id, peeked.require_anchor("due"), due_journal_id
         )
@@ -1354,6 +1390,14 @@ class TaskService:
         previous_due_journal_id = task.require_anchor("due")
         if previous_due_journal_id == due_journal_id:
             return task
+        # A retarget leaves the task not done, and a list task's date change
+        # never changes its status, so a closed list task is refused rather
+        # than reopened — whatever the acknowledgement says. Decided from the
+        # locked read, and before the journal checks, since no journal would
+        # make it succeed. Temporary: lifted when a list task's due journal can
+        # be changed under list rules.
+        if task.task_list_id is not None and task.status is not TaskStatus.NOT_DONE:
+            raise TaskListTaskClosedError(task_id, task.status)
 
         if due_journal_id not in journals:
             raise TaskAnchorJournalNotFoundError("due", due_journal_id)
@@ -1399,17 +1443,15 @@ class TaskService:
         # its docstring describes. The window this path had is now shut — the
         # journal is held ``FOR KEY SHARE`` from the locking read above, and a
         # ``DELETE`` conflicts with that — but the mapping stays: it is the same
-        # method creation writes through, where no journal lock is taken, and a
-        # guard that only holds on one of two callers is worth neither of them
-        # relying on.
+        # method the journal-only create writes through, where no journal lock
+        # is taken, and a guard that only holds on one of its callers is worth
+        # none of them relying on.
         saved = await self._save(
             replace(
                 task,
                 due_journal_id=due_journal_id,
                 status=TaskStatus.NOT_DONE,
-            ),
-            task.require_anchor("creating"),
-            due_journal_id,
+            )
         )
 
         # After the save, so the event announces a change that finished. Not for
@@ -1788,16 +1830,16 @@ class TaskService:
         )
         return [(each, trails.get(each.id or 0, [])) for each in tasks]
 
-    async def _save(
-        self, task: Task, creating_journal_id: int, due_journal_id: int
-    ) -> Task:
+    async def _save(self, task: Task) -> Task:
         """Write the task, keeping the promised error if an anchor just vanished.
 
-        Used by both writers of an anchor column — the insert on creation and the
-        update on a retarget. The anchor checks are a plain read, so a journal
-        deleted between that read and this write would fail the foreign key and
-        surface a raw ``IntegrityError`` — a 500 in place of the 404 the caller
-        was promised. The window is narrow and the database is never wrong here
+        Used by every writer of an anchor column — the inserts on creation, from
+        journals or on a list, and the update on a retarget. The anchor ids are
+        read off the task being written, so the error names exactly the journal
+        that write pointed at. The journal-only create's anchor checks are a
+        plain read, so a journal deleted between that read and this write would
+        fail the foreign key and surface a raw ``IntegrityError`` — a 500 in
+        place of the 404 the caller was promised. The window is narrow and the database is never wrong here
         (the anchors are ``ON DELETE RESTRICT``, so nothing is corrupted); what
         is at stake is only which error the caller sees, so it is mapped back
         rather than locked out.
@@ -1805,7 +1847,10 @@ class TaskService:
         Locking the journal rows for the duration closes the window, and the
         **retarget** path now does hold them — not for this, but because the lock
         order against journal merge required it, and ``FOR KEY SHARE`` conflicts
-        with the ``DELETE`` too. The **creation** path still does not: it would
+        with the ``DELETE`` too. So does the **list** create with a due journal,
+        for the lock order against a retarget and a journal delete (see
+        :meth:`create_list_task`). The **journal-only creation** path still does
+        not: it would
         need the same owner-scoped locking read on ``JournalRepository`` to
         change an outcome that is identical either way — the journal is gone, and
         the task cannot anchor to it — so the mapping below stays, and is what
@@ -1818,7 +1863,14 @@ class TaskService:
             anchor = _violated_anchor(error)
             if anchor is None:
                 raise
-            journal_id = creating_journal_id if anchor == "creating" else due_journal_id
+            journal_id = (
+                task.creating_journal_id
+                if anchor == "creating"
+                else task.due_journal_id
+            )
+            # A foreign key is only ever violated by an id that was written, so
+            # the column the database named is set on this task.
+            assert journal_id is not None, f"{anchor} anchor violated but unset"
             raise TaskAnchorJournalNotFoundError(anchor, journal_id) from error
 
     async def _require_task(self, task_id: int, user_id: str) -> Task:
@@ -1867,8 +1919,9 @@ class TaskService:
         has no task row to lock first, and its insert needs ``FOR NO KEY
         UPDATE`` on the list to compute the bottom; taking share here first
         would be a lock upgrade two concurrent creates deadlock on. So
-        :meth:`create_list_task` reads the list with the update lock from the
-        start and calls ``ensure_writable`` itself.
+        :meth:`create_list_task` reads the list with the update lock (after any
+        due journal's key-share lock, the one lock it takes first) and calls
+        ``ensure_writable`` itself.
 
         Raises:
             TaskListArchivedError: The list is archived, and so is the task.
@@ -2016,6 +2069,25 @@ class TaskService:
 
         return found[due_journal_id]
 
+    async def _lock_due_journal(
+        self, user_id: str, due_journal_id: int
+    ) -> Journal | None:
+        """Hold the user's journal ``FOR KEY SHARE``, or ``None`` if it is not theirs.
+
+        The lock a task's foreign key on it takes, taken before any other lock
+        the write needs — the order :meth:`_lock_retarget_journals` and a journal
+        delete's detach take the journal in. Owner-scoped, so a journal that
+        belongs to somebody else is absent and was never locked. The caller
+        decides when a missing one is refused, so the refusal order does not
+        have to follow the lock order.
+        """
+        found = await self.journal_repo.find_and_lock_by_ids_for_user(
+            user_id, [due_journal_id]
+        )
+        return next(
+            (journal for journal in found if journal.id == due_journal_id), None
+        )
+
     async def _lock_retarget_journals(
         self, user_id: str, previous_due_journal_id: int, due_journal_id: int
     ) -> dict[int, Journal]:
@@ -2096,7 +2168,9 @@ class TaskService:
         reason to charge, and ``FOR KEY SHARE`` was chosen on the retarget path
         precisely so it does not — see
         :meth:`~app.core.journal.models.repositories.JournalRepository.find_and_lock_by_ids_for_user`.
-        On the creation path no journal lock is taken at all.
+        On the journal-only creation path no journal lock is taken at all; the
+        list create holds its due journal ``FOR KEY SHARE``, for its lock order
+        rather than for this check, which that lock does not tighten either.
         """
         tz = await self.date_resolver.timezone_for(user_id)
         moment = now if now is not None else datetime.datetime.now(tz)

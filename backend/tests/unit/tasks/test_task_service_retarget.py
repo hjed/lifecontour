@@ -37,6 +37,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDomainError,
     TaskDueJournalNotFutureError,
+    TaskListTaskClosedError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -47,7 +48,11 @@ from sqlalchemy.exc import IntegrityError
 from app.core.journal.services.journal_date_resolver import JournalDateResolver
 from app.core.tasks.models.events import DomainEvent
 from app.core.tasks.services.task_service import TaskService
-from tests.unit.tasks.task_doubles import make_task_list_repo, published_events
+from tests.unit.tasks.task_doubles import (
+    TASK_LIST_ID,
+    make_task_list_repo,
+    published_events,
+)
 
 USER_ID = "test-user-123"
 OTHER_USER_ID = "other-user-456"
@@ -2068,3 +2073,103 @@ class TestProvenanceReachesTheRetargetEvent:
         event = retarget_event(mock_event_publisher)
         assert event.event_data["source"] == source.value
         assert event.event_data["changed_by"] == changed_by
+
+
+def make_list_task_due_in_a_journal(status: TaskStatus) -> Task:
+    """A task on a list, due in a journal and with no creating journal."""
+    return Task(
+        id=TASK_ID,
+        user_id=USER_ID,
+        text=TASK_TEXT,
+        task_list_id=TASK_LIST_ID,
+        position=0,
+        due_journal_id=OLD_DUE_JOURNAL_ID,
+        status=status,
+        created_at=at(YESTERDAY),
+        updated_at=at(YESTERDAY),
+    )
+
+
+@pytest.mark.unit
+class TestAClosedTaskOnAListIsNotRetargeted:
+    """Changing a list task's date never reopens it, so retarget refuses it closed.
+
+    Temporary, until a list task's due journal can be changed under list rules.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
+    @pytest.mark.parametrize("acknowledge_reopen", [False, True])
+    async def test_is_refused_and_nothing_is_written(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        status: TaskStatus,
+        acknowledge_reopen: bool,
+    ) -> None:
+        """The acknowledgement cannot buy a reopen the list rules forbid."""
+        mock_task_repo.find_by_id_for_update.return_value = (
+            make_list_task_due_in_a_journal(status)
+        )
+
+        with pytest.raises(TaskListTaskClosedError) as raised:
+            await retarget(
+                service, mock_transaction, acknowledge_reopen=acknowledge_reopen
+            )
+
+        assert raised.value.task_id == TASK_ID
+        assert raised.value.status is status
+        mock_task_repo.save.assert_not_awaited()
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_is_decided_from_the_locked_read(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Closed between the peek and the lock: the locked read decides."""
+        stored_task(
+            mock_task_repo,
+            peeked=make_list_task_due_in_a_journal(TaskStatus.NOT_DONE),
+            locked=make_list_task_due_in_a_journal(TaskStatus.DONE),
+        )
+
+        with pytest.raises(TaskListTaskClosedError):
+            await retarget(service, mock_transaction)
+
+        mock_task_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_not_done_list_task_moves_and_stays_not_done(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Already the list rule: the date moves and the status is untouched."""
+        mock_task_repo.find_by_id_for_update.return_value = (
+            make_list_task_due_in_a_journal(TaskStatus.NOT_DONE)
+        )
+
+        moved = await retarget(service, mock_transaction)
+
+        assert moved.due_journal_id == NEW_DUE_JOURNAL_ID
+        assert moved.status is TaskStatus.NOT_DONE
+        mock_task_repo.add_intermediate_journal.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_done_journal_only_task_still_asks_for_the_acknowledgement(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        mock_task_repo.find_by_id_for_update.return_value = make_task(TaskStatus.DONE)
+
+        with pytest.raises(TaskReopenNotAcknowledgedError):
+            await retarget(service, mock_transaction)

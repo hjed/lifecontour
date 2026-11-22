@@ -158,8 +158,9 @@ class TaskCreated(DomainEvent):
     The payload carries the task as it was persisted: its text, its status, its
     list and due date, both anchors and **the people it was created with**. A
     task created in journals has no list and no due date; one created on a list
-    has no journal, so either pair may be ``None``. The due date travels as its
-    ISO string, the form a subscriber reading it back through Redis sees.
+    has no creating journal and at most one of a due date and a due journal, so
+    any of them may be ``None``. The due date travels as its ISO string, the
+    form a subscriber reading it back through Redis sees.
 
     ``task_list_id`` and ``due_date`` have **no default**, for the reason
     ``contact_ids`` below has none: ``None`` is right for a journal-only create
