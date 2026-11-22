@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo
 
 from calendar_models import GoogleEvent
 from split_adoption import (
+    InstanceAdoption,
     LinkedInstance,
-    SplitTarget,
     pair_split_instances,
 )
 
@@ -89,7 +89,7 @@ class TestPairSplitInstances:
         pairing = pair_split_instances(events, links, SYDNEY, NOW)
 
         assert pairing.targets == {
-            f"{NEW}_{NEW_START}": SplitTarget(
+            f"{NEW}_{NEW_START}": InstanceAdoption(
                 journal_id=224578,
                 adopted_from=OLD,
                 old_event_id=f"{OLD}_20261016T011000Z",
@@ -221,7 +221,7 @@ class TestPairSplitInstances:
 
         [target] = pair_split_instances(events, links, SYDNEY, NOW).targets.values()
 
-        assert target == SplitTarget(
+        assert target == InstanceAdoption(
             journal_id=7,
             adopted_from=OLD,
             old_event_id=f"{old_split}_20261016T011000Z",
@@ -243,7 +243,7 @@ class TestPairSplitInstances:
         links = dict([_link("20261016", 3, old_start)])
 
         assert pair_split_instances(events, links, SYDNEY, NOW).targets == {
-            new_event.id: SplitTarget(
+            new_event.id: InstanceAdoption(
                 journal_id=3, adopted_from=OLD, old_event_id=f"{OLD}_20261016"
             )
         }

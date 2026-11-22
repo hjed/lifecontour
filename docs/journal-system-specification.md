@@ -367,6 +367,23 @@ two same-title instances on that day, the first to arrive adopts the cancelled
 journal. The match is restricted to the calendar the journal is displayed in,
 where its series is keyed.
 
+#### Recurrences re-timed as a whole
+
+Re-timing every instance of a Google recurrence re-issues every instance id
+and cancels none of the old ones. The Google worker checks with Google which
+linked instances are gone, within the window Google returned. Each one is
+retired in one of two ways:
+
+- **Adopted:** when exactly one new instance of the same recurrence falls on
+  that local day, the worker sends it as an update of the old journal carrying
+  `rekeyed_from`. The backend re-points the journal's link at the new event
+  only while the link still names `rekeyed_from`. The series is unchanged, and
+  the update merges against the synced base like any other, so local edits are
+  kept. If the journal is gone, or its link has moved on, the instance is
+  created instead.
+- **Cancelled:** otherwise the worker cancels the old instance, as if Google
+  had sent the cancellation.
+
 Cancelled calendar events are never offered as duplicate candidates for a new
 journal: what is left of an occurrence that is off duplicates nothing.
 

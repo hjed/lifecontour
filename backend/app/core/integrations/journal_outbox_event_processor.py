@@ -733,11 +733,28 @@ class JournalOutboxEventProcessor:
                 return _skipped_as_merged(
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
-            if payload.split_adopted_from is not None:
+            if (
+                payload.split_adopted_from is not None
+                or payload.rekeyed_from is not None
+            ):
                 return await self._create_instead_of_adopting(event)
             raise JournalOutboxEventProcessingError(
                 f"Journal {existing_journal_id} not found for update"
             )
+
+        # The recurrence re-issued its instance ids, and this instance adopts
+        # the journal the old id was linked to.
+        if payload.rekeyed_from is not None:
+            if await self._rekey_is_stale(existing_journal_id, payload):
+                logger.info(
+                    "Re-key adoption stale - the journal has moved on, creating",
+                    journal_id=existing_journal_id,
+                    external_event_id=external_event_id,
+                )
+                return await self._create_instead_of_adopting(event)
+            # The worker sends the description for that fallback create; an
+            # adoption never writes it over the journal's notes.
+            journal_data = {k: v for k, v in journal_data.items() if k != "content"}
 
         # A split-off recurrence adopting this journal (see ``split_adoption``)
         split_adoption = None
@@ -1053,6 +1070,30 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
+    async def _rekey_is_stale(
+        self, journal_id: int, payload: JournalSyncEventData
+    ) -> bool:
+        """Whether a re-key adoption no longer describes the journal's link.
+
+        Holds the recurrence's lock first, the one its cancellations take, so
+        a cancellation of the old id cannot interleave. The adoption applies
+        while the journal's link in this calendar still names the old id it
+        was planned from - or already names this event, when it is delivered
+        again. Anything else (the link moved to another event, or is gone)
+        means the journal is no longer the old instance's, and adopting it
+        would steal it.
+        """
+        calendar_id = UUID(payload.calendar_id)
+        if payload.recurring_event_id:
+            await self.link_repo.lock_recurrence(
+                calendar_id, payload.recurring_event_id
+            )
+        current = await self.link_repo.find_by_journal(journal_id, calendar_id)
+        return current is None or current.external_event_id not in (
+            payload.rekeyed_from,
+            payload.external_event_id,
+        )
+
     async def _link_moved_on(
         self, journal_id: int, calendar_id: UUID, external_event_id: str
     ) -> bool:
@@ -1097,6 +1138,7 @@ class JournalOutboxEventProcessor:
         event_data.update(
             existing_journal_id=None,
             split_adopted_from=None,
+            rekeyed_from=None,
             sync_action="created",
         )
         logger.info(

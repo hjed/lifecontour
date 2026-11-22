@@ -872,6 +872,37 @@ class GoogleAPIClient:
             logger.error("Error fetching events", error=str(e))
             raise e
 
+    async def list_instances(
+        self, calendar_id: str, event_id: str, time_min: str
+    ) -> list[dict[str, Any]]:
+        """Every live instance of a recurring event from ``time_min`` on.
+
+        Pages through ``events().instances`` and returns all items. Google
+        expands an endless recurrence only so far, so the last instance
+        returned bounds what this can say is gone.
+        """
+        try:
+            service = await self._get_calendar_service()
+            instances: list[dict[str, Any]] = []
+            page_token: str | None = None
+            while True:
+                request_params: dict[str, Any] = {
+                    "calendarId": calendar_id,
+                    "eventId": event_id,
+                    "maxResults": 2500,
+                    "timeMin": time_min,
+                }
+                if page_token:
+                    request_params["pageToken"] = page_token
+                result = service.events().instances(**request_params).execute()
+                instances.extend(result.get("items", []))
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    return instances
+        except HttpError as e:
+            logger.error("Error fetching event instances", error=str(e))
+            raise e
+
     async def get_event(
         self, event_id: str, calendar_id: str = "primary"
     ) -> dict[str, Any]:

@@ -390,3 +390,264 @@ class TestSplitAdoptionIntegration:
             "journal_event.cancelled",
             "journal_event.created",
         ]
+
+
+@pytest.mark.asyncio
+class TestRekeyedRecurrenceIntegration:
+    """A recurrence re-timed as a whole re-issues every instance id, and
+    Google sends no cancellation for the old ones."""
+
+    RECURRENCE = "dc7pp0jpb9fdfg6b6csu2jbfes"
+
+    @staticmethod
+    def _day(weeks: int, minute: int = 0) -> datetime:
+        from datetime import timedelta
+
+        # Mid-afternoon UTC (the user has no zone set), so half an hour later
+        # is the same local day whatever time the test runs.
+        return (datetime.now(UTC) + timedelta(weeks=weeks)).replace(
+            hour=3, minute=minute, second=0, microsecond=0
+        )
+
+    @classmethod
+    def _instance_id(cls, start: datetime) -> str:
+        return f"{cls.RECURRENCE}_{start:%Y%m%dT%H%M%SZ}"
+
+    @classmethod
+    def _instance(cls, start: datetime) -> dict:
+        from datetime import timedelta
+
+        return {
+            "id": cls._instance_id(start),
+            "status": "confirmed",
+            "etag": '"etag-rekeyed"',
+            "summary": "Retro",
+            "start": {"dateTime": start.isoformat()},
+            "end": {"dateTime": (start + timedelta(hours=1)).isoformat()},
+            "recurringEventId": cls.RECURRENCE,
+        }
+
+    @staticmethod
+    async def _calendar(db_session, *, sync_token: str | None = None) -> str:
+        now = datetime.now(UTC)
+        calendar_uuid = str(uuid.uuid4())
+        await db_session.execute(
+            text("""
+                INSERT INTO calendars (id, user_id, name, color, created_at,
+                    updated_at, google_calendar_id, is_synced_to_google)
+                VALUES (:cal_id, :user_id, 'Rekey Cal', '#00FF00', :now, :now,
+                    'primary', true)
+            """),
+            {"cal_id": calendar_uuid, "user_id": TEST_USER, "now": now},
+        )
+        if sync_token is not None:
+            await db_session.execute(
+                text("""
+                    INSERT INTO calendar_sync_tokens
+                        (user_id, google_account_email, google_calendar_id,
+                         sync_token, last_synced_at, created_at, updated_at)
+                    VALUES (:user_id, :email, 'primary', :token, :now, :now, :now)
+                """),
+                {
+                    "user_id": TEST_USER,
+                    "email": TEST_EMAIL,
+                    "token": sync_token,
+                    "now": now,
+                },
+            )
+        await db_session.commit()
+        return calendar_uuid
+
+    @classmethod
+    async def _linked_journal(
+        cls,
+        db_session,
+        calendar_uuid: str,
+        start: datetime,
+        *,
+        displayed: bool = True,
+    ) -> int:
+        now = datetime.now(UTC)
+        journal_id = (
+            await db_session.execute(
+                text("""
+                    INSERT INTO journals (user_id, title, content,
+                        event_date_range_start, event_date_range_end,
+                        created_at, updated_at)
+                    VALUES (:user_id, 'Retro', '', :start, :start, :now, :now)
+                    RETURNING id
+                """),
+                {"user_id": TEST_USER, "start": start, "now": now},
+            )
+        ).scalar_one()
+        await db_session.execute(
+            text("""
+                INSERT INTO journal_external_event_links
+                (journal_id, calendar_id, external_event_id, external_version,
+                 recurring_event_id, sync_capability, sync_status,
+                 created_at, updated_at)
+                VALUES (:journal_id, :cal_id, :external_event_id, :etag,
+                    :recurrence, 'bidirectional', 'synced', :now, :now)
+            """),
+            {
+                "journal_id": journal_id,
+                "cal_id": calendar_uuid,
+                "external_event_id": cls._instance_id(start),
+                "etag": ETAG,
+                "recurrence": cls.RECURRENCE,
+                "now": now,
+            },
+        )
+        if displayed:
+            await db_session.execute(
+                text("""
+                    INSERT INTO journal_calendar_info
+                        (journal_id, calendar_id, is_all_day)
+                    VALUES (:journal_id, :cal_id, false)
+                """),
+                {"journal_id": journal_id, "cal_id": calendar_uuid},
+            )
+        await db_session.commit()
+        return journal_id
+
+    @staticmethod
+    async def _sync(
+        db_session,
+        items: list[dict],
+        *,
+        sync_type: str,
+        instances: list[dict] | Exception | None = None,
+    ) -> tuple[dict, MagicMock]:
+        client = MagicMock()
+        client.list_events = AsyncMock(
+            return_value={"items": items, "nextSyncToken": "sync_token"}
+        )
+        client.list_instances = AsyncMock(
+            side_effect=instances if isinstance(instances, Exception) else None,
+            return_value=instances or [],
+        )
+        with patch("worker._create_google_client", return_value=client):
+            result = await sync_calendar_events(
+                _ctx(db_session), TEST_EMAIL, TEST_USER, sync_type
+            )
+        return result, client
+
+    @staticmethod
+    async def _outbox(db_session) -> list[tuple[str, dict]]:
+        rows = await db_session.execute(
+            text("""
+                SELECT event_type, event_data FROM outbox_events
+                WHERE event_type LIKE 'journal_event.%'
+                ORDER BY occurred_at, id
+            """)
+        )
+        return [(row.event_type, _as_dict(row.event_data)) for row in rows]
+
+    async def test_an_incremental_re_time_adopts_every_old_journal(
+        self, db_session
+    ) -> None:
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session, sync_token="token")
+        olds = [self._day(weeks) for weeks in (1, 2, 3)]
+        news = [self._day(weeks, minute=30) for weeks in (1, 2, 3)]
+        journals = [
+            await self._linked_journal(db_session, calendar_uuid, olds[0]),
+            # Displayed in no calendar: a re-key moves no series, so a link
+            # alone is adopted too.
+            await self._linked_journal(
+                db_session, calendar_uuid, olds[1], displayed=False
+            ),
+            await self._linked_journal(db_session, calendar_uuid, olds[2]),
+        ]
+        live = [self._instance(start) for start in news]
+
+        result, client = await self._sync(
+            db_session, live, sync_type="incremental", instances=live
+        )
+
+        assert result["status"] == "success"
+        assert result.get("events_rekey_adopted") == 3
+        client.list_instances.assert_awaited_once_with(
+            "primary", self.RECURRENCE, (olds[0] - timedelta(days=1)).isoformat()
+        )
+        outbox = await self._outbox(db_session)
+        assert [event_type for event_type, _ in outbox] == ["journal_event.updated"] * 3
+        assert sorted(
+            (
+                data["existing_journal_id"],
+                data["external_event_id"],
+                data["rekeyed_from"],
+            )
+            for _, data in outbox
+        ) == sorted(
+            (journal_id, self._instance_id(new), self._instance_id(old))
+            for journal_id, old, new in zip(journals, olds, news, strict=True)
+        )
+
+    async def test_a_full_listing_cancels_only_the_orphans_inside_its_window(
+        self, db_session
+    ) -> None:
+        """No unlinked instance needed: the listing is Google's whole view.
+        A link past the last instance Google returned may still be live."""
+        calendar_uuid = await self._calendar(db_session)
+        orphan_start = self._day(1)
+        live_start, last_start = self._day(2, minute=30), self._day(3, minute=30)
+        beyond_start = self._day(10)
+        orphan = await self._linked_journal(db_session, calendar_uuid, orphan_start)
+        for start in (live_start, last_start, beyond_start):
+            await self._linked_journal(db_session, calendar_uuid, start)
+
+        result, client = await self._sync(
+            db_session,
+            [self._instance(live_start), self._instance(last_start)],
+            sync_type="full",
+        )
+
+        assert result["status"] == "success"
+        client.list_instances.assert_not_awaited()
+        cancelled = [
+            data
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.cancelled"
+        ]
+        assert [
+            (d["existing_journal_id"], d["external_event_id"]) for d in cancelled
+        ] == [(orphan, self._instance_id(orphan_start))]
+        assert cancelled[0]["recurring_event_id"] == self.RECURRENCE
+
+    async def test_an_incremental_batch_of_linked_instances_asks_google_nothing(
+        self, db_session
+    ) -> None:
+        calendar_uuid = await self._calendar(db_session, sync_token="token")
+        start = self._day(1)
+        await self._linked_journal(db_session, calendar_uuid, start)
+        await self._linked_journal(db_session, calendar_uuid, self._day(2))
+
+        result, client = await self._sync(
+            db_session, [self._instance(start)], sync_type="incremental"
+        )
+
+        assert result["status"] == "success"
+        client.list_instances.assert_not_awaited()
+
+    async def test_a_failed_instances_listing_retires_nothing(self, db_session) -> None:
+        """The recurrence may be gone altogether; its master's cancellation
+        handles that. The rest of the sync goes on."""
+        from googleapiclient.errors import HttpError
+
+        calendar_uuid = await self._calendar(db_session, sync_token="token")
+        await self._linked_journal(db_session, calendar_uuid, self._day(1))
+        new = self._instance(self._day(1, minute=30))
+
+        result, _ = await self._sync(
+            db_session,
+            [new],
+            sync_type="incremental",
+            instances=HttpError(resp=MagicMock(status=404), content=b"gone"),
+        )
+
+        assert result["status"] == "success"
+        assert [event_type for event_type, _ in await self._outbox(db_session)] == [
+            "journal_event.created"
+        ]

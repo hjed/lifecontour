@@ -92,6 +92,42 @@ halves costs no extra query.
 Halves that arrive in different syncs are not paired here. The cancellations
 apply the backend's keep-next rule instead.
 
+### Recurrences re-timed as a whole
+
+Moving every instance of a recurrence to a new time re-issues every instance
+id (`<recurrence>_<original start>`), and Google sends **no cancellation for
+the old ids**. Each new instance arrives looking unjournalled while the old
+journals stay linked to ids Google no longer has.
+
+Before the event loop, `rekeyed_recurrence.find_rekeyed_instances` finds those
+orphaned links and retires them:
+- it decides what is gone from Google, never from the batch alone. A sync-token
+  batch holds only what changed, so for each recurrence with an unlinked live
+  instance beside linked instances the batch did not mention, it calls
+  `GoogleAPIClient.list_instances` from a day before the earliest of those.
+  A time-ranged listing (a full sync, or the fallback after an invalid token)
+  already is Google's whole view, so it is used as is - no unlinked instance
+  needed, which is what sweeps up orphans left from before this existed;
+- it only retires links inside the window Google answered for: from the
+  query's `time_min` to the last instance Google returned. Google expands an
+  endless recurrence only so far (about 730 instances), and a link past that
+  may still be live;
+- it never retires outbound-only links, or legacy links with no recorded
+  recurrence. A failed `list_instances` retires nothing.
+
+A retired link is **adopted** when exactly one new, unlinked instance of the
+same recurrence falls on its local day (the user's zone). There is no title
+check, because a re-time often comes with a rename. The new instance is sent as
+an update of the old journal carrying `rekeyed_from` (the old id), and the
+backend re-points the link only if the journal's link still names that id. Any
+other retired link is **cancelled** with a synthetic cancellation through the
+ordinary path. Past events are skipped, and the backend's keep-next rule
+applies.
+
+Known limit: if a recurrence is re-timed twice within the backend's
+processing lag, the middle set's links may not exist yet when the worker
+looks. The next time-ranged listing cleans them up.
+
 ### What the outbound journal push declines to do
 
 `_process_journal_upsert_event` pushes an EVENT journal to Google Calendar. Two

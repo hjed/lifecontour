@@ -220,6 +220,18 @@ class JournalSyncEventData(BaseModel):
             "instead of starting another. Null for every other event."
         ),
     )
+    rekeyed_from: str | None = Field(
+        default=None,
+        description=(
+            "Set on an update that adopts an existing journal for an instance "
+            "of the same recurrence after the source re-issued its instance "
+            "ids (a whole recurrence moved to a new time): the old instance's "
+            "event id. The consumer re-points the journal's link at this "
+            "event only while that link still names this id; otherwise the "
+            "adoption is stale and the event is treated as new. Null for "
+            "every other event."
+        ),
+    )
     synced_entries: dict[str, list[str]] | None = Field(
         default=None,
         description="Per event field, the keys of the values the source holds "
