@@ -59,4 +59,27 @@ describe('Calendar', () => {
       expect.anything()
     );
   });
+
+  // The month/year selects are invisible (`opacity-0`) over their caption,
+  // so the wrapper has to show keyboard focus for them.
+  it('shows focus on the month and year dropdowns', () => {
+    const { container } = render(
+      <Calendar
+        mode='single'
+        captionLayout='dropdown'
+        defaultMonth={MONTH}
+        startMonth={new Date(2020, 0)}
+        endMonth={new Date(2030, 11)}
+      />
+    );
+
+    const roots = container.querySelectorAll('.rdp-dropdown_root');
+    expect(roots.length).toBeGreaterThan(0);
+    roots.forEach(root => {
+      expect(root).toHaveClass(
+        'has-focus:ring-[3px]',
+        'has-focus:ring-ring/50'
+      );
+    });
+  });
 });
