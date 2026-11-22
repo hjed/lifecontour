@@ -63,7 +63,7 @@ export function SearchHighlight({
   // Add styling to mark tags after sanitization
   const styledHtml = sanitizedHtml.replace(
     /<mark>/g,
-    '<mark class="bg-yellow-200 dark:bg-yellow-800 px-1 rounded">'
+    '<mark class="bg-warning/30 px-1 rounded">'
   );
 
   return (

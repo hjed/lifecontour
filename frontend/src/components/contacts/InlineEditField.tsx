@@ -154,7 +154,7 @@ export function InlineEditField({
             variant='ghost'
             onClick={saveEdit}
             disabled={isLoading}
-            className='h-8 w-8 p-0 text-green-600 hover:bg-green-50 hover:text-green-700'
+            className='text-success hover:bg-success/10 hover:text-success h-8 w-8 p-0'
             aria-label='Save changes'
           >
             <Check className='h-4 w-4' />
@@ -165,7 +165,7 @@ export function InlineEditField({
             variant='ghost'
             onClick={cancelEdit}
             disabled={isLoading}
-            className='h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700'
+            className='text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0'
             aria-label='Cancel changes'
           >
             <X className='h-4 w-4' />

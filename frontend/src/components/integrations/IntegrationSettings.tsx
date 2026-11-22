@@ -41,7 +41,7 @@ export function IntegrationSettings({
       <DialogContent className='max-h-[90vh] max-w-3xl overflow-y-auto'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <Settings className='h-5 w-5 text-gray-500' />
+            <Settings className='text-muted-foreground h-5 w-5' />
             Integration Settings
           </DialogTitle>
           <DialogDescription className='sr-only'>

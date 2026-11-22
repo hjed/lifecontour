@@ -170,14 +170,14 @@ describe('JournalContactBadge', () => {
     it('renders status indicators with correct colors and tooltips', () => {
       render(<JournalContactBadge contacts={mockContacts} />);
       const attendingStatus = screen.getByTestId('contact-status-1');
-      expect(attendingStatus).toHaveClass('bg-green-500');
+      expect(attendingStatus).toHaveClass('bg-success');
       expect(attendingStatus).toHaveAttribute(
         'aria-label',
         'Status: ATTENDING'
       );
 
       const maybeStatus = screen.getByTestId('contact-status-2');
-      expect(maybeStatus).toHaveClass('bg-amber-500');
+      expect(maybeStatus).toHaveClass('bg-warning');
       expect(maybeStatus).toHaveAttribute('aria-label', 'Status: MAYBE');
     });
 

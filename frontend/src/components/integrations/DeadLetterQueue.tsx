@@ -13,7 +13,7 @@ export function DeadLetterQueue() {
       <Card className='mt-6'>
         <CardHeader>
           <CardTitle className='flex items-center gap-2'>
-            <FileWarning className='h-5 w-5 text-gray-500' />
+            <FileWarning className='text-muted-foreground h-5 w-5' />
             Dead-Letter Queue
           </CardTitle>
         </CardHeader>
@@ -31,7 +31,7 @@ export function DeadLetterQueue() {
       <Card className='mt-6'>
         <CardHeader>
           <CardTitle className='flex items-center gap-2'>
-            <FileWarning className='h-5 w-5 text-gray-500' />
+            <FileWarning className='text-muted-foreground h-5 w-5' />
             Dead-Letter Queue
           </CardTitle>
         </CardHeader>
@@ -53,7 +53,7 @@ export function DeadLetterQueue() {
     <Card className='mt-6' data-testid='dead-letter-queue'>
       <CardHeader>
         <CardTitle className='flex items-center gap-2'>
-          <FileWarning className='h-5 w-5 text-amber-500' />
+          <FileWarning className='text-warning h-5 w-5' />
           Dead-Letter Queue ({total})
         </CardTitle>
       </CardHeader>

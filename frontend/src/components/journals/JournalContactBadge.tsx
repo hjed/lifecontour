@@ -411,15 +411,15 @@ function ContactBadge({
     switch (status) {
       case AttendeeStatus.ATTENDING:
       case AttendeeStatus.ATTENDED:
-        return 'bg-green-500';
+        return 'bg-success';
       case AttendeeStatus.MAYBE:
-        return 'bg-amber-500';
+        return 'bg-warning';
       case AttendeeStatus.DECLINED:
-        return 'bg-red-500 line-through';
+        return 'bg-destructive line-through';
       case AttendeeStatus.NO_REPLY:
-        return 'bg-neutral-400';
+        return 'bg-muted-foreground';
       default:
-        return 'bg-neutral-400';
+        return 'bg-muted-foreground';
     }
   };
 

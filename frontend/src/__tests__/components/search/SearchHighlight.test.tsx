@@ -35,8 +35,8 @@ const createTestData = {
 
 // Helper function to check mark element styling
 const expectMarkStyling = (element: HTMLElement) => {
-  expect(element).toHaveClass('bg-yellow-200');
-  expect(element).toHaveClass('dark:bg-yellow-800');
+  // Theme token, not a raw palette colour: follows the palette and mode.
+  expect(element).toHaveClass('bg-warning/30');
   expect(element).toHaveClass('px-1');
   expect(element).toHaveClass('rounded');
 };

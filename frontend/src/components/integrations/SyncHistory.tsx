@@ -74,7 +74,7 @@ export function SyncHistory({ integrationId }: SyncHistoryProps) {
       <DialogContent className='max-h-[80vh] max-w-2xl overflow-y-auto'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <Clock className='h-5 w-5 text-blue-500' />
+            <Clock className='text-info h-5 w-5' />
             Sync History
           </DialogTitle>
         </DialogHeader>

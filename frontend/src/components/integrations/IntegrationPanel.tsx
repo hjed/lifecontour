@@ -14,13 +14,13 @@ import { ImmichConflicts } from './ImmichConflicts';
 function getIntegrationIcon(id: string) {
   switch (id) {
     case 'google':
-      return <Cloud className='h-5 w-5 text-blue-500' />;
+      return <Cloud className='text-info h-5 w-5' />;
     case 'strava':
-      return <Database className='h-5 w-5 text-orange-500' />;
+      return <Database className='text-warning h-5 w-5' />;
     case 'snipeit':
-      return <Wrench className='h-5 w-5 text-green-500' />;
+      return <Wrench className='text-success h-5 w-5' />;
     default:
-      return <Cloud className='h-5 w-5 text-gray-500' />;
+      return <Cloud className='text-muted-foreground h-5 w-5' />;
   }
 }
 

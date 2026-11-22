@@ -199,7 +199,7 @@ export function SnipeItSettings({ connected = false }: SnipeItSettingsProps) {
           !(error as Error)?.message?.includes(
             'No Snipe-IT settings found'
           ) && (
-            <p className='text-sm text-red-500'>
+            <p className='text-destructive text-sm'>
               Failed to load settings. Please try again later.
             </p>
           )}

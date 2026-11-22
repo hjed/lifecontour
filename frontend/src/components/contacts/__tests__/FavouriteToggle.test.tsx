@@ -46,7 +46,7 @@ describe('FavouriteToggle', () => {
 
     // Check for filled star (should have fill class)
     const starIcon = button.querySelector('svg');
-    expect(starIcon).toHaveClass('fill-yellow-400');
+    expect(starIcon).toHaveClass('fill-warning');
   });
 
   it('should render empty star when contact is not favourite', () => {
@@ -65,7 +65,7 @@ describe('FavouriteToggle', () => {
 
     // Check for empty star (should not have fill class)
     const starIcon = button.querySelector('svg');
-    expect(starIcon).not.toHaveClass('fill-yellow-400');
+    expect(starIcon).not.toHaveClass('fill-warning');
   });
 
   it('should call toggle mutation when clicked', async () => {
