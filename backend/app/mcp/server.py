@@ -160,6 +160,8 @@ def create_mcp_app(
     container: AsyncContainer,
     auth_provider: AuthProvider | None = None,
     allowed_hosts: list[str] | None = None,
+    *,
+    server: FastMCP[None] | None = None,
 ) -> object:
     """
     Create FastMCP ASGI app with Dishka integration and optional OAuth auth.
@@ -175,6 +177,10 @@ def create_mcp_app(
                        a reverse proxy the public host (e.g. journal.hjed.net)
                        must be passed here or every request is rejected before
                        reaching the app.
+        server: An already-built server to mount instead of building one. Every
+                app still gets its own HTTP transport and lifespan; only the
+                tool registry is reused. ``auth_provider`` is ignored when this
+                is given, since a server's auth is fixed at construction.
 
     Returns:
         ASGI application ready for mounting in FastAPI
@@ -185,8 +191,7 @@ def create_mcp_app(
         allowed_hosts=allowed_hosts,
     )
 
-    # Create MCP server with auth
-    mcp = create_mcp_server(auth=auth_provider)
+    mcp = server if server is not None else create_mcp_server(auth=auth_provider)
 
     # Create HTTP app — FastMCP handles auth internally via the provider.
     # Propagate the app's trusted hosts so requests arriving through the

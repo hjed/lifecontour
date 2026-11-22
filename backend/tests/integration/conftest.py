@@ -6,7 +6,7 @@ import os
 import subprocess
 import time
 from base64 import b64encode
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,8 +14,11 @@ from typing import Any, cast
 
 import pytest
 import pytest_asyncio
+from dishka import AsyncContainer
 from dishka.integrations.fastapi import setup_dishka as setup_fastapi_dishka
 from dishka.integrations.starlette import setup_dishka as setup_starlette_dishka
+from fastmcp import FastMCP
+from fastmcp.server.auth.auth import AuthProvider
 from itsdangerous import TimestampSigner
 from meilisearch import Client as MeiliSearchClient
 from sqlalchemy import text
@@ -741,6 +744,43 @@ def test_settings():
         allowed_hosts=["*"],  # Allow all hosts for testing
         cors_origins=["*"],
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def shared_mcp_server() -> Iterator[None]:
+    """Mount one FastMCP server in every app the suite builds without MCP auth.
+
+    Building a server registers every tool and generates its JSON schemas,
+    which was most of each API and MCP test's setup. Each app still gets its
+    own HTTP transport, Dishka wiring and lifespan; only the tool registry is
+    shared, so tests must never mutate it.
+
+    Only ``create_app``'s call is redirected: an app with an auth provider, and
+    every direct ``create_mcp_server()`` caller (the read-only AI server, which
+    sanitises its tools' schemas in place, and the coverage guards), still
+    build their own.
+    """
+    import app.main as main_module
+    from app.mcp.server import create_mcp_app, create_mcp_server
+
+    built: list[FastMCP[None]] = []
+
+    def create_mcp_app_sharing_server(
+        container: AsyncContainer,
+        auth_provider: AuthProvider | None = None,
+        allowed_hosts: list[str] | None = None,
+    ) -> object:
+        if auth_provider is not None:
+            return create_mcp_app(
+                container, auth_provider=auth_provider, allowed_hosts=allowed_hosts
+            )
+        if not built:
+            built.append(create_mcp_server(auth=None))
+        return create_mcp_app(container, allowed_hosts=allowed_hosts, server=built[0])
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(main_module, "create_mcp_app", create_mcp_app_sharing_server)
+        yield
 
 
 @pytest.fixture

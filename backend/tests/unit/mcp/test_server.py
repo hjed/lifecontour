@@ -4,9 +4,11 @@ Unit tests for MCP server setup.
 Tests the FastMCP server configuration and initialization.
 """
 
-from unittest.mock import patch
+from typing import cast
+from unittest.mock import MagicMock, patch
 
 from core_shared.product import PRODUCT_NAME
+from starlette.applications import Starlette
 
 from app.infrastructure.di.container import create_container
 from app.mcp.server import create_mcp_app, create_mcp_server
@@ -45,6 +47,22 @@ class TestMCPServer:
         assert app is not None
         # Should be callable (ASGI app)
         assert callable(app)
+
+    @patch("app.mcp.server.create_mcp_server")
+    def test_create_mcp_app_mounts_a_given_server_without_building_one(
+        self, mock_create_server: MagicMock
+    ) -> None:
+        """A prebuilt server is mounted as is; no second server is built.
+
+        The patch replaces ``app.mcp.server.create_mcp_server`` only, so this
+        module's own import still builds a real server.
+        """
+        prebuilt = create_mcp_server()
+
+        app = create_mcp_app(create_container(), server=prebuilt)
+
+        mock_create_server.assert_not_called()
+        assert cast(Starlette, app).state.fastmcp_server is prebuilt
 
     @patch("app.mcp.server.create_mcp_server")
     def test_create_mcp_app_with_auth_provider(self, mock_create_server):

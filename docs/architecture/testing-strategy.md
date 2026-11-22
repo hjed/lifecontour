@@ -322,6 +322,12 @@ raw rows in that older schema, then upgrade and assert on the data
 
 ### MCP Integration Testing Guidelines
 
+Every app the integration suite builds without MCP auth mounts **one shared FastMCP server**
+(the session fixture `shared_mcp_server`), because building one registers every tool and
+generates its schemas. Each app keeps its own transport and lifespan, but the tool registry is
+shared: never mutate a mounted server from a test, and never enter two app lifespans at once. A
+test that needs a server of its own calls `create_mcp_server()` directly.
+
 MCP tools are tested through the mounted app (`authenticated_lifespan_client`),
 speaking the **sessionless `2026-07-28` protocol** that current clients
 negotiate — see [MCP Setup → Protocol Versions](../mcp-setup.md#protocol-versions).
