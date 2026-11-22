@@ -45,7 +45,12 @@ from googleapiclient.errors import HttpError
 from sqlalchemy import text
 
 from calendar_models import GoogleEvent
-from split_adoption import InstanceAdoption, event_start, parse_events
+from split_adoption import (
+    InstanceAdoption,
+    event_start,
+    parse_events,
+    start_moment,
+)
 
 logger = get_logger(__name__)
 
@@ -70,6 +75,21 @@ class RecurrenceReader(Protocol):
 _UNBOUNDED = datetime.max.replace(tzinfo=UTC)
 
 
+def instance_slot(external_event_id: str, zone: ZoneInfo) -> datetime | None:
+    """When the rule scheduled an instance, from its ``<recurrence>_<slot>`` id.
+
+    The slot is UTC (``20261214T030000Z``) or, all-day, a date
+    (``20261214``) taken as midnight in ``zone``. ``None`` for any other id.
+    """
+    _, _, suffix = external_event_id.rpartition("_")
+    for pattern, tzinfo in (("%Y%m%dT%H%M%SZ", UTC), ("%Y%m%d", zone)):
+        try:
+            return datetime.strptime(suffix, pattern).replace(tzinfo=tzinfo)
+        except ValueError:
+            continue
+    return None
+
+
 def rule_is_bounded(master: Mapping[str, Any]) -> bool:
     """Whether a recurring master's rules all end (``UNTIL`` or ``COUNT``).
 
@@ -86,12 +106,18 @@ def rule_is_bounded(master: Mapping[str, Any]) -> bool:
 
 @dataclass(frozen=True)
 class RecurrenceLink:
-    """A link in this calendar to an instance (or a legacy link in the batch)."""
+    """A link in this calendar to an instance (or a legacy link in the batch).
+
+    ``start`` is the journal's, which a local edit may have moved; ``slot``
+    is when the rule scheduled the instance (read from its id), which is how
+    Google places it against the window it expanded.
+    """
 
     external_event_id: str
     recurring_event_id: str | None
     journal_id: int
     start: datetime
+    slot: datetime
     sync_capability: str
 
 
@@ -143,7 +169,7 @@ def _retired_links(
             and link.external_event_id not in instances.event_ids
             # An instance the batch cancelled is handled by that cancellation.
             and link.external_event_id not in batch_ids
-            and instances.window_start <= link.start < instances.window_end
+            and instances.window_start <= link.slot < instances.window_end
         ):
             retired.append(link)
     return retired
@@ -220,6 +246,7 @@ async def _load_links(
     calendar_id: UUID,
     recurrences: Sequence[str],
     event_ids: Sequence[str],
+    zone: ZoneInfo,
 ) -> list[RecurrenceLink]:
     result = await session.execute(
         _LINKS,
@@ -235,6 +262,8 @@ async def _load_links(
             recurring_event_id=row.recurring_event_id,
             journal_id=row.journal_id,
             start=row.event_date_range_start,
+            slot=instance_slot(row.external_event_id, zone)
+            or row.event_date_range_start,
             sync_capability=row.sync_capability,
         )
         for row in result.fetchall()
@@ -255,10 +284,20 @@ def _live_instances(
     earlier has its last old occurrence on that day, after the last new one.
     """
     live = [event for event in instances if event.status != "cancelled"]
-    starts = [s for event in live if (s := event_start(event, zone)) is not None]
-    if not starts:
+    # Where the rule put each instance: one moved far ahead must not stretch
+    # the window over dates Google never expanded.
+    slots = [
+        s
+        for event in live
+        if (
+            s := start_moment(event.original_start_time, zone)
+            or event_start(event, zone)
+        )
+        is not None
+    ]
+    if not slots:
         return None
-    last_day = max(starts).astimezone(zone).date()
+    last_day = max(slots).astimezone(zone).date()
     return LiveInstances(
         event_ids=frozenset(event.id for event in live),
         window_start=window_start,
@@ -335,12 +374,12 @@ async def find_rekeyed_instances(
     if not by_recurrence:
         return RekeyedPlan()
 
+    zone = ZoneInfo(zone_name) if zone_name else ZoneInfo("UTC")
     links = await _load_links(
-        session, calendar_id, list(by_recurrence), [e.id for e in events]
+        session, calendar_id, list(by_recurrence), [e.id for e in events], zone
     )
     batch_ids = {event.id for event in events}
     linked_ids = {link.external_event_id for link in links}
-    zone = ZoneInfo(zone_name) if zone_name else ZoneInfo("UTC")
 
     live: dict[str, LiveInstances] = {}
     for recurrence, instances in by_recurrence.items():
@@ -365,7 +404,9 @@ async def find_rekeyed_instances(
                 client,
                 google_calendar_id,
                 recurrence,
-                min(link.start for link in absent) - _WINDOW_LEAD,
+                # Google filters by where an instance is now: the slot for one
+                # still there, the journal's date for one moved with it.
+                min(min(link.slot, link.start) for link in absent) - _WINDOW_LEAD,
                 zone,
                 bounded=bounded,
             )
