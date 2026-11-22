@@ -134,9 +134,20 @@ other retired link is **cancelled** with a synthetic cancellation through the
 ordinary path. Past events are skipped, and the backend's keep-next rule
 applies.
 
-Known limit: if a recurrence is re-timed twice within the backend's
-processing lag, the middle set's links may not exist yet when the worker
-looks. The next time-ranged listing cleans them up.
+For an endless rule with more than one slot a day, Google may stop
+expanding it partway through a day, so its window ends at the last listed
+slot, not at the end of that day.
+
+Known limits, both from the backend's processing lag:
+- if a recurrence is re-timed twice within the lag, the middle set's links
+  may not exist yet when the worker looks. The next time-ranged listing
+  cleans them up;
+- if one instance moved more than a day earlier in Google and the backend
+  has not yet applied the move, the journal still has the old date. A
+  sync-token batch in that window that shows the symptom for the same
+  recurrence asks Google from after the instance's new time, so it looks
+  gone and is cancelled. Verifying each candidate one by one would cost up to
+  one call per instance (730 for an endless series), so this is accepted.
 
 ### What the outbound journal push declines to do
 

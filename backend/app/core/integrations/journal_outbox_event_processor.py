@@ -877,11 +877,14 @@ class JournalOutboxEventProcessor:
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
 
-        # A plain update for an event the journal's link no longer names: the
-        # journal was adopted by another event (a split or a re-key) after
-        # this update was queued. Re-pointing the link would undo that.
+        # A plain update for a recurring instance the journal's link no longer
+        # names: another instance adopted the journal (a split or a re-key)
+        # after this update was queued, and re-pointing the link would undo
+        # that. Only recurring instances are adopted; a journal holding
+        # several Strava activities over one link updates through the others.
         if (
             existing_link is None
+            and payload.recurring_event_id is not None
             and payload.split_adopted_from is None
             and payload.rekeyed_from is None
             and await self._link_moved_on(
