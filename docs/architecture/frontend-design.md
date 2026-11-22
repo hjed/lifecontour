@@ -35,7 +35,7 @@ Updating or adding a primitive with `pnpm dlx shadcn@latest add <name> --overwri
 | `button.tsx` | `lg` is 40px; default/icon carry `touch-target` / `touch-target-square`, a coarse-pointer floor in the components layer (so a call site's own `min-h-11` still wins) | `ui/__tests__/button.test.tsx`, `globals-css.test.ts`, `auth/login.spec.ts`, `new-dialog.spec.ts` |
 | `select.tsx` | `SelectContent` defaults to `position='popper'` (Vega's `item-aligned` opens over the trigger, where the opening tap picks an option) | `ui/__tests__/select.test.tsx` |
 | `popover.tsx` | content scrolls within `--radix-popover-content-available-height` | `ui/__tests__/popover.test.tsx` |
-| `calendar.tsx` | slot components at module scope (inline ones remount the grid and lose clicks) | `ui/__tests__/calendar.test.tsx` |
+| `calendar.tsx` | slot components at module scope (inline ones remount the grid and lose clicks); focus ring on the month/year dropdown wrapper | `ui/__tests__/calendar.test.tsx` |
 | `card.tsx` | `CardTitle` is an `h3` rendering its children; `CardDescription` a `p` | `components/ui/card.test.tsx` |
 | `table.tsx` | `role="table"`, `scope="col"` headers, `TableRowHeader` (`th scope="row"`) | `components/ui/table.test.tsx` |
 | `input-group.tsx` | jsx-a11y disable on the addon's click-to-focus (pointer convenience) | lint |
