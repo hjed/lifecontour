@@ -777,3 +777,34 @@ class TestRekeyedRecurrenceIntegration:
         assert [event_type for event_type, _ in await self._outbox(db_session)] == [
             "journal_event.created"
         ]
+
+    async def test_a_far_slot_moved_earlier_does_not_stretch_the_window(
+        self, db_session
+    ) -> None:
+        """The reverse: an occurrence scheduled far past Google's expansion but
+        moved into it keeps its far slot, which proves nothing about the dates
+        between."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        first, second = self._day(1), self._day(2)
+        unlisted = self._day(10)
+        for start in (first, second, unlisted):
+            await self._linked_journal(db_session, calendar_uuid, start)
+        far_slot = self._day(30)
+        moved = self._instance(far_slot)
+        moved["originalStartTime"] = {"dateTime": far_slot.isoformat()}
+        moved_to = second + timedelta(days=2)
+        moved["start"] = {"dateTime": moved_to.isoformat()}
+        moved["end"] = {"dateTime": (moved_to + timedelta(hours=1)).isoformat()}
+
+        result, _ = await self._sync(
+            db_session,
+            [self._instance(first), self._instance(second), moved],
+            sync_type="full",
+        )
+
+        assert result["status"] == "success"
+        assert "journal_event.cancelled" not in [
+            event_type for event_type, _ in await self._outbox(db_session)
+        ]
