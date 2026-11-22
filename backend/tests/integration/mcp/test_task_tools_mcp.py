@@ -14,6 +14,7 @@ the user's timezone — with two zones 25 hours apart, whose local dates therefo
 differ at every instant.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -65,6 +66,7 @@ from tests.integration.tasks.task_seeding import (
     mark_journal_as_event,
     mark_task,
     seed_task_list,
+    seed_task_list_id,
     stored_anchors,
     stored_marks,
     stored_status,
@@ -3973,7 +3975,7 @@ class TestGetTaskHistoryTool:
         assert '"isError":true' in response.text
 
 
-async def _seeded_list_id(
+async def _seededseed_task_list_id(
     connection: AsyncConnection, *, user_id: str = USER_ID
 ) -> int:
     """A list for the list tasks below to live on."""
@@ -3986,8 +3988,8 @@ async def _seeded_list_id(
 class TestListTasksThroughTheTools:
     """A task on a list reads and is written through the task tools.
 
-    Seeded as a row: nothing creates a list task yet, so this is how the tools
-    are shown to cope with one before it can arrive.
+    Seeded as a row, so each shape a list task can take is shown without driving
+    the writes that produce it; creating one is ``TestCreateTaskOnAList``.
     """
 
     async def test_get_task_answers_a_list_task_with_null_anchors(
@@ -3995,7 +3997,7 @@ class TestListTasksThroughTheTools:
     ) -> None:
         """Typed, matching the published read shape, with nulls where it has none."""
         task_id = await create_list_task(
-            clean_database, task_list_id=await _seeded_list_id(clean_database)
+            clean_database, task_list_id=await _seededseed_task_list_id(clean_database)
         )
 
         async with authenticated_lifespan_client() as client:
@@ -4046,7 +4048,7 @@ class TestListTasksThroughTheTools:
         viewed_id = await create_journal(journal_repository, title="Tuesday")
         task_id = await create_list_task(
             clean_database,
-            task_list_id=await _seeded_list_id(clean_database),
+            task_list_id=await _seededseed_task_list_id(clean_database),
             creating_journal_id=viewed_id,
         )
 
@@ -4075,7 +4077,7 @@ class TestListTasksThroughTheTools:
         )
         await create_list_task(
             clean_database,
-            task_list_id=await _seeded_list_id(clean_database),
+            task_list_id=await _seededseed_task_list_id(clean_database),
             due_journal_id=due_id,
         )
 
@@ -4090,7 +4092,7 @@ class TestListTasksThroughTheTools:
     ) -> None:
         """The write succeeds and its answer carries the null anchors."""
         task_id = await create_list_task(
-            clean_database, task_list_id=await _seeded_list_id(clean_database)
+            clean_database, task_list_id=await _seededseed_task_list_id(clean_database)
         )
 
         async with authenticated_lifespan_client() as client:
@@ -4106,7 +4108,7 @@ class TestListTasksThroughTheTools:
     ) -> None:
         """The reword succeeds and its answer carries the null anchors."""
         task_id = await create_list_task(
-            clean_database, task_list_id=await _seeded_list_id(clean_database)
+            clean_database, task_list_id=await _seededseed_task_list_id(clean_database)
         )
 
         async with authenticated_lifespan_client() as client:
@@ -4123,7 +4125,9 @@ class TestListTasksThroughTheTools:
         """Owner scoping holds for list tasks: theirs is not found, as any task."""
         theirs = await create_list_task(
             clean_database,
-            task_list_id=await _seeded_list_id(clean_database, user_id=OTHER_USER_ID),
+            task_list_id=await _seededseed_task_list_id(
+                clean_database, user_id=OTHER_USER_ID
+            ),
             user_id=OTHER_USER_ID,
         )
 
@@ -4193,7 +4197,7 @@ class TestTaskToolsCarryListDueDateFlagIconAndOverdue:
         )
         task_id = await create_list_task(
             clean_database,
-            task_list_id=await _seeded_list_id(clean_database),
+            task_list_id=await _seededseed_task_list_id(clean_database),
             due_journal_id=trip,
         )
 
@@ -4234,7 +4238,7 @@ class TestTaskToolsCarryListDueDateFlagIconAndOverdue:
     async def test_a_write_tool_answers_with_the_plain_fields(
         self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
     ) -> None:
-        list_id = await _seeded_list_id(clean_database)
+        list_id = await _seededseed_task_list_id(clean_database)
         task_id = await create_list_task(
             clean_database, task_list_id=list_id, flagged=True, icon=TaskIcon.GIFT
         )
@@ -4271,3 +4275,290 @@ class TestTaskToolsCarryListDueDateFlagIconAndOverdue:
 
         assert "Their secret list" not in response.text
         assert extract_mcp_tool_error(response.text)["error"] == "Not found"
+
+
+@pytest.mark.integration
+class TestCreateTaskOnAList:
+    """``create_task`` with ``task_list_id``: a task on a list, with no journal."""
+
+    async def test_creates_an_undated_task_at_the_bottom_of_the_list(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        await create_list_task(clean_database, task_list_id=list_id, position=0)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _create_task(
+                client, task_list_id=list_id, text="pack the tent"
+            )
+
+        assert "error" not in payload
+        assert payload["task_list_id"] == list_id
+        assert payload["due_date"] is None
+        assert payload["creating_journal_id"] is None
+        assert payload["due_journal_id"] is None
+        row = (
+            await clean_database.execute(
+                sa_text("SELECT position FROM tasks WHERE id = :id"),
+                {"id": int(payload["id"])},
+            )
+        ).one()
+        assert row.position == 1
+
+    async def test_creates_a_dated_task_with_its_contacts(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        contact_id = await create_contact(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _create_task(
+                client,
+                task_list_id=list_id,
+                due_date="2099-12-31",
+                contact_ids=[contact_id],
+                text="pack the tent",
+            )
+
+        assert payload["due_date"] == "2099-12-31"
+        assert await linked_contact_ids(clean_database, int(payload["id"])) == [
+            contact_id
+        ]
+
+    async def test_explicit_nulls_are_read_as_absent(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """Agents often send ``null`` for an argument they mean to leave out."""
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _create_task(
+                client,
+                task_list_id=list_id,
+                due_date=None,
+                creating_journal_id=None,
+                due_journal_id=None,
+                contact_ids=None,
+                text="pack the tent",
+            )
+
+        assert "error" not in payload
+        assert payload["task_list_id"] == list_id
+
+    async def test_the_create_is_attributed_to_the_assistant(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _create_task(
+                client, task_list_id=list_id, text="pack the tent"
+            )
+
+        (event,) = await task_events(clean_database, task_id=int(payload["id"]))
+        assert event.event_type == "TaskCreated"
+        assert event.payload["task_list_id"] == list_id
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+
+
+@pytest.mark.integration
+class TestCreateTaskOnAListRefusals:
+    """Each refusal is actionable, and nothing is written."""
+
+    async def test_a_past_due_date_names_the_rule_and_today(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                due_date="2000-01-01",
+                text="too late",
+            )
+
+        assert payload["error"] == "Task error"
+        assert "2000-01-01 is before today" in payload["message"]
+        assert re.search(r"today \(\d{4}-\d{2}-\d{2}\)", payload["message"])
+        assert "today or later" in payload["message"]
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_an_archived_list_names_the_way_out(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database, archived=True)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "create_task", task_list_id=list_id, text="pack the tent"
+            )
+
+        assert payload["error"] == "Task error"
+        assert "unarchive" in payload["message"].lower()
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_blank_text_names_the_field(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "create_task", task_list_id=list_id, text="   "
+            )
+
+        assert payload["error"] == "Task error"
+        assert payload["field"] == "text"
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_an_unknown_contact_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                contact_ids=[999_999],
+                text="pack the tent",
+            )
+
+        assert payload["error"] == "Contact not found"
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_the_list_id_as_a_string_is_refused_by_the_schema(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        """``"7"`` would otherwise be coerced to list 7."""
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_tool_call(
+                client, {"task_list_id": str(list_id), "text": "pack the tent"}
+            )
+
+        assert '"isError":true' in response.text
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            pytest.param({"task_list_id": True}, id="the list id as a boolean"),
+            pytest.param({"due_date": 20991231}, id="the due date as a number"),
+            pytest.param(
+                {"due_date": "2099-12-31T09:00:00Z"}, id="the due date as an instant"
+            ),
+        ],
+    )
+    async def test_a_coercible_argument_is_refused_by_the_schema(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        given = {"task_list_id": list_id, "text": "pack the tent", **arguments}
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_tool_call(client, given)
+
+        assert '"isError":true' in response.text
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    @pytest.mark.parametrize(
+        ("arguments", "field"),
+        [
+            pytest.param(
+                {"creating_journal_id": "CREATING"},
+                "creating_journal_id",
+                id="a list and a creating journal",
+            ),
+            pytest.param(
+                {"due_journal_id": "DUE"},
+                "due_journal_id",
+                id="a list and a due journal",
+            ),
+        ],
+    )
+    async def test_a_journal_beside_a_list_is_refused_naming_it(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        arguments: dict[str, str],
+        field: str,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        creating_id, due_id = task_anchors
+        ids = {"CREATING": creating_id, "DUE": due_id}
+        given = {name: ids[value] for name, value in arguments.items()}
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                task_list_id=list_id,
+                text="pack the tent",
+                **given,
+            )
+
+        assert payload["error"] == "Task error"
+        assert payload["field"] == field
+        assert payload["message"].startswith(f"{field}: ")
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_a_due_date_without_a_list_is_refused_naming_it(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        creating_id, due_id = task_anchors
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client,
+                "create_task",
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                due_date="2099-12-31",
+                text="print the permit",
+            )
+
+        assert payload["error"] == "Task error"
+        assert payload["field"] == "due_date"
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_no_placement_at_all_is_refused_naming_the_choices(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(client, "create_task", text="pack the tent")
+
+        assert payload["error"] == "Task error"
+        assert payload["field"] == "task_list_id"
+        assert "creating_journal_id and due_journal_id" in payload["message"]
+        assert await count(clean_database, COUNT_TASKS, {"user_id": USER_ID}) == 0
+
+    async def test_another_users_list_reads_as_an_absent_one(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        foreign_list_id = await seed_task_list_id(clean_database, user_id=OTHER_USER_ID)
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client, "create_task", task_list_id=foreign_list_id, text="mine now"
+            )
+            absent = await _refused(
+                client, "create_task", task_list_id=999_999, text="mine now"
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert "Packing" not in str(foreign)
+        for owner in (USER_ID, OTHER_USER_ID):
+            assert await count(clean_database, COUNT_TASKS, {"user_id": owner}) == 0

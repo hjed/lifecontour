@@ -1,13 +1,16 @@
 """Tasks domain MCP tools.
 
-A task is a short commitment anchored to two of the user's journals: the one it
-arose in, and the future-dated one where it matters. Both anchors are the tool's
-arguments because an AI client has no path to take the first from, unlike the
-REST surface.
+A task is a short commitment, either on one of the user's lists — undated or due
+on a date — or anchored to two of their journals: the one it arose in, and the
+future-dated one where it matters. ``create_task`` takes either placement, and
+both journal anchors are its arguments because an AI client has no path to take
+the first from, unlike the REST surface.
 
 The tools are controller-equivalent and stay that way: they open **no**
-transaction and enforce **no** invariant of their own. Every rule — both anchors
-exist and are the acting user's, the due journal is future-dated at the moment
+transaction and enforce **no** invariant of their own — only which placement a
+create's arguments describe, which is argument parsing, not a rule. Every rule —
+the list or both anchors exist and are the acting user's, the list is not
+archived, a due date is today or later, the due journal is future-dated at the moment
 it is set, referenced contacts exist, and the status transition is one the
 lifecycle permits — belongs to ``TaskService``, which owns the commit. That is
 what makes the answers here identical to the endpoint's rather than merely
@@ -45,6 +48,11 @@ from app.api.common.identifiers import INT32_MAX
 from app.core.history.services.task_history_service import TaskHistoryService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
+from app.mcp.domains.tasks.placement import (
+    InJournals,
+    OnList,
+    resolve_create_placement,
+)
 from app.mcp.domains.tasks.schemas import (
     GroupedTaskMCP,
     JournalTasksResponse,
@@ -78,7 +86,7 @@ from app.mcp.shared.annotations import (
     IDEMPOTENT_WRITE,
     READ_ONLY,
 )
-from app.mcp.shared.arguments import JsonBool
+from app.mcp.shared.arguments import JsonBool, JsonIntOnly, JsonIsoDate
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
     get_async_connection,
@@ -161,33 +169,55 @@ def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
 @tool(annotations=ADDITIVE_WRITE)
 @mcp_unified_error_handler("create_task", "task")
 async def create_task(
-    creating_journal_id: Annotated[
-        int,
-        Field(
-            ge=1,
-            le=INT32_MAX,
-            description=(
-                "The journal the commitment arose in — the entry you were "
-                "reading or writing when it came up. Never changes."
-            ),
-        ),
-    ],
-    due_journal_id: Annotated[
-        int,
-        Field(
-            ge=1,
-            le=INT32_MAX,
-            description=(
-                "The journal the task is due in. Must be an existing journal of "
-                "yours dated in the future: today is not the future, and a "
-                "multi-day journal already under way is dated by the day it "
-                "started. Create the journal first if the day you want has none."
-            ),
-        ),
-    ],
     text: Annotated[
         str, Field(description="The commitment, as plain text. Required and non-empty.")
     ],
+    task_list_id: Annotated[
+        Annotated[int, Field(ge=1, le=INT32_MAX), JsonIntOnly] | None,
+        Field(
+            description=(
+                "The list to put the task on, at the bottom. A task on a list has "
+                "no creating or due journal: give a due_date instead, or leave it "
+                "undated. The list must be yours and not archived."
+            )
+        ),
+    ] = None,
+    due_date: Annotated[
+        JsonIsoDate | None,
+        Field(
+            description=(
+                "Only for a task on a list: the day it is due, as YYYY-MM-DD. "
+                "Must be today or later in the user's timezone. Omit for an "
+                "undated task."
+            )
+        ),
+    ] = None,
+    creating_journal_id: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description=(
+                "For a task in journals: the journal the commitment arose in — "
+                "the entry you were reading or writing when it came up. Never "
+                "changes. Give it with due_journal_id, and without task_list_id."
+            ),
+        ),
+    ] = None,
+    due_journal_id: Annotated[
+        int | None,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description=(
+                "For a task in journals: the journal the task is due in. Must be "
+                "an existing journal of yours dated in the future: today is not "
+                "the future, and a multi-day journal already under way is dated "
+                "by the day it started. Create the journal first if the day you "
+                "want has none. Give it with creating_journal_id."
+            ),
+        ),
+    ] = None,
     contact_ids: Annotated[
         list[Annotated[int, Field(ge=1, le=INT32_MAX)]] | None,
         Field(
@@ -201,35 +231,62 @@ async def create_task(
     task_service: TaskService = mcp_depends(get_task_service),
 ) -> TaskMCP:
     """
-    Create a task: something to do, anchored to the journal it is due in.
+    Create a task: something to do, either on a list or in journals.
 
-    Tasks created here are attached to journals, and there is no due *date*;
-    task lists exist but cannot hold tasks yet. To make a task due on a
-    particular day, that day's journal must already exist; name it as
-    due_journal_id. The creating and due journal may be the same one.
+    Say where it goes in one of two ways:
 
-    Rejections are actionable rather than generic: a journal that does not exist
-    or is not yours is reported as not found naming which anchor it was, and a
-    due journal that is not future-dated comes back with both its date and
-    today's so a later journal can be chosen.
+    - **On a list:** task_list_id, and optionally a due_date (YYYY-MM-DD, today
+      or later). The task joins the bottom of the list and has no journal. Use
+      this for anything not tied to a particular journal entry, such as a
+      packing list or a shopping list.
+    - **In journals:** creating_journal_id (where it came up) and due_journal_id
+      (the future journal it is due in), with no list and no due_date. To make
+      such a task due on a particular day, that day's journal must already
+      exist. The creating and due journal may be the same one.
+
+    Any other mix is refused, naming the argument to change, before anything is
+    written. Other rejections are actionable rather than generic: a list or
+    journal that does not exist or is not yours is reported as not found, an
+    archived list says to unarchive it, a past due date comes back with today's
+    date, and a due journal that is not future-dated comes back with both its
+    date and today's.
     """
     user_id = await get_current_user_id()
+    placement = resolve_create_placement(
+        creating_journal_id=creating_journal_id,
+        due_journal_id=due_journal_id,
+        task_list_id=task_list_id,
+        due_date=due_date,
+    )
 
     # A task an assistant created has to read as one an assistant created. The
     # service defaults to ``SYSTEM``, so saying nothing here would make an
     # agent's work indistinguishable from an internal one in the user's own
     # history — the distinction the activity-history specification asks for by
     # name.
-    created, trail = await task_service.create_task_with_trail(
-        user_id=user_id,
-        creating_journal_id=creating_journal_id,
-        due_journal_id=due_journal_id,
-        text=text,
-        transaction=db_connection,
-        contact_ids=contact_ids,
-        source=Provenance.MCP,
-        changed_by="mcp",
-    )
+    match placement:
+        case OnList():
+            created, trail = await task_service.create_list_task_with_trail(
+                user_id=user_id,
+                task_list_id=placement.task_list_id,
+                text=text,
+                transaction=db_connection,
+                due_date=placement.due_date,
+                contact_ids=contact_ids,
+                source=Provenance.MCP,
+                changed_by="mcp",
+            )
+        case InJournals():
+            created, trail = await task_service.create_task_with_trail(
+                user_id=user_id,
+                creating_journal_id=placement.creating_journal_id,
+                due_journal_id=placement.due_journal_id,
+                text=text,
+                transaction=db_connection,
+                contact_ids=contact_ids,
+                source=Provenance.MCP,
+                changed_by="mcp",
+            )
     return _task_fields(created, trail)
 
 

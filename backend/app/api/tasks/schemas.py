@@ -61,6 +61,7 @@ from app.api.common.schemas import (
     JsonApiResponse,
     JsonApiUpdateRequest,
 )
+from app.shared.calendar_date import IsoCalendarDate
 from app.shared.patch import UNSET, Unset
 
 RESOURCE_TYPE_DESC = "Resource type"
@@ -211,6 +212,49 @@ class TaskCreateRequest(JsonApiCreateRequest[TaskCreateData]):
     precisely the omission the other two guards exist to prevent. All three
     levels are now closed.
     """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListTaskCreateAttributes(BaseModel):
+    """Attributes a client may send to create a task on a list.
+
+    The list is the path, so it is never a body field, and a task on a list has
+    no creating journal. The due journal is not accepted yet; ``extra="forbid"``
+    refuses it rather than dropping it, so no client believes it was applied.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(..., description="The commitment, as plain text")
+    due_date: IsoCalendarDate | None = Field(
+        default=None,
+        description=(
+            "The day it is due, as YYYY-MM-DD. Must be today or later in your "
+            "timezone. Omit for an undated task."
+        ),
+    )
+    contact_ids: list[DatabaseId] | None = Field(
+        default=None,
+        description="Optional contacts this task references; duplicates are ignored",
+    )
+
+
+class ListTaskCreateData(BaseModel):
+    """Data for creating a task on a list; the resource type is pinned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tasks"] = Field(
+        default=TASK_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: ListTaskCreateAttributes = Field(
+        ..., description="Task attributes to create"
+    )
+
+
+class ListTaskCreateRequest(JsonApiCreateRequest[ListTaskCreateData]):
+    """Request model for creating a task on a list, closed at every level."""
 
     model_config = ConfigDict(extra="forbid")
 

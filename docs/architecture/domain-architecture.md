@@ -178,8 +178,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
     Like `TaskList`, the entity is keyword-only and a new list task's `position` is `None` until the
     repository places it. Whether a due date is today or later needs the user's timezone and is a
     service rule
-  - **Narrowing to a journal-only task.** Two existing contracts still promise both anchors as
-    `int`s — the `TaskCreated` payload and retargeting. They narrow through `Task.require_anchor(anchor)`,
+  - **Narrowing to a journal-only task.** Retargeting still needs both anchors as `int`s, and the
+    journal create checks the row it saved has both (`TaskCreated` itself carries nullable journal
+    ids since a task can be created on a list). They narrow through `Task.require_anchor(anchor)`,
     which raises `TaskAnchorMissingError` — a `RuntimeError`, deliberately not a `DomainError`, since
     reaching it means a list task got somewhere none can yet go (a broken invariant, surfacing as a
     500), not a request a client could correct. The phase that teaches each surface about list
@@ -261,6 +262,14 @@ the *creating* journal where it arose and the *due* journal where it matters.
   a list) must lock the list's tasks first. The delete refuses after its `DELETE … RETURNING
   task_list_id`, and raising rolls the unit of work back. Merges of journals and contacts still
   re-point an archived list's task links: they are the journal's and the contact's operations.
+  **Creating a task on a list** (`TaskService.create_list_task`) is the one exception to that lock
+  order: it has no task row yet, and its insert computes the bottom of the list, so it reads the
+  list with `find_by_id_for_update` (`FOR NO KEY UPDATE`) **first** and calls `ensure_writable()`
+  itself. Taking share first and update second would be a lock upgrade two concurrent creates
+  deadlock on. Refusals come entity rules → list not found → contact not found → archived → due
+  date before today. REST's `POST /api/task-lists/{list_id}/tasks` and MCP's `create_task` (with
+  `task_list_id`; `app/mcp/domains/tasks/placement.py` decides which create its arguments
+  describe) both call it.
 - **Read model**: `TaskReadModel` and the *lapsed* derivation — see
   *[Task read model and lapsed derivation](#task-read-model-and-lapsed-derivation)* below; the
   date rules a task on a list follows instead — due date, overdue, never lapsing — see

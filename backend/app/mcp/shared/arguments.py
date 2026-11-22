@@ -12,6 +12,8 @@ from typing import Annotated, Any
 
 from pydantic import BeforeValidator
 
+from app.shared.calendar_date import IsoCalendarDate
+
 
 def _require_json_bool(value: Any) -> bool:
     if not isinstance(value, bool):
@@ -44,3 +46,11 @@ def _require_json_int(value: Any) -> int:
 #: pydantic publishes bounds placed after a before-validator as ``ge``/``le``
 #: instead of JSON Schema's ``minimum``/``maximum``.
 JsonIntOnly = BeforeValidator(_require_json_int)
+
+
+#: A calendar day that only a ``"YYYY-MM-DD"`` string satisfies — never a number,
+#: which fastmcp's lax validation would read as a timestamp, nor an instant. The
+#: same type the REST schemas use, so both surfaces refuse the same input. For an
+#: optional argument write ``JsonIsoDate | None``, so an explicit ``null`` is
+#: accepted as absent rather than reaching the validator.
+JsonIsoDate = IsoCalendarDate

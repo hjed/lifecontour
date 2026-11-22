@@ -12,7 +12,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from pydantic import Field
 
-from app.mcp.shared.arguments import JsonBool, JsonIntOnly
+from app.mcp.shared.arguments import JsonBool, JsonIntOnly, JsonIsoDate
 
 
 @pytest.fixture
@@ -124,3 +124,117 @@ async def test_the_schema_still_advertises_a_bounded_integer(
         "maximum": 10,
         "description": "Where.",
     }
+
+
+@pytest.fixture
+def date_server() -> FastMCP[None]:
+    mcp: FastMCP[None] = FastMCP("date-arguments")
+
+    @mcp.tool
+    async def schedule(
+        day: Annotated[JsonIsoDate | None, Field(description="When.")] = None,
+    ) -> str:
+        return repr(day)
+
+    return mcp
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        20261130,
+        1764460800,
+        True,
+        "2026-11-30T09:00:00",
+        "2026-11-30T00:00:00Z",
+        "30/11/2026",
+        "2026-11-31",
+        "",
+    ],
+    ids=repr,
+)
+async def test_anything_but_an_iso_calendar_date_is_refused(
+    date_server: FastMCP[None], value: Any
+) -> None:
+    """A number would otherwise be read as a timestamp and an instant cut to
+    its UTC day — a date nobody named, a day off in half the world."""
+    async with Client(date_server) as client:
+        result = await client.call_tool(
+            "schedule", {"day": value}, raise_on_error=False
+        )
+
+    assert result.is_error is True
+
+
+async def test_an_iso_calendar_date_is_accepted_as_that_day(
+    date_server: FastMCP[None],
+) -> None:
+    async with Client(date_server) as client:
+        result = await client.call_tool("schedule", {"day": "2026-11-30"})
+
+    assert result.data == "datetime.date(2026, 11, 30)"
+
+
+@pytest.mark.parametrize("arguments", [{}, {"day": None}], ids=["omitted", "null"])
+async def test_an_absent_optional_date_is_none(
+    date_server: FastMCP[None], arguments: dict[str, Any]
+) -> None:
+    """An explicit ``null`` is how an agent most often says "not given"."""
+    async with Client(date_server) as client:
+        result = await client.call_tool("schedule", arguments)
+
+    assert result.data == "None"
+
+
+async def test_the_schema_advertises_a_date_string(
+    date_server: FastMCP[None],
+) -> None:
+    async with Client(date_server) as client:
+        (tool,) = await client.list_tools()
+
+    day = tool.input_schema["properties"]["day"]
+    assert {"type": "string", "format": "date"} in day["anyOf"]
+
+
+@pytest.fixture
+def optional_int_server() -> FastMCP[None]:
+    mcp: FastMCP[None] = FastMCP("optional-int-arguments")
+
+    @mcp.tool
+    async def pick(
+        record_id: Annotated[
+            Annotated[int, Field(ge=1, le=10), JsonIntOnly] | None,
+            Field(description="Which."),
+        ] = None,
+    ) -> str:
+        return repr(record_id)
+
+    return mcp
+
+
+@pytest.mark.parametrize(
+    "arguments", [{}, {"record_id": None}], ids=["omitted", "null"]
+)
+async def test_an_optional_integer_written_nested_accepts_null(
+    optional_int_server: FastMCP[None], arguments: dict[str, Any]
+) -> None:
+    """The form optional ids take: ``JsonIntOnly`` inside the union, not on it.
+
+    On the whole union the before-validator would see ``None`` and refuse it.
+    """
+    async with Client(optional_int_server) as client:
+        result = await client.call_tool("pick", arguments)
+
+    assert result.data == "None"
+
+
+@pytest.mark.parametrize("value", [True, "3", 0], ids=repr)
+async def test_an_optional_integer_written_nested_still_refuses_coercion(
+    optional_int_server: FastMCP[None], value: Any
+) -> None:
+    async with Client(optional_int_server) as client:
+        result = await client.call_tool(
+            "pick", {"record_id": value}, raise_on_error=False
+        )
+
+    assert result.is_error is True

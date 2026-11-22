@@ -806,11 +806,12 @@ refused row.
   discarding values `0145` has no column for.
 - **The `Task` entity mirrors these CHECKs** (ITER21-001 Phase 10), so a task that constructs is
   a row the table accepts — except an unplaced list task's `position`, which the insert assigns. `SqlTaskRepository` reads every column through `_TASK_COLUMN_NAMES`.
-  `save()` writes the due date, flag and icon, but **never list membership** (`task_list_id`,
-  `position`) — joining, leaving, moving and reordering are operations of their own, as
-  `task_lists.position` is, so an edit with a stale position cannot undo a reorder. Until the
-  list-task creation path exists, `save()` refuses to insert a task on a list rather than store it
-  as a journal-only task.
+  `save()` writes the due date, flag and icon, but an **update never writes list membership**
+  (`task_list_id`, `position`) — joining, leaving, moving and reordering are operations of their
+  own, as `task_lists.position` is, so an edit with a stale position cannot undo a reorder. An
+  **insert** of a task on a list (ITER21-001 Phase 19) locks the list `FOR NO KEY UPDATE` and
+  places the task at the bottom in the same statement, through the `_BOTTOM_OF_LIST` subquery
+  `add_to_list` uses, so overlapping creates on one list take consecutive positions.
 
 **Membership, order and close time** (ITER21-001 Phase 14). The list membership operations live on
 `TaskRepository` beside `save()`:

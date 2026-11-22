@@ -92,9 +92,9 @@ async def create_task_list(
     Create a task list: a named home for tasks, added below the user's lists.
 
     Lists can be created, renamed, given or cleared an icon, read, listed,
-    reordered, archived and unarchived; tasks cannot be placed on a list yet,
-    so a new list is empty. A blank or overlong name is refused naming the
-    field.
+    reordered, archived and unarchived. A new list is empty: put a task on it
+    with create_task and its task_list_id. A blank or overlong name is refused
+    naming the field.
     """
     user_id = await get_current_user_id()
 

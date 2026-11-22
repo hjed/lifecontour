@@ -69,6 +69,44 @@ export interface TaskCreateRequest {
   contactIds?: string[];
 }
 
+export interface ListTaskCreateRequest {
+  taskListId: string;
+  text: string;
+  /** `YYYY-MM-DD`, today or later. Omitted means an undated task. */
+  dueDate?: string;
+}
+
+/** A task list as the fixtures track it. */
+export interface TestTaskList {
+  id: string;
+  name: string;
+}
+
+/** A task created on a list: no journal, and a due date or none. */
+export interface TestListTask {
+  id: string;
+  text: string;
+  taskListId: string;
+  dueDate: string | null;
+}
+
+/**
+ * The fields of a task-list or list-task write response these fixtures read.
+ * Local rather than from `src/types`, which has no task-list types until the
+ * web app reads lists.
+ */
+interface ListWriteResponse {
+  data: {
+    id: string;
+    attributes: {
+      name?: string;
+      text?: string;
+      task_list_id?: number | null;
+      due_date?: string | null;
+    };
+  };
+}
+
 export interface TagCreateRequest {
   name: string;
   color?: string;
@@ -144,6 +182,9 @@ export class TestDataManager {
   // (ITER18-002 refuses it with a 409), so leaving tasks behind would leak
   // every journal a task fixture created.
   private createdTaskIds: string[] = [];
+  // Archived rather than deleted at cleanup: lists cannot be deleted yet, and
+  // an archived list never appears among the active ones other tests read.
+  private createdTaskListIds: string[] = [];
   private createdGearItemIds: string[] = [];
   private createdTemplateIds: string[] = [];
   private readonly createdCalendars: string[] = [];
@@ -1637,6 +1678,69 @@ export class TestDataManager {
     };
   }
 
+  /** Create a task list through the API, tracked so cleanup archives it. */
+  async createTaskList(name: string): Promise<TestTaskList> {
+    const response = await this.page.request.post('/api/task-lists', {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: { type: 'task-lists', attributes: { name } },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to create task list: ${response.status()} ${await response.text()}`
+      );
+    }
+
+    const resource = ((await response.json()) as ListWriteResponse).data;
+    this.createdTaskListIds.push(String(resource.id));
+    console.debug(`📝 [Data Manager] Created task list ${resource.id}`);
+    return { id: String(resource.id), name: resource.attributes.name ?? name };
+  }
+
+  /**
+   * Create a task on a list through the API: it has no journal, and joins the
+   * bottom of the list. Tracked with the other tasks, so cleanup deletes it
+   * before the journals it may since have been linked to.
+   */
+  async createListTask(taskData: ListTaskCreateRequest): Promise<TestListTask> {
+    const response = await this.page.request.post(
+      `/api/task-lists/${taskData.taskListId}/tasks`,
+      {
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        data: JSON.stringify({
+          data: {
+            type: 'tasks',
+            attributes: {
+              text: taskData.text,
+              ...(taskData.dueDate ? { due_date: taskData.dueDate } : {}),
+            },
+          },
+        }),
+      }
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to create list task: ${response.status()} ${await response.text()}`
+      );
+    }
+
+    const resource = ((await response.json()) as ListWriteResponse).data;
+    this.createdTaskIds.push(String(resource.id));
+    if (resource.attributes.task_list_id == null) {
+      throw new Error(`Task ${resource.id} came back on no list`);
+    }
+    console.debug(
+      `✅ [Data Manager] Created task ${resource.id} on list ${taskData.taskListId}`
+    );
+    return {
+      id: String(resource.id),
+      text: resource.attributes.text ?? taskData.text,
+      taskListId: String(resource.attributes.task_list_id),
+      dueDate: resource.attributes.due_date ?? null,
+    };
+  }
+
   /**
    * Link a task to a journal as an intermediate journal — a *mention*.
    *
@@ -1665,6 +1769,23 @@ export class TestDataManager {
     console.debug(
       `🔗 [Data Manager] Attached journal ${journalId} to task ${taskId} as a mention`
     );
+  }
+
+  /**
+   * Archive every list this manager created. Their tasks were deleted first,
+   * because an archived list's tasks are read-only and so cannot be deleted.
+   */
+  private async archiveTaskLists(): Promise<void> {
+    for (const listId of this.createdTaskListIds) {
+      const response = await this.page.request.post(
+        `/api/task-lists/${listId}/archive`
+      );
+      if (!response.ok() && response.status() !== 404) {
+        console.debug(
+          `⚠️ [Data Manager] Failed to archive task list ${listId}: ${response.status()}`
+        );
+      }
+    }
   }
 
   /** Delete a task, and stop tracking it for cleanup. */
@@ -2178,6 +2299,7 @@ export class TestDataManager {
     // tasks in place would leak this test's journals into every test after it,
     // and into the pickers and listings they assert on.
     await this.cleanupSpecificItems(this.createdTaskIds, '/api/tasks', 'task');
+    await this.archiveTaskLists();
 
     // Task-aware, because the pass above only knows about tasks this manager
     // created through the API. A task the *test* created through the UI is
@@ -2218,6 +2340,7 @@ export class TestDataManager {
     this.createdJournalTagIds = [];
     this.createdJournalIds = [];
     this.createdTaskIds = [];
+    this.createdTaskListIds = [];
     this.createdGearItemIds = [];
     this.createdTemplateIds = [];
     // The cached calendar was deleted with the rest; keeping its id would hand

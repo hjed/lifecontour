@@ -6,8 +6,9 @@ from the Python signature. Two properties matter beyond documentation.
 
 ``now`` must be absent. It is the seam the future-dated invariant is judged
 against, and a tool able to set it would make that invariant opt-out for any
-caller. So must any bare date: a task is due *in a journal*, and offering a date
-would invite the tool to create one implicitly.
+caller. A due date is offered, but only as an ISO calendar-date string and only
+for a task on a list: a task in journals is due in its journal, and a date there
+would invite the tool to create that journal implicitly.
 
 The tool's documentation lives here too — in the docstring and the parameter
 descriptions the schema carries — and nowhere else, so a test asserts it exists.
@@ -65,12 +66,36 @@ async def delete_task_schema() -> dict[str, Any]:
 class TestCreateTaskToolParameters:
     """What an AI client may send."""
 
-    def test_both_anchors_and_the_text_are_required(
+    def test_only_the_text_is_required(
         self, create_task_schema: dict[str, Any]
     ) -> None:
+        """A task goes in journals *or* on a list, so neither is required.
+
+        Which arguments make a valid placement is the tool's own refusal, named
+        by field, because a JSON schema cannot say "these two, or that one".
+        """
         required = set(create_task_schema["input_schema"]["required"])
 
-        assert required == {"creating_journal_id", "due_journal_id", "text"}
+        assert required == {"text"}
+
+    def test_a_list_and_a_due_date_are_offered(
+        self, create_task_schema: dict[str, Any]
+    ) -> None:
+        properties = create_task_schema["input_schema"]["properties"]
+
+        assert "task_list_id" in properties
+        assert "due_date" in properties
+
+    def test_the_list_id_is_a_bounded_integer_or_null(
+        self, create_task_schema: dict[str, Any]
+    ) -> None:
+        options = create_task_schema["input_schema"]["properties"]["task_list_id"][
+            "anyOf"
+        ]
+
+        assert {"type": "null"} in options
+        [integer] = [option for option in options if option.get("type") == "integer"]
+        assert integer["minimum"] == 1
 
     def test_contacts_are_optional(self, create_task_schema: dict[str, Any]) -> None:
         properties = create_task_schema["input_schema"]["properties"]
@@ -96,13 +121,24 @@ class TestTheNowSeamIsNotReachableFromATool:
     ) -> None:
         assert "now" not in create_task_schema["input_schema"]["properties"]
 
-    def test_the_schema_offers_no_bare_date(
+    def test_the_only_date_offered_is_a_calendar_date_string(
         self, create_task_schema: dict[str, Any]
     ) -> None:
-        """The only way to say when is to name an existing journal."""
+        """A day, never an instant: "today" is judged in the user's timezone."""
         properties = create_task_schema["input_schema"]["properties"]
 
-        assert not [name for name in properties if "date" in name]
+        assert [name for name in properties if "date" in name] == ["due_date"]
+        assert {"type": "string", "format": "date"} in properties["due_date"]["anyOf"]
+
+    def test_the_due_date_states_its_rule_and_where_it_applies(
+        self, create_task_schema: dict[str, Any]
+    ) -> None:
+        description = create_task_schema["input_schema"]["properties"]["due_date"][
+            "description"
+        ].lower()
+
+        assert "today or later" in description
+        assert "on a list" in description
 
 
 class TestTheToolDocumentsItself:

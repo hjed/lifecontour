@@ -78,3 +78,19 @@ class TestMCPServer:
         # Should have instructions for AI
         assert hasattr(server, "name")
         # Instructions should be set during creation
+
+
+class TestTheTaskGuidanceDescribesListTasks:
+    """The superseded guidance said tasks could not live on a list or a date."""
+
+    def test_says_a_task_can_be_created_on_a_list_with_a_due_date(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "on a list" in instructions
+        assert "due date" in instructions
+
+    def test_no_longer_says_tasks_cannot_be_placed_on_a_list(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "cannot be placed on a list" not in instructions
+        assert "never on a bare date" not in instructions

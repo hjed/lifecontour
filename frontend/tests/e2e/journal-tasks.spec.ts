@@ -21,12 +21,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 import type { JournalDeletePreviewResponse } from '../../src/types/journals';
-import {
-  TaskLinkRole,
-  TaskStatus,
-  type JournalTaskResource,
-  type JournalTasksResponse,
-} from '../../src/types/tasks';
+import type { TaskReadResponse } from '../../src/types/tasks';
 import { TestDataManager, utcDayOffset } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
 import { chooseDueJournal, submitRetarget } from './utils/retarget-dialog';
@@ -560,24 +555,22 @@ test.describe('Journal Task Surface', () => {
 });
 
 /**
- * A task on a list — one with no due journal — on a journal's page.
+ * A task on a list — one with no journal at all — on a journal's page.
  *
- * No endpoint can create a list task until tasks can be created on a list, so
- * this injects one into the journal's **real** task listing as the page reads
- * it. The resource is built from the frontend's own types, so the shape the
- * route claims is the one the compiler checks rather than an untyped literal.
+ * Created for real on a list, so it has neither anchor. The one write that
+ * puts such a task on a journal's page is a mention, so it is linked to the
+ * journal as an intermediate journal and listed under **Mentioned**.
  */
 test.describe('Journal Task Surface — a task with no due journal', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('shows a list task created here without erroring, and offers it no retarget', async ({
+  test('shows a task on a list mentioned here without erroring, and offers it no retarget', async ({
     authenticatedPage,
     testCleanup,
   }) => {
     const page = authenticatedPage;
     const dataManager = new TestDataManager(page);
     testCleanup(async () => {
-      await page.unrouteAll({ behavior: 'ignoreErrors' });
       await dataManager.cleanup();
     });
 
@@ -592,63 +585,21 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
       text: journalOnlyText,
     });
 
-    const listTaskId = 900_000_000 + Math.floor(Math.random() * 1_000_000);
+    const list = await dataManager.createTaskList(taskText('Beach packing'));
     const listTaskText = taskText('Buy sunscreen');
-    const listTask: JournalTaskResource = {
-      type: 'tasks',
-      id: String(listTaskId),
-      attributes: {
-        text: listTaskText,
-        status: TaskStatus.NOT_DONE,
-        creating_journal_id: Number(journal.id),
-        due_journal_id: null,
-        intermediate_journal_ids: [],
-        creating_journal: {
-          id: Number(journal.id),
-          title: journal.title,
-          date: utcDayOffset(2).slice(0, 10),
-          cancelled: false,
-        },
-        due_journal: null,
-        intermediate_journals: [],
-        contacts: [],
-        lapsed: false,
-        lapse_reason: null,
-        link_roles: [TaskLinkRole.CREATED],
-      },
-    };
-
-    // Matched on the path rather than a glob: the client may add `?role=`.
-    const listingPath = `/api/journals/${journal.id}/tasks`;
-    await page.route(
-      url => url.pathname === listingPath,
-      async route => {
-        const response = await route.fetch();
-        const body = (await response.json()) as JournalTasksResponse;
-        await route.fulfill({
-          response,
-          json: {
-            ...body,
-            data: [...body.data, listTask],
-            meta: {
-              ...body.meta,
-              groups: {
-                ...body.meta.groups,
-                created: [...body.meta.groups.created, listTaskId],
-              },
-            },
-          } satisfies JournalTasksResponse,
-        });
-      }
-    );
+    const listTask = await dataManager.createListTask({
+      taskListId: list.id,
+      text: listTaskText,
+    });
+    await dataManager.attachTaskMention(listTask.id, journal.id);
 
     const pageErrors: Error[] = [];
     page.on('pageerror', error => pageErrors.push(error));
 
     await openJournal(page, journal);
 
-    const createdGroup = page.getByTestId('journal-tasks-group-created');
-    const listRow = createdGroup.getByTestId(`journal-task-${listTaskId}`);
+    const mentionedGroup = page.getByTestId('journal-tasks-group-mentioned');
+    const listRow = mentionedGroup.getByTestId(`journal-task-${listTask.id}`);
     await expect(listRow.getByTestId('journal-task-text')).toHaveText(
       listTaskText
     );
@@ -764,7 +715,6 @@ test.describe('Journal delete confirmation and list tasks', () => {
     const page = authenticatedPage;
     const dataManager = new TestDataManager(page);
     testCleanup(async () => {
-      await page.unrouteAll({ behavior: 'ignoreErrors' });
       await dataManager.cleanup();
     });
 
@@ -773,22 +723,17 @@ test.describe('Journal delete confirmation and list tasks', () => {
       dayOffset: 0,
     });
 
-    // Stands in for two list tasks until Phase 19 lets one exist. Typed
-    // against the same response the app reads, so a contract change fails
-    // to compile here rather than passing silently.
-    const stubbed: JournalDeletePreviewResponse = {
-      data: {
-        type: 'journal-delete-previews',
-        id: String(journal.id),
-        attributes: { list_tasks_losing_link: 2 },
-      },
-    };
-    await page.route(
-      `**/api/journals/${journal.id}/delete-preview`,
-      async route => {
-        await route.fulfill({ status: 200, json: stubbed });
-      }
+    // Two real tasks on a list, each linked here only as a mention: the delete
+    // unlinks them rather than being blocked by them.
+    const list = await dataManager.createTaskList(taskText('Trip prep'));
+    const listTasks = await Promise.all(
+      [taskText('Buy maps'), taskText('Charge the radio')].map(text =>
+        dataManager.createListTask({ taskListId: list.id, text })
+      )
     );
+    for (const listTask of listTasks) {
+      await dataManager.attachTaskMention(listTask.id, journal.id);
+    }
 
     await page.setViewportSize(MOBILE);
     await openJournal(page, journal);
@@ -831,6 +776,30 @@ test.describe('Journal delete confirmation and list tasks', () => {
     await expect(dialog).toBeHidden();
     const kept = await page.request.get(`/api/journals/${journal.id}`);
     expect(kept.status()).toBe(200);
+
+    // Deleting for real unlinks both tasks and keeps them on their list.
+    await page.getByTestId('delete-journal-button').click();
+    await expect(dialog).toBeVisible();
+    await expect(count).toBeVisible();
+    const deleteResponse = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/journals/${journal.id}`) &&
+        response.request().method() === 'DELETE'
+    );
+    await dialog.getByTestId('confirm-delete-journal').click();
+    expect((await deleteResponse).status()).toBe(204);
+    await expect(page).toHaveURL(/\/journals$/);
+
+    for (const listTask of listTasks) {
+      const read = await page.request.get(`/api/tasks/${listTask.id}`);
+      expect(read.status()).toBe(200);
+      const body = (await read.json()) as TaskReadResponse & {
+        // Carried by every task response; not yet on the web app's type.
+        data: { attributes: { task_list_id: number | null } };
+      };
+      expect(body.data.attributes.intermediate_journal_ids).toEqual([]);
+      expect(body.data.attributes.task_list_id).toBe(Number(list.id));
+    }
   });
 });
 
