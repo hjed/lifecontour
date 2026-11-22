@@ -35,9 +35,18 @@ RUN pip install uv==0.11.15
 # (FastMCP OAuthProxy needs writable home for token storage)
 RUN groupadd -r appuser && useradd -r -m -g appuser appuser
 
-# Pre-install core_shared package (shared by all Python services)
+# Pre-install core_shared package (shared by all Python services).
+# Its dependencies come from core_shared/uv.lock: `uv export --locked` fails the
+# build when the lock is stale against pyproject.toml, and the exported hashes
+# are verified on install. Every install passes --no-deps: the export is the
+# complete locked closure, and re-resolving it would drop the lock's overrides.
+# The package itself is then installed editable.
+# Each backend/worker image re-pins these on top from its own lock.
 COPY core_shared/ /core_shared/
-RUN uv pip install --system -e /core_shared
+RUN uv export -q --locked --no-dev --no-emit-project --project /core_shared \
+        -o /tmp/requirements.txt \
+ && uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt \
+ && uv pip install --system --no-deps -e /core_shared
 
 # Default working directory
 WORKDIR /app

@@ -9,20 +9,28 @@ FROM pms-python-base AS base
 ARG BUILD_ENV=production
 ARG INSTALL_DEV_DEPS=false
 
-# Copy dependency files
-COPY backend/pyproject.toml backend/README.md ./
+# Copy dependency files. The lock's `../core_shared` path source resolves to
+# the /core_shared copy the base image installed.
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 
-# Install dependencies based on build environment
+# Install dependencies from uv.lock. `uv export --locked` fails the build when
+# the lock is stale against pyproject.toml; the exported hashes are verified on
+# install. Every install passes --no-deps: the export is the complete locked
+# closure, and re-resolving it would drop the lock's overrides. core_shared is
+# already installed (editable) by the base image. Production leaves out the dev
+# dependency group; development adds the `dev` extra.
 RUN if [ "$INSTALL_DEV_DEPS" = "true" ]; then \
         echo "Installing development dependencies..." && \
-        uv pip install --system -e .[dev] && \
-        uv pip install --system \
-            watchdog \
-            opentelemetry-exporter-otlp \
-            opentelemetry-exporter-jaeger; \
+        uv export -q --locked --extra dev --no-emit-project --no-emit-package core_shared \
+            -o /tmp/requirements.txt && \
+        uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt && \
+        uv pip install --system --no-deps -e .; \
     else \
         echo "Installing production dependencies..." && \
-        uv pip install --system .; \
+        uv export -q --locked --no-dev --no-emit-project --no-emit-package core_shared \
+            -o /tmp/requirements.txt && \
+        uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt && \
+        uv pip install --system --no-deps .; \
     fi
 
 # Copy application code

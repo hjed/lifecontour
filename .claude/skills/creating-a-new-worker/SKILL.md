@@ -521,12 +521,19 @@ image (which provides Python 3.14, uv, `core_shared`, and the `appuser` account)
 # Extends the shared python-base image (Python 3.14, uv, core_shared, appuser).
 FROM pms-python-base
 
-# Copy worker pyproject.toml first for dependency caching.
-COPY ./integration_workers/<name>/pyproject.toml .
+# Install dependencies from uv.lock, before the source so code edits keep this
+# layer cached. The manifest and lock go to the repo-shaped path because the
+# lock's `../../core_shared` path source can't be resolved from /app.
+# `uv export --locked` fails the build on a stale lock; --no-deps keeps the
+# lock's override-dependencies (redis>=8 over arq's redis<6 pin).
+COPY ./integration_workers/<name>/pyproject.toml ./integration_workers/<name>/uv.lock /integration_workers/<name>/
+RUN uv export -q --locked --no-dev --no-emit-project --no-emit-package core_shared \
+        --project /integration_workers/<name> -o /tmp/requirements.txt \
+ && uv pip install --system --no-cache --no-deps -r /tmp/requirements.txt
 
-# Copy worker source before install so the package is complete.
+# Copy the worker source and install the worker itself (dependencies above).
 COPY ./integration_workers/<name>/ .
-RUN uv pip install --system --no-cache-dir --no-sources .
+RUN uv pip install --system --no-cache-dir --no-deps --no-sources .
 
 # Health check — Python pings Redis using REDIS_URL from the environment.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -578,7 +585,10 @@ are matrix-driven and need no per-worker copy — only the registration below):
    workers="[\"google\", \"immich\", \"snipeit\", \"strava\", \"<name>\"]"
    ```
    The `worker-unit-test` and `worker-integration-test` jobs already read
-   `fromJSON(needs.changes.outputs.workers)`, so no further edits are needed.
+   `fromJSON(needs.changes.outputs.workers)`, so no further edits are needed there.
+4. `integration_workers/<name>` in the project list of the `python-locks` job (and of the
+   `pip-audit` loop in `.github/workflows/security.yml`). The locked-install governance
+   test fails until every committed `uv.lock` is in both.
 
 ### `.github/workflows/release.yml`
 
