@@ -15,6 +15,7 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ImmichAlbumSyncEventData,
     JournalSeriesCancelledEventData,
+    JournalStatusEventData,
     JournalSyncEventData,
     parse_outbox_event_data,
 )
@@ -256,3 +257,42 @@ class TestCreateJournalSyncEventRecurring:
         older = {k: v for k, v in event.event_data.items() if k != "rekeyed_from"}
 
         assert JournalSyncEventData.model_validate(older).rekeyed_from is None
+
+    def test_superseded_by_journal_id_in_a_cancellation(self) -> None:
+        """A retired duplicate names the live journal it should merge into."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="r-1_20261214T030000Z",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="cancelled",
+            existing_journal_id=7,
+            recurring_event_id="r-1",
+            superseded_by_journal_id=8,
+        )
+
+        assert (
+            JournalStatusEventData.model_validate(
+                event.event_data
+            ).superseded_by_journal_id
+            == 8
+        )
+
+    def test_superseded_by_journal_id_is_absent_from_older_payloads(self) -> None:
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-2",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="cancelled",
+        )
+        older = {
+            k: v for k, v in event.event_data.items() if k != "superseded_by_journal_id"
+        }
+
+        assert (
+            JournalStatusEventData.model_validate(older).superseded_by_journal_id
+            is None
+        )

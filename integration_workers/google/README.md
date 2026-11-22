@@ -134,6 +134,19 @@ other retired link is **cancelled** with a synthetic cancellation through the
 ordinary path. Past events are skipped, and the backend's keep-next rule
 applies.
 
+The exception is a link that is a **duplicate of a live journal**: when both
+the old and the new instances were journalled before anything could adopt
+(two re-times within the backend's lag, or data from before this existed),
+an old link's day has no unlinked candidate but exactly one other journal
+linked to a live instance of the same recurrence. Its cancellation carries
+`superseded_by_journal_id`, and the backend merges the old journal into that
+one, so its notes, tasks and contacts survive and its id becomes a merged
+alias. A cancelled duplicate left beside the live journal would otherwise
+stay visible, because the keep-next rule never sees an unbroken cancelled
+run. Such a cancellation is sent even for a past journal, since merging loses
+nothing. If the sibling is gone, cancelled, or in another recurrence by the
+time the backend applies it, the cancellation falls back to the ordinary one.
+
 For an endless rule with more than one slot a day, Google may stop
 expanding it partway through a day, so its window ends at the last listed
 slot, not at the end of that day.

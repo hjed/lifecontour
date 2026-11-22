@@ -220,6 +220,7 @@ class OutboxEvent(Base):
         series_recurring_event_id: str | None = None,
         split_adopted_from: str | None = None,
         rekeyed_from: str | None = None,
+        superseded_by_journal_id: int | None = None,
         synced_entries: dict[str, list[str]] | None = None,
     ) -> OutboxEvent:
         """
@@ -252,6 +253,9 @@ class OutboxEvent(Base):
                 an unrelated id
             rekeyed_from: The old instance id whose journal this update
                 adopts, when the source re-issued a recurrence's instance ids
+            superseded_by_journal_id: On a cancellation of a re-keyed
+                instance, the live journal of the same recurrence on its day,
+                which the cancelled journal is merged into
             synced_entries: Per event field, the keys of the values the source
                 holds: the base the next push merges against
 
@@ -277,6 +281,7 @@ class OutboxEvent(Base):
             series_recurring_event_id=series_recurring_event_id,
             split_adopted_from=split_adopted_from,
             rekeyed_from=rekeyed_from,
+            superseded_by_journal_id=superseded_by_journal_id,
             synced_entries=synced_entries,
         )
         return cls(
