@@ -285,6 +285,25 @@ class ContactResolver:
         return row.id if row else None
 
 
+def _rekey_superseded(
+    link: SeriesLinkedJournal | None, payload: JournalSyncEventData
+) -> bool:
+    """Whether a later re-key of the same recurrence has adopted the journal.
+
+    The link names neither the old id nor this event but another instance of
+    this recurrence: the adoption is a replay overtaken by a newer one, and
+    this event is gone. A link moved anywhere else (or gone) leaves this
+    event live but unjournalled, so it is created instead.
+    """
+    return (
+        link is not None
+        and link.external_event_id
+        not in (payload.rekeyed_from, payload.external_event_id)
+        and link.recurring_event_id is not None
+        and link.recurring_event_id == payload.recurring_event_id
+    )
+
+
 def _skipped_as_merged(
     event_type: str, alias: MergedAlias, external_event_id: str
 ) -> dict[str, Any]:
@@ -747,8 +766,23 @@ class JournalOutboxEventProcessor:
         # the journal the old id was linked to.
         rekeyed_link_synced_at: datetime | None = None
         if payload.rekeyed_from is not None:
-            rekeyed_link = await self._rekeyed_link(existing_journal_id, payload)
-            if rekeyed_link is None:
+            rekeyed_link = await self._locked_rekey_link(existing_journal_id, payload)
+            if _rekey_superseded(rekeyed_link, payload):
+                logger.info(
+                    "Re-key adoption skipped - a later instance has adopted it",
+                    journal_id=existing_journal_id,
+                    external_event_id=external_event_id,
+                )
+                return {
+                    "status": "skipped",
+                    "event_type": EVENT_TYPE_JOURNAL_EVENT_UPDATED,
+                    "reason": "adoption_superseded",
+                    "journal_id": existing_journal_id,
+                }
+            if rekeyed_link is None or rekeyed_link.external_event_id not in (
+                payload.rekeyed_from,
+                external_event_id,
+            ):
                 logger.info(
                     "Re-key adoption stale - the journal has moved on, creating",
                     journal_id=existing_journal_id,
@@ -1104,31 +1138,22 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
-    async def _rekeyed_link(
+    async def _locked_rekey_link(
         self, journal_id: int, payload: JournalSyncEventData
     ) -> SeriesLinkedJournal | None:
-        """The journal's link a re-key adoption moves, or ``None`` when stale.
+        """The journal's link in the adoption's calendar, read under its lock.
 
         Holds the recurrence's lock first, the one its cancellations take, so
         a cancellation of the old id cannot interleave. The adoption applies
-        while the journal's link in this calendar still names the old id it
-        was planned from - or already names this event, when it is delivered
-        again. Anything else (the link moved to another event, or is gone)
-        means the journal is no longer the old instance's, and adopting it
-        would steal it.
+        while the link still names the old id it was planned from - or
+        already names this event, when it is delivered again.
         """
         calendar_id = UUID(payload.calendar_id)
         if payload.recurring_event_id:
             await self.link_repo.lock_recurrence(
                 calendar_id, payload.recurring_event_id
             )
-        current = await self.link_repo.find_by_journal(journal_id, calendar_id)
-        if current is None or current.external_event_id not in (
-            payload.rekeyed_from,
-            payload.external_event_id,
-        ):
-            return None
-        return current
+        return await self.link_repo.find_by_journal(journal_id, calendar_id)
 
     async def _link_moved_on(
         self, journal_id: int, calendar_id: UUID, external_event_id: str

@@ -270,8 +270,23 @@ async def _load_links(
     ]
 
 
+def _listed_ids(
+    raw_items: Sequence[dict[str, Any]], recurrence: str | None = None
+) -> frozenset[str]:
+    """The live ids Google listed, read raw: an item our validation rejects
+    (an attendee without an email, say) is still live in Google."""
+    return frozenset(
+        raw["id"]
+        for raw in raw_items
+        if raw.get("id")
+        and raw.get("status") != "cancelled"
+        and (recurrence is None or raw.get("recurringEventId") == recurrence)
+    )
+
+
 def _live_instances(
     instances: Sequence[GoogleEvent],
+    listed_ids: frozenset[str],
     window_start: datetime,
     zone: ZoneInfo,
     *,
@@ -303,7 +318,7 @@ def _live_instances(
             return None
         window_end = _expansion_end(slots, zone)
     return LiveInstances(
-        event_ids=frozenset(event.id for event in live),
+        event_ids=listed_ids,
         window_start=window_start,
         window_end=window_end,
     )
@@ -364,7 +379,9 @@ async def _ask_google(
             error=str(e),
         )
         return None
-    return _live_instances(parse_events(listed), window_start, zone, bounded=bounded)
+    return _live_instances(
+        parse_events(listed), _listed_ids(listed), window_start, zone, bounded=bounded
+    )
 
 
 async def find_rekeyed_instances(
@@ -397,7 +414,7 @@ async def find_rekeyed_instances(
     links = await _load_links(
         session, calendar_id, list(by_recurrence), [e.id for e in events], zone
     )
-    batch_ids = {event.id for event in events}
+    batch_ids = {raw["id"] for raw in raw_events if raw.get("id")}
     linked_ids = {link.external_event_id for link in links}
 
     live: dict[str, LiveInstances] = {}
@@ -417,7 +434,13 @@ async def find_rekeyed_instances(
             continue
         bounded = await _is_bounded(client, google_calendar_id, recurrence)
         if listing_time_min is not None:
-            view = _live_instances(instances, listing_time_min, zone, bounded=bounded)
+            view = _live_instances(
+                instances,
+                _listed_ids(raw_events, recurrence),
+                listing_time_min,
+                zone,
+                bounded=bounded,
+            )
         else:
             view = await _ask_google(
                 client,
