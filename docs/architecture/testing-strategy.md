@@ -320,6 +320,13 @@ the fixture with `tests.integration.migration_helpers.RunAlembic`; the same modu
 raw rows in that older schema, then upgrade and assert on the data
 (`test_add_user_id_to_contacts_migration.py` is a worked example, `-x` override included).
 
+The first `upgrade` of a fresh `throwaway_database` with no `x_args` is not migrated from base: it
+clones a template database already migrated to that revision (`MigrationTemplates` in
+`migration_helpers.py`, built once per revision per session by real alembic). Every later command,
+the upgrade under test included, runs alembic for real. Use the shared `throwaway_database` and
+`run_alembic` fixtures rather than local copies, or a file pays the full migration from base on
+every test.
+
 ### MCP Integration Testing Guidelines
 
 Every app the integration suite builds without MCP auth mounts **one shared FastMCP server**

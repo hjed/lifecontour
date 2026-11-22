@@ -6,23 +6,13 @@ cleanly reverses all of it. Runs against an isolated throwaway database so the
 shared session database is untouched.
 """
 
-import os
-import subprocess
-import sys
-from collections.abc import AsyncGenerator
-from pathlib import Path
-
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-# Process-unique so parallel test workers (e.g. pytest-xdist) sharing the same
-# Postgres instance each create/drop their own throwaway database.
-THROWAWAY_DB_NAME = f"pms_sync_job_fanout_migration_test_{os.getpid()}"
-BACKEND_DIR = Path(__file__).resolve().parents[3]
+from tests.integration.migration_helpers import RunAlembic
 
 _NEW_COLUMNS = (
     "parent_job_id",
@@ -30,26 +20,6 @@ _NEW_COLUMNS = (
     "completed_children",
     "failed_children",
 )
-
-
-def _run_alembic(database_url: str, command: str, target: str) -> None:
-    """Run ``alembic <command> <target>`` against the given database."""
-    env = {
-        **os.environ,
-        "ENVIRONMENT": "test",
-        "DATABASE_URL": database_url,
-    }
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", command, target],
-        cwd=str(BACKEND_DIR),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"alembic {command} {target} failed:\n{result.stdout}\n{result.stderr}"
-        )
 
 
 async def _existing_columns(engine: AsyncEngine) -> set[str]:
@@ -66,45 +36,19 @@ async def _existing_columns(engine: AsyncEngine) -> set[str]:
     return {row.column_name for row in rows}
 
 
-@pytest_asyncio.fixture
-async def throwaway_database(async_engine: AsyncEngine) -> AsyncGenerator[URL]:
-    """Create and drop an isolated database derived from the test engine URL."""
-    base_url: URL = async_engine.url
-    admin_url = base_url.set(database="postgres")
-    target_url = base_url.set(database=THROWAWAY_DB_NAME)
-
-    admin_engine = create_async_engine(
-        admin_url.render_as_string(hide_password=False),
-        isolation_level="AUTOCOMMIT",
-    )
-    try:
-        async with admin_engine.connect() as conn:
-            await conn.execute(
-                text(f"DROP DATABASE IF EXISTS {THROWAWAY_DB_NAME} WITH (FORCE)")
-            )
-            await conn.execute(text(f"CREATE DATABASE {THROWAWAY_DB_NAME}"))
-        yield target_url
-    finally:
-        async with admin_engine.connect() as conn:
-            await conn.execute(
-                text(f"DROP DATABASE IF EXISTS {THROWAWAY_DB_NAME} WITH (FORCE)")
-            )
-        await admin_engine.dispose()
-
-
 @pytest.mark.integration
 @pytest.mark.slow
 class TestSyncJobFanoutMigration:
     """0088 fan-out hierarchy migration round-trip."""
 
     async def test_upgrade_then_downgrade_round_trip(
-        self, throwaway_database: URL
+        self, throwaway_database: URL, run_alembic: RunAlembic
     ) -> None:
         url_str = throwaway_database.render_as_string(hide_password=False)
 
         # 1. Migrate the empty database up to the revision just before the
         #    fan-out hierarchy.
-        _run_alembic(url_str, "upgrade", "0087")
+        run_alembic(url_str, "upgrade", "0087")
         engine = create_async_engine(url_str)
         try:
             before = await _existing_columns(engine)
@@ -125,7 +69,7 @@ class TestSyncJobFanoutMigration:
         # 2. Apply the fan-out hierarchy migration. Target 0088 explicitly (not
         #    "head") so the round-trip stays scoped to this migration and cannot
         #    be perturbed by unrelated future migrations.
-        _run_alembic(url_str, "upgrade", "0088")
+        run_alembic(url_str, "upgrade", "0088")
 
         engine = create_async_engine(url_str)
         try:
@@ -175,7 +119,7 @@ class TestSyncJobFanoutMigration:
             await engine.dispose()
 
         # 3. Downgrade and assert the columns are gone and in_progress rejected.
-        _run_alembic(url_str, "downgrade", "0087")
+        run_alembic(url_str, "downgrade", "0087")
 
         engine = create_async_engine(url_str)
         try:
