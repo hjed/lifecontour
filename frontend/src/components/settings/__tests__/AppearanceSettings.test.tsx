@@ -102,6 +102,20 @@ describe('AppearanceSettings', () => {
     expect(option(/emerald/i)).toBeChecked();
   });
 
+  it('is locked while a save is in flight so saves cannot overtake', () => {
+    settingsWith(null);
+    mockUseUpdateAppearance.mockReturnValue({
+      mutate: mockSave,
+      isPending: true,
+      variables: 'emerald',
+    });
+
+    render(<AppearanceSettings />);
+
+    expect(option(/default/i)).toBeDisabled();
+    expect(option(/emerald/i)).toBeDisabled();
+  });
+
   it('cannot be changed before the saved palette has loaded', () => {
     settingsWith(undefined);
 
