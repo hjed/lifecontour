@@ -1765,6 +1765,12 @@ dated in the future (strictly after today in the user's timezone, the journal-on
   moves, the old journal becomes a mention, the status is untouched — which already matches the
   spec. The web app never offered retarget on such a task (`canRetarget` needs both journals).
   **Lifted in Phase 23** (see its acceptance criteria).
+- **Retarget refuses a task on a list with no due journal** (from PR review):
+  `TaskListTaskNotDueInJournalError` (409, REST `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL`, MCP "Task
+  error") for an undated or due-date list task, checked on the peek before any lock, and again on
+  the locked read. The second check closes the race this phase opens: a journal delete that
+  commits while a retarget waits on the journal's lock detaches the task, which used to reach
+  `require_anchor("due")` and answer 500. **Lifted in Phase 23** with the closed refusal.
 
 **Tests:** unit `test_task_service_create_on_list.py` (`TestCreatingWithADueJournal`: saved shape,
 event payload, the journal locked before the list and never the share lock, tomorrow accepted and
@@ -1773,7 +1779,9 @@ read, precedence list → journal → contact and archived → not future, the F
 dated create takes no journal lock), `test_task_service_retarget.py`
 (`TestAClosedTaskOnAListIsNotRetargeted`: done and cancelled, with and without the
 acknowledgement, nothing written; decided from the locked read; a not-done list task moves and
-stays not done; a done journal-only task still asks for the acknowledgement),
+stays not done; a done journal-only task still asks for the acknowledgement;
+`TestAListTaskNotDueInAJournalIsNotRetargeted`: undated and due-date refused before any lock, and a
+journal delete between the peek and the lock refused cleanly),
 `test_task_error_mapping.py`, `test_task_create_placement.py` (the Phase 19 "not supported yet"
 case replaced by the accepted placement, the pair refusal and a list with both journals),
 `test_list_task_create_schemas.py`, `test_task_tools_schema.py`, `test_server.py`, and
@@ -1785,14 +1793,17 @@ lapsed nor overdue, in the journal's *due* group; lights the journal's tasks-due
 the upcoming window; another user's journal → not found, nothing written; today in Sydney refused
 naming both days; UTC fallback; and `TestAJournalDeleteRacingTheCreate`, two committed connections
 through `overlap`: a create during the delete waits and is told the journal is gone, a delete during
-the create waits and leaves the task undated with `TaskJournalLinksRemoved`), the event-completeness
+the create waits and leaves the task undated with `TaskJournalLinksRemoved`;
+`TestAJournalDeleteRacingARetarget`: a retarget during the delete waits and is refused with
+`TaskListTaskNotDueInJournalError`, not a 500), the event-completeness
 inventory (a "create on a list due in a journal" write path, ports `{"save"}`),
 `api/test_list_task_create_endpoints.py` (201; 400 not future, the pair, a creating journal, out of
 range ids; 404 unknown; 409 archived before a past journal; a second user's journal identical to a
 missing one, nothing written; retarget of a closed list task → 409 `TASK_LIST_TASK_CLOSED`, left as
-it was), `mcp/test_task_tools_mcp.py` (`TestCreateTaskOnAListDueInAJournal`: created at the bottom
+it was; retarget of an undated or due-date list task → 409 `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL`), `mcp/test_task_tools_mcp.py` (`TestCreateTaskOnAListDueInAJournal`: created at the bottom
 with MCP provenance; not future with both dates; the pair naming `due_date`; another user's journal
-reads as an absent one, nothing written; `TestRetargetingAClosedListTask`), and
+reads as an absent one, nothing written; `TestRetargetingAClosedListTask`;
+`TestRetargetingAListTaskNotDueInAJournal`), and
 `test_task_tools_archived_list_mcp.py` (archived wins over a past journal). E2E
 (`journal-tasks.spec.ts`, new describe *a task on a list due here*, 390px): the first real list task
 in a journal's *Due* group — no lapsed marker, no retarget, **Mark done** awaited on its PATCH and
@@ -1834,6 +1845,13 @@ pre-commit.
   assert the change lands with the status kept. Update the `retarget_task` tool docstring, the
   controller docstring and `api-design.md`'s retarget row. Reuse `_lock_due_journal` for the new
   due journal, before the task and list locks.
+- *Phase 23 (set a due journal):* **lifts the not-due-in-a-journal refusal too.** Setting a due
+  journal on an undated list task (or replacing a due date with one) is Phase 23's "set"; delete
+  `TaskListTaskNotDueInJournalError`, its `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` mapping and both
+  checks in `retarget_due_journal`, and rewrite `TestAListTaskNotDueInAJournalIsNotRetargeted`, the
+  REST and MCP `TestRetargetingAListTaskNotDueInAJournal` and
+  `TestAJournalDeleteRacingARetarget` (a delete that wins must still leave a clean outcome, never
+  a 500).
 - *Phase 24 (direct reopen):* the closed-list-task refusal's message names "set it back to not
   done" only for a done task; once a cancelled list task can be reopened directly, reword it (or,
   if Phase 23 lands first, it is already gone).
@@ -1993,6 +2011,7 @@ tasks most-recently-closed first, paged".
 
 - [ ] Set, change, clear; the replaced journal becomes intermediate.
 - [ ] Lifts Phase 20's closed-list-task retarget refusal: a done or cancelled task on a list can have its due journal changed, keeping its status and asking for no acknowledgement; `TaskListTaskClosedError` and `TASK_LIST_TASK_CLOSED` are removed and Phase 20's refusal tests rewritten to assert the change (see Phase 20's notes).
+- [ ] Lifts Phase 20's not-due-in-a-journal retarget refusal: an undated or due-date list task can be given a due journal; `TaskListTaskNotDueInJournalError` and `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are removed, and a journal delete racing the change still ends cleanly (see Phase 20's notes).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 24: Direct reopen of list tasks
