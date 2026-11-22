@@ -18,7 +18,11 @@ import {
   type ThemePalette,
 } from '@/lib/theme/palettes';
 import type { JsonApiErrorResponse } from '@/types/api';
-import type { UserSettingsPatch, UserSettingsResponse } from '@/types/settings';
+import type {
+  UserSettingsAttributes,
+  UserSettingsPatch,
+  UserSettingsResponse,
+} from '@/types/settings';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 // `journalKeys` comes from `./journal-keys` rather than `./journals`, which
 // imports *this* module — see that file's header for the cycle it removes.
@@ -127,6 +131,40 @@ interface UseUserSettingsOptions {
   enabled?: boolean;
 }
 
+/**
+ * Store the fields a settings save owns, keeping the rest of the cached row.
+ *
+ * The two settings cards save independently, and each response carries every
+ * field as the server held it when *that* request ran. Seeding the whole
+ * response would let a slower save restore a value the other card has since
+ * changed — an old timezone (then copied into the timezone cache) or an old
+ * palette (then repainted).
+ */
+function storeSavedSettings(
+  queryClient: ReturnType<typeof useQueryClient>,
+  response: UserSettingsResponse,
+  fields: readonly (keyof UserSettingsAttributes)[]
+): void {
+  queryClient.setQueryData<UserSettingsResponse>(
+    userSettingsKeys.detail(),
+    cached => {
+      if (!cached) {
+        return response;
+      }
+      const saved = Object.fromEntries(
+        fields.map(field => [field, response.data.attributes[field]])
+      );
+      return {
+        ...cached,
+        data: {
+          ...cached.data,
+          attributes: { ...cached.data.attributes, ...saved },
+        },
+      };
+    }
+  );
+}
+
 export function useUserSettings({
   enabled = true,
 }: UseUserSettingsOptions = {}) {
@@ -231,7 +269,10 @@ export function useUpdateLocalisation() {
       // zone the user has just replaced — and a non-null stored value outranks
       // everything else in `useUserTimezone`. Without this, a journal saved in
       // that window is anchored in the old zone despite a successful save.
-      queryClient.setQueryData(userSettingsKeys.detail(), response);
+      storeSavedSettings(queryClient, response, [
+        'timezone',
+        'default_country',
+      ]);
       // **Changing the zone changes what the server thinks "today" is**, and
       // two answers are derived from that rather than stored: whether a task
       // has *lapsed*, and the journal list's `tasks_due_count`, which is the
@@ -264,7 +305,9 @@ export function useUpdateLocalisation() {
  * Save the colour palette on the account.
  *
  * Repaints at once rather than waiting for the PATCH, and puts the previous
- * palette back if it fails. On success the settings query is seeded, and
+ * palette back if it fails. Reads in flight are cancelled so an older answer
+ * cannot overwrite the save, and only `theme_palette` is stored from the
+ * response (see {@link storeSavedSettings}). On success the cache is updated, and
  * `PaletteProvider` mirrors the saved value to localStorage from there.
  * Nothing else is invalidated: unlike the timezone, the palette changes no
  * answer the server derives.
@@ -278,15 +321,20 @@ export function useUpdateAppearance() {
         { theme_palette: palette === DEFAULT_PALETTE ? null : palette },
         'Failed to save the colour palette'
       ),
-    onMutate: (palette: ThemePalette) => {
+    onMutate: async (palette: ThemePalette) => {
+      // A settings read already in flight predates this save; let it land and
+      // it would put the old palette back.
+      await queryClient.cancelQueries({ queryKey: userSettingsKeys.detail() });
       const stored = queryClient.getQueryData<UserSettingsResponse>(
         userSettingsKeys.detail()
       )?.data.attributes.theme_palette;
       applyPalette(palette);
       return { previous: isThemePalette(stored) ? stored : DEFAULT_PALETTE };
     },
-    onSuccess: response => {
-      queryClient.setQueryData(userSettingsKeys.detail(), response);
+    onSuccess: async response => {
+      // And one started while the PATCH was in flight is no fresher.
+      await queryClient.cancelQueries({ queryKey: userSettingsKeys.detail() });
+      storeSavedSettings(queryClient, response, ['theme_palette']);
     },
     onError: (error: Error, _palette, context) => {
       applyPalette(context?.previous ?? DEFAULT_PALETTE);

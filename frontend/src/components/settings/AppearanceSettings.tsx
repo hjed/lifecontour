@@ -60,7 +60,9 @@ export function AppearanceSettings() {
               savePalette(value);
             }
           }}
-          disabled={!loaded}
+          // Locked while saving, so a quicker second pick can never be
+          // overtaken by the first one's late response.
+          disabled={!loaded || isPending}
           className='grid gap-3 sm:grid-cols-2'
         >
           {THEME_PALETTES.map(palette => {

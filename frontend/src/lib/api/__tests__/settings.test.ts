@@ -21,6 +21,7 @@ import { userSettingsKeys } from '../settings';
 import { journalKeys } from '../journal-keys';
 import { taskKeys } from '../tasks';
 import { PALETTE_ATTRIBUTE } from '@/lib/theme/palettes';
+import type { UserSettingsResponse } from '@/types/settings';
 
 globalThis.fetch = jest.fn();
 const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
@@ -172,6 +173,54 @@ describe('settings API', () => {
       expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBe(
         'Pacific/Auckland'
       );
+    });
+
+    it('keeps the palette the appearance card saved meanwhile', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      });
+      // The palette was saved after this PATCH's response was built.
+      queryClient.setQueryData(userSettingsKeys.detail(), {
+        data: {
+          id: 'user-1',
+          type: 'user_settings',
+          attributes: {
+            timezone: null,
+            default_country: null,
+            theme_palette: 'emerald',
+          },
+        },
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'user-1',
+            type: 'user_settings',
+            attributes: {
+              timezone: 'Pacific/Auckland',
+              default_country: 'NZ',
+              theme_palette: null,
+            },
+          },
+        }),
+      } as Response);
+      // The follow-up refetch has not landed when the cache is read.
+      mockFetch.mockReturnValue(new Promise(() => {}));
+      const { result } = renderHook(() => useUpdateLocalisation(), {
+        wrapper: wrapper(queryClient),
+      });
+
+      await result.current.mutateAsync({ timezone: 'Pacific/Auckland' });
+
+      const attributes = queryClient.getQueryData<UserSettingsResponse>(
+        userSettingsKeys.detail()
+      )?.data.attributes;
+      expect(attributes?.timezone).toBe('Pacific/Auckland');
+      expect(attributes?.theme_palette).toBe('emerald');
     });
 
     /**
@@ -408,6 +457,72 @@ describe('settings API', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it('cannot be undone by a settings read that lands after it', async () => {
+      // A background read started before the save answers with the old value.
+      let landStaleRead: (value: unknown) => void = () => {};
+      const { result, queryClient } = renderAppearance();
+      const staleRead = queryClient
+        .fetchQuery({
+          queryKey: userSettingsKeys.detail(),
+          queryFn: () =>
+            new Promise(resolve => {
+              landStaleRead = resolve;
+            }),
+          staleTime: 0,
+        })
+        .catch(() => undefined);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => settingsResponse('emerald'),
+      } as Response);
+
+      result.current.mutate('emerald');
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      landStaleRead(settingsResponse(null));
+      await staleRead;
+
+      expect(
+        queryClient.getQueryData<UserSettingsResponse>(
+          userSettingsKeys.detail()
+        )?.data.attributes.theme_palette
+      ).toBe('emerald');
+    });
+
+    it('keeps the fields the localisation card saved meanwhile', async () => {
+      let answer: (value: Response) => void = () => {};
+      mockFetch.mockReturnValueOnce(
+        new Promise<Response>(resolve => {
+          answer = resolve;
+        })
+      );
+      const { result, queryClient } = renderAppearance();
+
+      result.current.mutate('emerald');
+      // The other card saves a new zone while the palette PATCH is in flight.
+      queryClient.setQueryData<UserSettingsResponse>(
+        userSettingsKeys.detail(),
+        old => ({
+          ...old!,
+          data: {
+            ...old!.data,
+            attributes: { ...old!.data.attributes, timezone: 'Europe/Paris' },
+          },
+        })
+      );
+      // The palette response predates that save.
+      answer({
+        ok: true,
+        json: async () => settingsResponse('emerald'),
+      } as Response);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      const attributes = queryClient.getQueryData<UserSettingsResponse>(
+        userSettingsKeys.detail()
+      )?.data.attributes;
+      expect(attributes?.timezone).toBe('Europe/Paris');
+      expect(attributes?.theme_palette).toBe('emerald');
     });
 
     it('puts the previous palette back when the save fails', async () => {
