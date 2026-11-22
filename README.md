@@ -26,6 +26,43 @@ journal, your tasks and your outdoor adventures in one place you run yourself:
 
 It is built with a Python FastAPI backend, a Next.js frontend and PostgreSQL.
 
+## ✨ Features
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/home-dashboard.png"><img src="docs/images/readme/home-dashboard.png" alt="Home dashboard with an AI daily summary, today's agenda, tasks due and upcoming birthdays"></a>
+      <p><strong>Home dashboard:</strong> an AI summary of your day, today's agenda, tasks you said you would do, and upcoming birthdays and anniversaries.</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/contact.png"><img src="docs/images/readme/contact.png" alt="Contact page showing important dates, relationships and an AI summary in dark mode"></a>
+      <p><strong>People:</strong> contacts with important dates, relationships to each other and to you, an AI summary, and every journal they appear in.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/journal-entry.png"><img src="docs/images/readme/journal-entry.png" alt="Journal entry linked to two contacts with a tag and markdown content in dark mode"></a>
+      <p><strong>Journal:</strong> notes, events and moods written in markdown, linked to the people involved and organised with tags, series and parent entries.</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/journals.png"><img src="docs/images/readme/journals.png" alt="Journals month calendar view"></a>
+      <p><strong>Timeline and calendar:</strong> browse your journal as a list with daily summaries, or by month, week, day or agenda.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/outdoor-logbook.png"><img src="docs/images/readme/outdoor-logbook.png" alt="Outdoor logbook with activity stats, incomplete activities, totals and upcoming trips"></a>
+      <p><strong>Outdoor logbook:</strong> activity stats, trips missing details, upcoming adventures, templates done and gear currently checked out.</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/readme/adventure-route.png"><img src="docs/images/readme/adventure-route.png" alt="Canyoning trip journal with its GPX route drawn on a map in dark mode"></a>
+      <p><strong>Adventures:</strong> GPX routes drawn on a map alongside distance, elevation and duration, with Strava activities synced in.</p>
+    </td>
+  </tr>
+</table>
+
+<sub>Screenshots use fictional demo data. Regenerate them with <code>pnpm screenshots:readme</code>, see <a href="docs/images/readme/README.md">docs/images/readme</a>.</sub>
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -159,23 +196,6 @@ lifecontour/
 ├── docs/                 # Documentation
 └── docker-compose.yml    # Multi-container setup
 ```
-
-## 📋 Features
-
-### Current (Iteration 1 - Foundation)
-- ✅ **Project Foundation**: Python FastAPI + Next.js with full development setup
-- ✅ **Database**: PostgreSQL with Alembic migrations
-- ✅ **Testing**: Comprehensive test setup (pytest, Jest, Playwright)
-- ✅ **Development Tools**: Linting, formatting, type checking
-- ✅ **Docker**: Multi-container setup with nginx proxy
-
-### Planned Features
-- **Contacts Management**: Personal and professional contacts with tags
-- **Google Integration**: Bidirectional sync with Google Contacts and Calendar
-- **Journal System**: Personal journaling with mood tracking and album linking
-- **Photo Integration**: Immich integration with person-to-contact matching
-- **AI Integration**: MCP protocol support for AI assistant access
-- **Advanced Features**: CardDAV/CalDAV protocols, Home Assistant integration
 
 ## 🧪 Development
 

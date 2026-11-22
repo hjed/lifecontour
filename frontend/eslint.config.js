@@ -55,10 +55,18 @@ const eslintConfig = [
   },
   {
     ...playwright.configs['flat/recommended'],
-    files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+    files: [
+      'tests/e2e/**/*.ts',
+      'tests/e2e/**/*.tsx',
+      'tests/screenshots/**/*.ts',
+    ],
   },
   {
-    files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+    files: [
+      'tests/e2e/**/*.ts',
+      'tests/e2e/**/*.tsx',
+      'tests/screenshots/**/*.ts',
+    ],
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',

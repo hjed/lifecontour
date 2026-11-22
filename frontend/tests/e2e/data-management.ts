@@ -38,6 +38,8 @@ export function utcDayOffset(days: number, hour: number = 12): string {
 export interface ContactCreateRequest {
   firstName: string;
   lastName: string;
+  /** Keep the names as given instead of appending a unique suffix. */
+  exactName?: boolean;
   email?: string;
   phone?: string;
   tags?: string[];
@@ -116,6 +118,8 @@ export interface TagCreateRequest {
 /** Journal tags are UUID-keyed, so their parent reference is a string. */
 export interface JournalTagCreateRequest {
   name: string;
+  /** Keep the name as given instead of appending a unique suffix. */
+  exactName?: boolean;
   color?: string;
   parent_id?: string;
 }
@@ -223,8 +227,12 @@ export class TestDataManager {
   async createContact(contactData: ContactCreateRequest): Promise<TestContact> {
     // Make contact names unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
-    const uniqueFirstName = `${contactData.firstName}_${uniqueId}`;
-    const uniqueLastName = `${contactData.lastName}_${uniqueId}`;
+    const uniqueFirstName = contactData.exactName
+      ? contactData.firstName
+      : `${contactData.firstName}_${uniqueId}`;
+    const uniqueLastName = contactData.exactName
+      ? contactData.lastName
+      : `${contactData.lastName}_${uniqueId}`;
 
     console.debug(
       `📝 [Data Manager] Creating contact: ${uniqueFirstName} ${uniqueLastName}`
@@ -936,7 +944,9 @@ export class TestDataManager {
   ): Promise<{ id: string; name: string }> {
     // Make tag names unique to avoid conflicts using UUID
     const uniqueId = this.generateUniqueId();
-    const uniqueName = `${tagData.name}_${uniqueId}`;
+    const uniqueName = tagData.exactName
+      ? tagData.name
+      : `${tagData.name}_${uniqueId}`;
 
     console.debug(`🏷️ [Data Manager] Creating journal tag: ${uniqueName}`);
 
@@ -1912,11 +1922,17 @@ export class TestDataManager {
   /**
    * Create a gear item via API.
    *
-   * The name is made unique so parallel workers don't collide; the returned
-   * name is the one actually stored, for assertions.
+   * The name is made unique so parallel workers don't collide, unless
+   * `exactName` is set; the returned name is the one actually stored, for
+   * assertions.
    */
-  async createGearItem(name: string): Promise<{ id: string; name: string }> {
-    const uniqueName = `${name}_${this.generateUniqueId()}`;
+  async createGearItem(
+    name: string,
+    options: { exactName?: boolean } = {}
+  ): Promise<{ id: string; name: string }> {
+    const uniqueName = options.exactName
+      ? name
+      : `${name}_${this.generateUniqueId()}`;
     console.debug(`🎒 [Data Manager] Creating gear item "${uniqueName}"`);
 
     const response = await this.page.request.post('/api/gear-items', {
@@ -1952,9 +1968,12 @@ export class TestDataManager {
    */
   async createTemplate(
     name: string,
-    templateType: string
+    templateType: string,
+    options: { exactName?: boolean } = {}
   ): Promise<{ id: string; name: string }> {
-    const uniqueName = `${name}_${this.generateUniqueId()}`;
+    const uniqueName = options.exactName
+      ? name
+      : `${name}_${this.generateUniqueId()}`;
     console.debug(
       `📐 [Data Manager] Creating ${templateType} template "${uniqueName}"`
     );
