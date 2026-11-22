@@ -289,15 +289,17 @@ class TestRekeyedAdoption:
         async_connection: AsyncConnection,
         clean_database: None,  # noqa: ARG001
     ) -> None:
-        """The journal's link has moved on to a third event since the worker
-        read it, so the new instance is a journal of its own."""
+        """The journal's link has moved to an unrelated event (in another
+        recurrence) since the worker read it, so the new instance is live but
+        unjournalled: it gets a journal of its own."""
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
         journal_id = await _seed(processor, calendar_id)
         await async_connection.execute(
             text(
                 "UPDATE journal_external_event_links"
-                " SET external_event_id = 'elsewhere' WHERE journal_id = :id"
+                " SET external_event_id = 'elsewhere', recurring_event_id = 'other'"
+                " WHERE journal_id = :id"
             ),
             {"id": journal_id},
         )
@@ -415,3 +417,35 @@ class TestRekeyedAdoption:
         )
 
         assert result["status"] == "success"
+
+    async def test_a_replay_after_a_later_re_key_creates_nothing(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """A->B then B->C applied; A->B delivered again finds the link on C, a
+        later instance of the same recurrence. B is gone: nothing to create."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journal_id = await _seed(processor, calendar_id)
+        await processor.process_event(_adoption(calendar_id, journal_id))
+        later = NEW_START + timedelta(minutes=30)
+        later_id = f"{RECURRENCE}_{later:%Y%m%dT%H%M%SZ}"
+        second = _event(
+            "journal_event.updated",
+            calendar_id,
+            later_id,
+            later,
+            etag='"etag-later"',
+            existing_journal_id=journal_id,
+            rekeyed_from=NEW_ID,
+        )
+        await processor.process_event(second)
+
+        result = await processor.process_event(_adoption(calendar_id, journal_id))
+
+        assert result["status"] == "skipped"
+        assert await _journal_ids(async_connection) == [journal_id]
+        assert (await _journal(async_connection, journal_id)).external_event_id == (
+            later_id
+        )

@@ -872,3 +872,31 @@ class TestRekeyedRecurrenceIntegration:
             if event_type == "journal_event.cancelled"
         ]
         assert unlisted_evening not in cancelled
+
+    async def test_an_instance_the_sync_cannot_parse_is_still_live(
+        self, db_session
+    ) -> None:
+        """Google listed it; that it fails our validation does not make it
+        gone, so its journal must not be cancelled."""
+        calendar_uuid = await self._calendar(db_session)
+        rejected_start, valid_start = self._day(1), self._day(2)
+        rejected_journal = await self._linked_journal(
+            db_session, calendar_uuid, rejected_start
+        )
+        await self._linked_journal(db_session, calendar_uuid, valid_start)
+        rejected = self._instance(rejected_start)
+        rejected["attendees"] = [{"displayName": "No email"}]
+
+        result, _ = await self._sync(
+            db_session,
+            [rejected, self._instance(valid_start)],
+            sync_type="full",
+        )
+
+        cancelled = [
+            data["existing_journal_id"]
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.cancelled"
+        ]
+        assert rejected_journal not in cancelled
+        assert result.get("errors") == 1
