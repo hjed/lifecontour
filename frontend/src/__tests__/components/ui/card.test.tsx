@@ -40,6 +40,16 @@ describe('Card Components', () => {
       expect(card).toHaveAttribute('data-slot', 'card');
       expect(card).toHaveClass('bg-card', 'text-card-foreground');
     });
+
+    // Local to this app: Vega clips the card, which hid dropdowns that render
+    // in place rather than in a portal (ContactSearchCombobox inside the
+    // Relationships card). Edge-to-edge images still get their rounded
+    // corners from the card's own img selectors.
+    it('does not clip content that overflows it', () => {
+      render(<Card data-testid='card'>Content</Card>);
+
+      expect(screen.getByTestId('card')).not.toHaveClass('overflow-hidden');
+    });
   });
 
   describe('CardHeader', () => {

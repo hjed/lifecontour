@@ -5,6 +5,7 @@
 import { test, expect } from './fixtures';
 import { TestDataManager } from './data-management';
 import { selectRadixOption } from './utils/radix-select';
+import { waitForContactSearchIndexing } from './utils/test-helpers';
 import type { Page } from '@playwright/test';
 
 function attachClientErrorLogging(page: Page): void {
@@ -80,6 +81,77 @@ test.describe('Contact Relationships', () => {
     // Select the first option from the keyboard; see selectRadixOption for why the
     // portaled option is never clicked.
     await selectRadixOption(page, typeTrigger, 'Parent');
+  });
+
+  test('should pick a contact from the bottom of a long search result list', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    // The results list renders in place, below the input, inside the
+    // Relationships card, and runs past that card's bottom edge. A card that
+    // clips its overflow hides the end of the list.
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => await dataManager.cleanup());
+
+    const surname = `Overflow${Date.now()}`;
+    const primary = await dataManager.createContact({
+      firstName: 'Primary',
+      lastName: 'Contact',
+    });
+    const firstNames = [
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'Delta',
+      'Echo',
+      'Foxtrot',
+    ];
+    for (const firstName of firstNames) {
+      await dataManager.createContact({
+        firstName,
+        lastName: surname,
+        exactName: true,
+      });
+    }
+    const lastName = `${firstNames[firstNames.length - 1]} ${surname}`;
+    await waitForContactSearchIndexing(page, surname, lastName);
+
+    await page.goto(`/contacts/${primary.id}`);
+    await expect(
+      page.getByRole('heading', { name: 'Relationships' })
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Add Relationship' }).click();
+
+    await page.getByPlaceholder('Search for a contact...').fill(surname);
+    const results = page.getByRole('listbox', {
+      name: 'Contact search results',
+    });
+    await expect(results.getByRole('option')).toHaveCount(firstNames.length);
+
+    // Hit-test the popup's bottom edge: an ancestor that clips its overflow
+    // leaves whatever sits behind it as the topmost element there. Scroll the
+    // window, not the popup, so no clipping ancestor is scrolled to fake it.
+    await expect
+      .poll(() =>
+        results.evaluate(list => {
+          const popup = list.closest('[data-slot=card]');
+          if (!popup) return 'no popup';
+          const { bottom, left, width } = popup.getBoundingClientRect();
+          window.scrollBy(0, Math.max(0, bottom - window.innerHeight + 16));
+          const edge = popup.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            left + width / 2,
+            edge.bottom - 2
+          );
+          return hit !== null && popup.contains(hit) ? 'visible' : 'clipped';
+        })
+      )
+      .toBe('visible');
+
+    await results.getByRole('option', { name: lastName }).click();
+
+    await expect(page.getByText(`Selected: ${lastName}`)).toBeVisible();
   });
 
   test('should toggle "Relationship with me" and create a user-targeted relationship', async ({
