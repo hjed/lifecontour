@@ -33,11 +33,12 @@ describe('Card Components', () => {
       expect(card).toHaveClass('custom-class');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<Card data-testid='card'>Content</Card>);
 
       const card = screen.getByTestId('card');
-      expect(card).toHaveClass('rounded-lg', 'border', 'bg-card');
+      expect(card).toHaveAttribute('data-slot', 'card');
+      expect(card).toHaveClass('bg-card', 'text-card-foreground');
     });
   });
 
@@ -54,11 +55,11 @@ describe('Card Components', () => {
       expect(header).toHaveTextContent('Header content');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<CardHeader data-testid='card-header'>Content</CardHeader>);
 
       const header = screen.getByTestId('card-header');
-      expect(header).toHaveClass('flex', 'flex-col', 'space-y-1.5', 'p-6');
+      expect(header).toHaveAttribute('data-slot', 'card-header');
     });
   });
 
@@ -71,11 +72,14 @@ describe('Card Components', () => {
       expect(title).toHaveTextContent('Test Title');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<CardTitle>Test Title</CardTitle>);
 
       const title = screen.getByRole('heading', { level: 3 });
-      expect(title).toHaveClass('text-2xl', 'font-semibold', 'leading-none');
+      // Local to this app, kept across shadcn regenerations: Vega renders a
+      // div; ours stays an h3 so every card keeps its heading semantics.
+      expect(title.tagName).toBe('H3');
+      expect(title).toHaveAttribute('data-slot', 'card-title');
     });
   });
 
@@ -88,11 +92,12 @@ describe('Card Components', () => {
       expect(description.tagName).toBe('P');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<CardDescription>Test description</CardDescription>);
 
       const description = screen.getByText('Test description');
-      expect(description).toHaveClass('text-sm', 'text-muted-foreground');
+      expect(description).toHaveClass('text-muted-foreground');
+      expect(description).toHaveAttribute('data-slot', 'card-description');
     });
   });
 
@@ -109,11 +114,11 @@ describe('Card Components', () => {
       expect(content).toHaveTextContent('Content text');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<CardContent data-testid='card-content'>Content</CardContent>);
 
       const content = screen.getByTestId('card-content');
-      expect(content).toHaveClass('p-6', 'pt-0');
+      expect(content).toHaveAttribute('data-slot', 'card-content');
     });
   });
 
@@ -130,11 +135,12 @@ describe('Card Components', () => {
       expect(footer).toHaveTextContent('Footer content');
     });
 
-    it('applies default styling classes', () => {
+    it('marks its slot and theme surface', () => {
       render(<CardFooter data-testid='card-footer'>Content</CardFooter>);
 
       const footer = screen.getByTestId('card-footer');
-      expect(footer).toHaveClass('flex', 'items-center', 'p-6', 'pt-0');
+      expect(footer).toHaveClass('flex', 'items-center');
+      expect(footer).toHaveAttribute('data-slot', 'card-footer');
     });
   });
 

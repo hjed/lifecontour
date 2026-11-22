@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-
 import { cn } from '@/lib/utils';
 
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
@@ -10,6 +9,8 @@ function Table({ className, ...props }: React.ComponentProps<'table'>) {
       data-slot='table-container'
       className='relative w-full overflow-x-auto'
     >
+      {/* Explicit role: an overflow wrapper can cost a <table> its implicit
+          one in some screen readers (local, kept across regenerations). */}
       <table
         data-slot='table'
         role='table'
@@ -58,7 +59,7 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot='table-row'
       className={cn(
-        'hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors',
+        'hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors',
         className
       )}
       {...props}
@@ -72,7 +73,25 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
       data-slot='table-head'
       scope='col'
       className={cn(
-        'text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0',
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * Local to this app, kept across regenerations: a body cell that heads its
+ * row (`<th scope="row">`), styled like a cell but left-aligned.
+ */
+function TableRowHeader({ className, ...props }: React.ComponentProps<'th'>) {
+  return (
+    <th
+      data-slot='table-row-header'
+      scope='row'
+      className={cn(
+        'p-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0',
         className
       )}
       {...props}
@@ -85,22 +104,7 @@ function TableCell({ className, ...props }: React.ComponentProps<'td'>) {
     <td
       data-slot='table-cell'
       className={cn(
-        'p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
-        className
-      )}
-      {...props}
-    />
-  );
-}
-
-// Row header cell component for accessibility
-function TableRowHeader({ className, ...props }: React.ComponentProps<'th'>) {
-  return (
-    <th
-      data-slot='table-row-header'
-      scope='row'
-      className={cn(
-        'p-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0',
         className
       )}
       {...props}
