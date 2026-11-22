@@ -59,7 +59,7 @@ it is recorded here as known duplication rather than repeated silently.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -155,8 +155,15 @@ class TaskCreated(DomainEvent):
     ``Integer`` column, so aggregating under anything else — the due journal,
     say — would file a task's history against another entity.
 
-    The payload carries the task as it was persisted: its text, its status, both
-    anchors and **the people it was created with**.
+    The payload carries the task as it was persisted: its text, its status, its
+    list and due date, both anchors and **the people it was created with**. A
+    task created in journals has no list and no due date; one created on a list
+    has no journal, so either pair may be ``None``. The due date travels as its
+    ISO string, the form a subscriber reading it back through Redis sees.
+
+    ``task_list_id`` and ``due_date`` have **no default**, for the reason
+    ``contact_ids`` below has none: ``None`` is right for a journal-only create
+    and a silent lie for a task made on a list.
 
     ``contact_ids`` answers the question the phase that wrote this class left
     open — whether a create naming contacts publishes one event or two. It
@@ -182,12 +189,15 @@ class TaskCreated(DomainEvent):
 
     def __init__(
         self,
+        *,
         task_id: int,
         user_id: str,
         text: str,
         status: TaskStatus,
-        creating_journal_id: int,
-        due_journal_id: int,
+        task_list_id: int | None,
+        due_date: date | None,
+        creating_journal_id: int | None,
+        due_journal_id: int | None,
         contact_ids: Sequence[int],
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
@@ -204,6 +214,8 @@ class TaskCreated(DomainEvent):
                 "user_id": user_id,
                 "text": text,
                 "status": status.value,
+                "task_list_id": task_list_id,
+                "due_date": None if due_date is None else due_date.isoformat(),
                 "creating_journal_id": creating_journal_id,
                 "due_journal_id": due_journal_id,
                 # Copied into a ``list`` rather than stored as handed over: the

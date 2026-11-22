@@ -280,6 +280,8 @@ class TestCreationLeavesAnOutboxRow:
             "user_id": USER_ID,
             "text": await stored_text(async_connection, task_id),
             "status": TaskStatus.NOT_DONE.value,
+            "task_list_id": None,
+            "due_date": None,
             "creating_journal_id": creating_id,
             "due_journal_id": due_id,
             "contact_ids": await linked_contact_ids(async_connection, task_id),

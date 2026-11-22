@@ -8,33 +8,44 @@ promises about those columns:
   entity, through both the plain and the locking read;
 - **``save`` drops nothing it writes** — the flag, icon and due date persist, and
   a text or status edit leaves a task's list and position alone. List
-  membership is not ``save``'s to write: it belongs to the membership
-  operations, as ``TaskList.position`` does, so inserting a task on a list is
-  refused rather than silently stored as a journal-only task;
+  membership is not ``save``'s to *change*: it belongs to the membership
+  operations, as ``TaskList.position`` does. An *insert* of a list task places
+  it at the bottom of its list, under the list's lock;
 - **owner scoping** holds for list tasks exactly as for journal-only ones.
 
-List tasks are seeded as rows (``create_list_task``): nothing in the product can
-create one yet. The CHECKs themselves are proven in
+List tasks are mostly seeded as rows (``create_list_task``), so each read and
+write is tested against a shape the reader did not produce itself. The CHECKs themselves are proven in
 ``test_task_list_columns_constraints.py``.
 """
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from typing import Any
 
 import pytest
 import pytest_asyncio
-from core_shared.models.tasks import Task, TaskIcon, TaskNotFoundError, TaskStatus
-from sqlalchemy.ext.asyncio import AsyncConnection
+from core_shared.models.tasks import (
+    Task,
+    TaskIcon,
+    TaskListNotFoundError,
+    TaskNotFoundError,
+    TaskStatus,
+)
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.infrastructure.unit_of_work import unit_of_work
+from tests.integration.concurrency_helpers import overlap
 from tests.integration.tasks.task_seeding import (
     COUNT_TASKS,
     FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
     backdate_closed_at,
+    committed_task_list,
     count,
     create_journal,
     create_list_task,
@@ -339,23 +350,136 @@ class TestSaveWithListColumns:
         updated = await _read(task_repository, inserted.id)
         assert (updated.flagged, updated.icon) == (False, TaskIcon.STAR)
 
-    async def test_inserting_a_task_on_a_list_is_refused(
+
+@pytest.mark.integration
+class TestInsertingATaskOnAList:
+    """``save`` places a new list task at the bottom of its list.
+
+    The insert locks the list first — the port's lock order — and computes the
+    bottom inside the same statement, so overlapping creates on one list cannot
+    compute the same position.
+    """
+
+    async def test_stores_the_list_the_due_date_and_no_journal(
+        self, task_repository: SqlTaskRepository, list_id: int
+    ) -> None:
+        inserted = await task_repository.save(
+            Task(
+                user_id=USER_ID,
+                text="pack the tent",
+                task_list_id=list_id,
+                due_date=DUE_DATE,
+            )
+        )
+
+        assert inserted.id is not None
+        found = await _read(task_repository, inserted.id)
+        assert found.task_list_id == list_id
+        assert found.due_date == DUE_DATE
+        assert found.creating_journal_id is None
+        assert found.due_journal_id is None
+        assert found.status is TaskStatus.NOT_DONE
+
+    async def test_the_first_task_on_an_empty_list_is_at_the_top(
+        self, task_repository: SqlTaskRepository, list_id: int
+    ) -> None:
+        inserted = await task_repository.save(
+            Task(user_id=USER_ID, text="pack the tent", task_list_id=list_id)
+        )
+
+        assert inserted.position == 0
+
+    async def test_joins_below_every_task_open_or_closed(
         self,
         async_connection: AsyncConnection,
         task_repository: SqlTaskRepository,
         list_id: int,
     ) -> None:
-        """Not stored as a journal-only task, and nothing is written at all."""
+        """Closed tasks count: a reopened task keeps its slot below the others."""
+        await create_list_task(async_connection, task_list_id=list_id, position=0)
+        await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=4,
+            status=TaskStatus.DONE,
+        )
+
+        inserted = await task_repository.save(
+            Task(user_id=USER_ID, text="pack the tent", task_list_id=list_id)
+        )
+
+        assert inserted.position == 5
+
+    async def test_only_this_lists_tasks_count_towards_its_bottom(
+        self,
+        async_connection: AsyncConnection,
+        task_repository: SqlTaskRepository,
+        list_id: int,
+    ) -> None:
+        other_list_id = await _seed_list_id(async_connection, "Groceries")
+        await create_list_task(async_connection, task_list_id=other_list_id, position=9)
+
+        inserted = await task_repository.save(
+            Task(user_id=USER_ID, text="pack the tent", task_list_id=list_id)
+        )
+
+        assert inserted.position == 0
+
+    async def test_another_users_list_is_not_found_and_nothing_is_written(
+        self, async_connection: AsyncConnection, task_repository: SqlTaskRepository
+    ) -> None:
+        foreign = await seed_task_list(
+            async_connection, "Theirs", user_id=OTHER_USER_ID
+        )
+        assert foreign.id is not None
         before = await count(async_connection, COUNT_TASKS, {"user_id": USER_ID})
 
-        with pytest.raises(ValueError, match="list"):
+        with pytest.raises(TaskListNotFoundError):
             await task_repository.save(
-                Task(user_id=USER_ID, text="pack the tent", task_list_id=list_id)
+                Task(user_id=USER_ID, text="pack the tent", task_list_id=foreign.id)
             )
 
         assert await count(async_connection, COUNT_TASKS, {"user_id": USER_ID}) == (
             before
         )
+
+
+@pytest.mark.integration
+class TestConcurrentInserts:
+    @pytest.mark.asyncio
+    async def test_two_inserts_on_one_list_take_consecutive_places(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Without the list lock both read the same bottom and share a position."""
+        async with committed_task_list(async_engine, with_task=True) as (
+            owner,
+            list_id,
+        ):
+
+            def insert(label: str) -> Callable[[AsyncConnection], Any]:
+                async def run(connection: AsyncConnection) -> None:
+                    async with unit_of_work(connection):
+                        await SqlTaskRepository(connection).save(
+                            Task(user_id=owner, text=label, task_list_id=list_id)
+                        )
+
+                return run
+
+            await overlap(async_engine, insert("first"), insert("second"))
+
+            async with async_engine.connect() as check:
+                rows = await check.execute(
+                    text(
+                        "SELECT text, position FROM tasks "
+                        "WHERE user_id = :user_id ORDER BY position"
+                    ),
+                    {"user_id": owner},
+                )
+                assert [(row.text, row.position) for row in rows] == [
+                    ("pack the head torch", 0),
+                    ("first", 1),
+                    ("second", 2),
+                ]
 
 
 @pytest.mark.integration

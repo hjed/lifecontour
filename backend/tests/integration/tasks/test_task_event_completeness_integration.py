@@ -266,6 +266,27 @@ async def _act_create_with_contacts(fixtures: _Fixtures, seeded: Seeded) -> None
     await _seed_task(fixtures, contact_ids=[contact_id])
 
 
+async def _act_create_on_a_list(
+    fixtures: _Fixtures, seeded: Seeded, *, contact_ids: list[int] | None = None
+) -> None:
+    task_list = await seed_task_list(fixtures.connection, "Packing")
+    assert task_list.id is not None
+    await fixtures.service.create_list_task(
+        user_id=USER_ID,
+        task_list_id=task_list.id,
+        text="pack the tent",
+        contact_ids=contact_ids,
+        transaction=fixtures.connection,
+    )
+
+
+async def _act_create_on_a_list_with_contacts(
+    fixtures: _Fixtures, seeded: Seeded
+) -> None:
+    contact_id = await create_contact(fixtures.connection)
+    await _act_create_on_a_list(fixtures, seeded, contact_ids=[contact_id])
+
+
 async def _act_update_text(fixtures: _Fixtures, seeded: Seeded) -> None:
     await fixtures.service.update_task(
         user_id=USER_ID,
@@ -431,8 +452,8 @@ async def _act_merge_the_due_journal_away(fixtures: _Fixtures, seeded: Seeded) -
 async def _seed_list_task_due_in_a_journal(fixtures: _Fixtures) -> Seeded:
     """A task on a list, due in a journal of its own that is about to be deleted.
 
-    Seeded as a row: no product path creates a list task yet. ``journal_id`` is
-    the journal the action deletes.
+    Seeded as a row: no product path creates a list task with a due journal yet.
+    ``journal_id`` is the journal the action deletes.
     """
     doomed_id = await create_journal(
         fixtures.journals, title="The journal being deleted", days_offset=5
@@ -504,6 +525,20 @@ WRITE_PATHS: list[WritePath] = [
         act=_act_create_with_contacts,
         # One event, not one plus a link each. The people are a field of the
         # task the create announces, which is this phase's decision.
+        expects=["created"],
+    ),
+    WritePath(
+        name="create on a list",
+        ports=frozenset({"save"}),
+        seed=_seed_nothing,
+        act=_act_create_on_a_list,
+        expects=["created"],
+    ),
+    WritePath(
+        name="create on a list naming contacts",
+        ports=frozenset({"save", "add_contacts"}),
+        seed=_seed_nothing,
+        act=_act_create_on_a_list_with_contacts,
         expects=["created"],
     ),
     WritePath(

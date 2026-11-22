@@ -338,8 +338,8 @@ class TaskAnchorMissingError(RuntimeError):
 
     Deliberately **not** a :class:`TaskDomainError`. Since a task may live on a
     list, both anchors are optional on the entity, but some existing contracts
-    (the ``TaskCreated`` payload, retargeting) still promise an ``int``. They
-    narrow through :meth:`Task.require_anchor`, and the journal-only read
+    (retargeting, and the journal create's own check of the row it saved) still
+    expect an ``int``. They narrow through :meth:`Task.require_anchor`, and the journal-only read
     surfaces (the dashboard row, the daily summary) narrow a read model through
     :meth:`TaskReadModel.require_journal`. Reaching this error from either means
     a list task got somewhere no list task can yet go — a broken invariant, not

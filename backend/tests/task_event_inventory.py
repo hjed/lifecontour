@@ -13,6 +13,7 @@ three tests fail, rather than the day somebody notices a task's history is
 missing a change.
 """
 
+import datetime
 import inspect
 from collections.abc import Mapping, Sequence
 from types import ModuleType
@@ -41,6 +42,10 @@ _SAMPLE_ARGUMENTS: dict[Any, Any] = {
     Provenance: Provenance.SYSTEM,
     # A list's icon, optional on ``TaskListCreated``.
     TaskIcon | None: None,
+    # A create's list, due date and journal anchors, each absent on one of the
+    # two kinds of create.
+    int | None: None,
+    datetime.date | None: None,
     # A merge's summary for one task. It has to record *something* — the value
     # object refuses one that records nothing — so the sample names the plainest
     # outcome rather than an all-default instance.

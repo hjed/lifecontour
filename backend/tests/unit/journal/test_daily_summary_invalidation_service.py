@@ -564,6 +564,34 @@ class TestATaskChangeFollowsItsDueJournal:
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
     @pytest.mark.asyncio
+    async def test_a_task_created_on_a_list_makes_nothing_stale(
+        self,
+        service: DailySummaryInvalidationService,
+        task_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """No due journal, so no summary names it while they leave lists out."""
+        task_repo.find_by_id.return_value = Task(
+            id=5, user_id=USER_ID, text="pack the tent", task_list_id=9, position=0
+        )
+
+        await service.invalidate_for_event(
+            "TaskCreated",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "task_list_id": 9,
+                "due_date": "2026-11-30",
+                "creating_journal_id": None,
+                "due_journal_id": None,
+            },
+        )
+
+        journal_repo.find_by_id.assert_not_awaited()
+        summary_repo.invalidate_for_range.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_a_task_due_beyond_the_week_makes_nothing_stale(
         self,
         service: DailySummaryInvalidationService,

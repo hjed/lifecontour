@@ -48,9 +48,11 @@ class TaskRepository(ABC):
     methods.
 
     **List membership** — which list a task is on and its position there — is
-    written only by the membership methods (:meth:`add_to_list`,
-    :meth:`move_within_list`, :meth:`remove_from_list`), never by :meth:`save`,
-    so an edit carrying a stale position cannot undo a reorder.
+    changed only by the membership methods (:meth:`add_to_list`,
+    :meth:`move_within_list`, :meth:`remove_from_list`), never by an update
+    through :meth:`save`, so an edit carrying a stale position cannot undo a
+    reorder. The one exception is the *insert* of a task on a list, which
+    :meth:`save` places at the bottom of that list under the list's lock.
 
     **Lock order.** Every membership write, and any later write that spans a
     whole list, locks the **list row first and then task rows, each in
@@ -71,17 +73,20 @@ class TaskRepository(ABC):
         """Insert a new task or update an existing one.
 
         Args:
-            task: The task to persist. A task without an ``id`` is inserted;
-                one with an ``id`` is updated in place, keeping its original
-                ``created_at``.
+            task: The task to persist. A task without an ``id`` is inserted —
+                on a list, at the bottom of it, after locking the list, whatever
+                ``position`` it carries. One with an ``id`` is updated in place,
+                keeping its original ``created_at`` and its list membership.
 
         Returns:
-            The persisted task, carrying the database-assigned id and
-            timestamps.
+            The persisted task, carrying the database-assigned id, timestamps
+            and, on a list, its position.
 
         Raises:
             TaskNotFoundError: On the update path, when no task with that id
                 belongs to ``task.user_id``.
+            TaskListNotFoundError: On the insert path, when the task's list is
+                not one of ``task.user_id``'s.
         """
 
     @abstractmethod

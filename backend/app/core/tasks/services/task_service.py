@@ -39,10 +39,12 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
+    TaskListNotFoundError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
     TaskStatusTransitionError,
+    ensure_due_date_allowed,
     is_status_transition_allowed,
 )
 from sqlalchemy.exc import IntegrityError
@@ -269,36 +271,183 @@ class TaskService:
         contacts = await self._resolve_contacts(contact_ids, user_id=user_id)
 
         created = await self._save(task, creating_journal_id, due_journal_id)
-        assert created.id is not None, "Task ID must be set after save"
-        linked = await self._link_contacts(created.id, contacts, user_id, transaction)
+        # This path only ever makes a journal-only task, so both anchors are
+        # set; a saved row without one is a broken invariant, not a list task.
+        created.require_anchor("creating")
+        created.require_anchor("due")
+        await self._link_and_announce_created(
+            created,
+            contacts,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+        return created
 
-        # Last, and deliberately: the event announces a create that finished,
-        # links included, following the journal tag service's ordering. It reads
-        # the *persisted* task because the id it carries exists only after the
-        # save, and that id is what the history projection files rows under.
-        #
-        # ``linked`` rather than ``contacts``: the payload names the ids a row
-        # was actually written for, as every other event here names what
-        # happened rather than what was asked for. The two coincide on a create —
-        # a new task has no links to collide with — which is exactly why taking
-        # the written set costs nothing and stops mattering only if that ever
-        # changes.
+    @transactional
+    async def create_list_task(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        text: str,
+        transaction: AsyncConnection,
+        due_date: datetime.date | None = None,
+        contact_ids: Sequence[int] | None = None,
+        now: datetime.datetime | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> Task:
+        """Create a task on one of the user's lists, at the bottom of it.
+
+        The task has no journal (spec *Core invariants* 1 and 5) and is either
+        undated or due on ``due_date``, which must be today or later in the
+        user's timezone. It joins the bottom of the list, closed tasks included.
+
+        **Lock order: the list first, with the update lock.** The list is read
+        ``FOR NO KEY UPDATE`` — not the share lock the other task writes take
+        through :meth:`_hold_list_writable` — because the insert then computes
+        the list's bottom under that same lock. Taking share first and update
+        second would be a lock upgrade, and two creates on one list would each
+        wait for the other's share lock. Holding the update lock from the start
+        also holds off an archive, which takes the same lock, and serialises
+        creates so each computes the bottom once.
+
+        Refusals come in this order, and a refused create writes and publishes
+        nothing: the entity's own rules (no I/O), the list not found, a contact
+        not found, the list archived, then the due date before today. An
+        archived list comes before the date because correcting the date would
+        not make the create succeed.
+
+        Publishes :class:`~app.core.tasks.models.events.TaskCreated`, carrying
+        the list and the due date, in this unit of work.
+
+        Args:
+            user_id: The acting user; the list and contacts must be theirs
+            task_list_id: The list to create the task on
+            text: The commitment, as plain text
+            transaction: The request connection; the unit of work commits here
+            due_date: The day it is due, or ``None`` for an undated task
+            contact_ids: Optional contacts to reference; duplicates are ignored
+            now: The instant "today" is derived from, defaulting to the real
+                clock. **Never bind this from client input**, for the reason
+                :meth:`create_task` gives.
+            source: Where the create came from, recorded on the event
+            changed_by: The actor, ``"ui"`` or ``"mcp"`` as the other domains
+                write it
+
+        Returns:
+            The persisted task, carrying its id and its position on the list.
+
+        Raises:
+            TaskValidationError: When the text is empty.
+            TaskListNotFoundError: When the list does not exist or is not the
+                acting user's.
+            ContactNotFoundError: When a referenced contact does not exist.
+            TaskListArchivedError: When the list is archived.
+            TaskDueDateInPastError: When the due date is before today in the
+                user's timezone.
+        """
+        task = Task(
+            user_id=user_id,
+            text=text,
+            task_list_id=task_list_id,
+            due_date=due_date,
+        )
+
+        task_list = await self.task_list_repo.find_by_id_for_update(
+            task_list_id, user_id
+        )
+        if task_list is None:
+            raise TaskListNotFoundError(task_list_id)
+        contacts = await self._resolve_contacts(contact_ids, user_id=user_id)
+        task_list.ensure_writable()
+        if due_date is not None:
+            await self._require_due_date_allowed(user_id, due_date, now)
+
+        created = await self.task_repo.save(task)
+        await self._link_and_announce_created(
+            created,
+            contacts,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+        return created
+
+    async def _link_and_announce_created(
+        self,
+        created: Task,
+        contacts: Sequence[int],
+        *,
+        transaction: AsyncConnection,
+        source: Provenance,
+        changed_by: str,
+    ) -> None:
+        """Link a new task's contacts, then publish its ``TaskCreated``.
+
+        Last, and deliberately: the event announces a create that finished,
+        links included, following the journal tag service's ordering. It reads
+        the *persisted* task because the id it carries exists only after the
+        save, and that id is what the history projection files rows under.
+
+        ``linked`` rather than ``contacts``: the payload names the ids a row was
+        actually written for, as every other event here names what happened
+        rather than what was asked for. The two coincide on a create — a new
+        task has no links to collide with — which is exactly why taking the
+        written set costs nothing and stops mattering only if that ever changes.
+        """
+        assert created.id is not None, "Task ID must be set after save"
+        linked = await self._link_contacts(
+            created.id, contacts, created.user_id, transaction
+        )
         await self.event_publisher.publish(
             TaskCreated(
                 task_id=created.id,
                 user_id=created.user_id,
                 text=created.text,
                 status=created.status,
-                # Creation only ever makes a journal-only task, so both are set.
-                creating_journal_id=created.require_anchor("creating"),
-                due_journal_id=created.require_anchor("due"),
+                task_list_id=created.task_list_id,
+                due_date=created.due_date,
+                creating_journal_id=created.creating_journal_id,
+                due_journal_id=created.due_journal_id,
                 contact_ids=linked,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
             )
         )
-        return created
+
+    @transactional
+    async def create_list_task_with_trail(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        text: str,
+        transaction: AsyncConnection,
+        due_date: datetime.date | None = None,
+        contact_ids: Sequence[int] | None = None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> tuple[Task, list[int]]:
+        """:meth:`create_list_task`, and the journals the new task has passed through.
+
+        Empty in practice, and read rather than assumed for the reason
+        :meth:`create_task_with_trail` gives. ``source`` and ``changed_by`` are
+        forwarded, never defaulted here.
+        """
+        created = await self.create_list_task(
+            user_id=user_id,
+            task_list_id=task_list_id,
+            text=text,
+            transaction=transaction,
+            due_date=due_date,
+            contact_ids=contact_ids,
+            source=source,
+            changed_by=changed_by,
+        )
+        return created, await self._trail_within_unit_of_work(created, user_id)
 
     @transactional
     async def update_task(
@@ -1505,6 +1654,13 @@ class TaskService:
         no order is unsafe yet; a later writer that locks a list and then its
         tasks — deleting a list — must lock the tasks first.
 
+        **One write does not use this: creating a task on a list.** A create
+        has no task row to lock first, and its insert needs ``FOR NO KEY
+        UPDATE`` on the list to compute the bottom; taking share here first
+        would be a lock upgrade two concurrent creates deadlock on. So
+        :meth:`create_list_task` reads the list with the update lock from the
+        start and calls ``ensure_writable`` itself.
+
         Raises:
             TaskListArchivedError: The list is archived, and so is the task.
             TaskNotFoundError: The list cannot be read. Unreachable while the
@@ -1741,6 +1897,21 @@ class TaskService:
         raise TaskDueJournalNotFutureError(
             due_journal_id, journal_date(due_journal, tz), today_in(tz, moment)
         )
+
+    async def _require_due_date_allowed(
+        self,
+        user_id: str,
+        due_date: datetime.date,
+        now: datetime.datetime | None,
+    ) -> None:
+        """Refuse a due date before today, judged in the user's local day.
+
+        The clock is read once, as in :meth:`_require_future_dated`, so the
+        rule and the error's "today" cannot straddle a local midnight.
+        """
+        tz = await self.date_resolver.timezone_for(user_id)
+        moment = now if now is not None else datetime.datetime.now(tz)
+        ensure_due_date_allowed(due_date, today_in(tz, moment))
 
     async def _resolve_contacts(
         self, contact_ids: Sequence[int] | None, *, user_id: str

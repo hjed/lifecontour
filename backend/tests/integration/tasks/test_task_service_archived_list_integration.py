@@ -17,8 +17,11 @@ prove what the database is left holding:
   makes an archive wait for it. Without the lock neither would wait, and the
   overlap helper would time out waiting for the block.
 
-Nothing creates a list task yet (Phase 19), so every one here is seeded as a row
-with ``create_list_task`` on a list seeded with ``seed_task_list``.
+Every list task here is seeded as a row with ``create_list_task`` on a list
+seeded with ``seed_task_list``. Creating a task on an archived list is refused
+too; that is tested in ``test_task_service_create_on_list_integration.py``,
+because the table below compares an existing task's state, which a create does
+not have.
 """
 
 import uuid
