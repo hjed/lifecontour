@@ -312,6 +312,15 @@ def _rekey_moved_within(
     )
 
 
+def _already_over(linked: SeriesLinkedJournal | None) -> bool:
+    """Whether a linked journal ended before yesterday, the worker's own cutoff
+    for skipping the cancellation of a past event."""
+    if linked is None:
+        return False
+    end = linked.event_date_range_end or linked.event_date_range_start
+    return end is not None and end < datetime.now(UTC) - timedelta(days=1)
+
+
 def _skipped_as_merged(
     event_type: str, alias: MergedAlias, external_event_id: str
 ) -> dict[str, Any]:
@@ -1530,6 +1539,21 @@ class JournalOutboxEventProcessor:
                 "merged_journal_id": existing_journal_id,
                 "external_event_id": external_event_id,
                 "action": "merged",
+            }
+        if payload.superseded_by_journal_id is not None and _already_over(linked):
+            # The worker skips its past-event check for a merge, which keeps
+            # everything; cancelling instead would cancel an event that
+            # already happened.
+            logger.info(
+                "Merge declined for a past duplicate - left unchanged",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "reason": "past_event",
+                "journal_id": existing_journal_id,
             }
 
         await self._mark_journal_cancelled(

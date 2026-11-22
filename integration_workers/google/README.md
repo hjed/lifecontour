@@ -145,7 +145,10 @@ alias. A cancelled duplicate left beside the live journal would otherwise
 stay visible, because the keep-next rule never sees an unbroken cancelled
 run. Such a cancellation is sent even for a past journal, since merging loses
 nothing. If the sibling is gone, cancelled, or in another recurrence by the
-time the backend applies it, the cancellation falls back to the ordinary one.
+time the backend applies it, the cancellation falls back to the ordinary one,
+except that a past journal is then left unchanged. A recurrence with more
+than one live journal on any day merges nothing, because there a retired slot
+beside a live one may be a deleted occurrence rather than a duplicate.
 
 For an endless rule with more than one slot a day, Google may stop
 expanding it partway through a day, so its window ends at the last listed
