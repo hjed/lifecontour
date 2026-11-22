@@ -35,7 +35,7 @@ recurrence, are never retired.
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -54,12 +54,34 @@ logger = get_logger(__name__)
 _WINDOW_LEAD = timedelta(days=1)
 
 
-class InstanceLister(Protocol):
-    """The one Google call this module makes."""
+class RecurrenceReader(Protocol):
+    """The Google calls this module makes."""
 
     async def list_instances(
         self, calendar_id: str, event_id: str, time_min: str
     ) -> list[dict[str, Any]]: ...
+
+    async def get_event(
+        self, event_id: str, calendar_id: str = "primary"
+    ) -> dict[str, Any]: ...
+
+
+# A window with no end: Google listed every instance there is.
+_UNBOUNDED = datetime.max.replace(tzinfo=UTC)
+
+
+def rule_is_bounded(master: Mapping[str, Any]) -> bool:
+    """Whether a recurring master's rules all end (``UNTIL`` or ``COUNT``).
+
+    Only then does a listing return every instance. An endless rule is
+    expanded only so far, and a master we could not read is treated as
+    endless.
+    """
+    lines = master.get("recurrence") or []
+    rules = [line.upper() for line in lines if line.upper().startswith("RRULE:")]
+    if not lines:
+        return False
+    return all("UNTIL=" in rule or "COUNT=" in rule for rule in rules)
 
 
 @dataclass(frozen=True)
@@ -75,7 +97,10 @@ class RecurrenceLink:
 
 @dataclass(frozen=True)
 class LiveInstances:
-    """Google's live instances of one recurrence, and the window they cover."""
+    """Google's live instances of one recurrence, and the window they cover.
+
+    ``window_end`` is exclusive.
+    """
 
     event_ids: frozenset[str]
     window_start: datetime
@@ -118,7 +143,7 @@ def _retired_links(
             and link.external_event_id not in instances.event_ids
             # An instance the batch cancelled is handled by that cancellation.
             and link.external_event_id not in batch_ids
-            and instances.window_start <= link.start <= instances.window_end
+            and instances.window_start <= link.start < instances.window_end
         ):
             retired.append(link)
     return retired
@@ -217,26 +242,55 @@ async def _load_links(
 
 
 def _live_instances(
-    instances: Sequence[GoogleEvent], window_start: datetime, zone: ZoneInfo
+    instances: Sequence[GoogleEvent],
+    window_start: datetime,
+    zone: ZoneInfo,
+    *,
+    bounded: bool,
 ) -> LiveInstances | None:
-    """Google's view of one recurrence, or ``None`` when it returned none."""
+    """Google's view of one recurrence, or ``None`` when it returned none.
+
+    A bounded rule is listed whole, so its window never ends. An endless one
+    covers through the last listed instance's local day: a recurrence moved
+    earlier has its last old occurrence on that day, after the last new one.
+    """
     live = [event for event in instances if event.status != "cancelled"]
     starts = [s for event in live if (s := event_start(event, zone)) is not None]
     if not starts:
         return None
+    last_day = max(starts).astimezone(zone).date()
     return LiveInstances(
         event_ids=frozenset(event.id for event in live),
         window_start=window_start,
-        window_end=max(starts),
+        window_end=_UNBOUNDED
+        if bounded
+        else datetime.combine(last_day + timedelta(days=1), time(), tzinfo=zone),
     )
 
 
+async def _is_bounded(
+    client: RecurrenceReader, google_calendar_id: str, recurrence: str
+) -> bool:
+    try:
+        master = await client.get_event(recurrence, google_calendar_id)
+    except HttpError as e:
+        logger.warning(
+            "Could not read a recurrence's rule, treating it as endless",
+            recurring_event_id=recurrence,
+            error=str(e),
+        )
+        return False
+    return rule_is_bounded(master)
+
+
 async def _ask_google(
-    client: InstanceLister,
+    client: RecurrenceReader,
     google_calendar_id: str,
     recurrence: str,
     window_start: datetime,
     zone: ZoneInfo,
+    *,
+    bounded: bool,
 ) -> LiveInstances | None:
     """Google's live instances of ``recurrence`` from ``window_start`` on."""
     try:
@@ -252,12 +306,12 @@ async def _ask_google(
             error=str(e),
         )
         return None
-    return _live_instances(parse_events(listed), window_start, zone)
+    return _live_instances(parse_events(listed), window_start, zone, bounded=bounded)
 
 
 async def find_rekeyed_instances(
     session: Any,
-    client: InstanceLister,
+    client: RecurrenceReader,
     calendar_id: UUID,
     google_calendar_id: str,
     raw_events: Sequence[dict[str, Any]],
@@ -299,18 +353,22 @@ async def find_rekeyed_instances(
         ]
         if not absent:
             continue
+        if listing_time_min is None and all(
+            event.id in linked_ids for event in instances
+        ):
+            continue
+        bounded = await _is_bounded(client, google_calendar_id, recurrence)
         if listing_time_min is not None:
-            view = _live_instances(instances, listing_time_min, zone)
-        elif any(event.id not in linked_ids for event in instances):
+            view = _live_instances(instances, listing_time_min, zone, bounded=bounded)
+        else:
             view = await _ask_google(
                 client,
                 google_calendar_id,
                 recurrence,
                 min(link.start for link in absent) - _WINDOW_LEAD,
                 zone,
+                bounded=bounded,
             )
-        else:
-            continue
         if view is not None:
             live[recurrence] = view
     if not live:
