@@ -284,25 +284,29 @@ def _live_instances(
     earlier has its last old occurrence on that day, after the last new one.
     """
     live = [event for event in instances if event.status != "cancelled"]
-    # Only an instance still at its slot shows how far Google expanded the
-    # rule: a moved one (an exception) keeps a slot that may lie far past
-    # that, or far before where it now sits, either way proving nothing
-    # about the dates between.
-    slots = [
-        start
-        for event in live
-        if (start := event_start(event, zone)) is not None
-        and start_moment(event.original_start_time, zone) in (None, start)
-    ]
-    if not slots:
+    if not live:
         return None
-    last_day = max(slots).astimezone(zone).date()
+    if bounded:
+        window_end = _UNBOUNDED
+    else:
+        # Only an instance still at its slot shows how far Google expanded
+        # the rule: a moved one (an exception) keeps a slot that may lie far
+        # past that, or far before where it now sits, either way proving
+        # nothing about the dates between.
+        slots = [
+            start
+            for event in live
+            if (start := event_start(event, zone)) is not None
+            and start_moment(event.original_start_time, zone) in (None, start)
+        ]
+        if not slots:
+            return None
+        last_day = max(slots).astimezone(zone).date()
+        window_end = datetime.combine(last_day + timedelta(days=1), time(), tzinfo=zone)
     return LiveInstances(
         event_ids=frozenset(event.id for event in live),
         window_start=window_start,
-        window_end=_UNBOUNDED
-        if bounded
-        else datetime.combine(last_day + timedelta(days=1), time(), tzinfo=zone),
+        window_end=window_end,
     )
 
 

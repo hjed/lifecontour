@@ -808,3 +808,37 @@ class TestRekeyedRecurrenceIntegration:
         assert "journal_event.cancelled" not in [
             event_type for event_type, _ in await self._outbox(db_session)
         ]
+
+    async def test_a_finite_series_of_only_moved_instances_is_still_adopted(
+        self, db_session
+    ) -> None:
+        """A rule with an end is listed whole, so no instance needs to sit at
+        its slot to show how far Google expanded it."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        olds = [self._day(weeks) for weeks in (1, 2)]
+        journals = [
+            await self._linked_journal(db_session, calendar_uuid, start)
+            for start in olds
+        ]
+        moved = []
+        for old in olds:
+            slot = old + timedelta(minutes=30)
+            instance = self._instance(slot)
+            instance["originalStartTime"] = {"dateTime": slot.isoformat()}
+            moved_to = slot + timedelta(hours=1)
+            instance["start"] = {"dateTime": moved_to.isoformat()}
+            instance["end"] = {"dateTime": (moved_to + timedelta(hours=1)).isoformat()}
+            moved.append(instance)
+
+        result, _ = await self._sync(
+            db_session, moved, sync_type="full", rule="RRULE:FREQ=WEEKLY;COUNT=2"
+        )
+
+        assert result.get("events_rekey_adopted") == 2
+        assert {
+            data["existing_journal_id"]
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.updated"
+        } == set(journals)
