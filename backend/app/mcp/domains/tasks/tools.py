@@ -72,6 +72,7 @@ from app.mcp.domains.tasks.task_list_tools import (
     list_task_list_tasks,
     list_task_lists,
     move_task_list,
+    reorder_list_tasks,
     unarchive_task_list,
     update_task_list,
 )
@@ -1020,6 +1021,7 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(get_task_list)
     mcp.add_tool(list_task_lists)
     mcp.add_tool(move_task_list)
+    mcp.add_tool(reorder_list_tasks)
     mcp.add_tool(archive_task_list)
     mcp.add_tool(unarchive_task_list)
     mcp.add_tool(get_task_list_history)

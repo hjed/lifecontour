@@ -258,8 +258,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `TaskListRepository.find_by_id_for_share` (`FOR SHARE`) and keeps it for the unit of work. The
   share lock conflicts with the `FOR NO KEY UPDATE` an archive takes, but not with another task
   write's, so an archive and a task write serialise while task writes on one list do not. **Lock
-  order is the task, then its list**; no list writer holds a task lock, and one that will (deleting
-  a list) must lock the list's tasks first. The delete refuses after its `DELETE … RETURNING
+  order is the task, then its list.** The reorders (`TaskService.reorder_task`,
+  `reorder_list_tasks`, ITER21-001 Phase 25) lock the other way round — the list, then its open
+  tasks — and are safe only because their list lock is this same `FOR SHARE`, which never waits on
+  a task write's; an exclusive list lock there deadlocked against them. A writer that would lock a
+  list exclusively and then its tasks (deleting a list) must lock the list's tasks first. The delete refuses after its `DELETE … RETURNING
   task_list_id`, and raising rolls the unit of work back. Merges of journals and contacts still
   re-point an archived list's task links: they are the journal's and the contact's operations.
   **Creating a task on a list** (`TaskService.create_list_task`) is the one exception to that lock

@@ -1392,6 +1392,7 @@ class TestTheResultShapeIsPublished:
                 {"task_id", "journal_id", "attached", "changed"},
             ),
             ("get_task", _READ_FIELDS),
+            ("reorder_list_tasks", {"task_list_id", "open_tasks"}),
             ("list_journal_tasks", {"journal_id", "groups"}),
             ("list_upcoming_tasks", {"window", "total", "tasks"}),
             (
@@ -1472,3 +1473,81 @@ class TestTheListFieldsArePublished:
 
         due_date = schema["properties"]["due_date"]
         assert _non_null(schema, due_date) == {"type": "string", "format": "date"}
+
+
+@pytest.mark.unit
+class TestReorderListTasksSchema:
+    """An agent arranges a block of open tasks: at the top, or beside one anchor."""
+
+    async def test_the_list_and_the_block_are_required_and_the_anchors_optional(
+        self,
+    ) -> None:
+        schema = (await _tool_schema("reorder_list_tasks"))["input_schema"]
+
+        assert set(schema["properties"]) == {
+            "task_list_id",
+            "task_ids",
+            "after_task_id",
+            "before_task_id",
+        }
+        assert sorted(schema["required"]) == ["task_ids", "task_list_id"]
+
+    async def test_every_id_is_a_bounded_integer(self) -> None:
+        properties = (await _tool_schema("reorder_list_tasks"))["input_schema"][
+            "properties"
+        ]
+        bounds = (1, 2_147_483_647)
+
+        list_id = properties["task_list_id"]
+        assert (list_id["type"], list_id["minimum"], list_id["maximum"]) == (
+            "integer",
+            *bounds,
+        )
+        block = properties["task_ids"]
+        assert (block["type"], block["minItems"], block["maxItems"]) == (
+            "array",
+            1,
+            500,
+        )
+        item = block["items"]
+        assert (item["type"], item["minimum"], item["maximum"]) == ("integer", *bounds)
+        for anchor in ("after_task_id", "before_task_id"):
+            options = properties[anchor]["anyOf"]
+            assert {"type": "null"} in options, anchor
+            (number,) = [each for each in options if each.get("type") == "integer"]
+            assert (number["minimum"], number["maximum"]) == bounds, anchor
+            assert properties[anchor].get("default") is None, anchor
+
+    async def test_the_description_says_what_the_block_does(self) -> None:
+        description = (await _tool_schema("reorder_list_tasks"))["description"]
+
+        for phrase in (
+            "in the order given",
+            "keeps its order",
+            "top",
+            "after_task_id",
+            "before_task_id",
+            "open tasks",
+            "not recorded in history",
+        ):
+            assert phrase in description, phrase
+
+    async def test_it_is_an_idempotent_write(self) -> None:
+        mcp: FastMCP[None] = FastMCP(name="Test")
+        register_task_tools(mcp)
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+
+        annotations = tools["reorder_list_tasks"].annotations
+        assert annotations is not None
+        assert annotations.idempotent_hint is True
+        assert annotations.destructive_hint is False
+        assert annotations.read_only_hint is False
+
+    async def test_the_answer_is_the_open_tasks_with_every_task_field(self) -> None:
+        schema = await _output_schema("reorder_list_tasks")
+
+        item = schema["properties"]["open_tasks"]["items"]
+        if "$ref" in item:
+            item = schema["$defs"][item["$ref"].rsplit("/", 1)[-1]]
+        assert set(item["properties"]) == _TASK_FIELDS

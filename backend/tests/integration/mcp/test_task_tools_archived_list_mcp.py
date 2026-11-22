@@ -85,6 +85,11 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
             "detach_intermediate_journal_from_task",
             {"task_id": s.task_id, "journal_id": s.intermediate_journal_id},
         ),
+        # Alone on its list and already at the top: a no-op, refused anyway.
+        (
+            "reorder_list_tasks",
+            {"task_list_id": s.task_list_id, "task_ids": [s.task_id]},
+        ),
     ]
 
 
@@ -100,6 +105,7 @@ TOOLS = [
     "unlink_task_from_contact",
     "attach_intermediate_journal_to_task",
     "detach_intermediate_journal_from_task",
+    "reorder_list_tasks",
 ]
 
 

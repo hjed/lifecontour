@@ -44,6 +44,7 @@ from core_shared.models.tasks import (
     TaskReopenNotAcknowledgedError,
     TaskStatus,
     TaskStatusTransitionError,
+    TaskValidationError,
     ensure_due_date_allowed,
     is_status_transition_allowed,
 )
@@ -151,6 +152,32 @@ def _refuse_anchor_role(task: Task, task_id: int, journal_id: int) -> None:
     for anchor, anchor_journal_id in roles:
         if anchor_journal_id == journal_id:
             raise TaskJournalIsAnchorError(task_id, journal_id, anchor)
+
+
+def _check_arrangement(task_ids: Sequence[int], anchors: dict[str, int | None]) -> None:
+    """Refuse a block that is malformed whatever the list holds.
+
+    Checked before anything is read, so these answers never depend on the
+    list's state: an empty or repeating block, both anchors, or an anchor
+    inside the block.
+    """
+    if not task_ids:
+        raise TaskValidationError("task_ids", "name at least one task")
+    seen: set[int] = set()
+    for named in task_ids:
+        if named in seen:
+            raise TaskValidationError("task_ids", f"task {named} is named twice")
+        seen.add(named)
+    given = [field for field, anchor in anchors.items() if anchor is not None]
+    if len(given) > 1:
+        raise TaskValidationError(
+            "before_task_id", "give after_task_id or before_task_id, not both"
+        )
+    for field in given:
+        if anchors[field] in seen:
+            raise TaskValidationError(
+                field, f"task {anchors[field]} is in the block it would anchor"
+            )
 
 
 class TaskService:
@@ -1611,6 +1638,156 @@ class TaskService:
         """
         return await self.task_repo.list_intermediate_journal_ids(task_id, user_id)
 
+    @transactional
+    async def reorder_task(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        after_task_id: int | None,
+        transaction: AsyncConnection,
+    ) -> list[tuple[Task, list[int]]]:
+        """Move an open task on a list to the top, or just after another open task.
+
+        The list page's single move: a drag names the task above the drop point,
+        a keyboard step its neighbour. Reordering is **not an edit** — nothing is
+        published, no history is recorded and no task's ``updated_at`` moves
+        (spec: *Contacts, events and history*).
+
+        **Locks: the list ``FOR SHARE``, then its open tasks.** The share lock is
+        the one every task write takes after its own task row (see
+        :meth:`_hold_list_writable`), so the two never wait on each other for
+        the list; they meet only on task rows, and no cycle can form. Both tasks
+        are read plainly first, and the repository re-checks them under lock.
+
+        Returns:
+            The list's open tasks in their new order, each with its trail.
+
+        Raises:
+            TaskValidationError: ``after_task_id`` is the task itself; the task
+                is on no list or is closed; the anchor is closed or on another
+                list (``field`` names which).
+            TaskNotFoundError: The task or the anchor does not exist or is not
+                the acting user's — indistinguishably.
+            TaskListArchivedError: The list is archived, so read-only — a move
+                that would change nothing included.
+            TaskListChangedConcurrentlyError: A task closed or left the list
+                between the checks and the locks; re-read and retry.
+        """
+        if after_task_id == task_id:
+            raise TaskValidationError(
+                "after_task_id", "a task cannot be placed after itself"
+            )
+        task = await self._require_task(task_id, user_id)
+        if task.task_list_id is None:
+            raise TaskValidationError(
+                "task_id", "the task is on no list, so it has no order to change"
+            )
+        anchor = (
+            None
+            if after_task_id is None
+            else await self._require_task(after_task_id, user_id)
+        )
+        await self._hold_list_writable(task.task_list_id, task_id, user_id)
+        if task.status is not TaskStatus.NOT_DONE:
+            raise TaskValidationError("task_id", "only open tasks can be reordered")
+        if anchor is not None and (
+            anchor.task_list_id != task.task_list_id
+            or anchor.status is not TaskStatus.NOT_DONE
+        ):
+            raise TaskValidationError(
+                "after_task_id", "must be an open task on the same list"
+            )
+
+        reordered = await self.task_repo.move_within_list(
+            task_id, user_id, after_task_id=after_task_id
+        )
+        return await self._with_trails(reordered, user_id)
+
+    @transactional
+    async def reorder_list_tasks(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        task_ids: Sequence[int],
+        transaction: AsyncConnection,
+        after_task_id: int | None = None,
+        before_task_id: int | None = None,
+    ) -> list[tuple[Task, list[int]]]:
+        """Arrange a block of a list's open tasks, in the order given, in one write.
+
+        An agent's reorder (user decision, ITER21-001 Phase 25): the named tasks
+        leave their places, every other open task keeps its relative order, and
+        the block lands at the top — or directly after ``after_task_id``, or
+        directly before ``before_task_id``. Naming every open task sets the whole
+        order. A task created on the list since the caller read it is not named,
+        so it simply stays at the bottom.
+
+        Not an edit, as :meth:`reorder_task` is not: nothing is published. The
+        list is held ``FOR SHARE`` before anything else and no task row is
+        locked before it, for the same reason.
+
+        Returns:
+            The list's open tasks in their new order, each with its trail.
+
+        Raises:
+            TaskValidationError: ``task_ids`` is empty or repeats a task, both
+                anchors are given, an anchor is in the block; a named task is not
+                an open task on this list (closed, on another list, or not the
+                user's — one answer, so nothing about another user's tasks
+                leaks); an anchor is not one. ``field`` names the argument.
+            TaskListNotFoundError: The list does not exist or is not the user's.
+            TaskListArchivedError: The list is archived — a no-op included.
+            TaskListChangedConcurrentlyError: A named task closed or left the
+                list between the check and the locks; re-read and retry.
+        """
+        anchors = {"after_task_id": after_task_id, "before_task_id": before_task_id}
+        _check_arrangement(task_ids, anchors)
+
+        task_list = await self.task_list_repo.find_by_id_for_share(
+            task_list_id, user_id
+        )
+        if task_list is None:
+            raise TaskListNotFoundError(task_list_id)
+        task_list.ensure_writable()
+
+        open_ids = {
+            each.id
+            for each in await self.task_repo.find_open_tasks_on_list(
+                task_list_id, user_id
+            )
+        }
+        not_open = [named for named in task_ids if named not in open_ids]
+        if not_open:
+            raise TaskValidationError(
+                "task_ids",
+                "not open tasks on this list: "
+                + ", ".join(str(named) for named in not_open),
+            )
+        for field, anchor in anchors.items():
+            if anchor is not None and anchor not in open_ids:
+                raise TaskValidationError(field, "must be an open task on this list")
+
+        arranged = await self.task_repo.arrange_open_tasks(
+            task_list_id,
+            user_id,
+            task_ids=list(task_ids),
+            after_task_id=after_task_id,
+            before_task_id=before_task_id,
+        )
+        return await self._with_trails(arranged, user_id)
+
+    async def _with_trails(
+        self, tasks: list[Task], user_id: str
+    ) -> list[tuple[Task, list[int]]]:
+        """Pair each task with its trail, read for all of them at once."""
+        ids = [each.id for each in tasks if each.id is not None]
+        trails = await self.task_repo.list_intermediate_journal_ids_for_tasks(
+            ids, user_id
+        )
+        return [(each, trails.get(each.id or 0, [])) for each in tasks]
+
     async def _save(
         self, task: Task, creating_journal_id: int, due_journal_id: int
     ) -> Task:
@@ -1679,9 +1856,12 @@ class TaskService:
         the archived row. Two task writes on the same list share the lock.
 
         **Lock order: the task, then its list.** Callers that lock the task row
-        do so before calling this. No list writer holds a task lock today, so
-        no order is unsafe yet; a later writer that locks a list and then its
-        tasks — deleting a list — must lock the tasks first.
+        do so before calling this. The reorders (:meth:`reorder_task`,
+        :meth:`reorder_list_tasks`) lock the other way round — the list, then
+        its open tasks — and that is safe only because their list lock is this
+        same ``FOR SHARE``, which never waits on this one. A writer that locks a
+        list *exclusively* and then its tasks — deleting a list — would
+        deadlock against this, and must lock the tasks first.
 
         **One write does not use this: creating a task on a list.** A create
         has no task row to lock first, and its insert needs ``FOR NO KEY
@@ -1711,10 +1891,10 @@ class TaskService:
         """:meth:`_hold_list_writable`'s rule on a plain read, holding nothing.
 
         For a refusal that has to come before the task row is locked — the
-        retarget's, which answers its no-op before taking any lock — where the
-        share lock would put the list ahead of the task in the lock order. It
-        decides only whether to refuse early; a write that goes on must still
-        take :meth:`_hold_list_writable` after its task lock.
+        retarget's, which answers its no-op before taking any lock — so that a
+        refused retarget holds nothing at all. It decides only whether to refuse
+        early; a write that goes on must still take :meth:`_hold_list_writable`
+        after its task lock.
         """
         if task_list_id is None:
             return

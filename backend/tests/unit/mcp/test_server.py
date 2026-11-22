@@ -117,3 +117,8 @@ class TestTheTaskGuidanceDescribesListTasks:
         instructions = create_mcp_server().instructions or ""
 
         assert "list_task_list_tasks" in instructions
+
+    def test_names_the_tool_that_reorders_a_lists_tasks(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "reorder_list_tasks" in instructions

@@ -511,7 +511,9 @@ task and the neighbour it should follow, or a removal — when, once the list's
 lock is held, either task has closed or left the list. A plain edit locks only
 its own task, so this can happen however carefully the caller checked first; the
 client re-reads the list and retries. It is mapped ahead of the first endpoint
-that can raise it (reorder, removal from a list); see *Tasks on a list* in
+that can raise it — `POST /api/tasks/{task_id}/reorder` and the
+`reorder_list_tasks` MCP tool since ITER21-001 Phase 25, removal from a list
+later; see *Tasks on a list* in
 [`database-design.md`](./database-design.md).
 
 `TaskAnchorJournalNotFoundError` names **which journal anchor was refused**:
@@ -897,6 +899,7 @@ a capped span of days. Neither can be widened into a task browser.
 | `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded, and so are tasks on a list (journal-only for now) | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
 | `PATCH /api/tasks/{task_id}` | Change a task's text, status, flag or icon, in one write. Body attributes: `text`, `status` (`not_done`, `done`, `cancelled`), `flagged` (a JSON boolean; `null` refused), `icon` (a fixed-set key, or `null` to clear; absent keeps it) — each optional, at least one required. Flag and icon apply to every task, journal-only ones included, in any status | 200; 400 unknown status, blank text, a null or non-boolean flag, an icon outside the fixed set, unknown attribute, a body naming no change, or a body `id` disagreeing with the path; 404 task unknown/not-owned; 409 a refused transition; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
+| `POST /api/tasks/{task_id}/reorder` | Move an open task on a list to the top, or directly after another open task on it — the list page's drag and keyboard move (ITER21-001 Phase 25). Body type `task-reorders`, attributes: `after_task_id` (**required**, nullable: `null` is the top). Answers the list's open tasks in their new order as a `tasks` collection. Records nothing: no event, no history, no `updated_at` | 200; 400 `TASK_VALIDATION_ERROR` with `meta.field` — `task_id` for a task on no list or a closed one, `after_task_id` for the task itself or an anchor that is closed or on another list — or a malformed body or out-of-range id; 404 task or anchor unknown/not-owned, indistinguishably; 409 `TASK_LIST_ARCHIVED` (a no-op included); 409 `TASK_LIST_CHANGED` when a task closed or left the list while the move waited |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. A flag change is field `flagged` with `"False"`/`"True"` values; an icon change is field `icon` with fixed-set keys, `null` being "no icon" (set `null → key`, cleared `key → null`). Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
@@ -1372,7 +1375,15 @@ Conventions this surface pins down:
 - The matching MCP tools are `create_task_list`, `update_task_list`,
   `get_task_list`, `list_task_lists`, `move_task_list`, `archive_task_list`,
   `unarchive_task_list`, `get_task_list_history` and `list_task_list_tasks`, documented in their
-  docstrings and parameter schemas. `update_task_list` clears the icon with
+  docstrings and parameter schemas. Reordering a list's **tasks** is
+  `reorder_list_tasks(task_list_id, task_ids, after_task_id?, before_task_id?)`
+  (ITER21-001 Phase 25, user decision): the named open tasks move as one block,
+  in the order given, to the top, directly after one open task or directly
+  before one, and every other open task keeps its order — so it covers the REST
+  route's single move and a whole new order alike. It answers the list's open
+  tasks in their new order, records nothing, and refuses a duplicate, both
+  anchors, an anchor inside the block, or any id that is not an open task on
+  the list (another user's included, indistinguishably) as a "Task error". `update_task_list` clears the icon with
   `clear_icon=true`, because a tool cannot tell a null argument from an omitted
   one. Their integer arguments (`task_list_id`, `index`) take only JSON
   integers, as REST does: `true` or `"1"` is refused rather than read as `1`.

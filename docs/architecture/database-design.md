@@ -822,6 +822,7 @@ refused row.
 |---|---|
 | `add_to_list` | Puts a task at the **bottom** of a list (a journal-only task joining, a move from another list, or rejoining its own): one past the owner's highest position on it, closed tasks included, so a reopened task keeps its slot. Keeps the journals, due date, status, flag and icon. |
 | `move_within_list` | Moves an open task to just after another open task on its list, or to the top (`after_task_id=None`). The pure rule `core_shared.models.tasks.reorder_open_tasks` hands the open tasks' **existing** positions out again in the new order, so no new value appears and closed tasks keep theirs; only changed rows are written. **Not an edit**: no event, no `updated_at` change. |
+| `arrange_open_tasks` | Moves a **block** of open tasks, in the order given, to the top of their list, directly after one open task or directly before one (ITER21-001 Phase 25, the MCP reorder). The named tasks leave their places and the other open tasks keep their relative order; the pure rule `core_shared.models.tasks.arrange_open_tasks` shares `reorder_open_tasks`'s slot assignment, so the same guarantees hold. **Not an edit.** |
 | `remove_from_list` | Clears `task_list_id`, `position` and `due_date` in one statement. A task without both journals is refused by `ck_tasks_journal_only_has_both_anchors`. |
 | `find_open_tasks_on_list` | Not-done tasks in `(position, id)` order, unpaged. |
 | `find_closed_tasks_on_list` | Done and cancelled tasks, `closed_at DESC, id DESC`, as a `TaskPage` (`limit`/`offset` and a total from a separate `COUNT`, so a page past the end still reports it). |
@@ -835,14 +836,27 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
 
 - **Lock order.** Every membership write, and any later write spanning a whole list (archive freeze,
   list delete), locks the **`task_lists` row first and then `tasks` rows, each in ascending id**.
-  A reorder locks every open task on its list (`FOR NO KEY UPDATE ... ORDER BY id`), so a
-  transaction holding one of them that then asked for the list would deadlock against it. A service
-  that must check a task under lock before a membership write locks the list(s) first, then the
-  task. Plain edits lock only their task and never a list afterwards, so a reorder's neighbour can
-  still close while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError`
-  (409, `TASK_LIST_CHANGED`). The rule covers list-side writers; a journal merge's anchor re-point
-  (`task_anchor_repository.py`) updates tasks by journal without a list lock, so a merge overlapping
-  a reorder of the same tasks can deadlock and PostgreSQL aborts one side. The overlap tests in
+  What keeps that from deadlocking is the **mode** of the list lock:
+  - Every task write takes its list `FOR SHARE` (`TaskService._hold_list_writable`, ITER21-001
+    Phase 18): text, status, flag, icon and retarget **after** locking their task; the contact and
+    journal link writes after a plain read, before a `FOR KEY SHARE` on the task that a reorder's
+    `FOR NO KEY UPDATE` does not conflict with.
+  - The reorders (`move_within_list`, `arrange_open_tasks`) take the list `FOR SHARE` too, then
+    every open task on it (`FOR NO KEY UPDATE ... ORDER BY id`). Share locks never wait on each
+    other, so a reorder and a task write meet only on task rows and no cycle can form. Until Phase
+    25 the reorder took the list `FOR NO KEY UPDATE`, which deadlocked against a task write holding
+    one of its tasks; `test_task_service_reorder_integration.py` reproduces that interleaving.
+  - Joins, removals and creates on a list take it `FOR NO KEY UPDATE`, which conflicts with the
+    share lock, so they queue against a reorder; none of them holds a task lock first. A writer that
+    locks a task and then asks for its list *exclusively* would break this — a same-list "move"
+    (Phase 26) must be refused or a no-op, and a list delete (Phase 29) locks the tasks first.
+
+  A task write locks only its own task, so a reorder's named task or neighbour can still close
+  while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError` (409,
+  `TASK_LIST_CHANGED`). A task *reopened* while a reorder waits was not in the set it reordered and
+  keeps its own position. A journal merge's anchor re-point (`task_anchor_repository.py`) updates
+  tasks by journal without a list lock, so a merge overlapping a reorder of the same tasks can
+  deadlock and PostgreSQL aborts one side. The overlap tests in
   `tests/integration/tasks/test_task_repository_list_queries_integration.py` prove joins and moves
   on one list queue on the list lock.
 - **`closed_at`** (migration `0147`) orders a list's Completed group. `updated_at` cannot: every
@@ -856,7 +870,8 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
 - **No event yet for joining or leaving.** The repository never publishes; the services that call
   `add_to_list` (Phase 26) and `remove_from_list` (Phase 27) publish the list-membership event, and
   until then both are named exclusions in `test_task_event_completeness_integration.py`.
-  `move_within_list` is excluded permanently — the spec gives reordering no event.
+  `move_within_list` and `arrange_open_tasks` are excluded permanently — the spec gives reordering
+  no event.
 
 ### Photo Integration (Iteration 4)
 ```sql

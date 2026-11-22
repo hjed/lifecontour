@@ -1,11 +1,13 @@
 """Task list MCP tools: create, update, read, list, move, archive, unarchive,
-read a list's history, and read a list's tasks.
+read a list's history, read a list's tasks, and reorder them.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
 no domain error. The writes (``create_task_list``, ``update_task_list``,
 ``move_task_list``, ``archive_task_list`` and ``unarchive_task_list``) call the
 ``@transactional`` ``TaskListService``, which
-commits each list and its event together (a move publishes none); the reads go
+commits each list and its event together (a move publishes none);
+``reorder_list_tasks`` calls the ``@transactional`` ``TaskService`` and
+publishes nothing either; the reads go
 through ``TaskListReadService`` and ``TaskReadService``, which can change
 nothing, and the history
 through ``TaskListHistoryService``, which authorises the read itself. A refused name
@@ -36,8 +38,9 @@ from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
-from app.mcp.domains.tasks.read_models import task_read_mcp
-from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP
+from app.core.tasks.services.task_service import TaskService
+from app.mcp.domains.tasks.read_models import task_mcp_fields, task_read_mcp
+from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP, TaskListOrderMCP
 from app.mcp.domains.tasks.task_list_schemas import (
     CompletedTaskListTasksMCP,
     OpenTaskListTasksMCP,
@@ -58,6 +61,7 @@ from app.mcp.shared.dependencies import (
     get_task_list_read_service,
     get_task_list_service,
     get_task_read_service,
+    get_task_service,
     mcp_depends,
 )
 from app.shared.patch import UNSET, Unset
@@ -288,6 +292,81 @@ async def move_task_list(
         transaction=db_connection,
     )
     return TaskListsMCP(lists=[_task_list_fields(each) for each in task_lists])
+
+
+_BoundedId = Annotated[int, Field(ge=1, le=INT32_MAX), JsonIntOnly]
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("reorder_list_tasks", "task")
+async def reorder_list_tasks(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The list whose tasks to reorder."),
+        JsonIntOnly,
+    ],
+    task_ids: Annotated[
+        list[_BoundedId],
+        Field(
+            min_length=1,
+            max_length=500,
+            description=(
+                "The open tasks to move, in the order they should take. Every one "
+                "must be an open task on this list, none twice; at most 500. Name "
+                "every open task to set the whole order; on a longer list, name "
+                "the head you want and the rest keep their order after it."
+            ),
+        ),
+    ],
+    after_task_id: Annotated[
+        _BoundedId | None,
+        Field(
+            description=(
+                "Place the tasks directly after this open task on the list, which "
+                "must not be one of them. Omit, with before_task_id, for the top."
+            )
+        ),
+    ] = None,
+    before_task_id: Annotated[
+        _BoundedId | None,
+        Field(
+            description=(
+                "Place the tasks directly before this open task on the list, "
+                "which must not be one of them. Never with after_task_id."
+            )
+        ),
+    ] = None,
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> TaskListOrderMCP:
+    """
+    Reorder the open tasks on one of the user's lists, and answer with all of
+    them in their new order.
+
+    The tasks named in task_ids move, in the order given, as one block; every
+    other open task on the list keeps its order. The block goes to the top, or
+    directly after after_task_id, or directly before before_task_id. So naming
+    one task moves it to the top, and naming one with after_task_id puts it
+    just below that task.
+
+    Only open tasks have a manual order: a done or cancelled task, a task on
+    another list or a task with no list is refused, as is a list that is
+    archived. A task added to the list since you last read it is left at the
+    bottom. Reordering is not recorded in history.
+    """
+    user_id = await get_current_user_id()
+    reordered = await task_service.reorder_list_tasks(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        task_ids=task_ids,
+        after_task_id=after_task_id,
+        before_task_id=before_task_id,
+        transaction=db_connection,
+    )
+    return TaskListOrderMCP(
+        task_list_id=task_list_id,
+        open_tasks=[task_mcp_fields(task, trail) for task, trail in reordered],
+    )
 
 
 @tool(annotations=IDEMPOTENT_WRITE)

@@ -703,13 +703,18 @@ PORT_READ_METHODS = frozenset(
 # no event should be *visible* rather than merely absent, and the test below
 # refuses to let the list grow again without somebody choosing to add to it.
 #
-# It holds the list-membership writes now (a user decision): the reorder for
-# good, and joining and leaving a list until the phase that gives each a service
-# path and its event — each of those phases must delete its entry:
+# It holds the list-membership writes now (a user decision): the two reorders
+# for good (their callers, ``TaskService.reorder_task`` and
+# ``reorder_list_tasks``, publish nothing), and joining and leaving a list until
+# the phase that gives each a service path and its event — each of those phases
+# must delete its entry:
 NAMED_EXCLUSIONS: dict[str, str] = {
     # Never announced, by specification: "reordering does not" emit an event or
     # appear in task history. This entry is permanent.
     "move_within_list": "reordering emits no event (spec: Contacts, events and history)",
+    # The agent's block arrangement (ITER21-001 Phase 25): a reorder too, so
+    # never announced either. Also permanent.
+    "arrange_open_tasks": "reordering emits no event (spec: Contacts, events and history)",
     # Repository primitives with no service caller yet, so no write can happen
     # unannounced. The list-membership event lands with the service that calls
     # them; that phase removes the entry and adds a WritePath above.
@@ -993,7 +998,7 @@ class TestEveryPortWriteIsAccountedFor:
 
         It held one entry for several phases: the merge re-point, the write the
         journal domain performs on task rows, until it published. It now holds
-        the list-membership writes: the reorder for good (the spec gives it no
+        the list-membership writes: the two reorders for good (the spec gives them no
         event), and joining and leaving a list only until the phases that give
         them a caller and an event, each of which deletes its entry here. A test
         allowing "a few" exclusions would let the next one be added as easily as
@@ -1001,6 +1006,7 @@ class TestEveryPortWriteIsAccountedFor:
         """
         assert set(NAMED_EXCLUSIONS) == {
             "move_within_list",
+            "arrange_open_tasks",
             "add_to_list",
             "remove_from_list",
         }

@@ -36,6 +36,7 @@ from tests.integration.tasks.task_seeding import (
     delete_task_list_row,
     seed_task_list,
     seed_task_list_history,
+    stored_positions,
     task_list_events,
 )
 
@@ -1168,3 +1169,259 @@ class TestListTaskListTasksRefusals:
         (argument,) = arguments
         assert argument in response.text
         assert bound in response.text
+
+
+async def _list_with_tasks(conn: AsyncConnection) -> tuple[int, list[int]]:
+    """A list with four open tasks at 0..3 and a done one at 4; ``(list, open)``."""
+    task_list = await seed_task_list(conn, "Packing")
+    assert task_list.id is not None
+    ids = [
+        await create_list_task(conn, task_list_id=task_list.id, position=position)
+        for position in range(4)
+    ]
+    await create_list_task(
+        conn, task_list_id=task_list.id, position=4, status=TaskStatus.DONE
+    )
+    return task_list.id, ids
+
+
+def _order(result: dict[str, Any]) -> list[int]:
+    return [task["id"] for task in result["open_tasks"]]
+
+
+class TestReorderListTasksTool:
+    """An agent arranges a block of open tasks in one call: the block, in the
+    order given, at the top or directly after / before one anchor, the rest
+    keeping their order."""
+
+    @pytest.mark.parametrize(
+        ("block", "anchors", "expected"),
+        [
+            ([3, 2, 1, 0], {}, [3, 2, 1, 0]),
+            ([2], {}, [2, 0, 1, 3]),
+            ([3, 0], {}, [3, 0, 1, 2]),
+            ([0, 1], {"after_task_id": 2}, [2, 0, 1, 3]),
+            ([3], {"before_task_id": 1}, [0, 3, 1, 2]),
+            ([3], {"after_task_id": None, "before_task_id": None}, [3, 0, 1, 2]),
+        ],
+        ids=["whole-order", "one-to-top", "prefix", "after", "before", "null-anchors"],
+    )
+    async def test_arranges_the_block_and_answers_the_new_order(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        block: list[int],
+        anchors: dict[str, int | None],
+        expected: list[int],
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+        named = {
+            field: None if index is None else ids[index]
+            for field, index in anchors.items()
+        }
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                task_ids=[ids[index] for index in block],
+                **named,
+            )
+
+        assert result["task_list_id"] == list_id
+        assert _order(result) == [ids[index] for index in expected]
+        assert await stored_positions(
+            clean_database, [ids[index] for index in expected]
+        ) == [
+            0,
+            1,
+            2,
+            3,
+        ]
+        assert await count(clean_database, _COUNT_OUTBOX, {}) == 0
+
+    async def test_a_task_created_since_the_read_stays_at_the_bottom(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+        late = await create_list_task(clean_database, task_list_id=list_id, position=5)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                task_ids=list(reversed(ids)),
+            )
+
+        assert _order(result) == [*reversed(ids), late]
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            ({"task_ids": [0, 1, 0]}, "named twice"),
+            ({"task_ids": [0], "after_task_id": 1, "before_task_id": 2}, "not both"),
+            ({"task_ids": [0, 1], "after_task_id": 1}, "in the block"),
+            ({"task_ids": [0, "closed"]}, "not open tasks on this list"),
+            ({"task_ids": [0], "before_task_id": "closed"}, "open task on this list"),
+        ],
+        ids=["duplicate", "both-anchors", "anchor-in-block", "closed", "closed-anchor"],
+    )
+    async def test_a_refused_arrangement_names_why_and_moves_nothing(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+        message: str,
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+        closed = await create_list_task(
+            clean_database, task_list_id=list_id, position=6, status=TaskStatus.DONE
+        )
+
+        def resolve(value: Any) -> Any:
+            if isinstance(value, list):
+                return [resolve(each) for each in value]
+            return closed if value == "closed" else ids[value]
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                **{field: resolve(value) for field, value in arguments.items()},
+            )
+
+        assert refused["error"] == "Task error"
+        assert message in refused["message"]
+        assert await stored_positions(clean_database, ids) == [0, 1, 2, 3]
+
+    async def test_a_task_on_another_list_or_journal_only_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+        elsewhere = await seed_task_list(clean_database, "Errands")
+        assert elsewhere.id is not None
+        other = await create_list_task(clean_database, task_list_id=elsewhere.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                task_ids=[ids[3], other],
+            )
+
+        assert refused["error"] == "Task error"
+        assert str(other) in refused["message"]
+        assert await stored_positions(clean_database, ids) == [0, 1, 2, 3]
+
+    async def test_another_users_list_is_not_found_and_nothing_moves(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        theirs = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+        their_tasks = [
+            await create_list_task(
+                clean_database,
+                task_list_id=theirs.id,
+                position=position,
+                user_id=OTHER_USER_ID,
+            )
+            for position in (0, 1)
+        ]
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=theirs.id,
+                task_ids=[their_tasks[1]],
+            )
+            missing = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=2_000_000_000,
+                task_ids=[their_tasks[1]],
+            )
+
+        assert foreign["error"] == missing["error"] == "Not found"
+        assert await stored_positions(clean_database, their_tasks) == [0, 1]
+
+    async def test_another_users_task_named_reads_as_one_on_another_list(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+        theirs = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert theirs.id is not None
+        their_task = await create_list_task(
+            clean_database, task_list_id=theirs.id, user_id=OTHER_USER_ID
+        )
+
+        missing_id = 2_000_000_000
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                task_ids=[ids[3], their_task],
+            )
+            missing = await _refused(
+                client,
+                "reorder_list_tasks",
+                task_list_id=list_id,
+                task_ids=[ids[3], missing_id],
+            )
+
+        assert refused["error"] == missing["error"] == "Task error"
+        assert refused["message"] == missing["message"].replace(
+            str(missing_id), str(their_task)
+        )
+        assert await stored_positions(clean_database, ids) == [0, 1, 2, 3]
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"task_ids": []},
+            {"task_ids": list(range(1, 502))},
+            {"task_ids": [True]},
+            {"task_ids": ["1"]},
+            {"task_ids": [1.0]},
+            {"task_ids": "1"},
+            {"task_list_id": True},
+            {"after_task_id": "1"},
+            {"before_task_id": True},
+        ],
+        ids=[
+            "empty",
+            "over-500",
+            "bool-item",
+            "string-item",
+            "float-item",
+            "string-block",
+            "bool-list",
+            "string-after",
+            "bool-before",
+        ],
+    )
+    async def test_a_malformed_argument_is_refused_and_nothing_moves(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+    ) -> None:
+        list_id, ids = await _list_with_tasks(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "reorder_list_tasks",
+                {"task_list_id": list_id, "task_ids": [ids[3]], **arguments},
+            )
+
+        assert '"isError":true' in response.text
+        assert await stored_positions(clean_database, ids) == [0, 1, 2, 3]
