@@ -1174,6 +1174,18 @@ Day boundaries are pinned in `tests/unit/tasks/test_list_task_dates_day_boundari
 the rules from UTC instants through `today_in`, `journal_date` and `journal_last_day` in Sydney, New
 York and across a daylight-saving change; the rules alone are in `test_list_task_dates.py`.
 
+### A list's tasks
+
+`TaskReadService.read_models_on_list` and `read_closed_models_on_list` answer the list page: the
+open tasks in manual order (`find_open_tasks_on_list`, whole, or sliced by an optional
+`limit`/`offset` **before** assembly so only a page's tasks have their links read) and one page of
+the closed ones, most recently closed first (`find_closed_tasks_on_list`). Both return a
+`TaskReadModelPage` (models plus the total across pages) and **resolve the list first**
+(`TaskListRepository.find_by_id`): the repository reads an unowned list as an empty one, so this
+is what makes another user's list `TaskListNotFoundError`. The resolved list seeds `_assemble`'s
+list refs (`known_lists`), so the read costs no second list statement, and the statement count is
+the same at any task count (pinned in `test_task_read_model_integration.py`).
+
 ### A journal's tasks, by link role
 
 `TaskReadService.read_models_for_journal` answers the surface a journal's detail view needs: every

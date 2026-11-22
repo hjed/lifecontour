@@ -35,8 +35,10 @@ from core_shared.models.tasks import (
     TaskJournalRef,
     TaskListNotFoundError,
     TaskListRef,
+    TaskListTasks,
     TaskNotFoundError,
     TaskReadModel,
+    TaskReadModelPage,
     TaskStatus,
     UpcomingTasks,
     build_task_read_model,
@@ -61,7 +63,7 @@ if TYPE_CHECKING:
     from zoneinfo import ZoneInfo
 
     from core_shared.models.journals import Journal
-    from core_shared.models.tasks import Task, TaskLinkRole
+    from core_shared.models.tasks import Task, TaskLinkRole, TaskList
 
     from app.core.contacts.models.repositories import ContactRepository
     from app.core.journal.models.repositories import (
@@ -85,6 +87,31 @@ def _ordered_unique(values: Iterable[int]) -> list[int]:
     between runs rather than depending on set iteration.
     """
     return list(dict.fromkeys(values))
+
+
+def _to_list_ref(list_id: int, task_list: TaskList) -> TaskListRef:
+    """The list a task sits on, as its read model carries it."""
+    return TaskListRef(
+        id=list_id,
+        name=task_list.name,
+        icon=task_list.icon,
+        archived=task_list.is_archived,
+    )
+
+
+def _check_page(limit: int | None, offset: int) -> None:
+    """Refuse a page no transport should be able to ask for."""
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be at least 1, got {limit}")
+    if offset < 0:
+        raise ValueError(f"offset must be at least 0, got {offset}")
+
+
+def _persisted_list_id(task_list: TaskList) -> int:
+    """A resolved list's id; a list read back from storage always has one."""
+    if task_list.id is None:
+        raise ValueError("A list read back from storage has an id")
+    return task_list.id
 
 
 def _lapses_its_tasks(
@@ -448,6 +475,222 @@ class TaskReadService:
         )
         return models
 
+    async def read_models_on_list(
+        self,
+        user_id: str,
+        task_list_id: int,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        now: datetime.datetime | None = None,
+    ) -> TaskReadModelPage:
+        """A list's open tasks, in the user's manual order.
+
+        The list page's main body. Every open task comes back by default: a
+        list's open tasks are its working set, and the page shows them all.
+        A ``limit`` cuts that set **before** it is assembled, so only the
+        page's tasks have their journals and contacts read; the open rows
+        themselves are one unpaged statement either way.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            task_list_id: The list to read
+            limit: The page size, or ``None`` for every open task
+            offset: How many open tasks to skip when paging
+            now: The instant to judge "today" (and so overdue) from, for tests
+
+        Returns:
+            The page, whose ``total`` is every open task on the list.
+
+        Raises:
+            TaskListNotFoundError: No such list, or it is not this user's —
+                indistinguishably. Resolved before any task is read, because
+                the repository answers an unowned list as an empty one.
+            ValueError: ``limit`` below 1 or ``offset`` below 0; the transports
+                bound both, so this is a caller's bug.
+        """
+        _check_page(limit, offset)
+        task_list = await self._resolve_list(user_id, task_list_id)
+        zone = await self.date_resolver.timezone_for(user_id)
+        return await self._open_page(
+            user_id, task_list, limit=limit, offset=offset, zone=zone, now=now
+        )
+
+    async def read_closed_models_on_list(
+        self,
+        user_id: str,
+        task_list_id: int,
+        *,
+        limit: int,
+        offset: int,
+        now: datetime.datetime | None = None,
+    ) -> TaskReadModelPage:
+        """One page of a list's done and cancelled tasks, most recently closed
+        first — the list page's Completed group.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            task_list_id: The list to read
+            limit: The page size, at least 1
+            offset: How many closed tasks to skip, at least 0
+            now: The instant to judge "today" from, for tests
+
+        Returns:
+            The page, with the total across every page — reported even for a
+            page past the end.
+
+        Raises:
+            TaskListNotFoundError: As :meth:`read_models_on_list`.
+            ValueError: A bad ``limit`` or ``offset``.
+        """
+        _check_page(limit, offset)
+        task_list = await self._resolve_list(user_id, task_list_id)
+        zone = await self.date_resolver.timezone_for(user_id)
+        return await self._closed_page(
+            user_id, task_list, limit=limit, offset=offset, zone=zone, now=now
+        )
+
+    async def read_list_with_tasks(
+        self,
+        user_id: str,
+        task_list_id: int,
+        *,
+        page: int,
+        limit: int,
+        page_open_tasks: bool,
+        include_completed: bool,
+        now: datetime.datetime | None = None,
+    ) -> TaskListTasks:
+        """A list with its tasks in one answer — the MCP tool's read.
+
+        The list is resolved once and the timezone read once for both
+        sections. ``page`` and ``limit`` always page the completed tasks, and
+        page the open ones too when ``page_open_tasks`` is set; otherwise
+        every open task comes back.
+
+        The two sections are separate statements with no transaction around
+        them (reads open none), so a task closed in between can appear in
+        both.
+
+        Args:
+            user_id: The acting user; every read below is scoped to them
+            task_list_id: The list to read
+            page: The 1-based page, for every paged section
+            limit: The page size, for every paged section
+            page_open_tasks: Page the open tasks as well
+            include_completed: Read the completed page at all
+            now: The instant to judge "today" from, for tests
+
+        Raises:
+            TaskListNotFoundError: As :meth:`read_models_on_list`.
+            ValueError: ``page`` or ``limit`` below 1.
+        """
+        if page < 1:
+            raise ValueError(f"page must be at least 1, got {page}")
+        offset = (page - 1) * limit
+        _check_page(limit, offset)
+        task_list = await self._resolve_list(user_id, task_list_id)
+        zone = await self.date_resolver.timezone_for(user_id)
+        open_tasks = await self._open_page(
+            user_id,
+            task_list,
+            limit=limit if page_open_tasks else None,
+            offset=offset if page_open_tasks else 0,
+            zone=zone,
+            now=now,
+        )
+        completed = (
+            await self._closed_page(
+                user_id, task_list, limit=limit, offset=offset, zone=zone, now=now
+            )
+            if include_completed
+            else None
+        )
+        return TaskListTasks(
+            task_list=task_list, open_tasks=open_tasks, completed=completed
+        )
+
+    async def _resolve_list(self, user_id: str, task_list_id: int) -> TaskList:
+        """The user's list, or its 404 — the read's ownership check."""
+        task_list = await self.task_list_repo.find_by_id(task_list_id, user_id)
+        if task_list is None:
+            raise TaskListNotFoundError(task_list_id)
+        return task_list
+
+    async def _open_page(
+        self,
+        user_id: str,
+        task_list: TaskList,
+        *,
+        limit: int | None,
+        offset: int,
+        zone: ZoneInfo,
+        now: datetime.datetime | None,
+    ) -> TaskReadModelPage:
+        """The open tasks of an already-resolved list, cut before assembly."""
+        list_id = _persisted_list_id(task_list)
+        tasks = await self.task_repo.find_open_tasks_on_list(list_id, user_id)
+        end = None if limit is None else offset + limit
+        return TaskReadModelPage(
+            models=await self._assemble_on_list(
+                user_id, task_list, tasks[offset:end], zone=zone, now=now
+            ),
+            total=len(tasks),
+        )
+
+    async def _closed_page(
+        self,
+        user_id: str,
+        task_list: TaskList,
+        *,
+        limit: int,
+        offset: int,
+        zone: ZoneInfo,
+        now: datetime.datetime | None,
+    ) -> TaskReadModelPage:
+        """A page of the closed tasks of an already-resolved list."""
+        closed = await self.task_repo.find_closed_tasks_on_list(
+            _persisted_list_id(task_list), user_id, limit=limit, offset=offset
+        )
+        return TaskReadModelPage(
+            models=await self._assemble_on_list(
+                user_id, task_list, closed.tasks, zone=zone, now=now
+            ),
+            total=closed.total,
+        )
+
+    async def _assemble_on_list(
+        self,
+        user_id: str,
+        task_list: TaskList,
+        tasks: Sequence[Task],
+        *,
+        zone: ZoneInfo,
+        now: datetime.datetime | None,
+    ) -> tuple[TaskReadModel, ...]:
+        """Assemble tasks read off one list, seeding their list ref with it.
+
+        An empty page reads nothing more: there are no links to batch.
+        """
+        if not tasks:
+            return ()
+        task_ids = [task.id for task in tasks if task.id is not None]
+        mentions = await self.task_repo.list_intermediate_journal_ids_for_tasks(
+            task_ids, user_id
+        )
+        contacts = await self.task_repo.list_contact_ids_for_tasks(task_ids, user_id)
+
+        models, _ = await self._assemble(
+            user_id,
+            tasks,
+            mentions=mentions,
+            contacts=contacts,
+            today=today_in(zone, now),
+            timezone=zone,
+            known_lists=[task_list],
+        )
+        return tuple(models)
+
     async def due_task_counts(
         self,
         user_id: str,
@@ -542,6 +785,7 @@ class TaskReadService:
         today: datetime.date,
         timezone: ZoneInfo,
         extra_journal_ids: Sequence[int] = (),
+        known_lists: Sequence[TaskList] = (),
     ) -> tuple[list[TaskReadModel], dict[int, TaskJournalRef]]:
         """Turn already-fetched tasks and their link ids into read models.
 
@@ -579,6 +823,9 @@ class TaskReadService:
             extra_journal_ids: Journals to resolve beside the tasks' own — the
                 journal a listing is *about*, which must be resolved even when
                 nothing is linked to it
+            known_lists: Lists the caller has **already read** for this user —
+                the list a listing is about — so their refs cost no second
+                statement. Any other list the tasks sit on is still fetched.
 
         Returns:
             The models, and the journal refs they were built from. The refs come
@@ -618,7 +865,7 @@ class TaskReadService:
             ),
             user_id=user_id,
         )
-        list_refs = await self._list_refs(user_id, tasks)
+        list_refs = await self._list_refs(user_id, tasks, known_lists=known_lists)
 
         models = [
             build_task_read_model(
@@ -690,28 +937,38 @@ class TaskReadService:
         )
 
     async def _list_refs(
-        self, user_id: str, tasks: Sequence[Task]
+        self,
+        user_id: str,
+        tasks: Sequence[Task],
+        *,
+        known_lists: Sequence[TaskList] = (),
     ) -> dict[int, TaskListRef]:
         """Every list the tasks sit on, keyed by id, from one owner-scoped read.
 
         Skipped when no task is on a list, so a page of journal-only tasks costs
-        exactly what it did before lists existed.
+        exactly what it did before lists existed — and when every list is among
+        ``known_lists``, already read by the caller, so a list's own page costs
+        no second list statement.
         """
-        list_ids = _ordered_unique(
-            task.task_list_id for task in tasks if task.task_list_id is not None
-        )
-        if not list_ids:
-            return {}
-        found = await self.task_list_repo.find_by_ids(list_ids, user_id)
-        return {
-            list_id: TaskListRef(
-                id=list_id,
-                name=task_list.name,
-                icon=task_list.icon,
-                archived=task_list.is_archived,
-            )
-            for list_id, task_list in found.items()
+        refs = {
+            task_list.id: _to_list_ref(task_list.id, task_list)
+            for task_list in known_lists
+            if task_list.id is not None
         }
+        missing = _ordered_unique(
+            task.task_list_id
+            for task in tasks
+            if task.task_list_id is not None and task.task_list_id not in refs
+        )
+        if missing:
+            found = await self.task_list_repo.find_by_ids(missing, user_id)
+            refs.update(
+                {
+                    list_id: _to_list_ref(list_id, task_list)
+                    for list_id, task_list in found.items()
+                }
+            )
+        return refs
 
     @staticmethod
     def _list_ref(list_refs: dict[int, TaskListRef], task: Task) -> TaskListRef | None:

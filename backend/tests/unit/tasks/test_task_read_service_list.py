@@ -38,7 +38,12 @@ from tests.unit.tasks.read_service_doubles import (
     make_journal,
     make_task,
 )
-from tests.unit.tasks.task_doubles import OTHER_USER_ID, USER_ID
+from tests.unit.tasks.task_doubles import (
+    OTHER_USER_ID,
+    TASK_LIST_ID,
+    USER_ID,
+    make_list_task,
+)
 
 # The journal being viewed, plus the ones its tasks reach out to.
 JOURNAL_ID = 100
@@ -542,3 +547,30 @@ class TestOrdering:
         groups = await service.read_models_for_journal(USER_ID, JOURNAL_ID)
 
         assert [model.task.id for model in groups.created] == [2, 3, 1]
+
+
+@pytest.mark.unit
+class TestTheListRefsStillComeFromTheBatchedLookup:
+    """Seeding list refs is only for a list's own page: a journal's listing,
+    which knows no list in advance, still reads them in one batched lookup."""
+
+    async def test_list_tasks_on_a_journal_read_their_list_once(
+        self,
+        service: TaskReadService,
+        task_repo: AsyncMock,
+        mock_task_list_repo: AsyncMock,
+    ) -> None:
+        task_repo.find_tasks_for_journal.return_value = [
+            make_list_task(task_id=1, due_journal_id=JOURNAL_ID),
+            make_list_task(task_id=2, due_journal_id=JOURNAL_ID),
+        ]
+
+        groups = await service.read_models_for_journal(USER_ID, JOURNAL_ID)
+
+        mock_task_list_repo.find_by_ids.assert_awaited_once_with(
+            [TASK_LIST_ID], USER_ID
+        )
+        assert [model.task_list.name for model in groups.due if model.task_list] == [
+            "Packing",
+            "Packing",
+        ]

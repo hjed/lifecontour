@@ -112,3 +112,8 @@ class TestTheTaskGuidanceDescribesListTasks:
 
         assert "cannot be placed on a list" not in instructions
         assert "never on a bare date" not in instructions
+
+    def test_names_the_tool_that_reads_a_lists_tasks(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "list_task_list_tasks" in instructions

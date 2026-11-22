@@ -25,7 +25,11 @@ from app.api.tasks.controllers import (
     list_upcoming_tasks,
     update_task,
 )
-from app.api.tasks.task_list_controllers import get_task_list_history
+from app.api.tasks.task_list_controllers import (
+    get_task_list_history,
+    list_completed_task_list_tasks,
+    list_task_list_tasks,
+)
 
 
 def _description(endpoint: object) -> str:
@@ -288,3 +292,32 @@ class TestTheListHistoryEndpointDocumentsItsVocabularyAndRefusals:
         description = _description(get_task_list_history)
 
         assert "same answer as an unknown one" in description
+
+
+@pytest.mark.unit
+class TestTheListTaskReadsDocumentTheirOrderAndPaging:
+    """The list page's two reads publish the order and paging they promise."""
+
+    def test_the_open_read_names_its_manual_order_and_says_it_is_unpaged(
+        self,
+    ) -> None:
+        description = _description(list_task_list_tasks)
+
+        assert "manual order" in description
+        assert "not paginated" in description
+
+    def test_the_completed_read_names_its_order_and_its_paging(self) -> None:
+        description = _description(list_completed_task_list_tasks)
+
+        assert "most recently closed first" in description
+        assert "cancelled" in description
+        assert "page" in description
+
+    @pytest.mark.parametrize(
+        "endpoint", [list_task_list_tasks, list_completed_task_list_tasks]
+    )
+    def test_each_documents_its_indistinguishable_404(self, endpoint: object) -> None:
+        description = _description(endpoint)
+
+        assert "404" in description
+        assert "not yours" in description

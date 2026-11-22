@@ -1,12 +1,13 @@
-"""Task list MCP tools: create, update, read, list, move, archive, unarchive and
-read a list's history.
+"""Task list MCP tools: create, update, read, list, move, archive, unarchive,
+read a list's history, and read a list's tasks.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
 no domain error. The writes (``create_task_list``, ``update_task_list``,
 ``move_task_list``, ``archive_task_list`` and ``unarchive_task_list``) call the
 ``@transactional`` ``TaskListService``, which
 commits each list and its event together (a move publishes none); the reads go
-through ``TaskListReadService``, which can change nothing, and the history
+through ``TaskListReadService`` and ``TaskReadService``, which can change
+nothing, and the history
 through ``TaskListHistoryService``, which authorises the read itself. A refused name
 comes back as a "Task error" naming the field, and another user's list as "Not
 found", exactly as a missing one. A write to an archived list comes back as a
@@ -34,13 +35,18 @@ from app.core.history.services.task_list_history_service import (
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
+from app.core.tasks.services.task_read_service import TaskReadService
+from app.mcp.domains.tasks.read_models import task_read_mcp
 from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP
 from app.mcp.domains.tasks.task_list_schemas import (
+    CompletedTaskListTasksMCP,
+    OpenTaskListTasksMCP,
     TaskListHistoryResponse,
     TaskListMCP,
     TaskListsMCP,
     TaskListSummariesMCP,
     TaskListSummaryMCP,
+    TaskListTasksMCP,
 )
 from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
 from app.mcp.shared.arguments import JsonBool, JsonIntOnly
@@ -51,6 +57,7 @@ from app.mcp.shared.dependencies import (
     get_task_list_history_service,
     get_task_list_read_service,
     get_task_list_service,
+    get_task_read_service,
     mcp_depends,
 )
 from app.shared.patch import UNSET, Unset
@@ -414,4 +421,98 @@ async def get_task_list_history(
         page=page,
         limit=limit,
         entries=[TaskHistoryEntryMCP.from_entry(entry) for entry in entries],
+    )
+
+
+@tool(annotations=READ_ONLY)
+@mcp_unified_error_handler("list_task_list_tasks", "task list")
+async def list_task_list_tasks(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to read."),
+        JsonIntOnly,
+    ],
+    include_completed: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Also return a page of the list's done and cancelled tasks. "
+                "Pass false when only the outstanding work matters."
+            )
+        ),
+    ] = True,
+    page: Annotated[
+        int,
+        Field(description="Page number (1-based)", ge=1, le=INT32_MAX),
+        JsonIntOnly,
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(description="Tasks per page", ge=1, le=100),
+        JsonIntOnly,
+    ] = 20,
+    page_open_tasks: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Page the open tasks with page and limit too. By default every "
+                "open task is returned."
+            )
+        ),
+    ] = False,
+    task_read_service: TaskReadService = mcp_depends(get_task_read_service),
+) -> TaskListTasksMCP:
+    """
+    Read one of the user's task lists with its tasks.
+
+    ``open_tasks`` holds the tasks that are not done, in the user's
+    manual order — the order of the list. ``completed`` holds the done and
+    cancelled tasks, most recently closed first, one page at a time; a
+    cancelled one says so in its ``status``. Each task carries the fields
+    ``get_task`` answers with: its due date or due journal, flag, icon,
+    contacts and ``overdue``. A task on a list is never lapsed; past its date
+    it is overdue.
+
+    **Paging.** ``page`` and ``limit`` (1–100, default 20) always page the
+    completed tasks. Every open task comes back unless ``page_open_tasks`` is
+    true, in which case the same ``page`` and ``limit`` page the open tasks as
+    well. Each section reports its own ``total_count``; to read everything,
+    step ``page`` until both totals are covered — a section that runs out
+    first comes back empty and still reports its total. Pass
+    ``include_completed`` false to skip the completed tasks altogether
+    (``completed`` is then null).
+
+    The two sections are read one after the other, so a task closed in
+    between can appear in both.
+
+    An archived list is readable; it and its tasks are read-only until it is
+    unarchived. A list that does not exist and one belonging to someone else
+    are both reported as not found.
+    """
+    user_id = await get_current_user_id()
+    result = await task_read_service.read_list_with_tasks(
+        user_id,
+        task_list_id,
+        page=page,
+        limit=limit,
+        page_open_tasks=page_open_tasks,
+        include_completed=include_completed,
+    )
+    return TaskListTasksMCP(
+        task_list=_task_list_fields(result.task_list),
+        page=page,
+        limit=limit,
+        open_tasks=OpenTaskListTasksMCP(
+            total_count=result.open_tasks.total,
+            paged=page_open_tasks,
+            tasks=[task_read_mcp(model) for model in result.open_tasks.models],
+        ),
+        completed=(
+            None
+            if result.completed is None
+            else CompletedTaskListTasksMCP(
+                total_count=result.completed.total,
+                tasks=[task_read_mcp(model) for model in result.completed.models],
+            )
+        ),
     )

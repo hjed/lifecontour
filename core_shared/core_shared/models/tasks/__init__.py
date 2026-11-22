@@ -53,7 +53,7 @@ from .task_list import (
     TaskListSummary,
 )
 from .task_list_order import reorder_task_lists
-from .task_page import TaskPage
+from .task_page import TaskListTasks, TaskPage, TaskReadModelPage
 from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
@@ -95,10 +95,12 @@ __all__ = [
     "TaskListArchivedError",
     "TaskListChangedConcurrentlyError",
     "TaskListNotFoundError",
+    "TaskListTasks",
     "TaskListValidationError",
     "TaskNotFoundError",
     "TaskPage",
     "TaskReadModel",
+    "TaskReadModelPage",
     "TaskReopenNotAcknowledgedError",
     "TaskStatus",
     "TaskStatusTransitionError",

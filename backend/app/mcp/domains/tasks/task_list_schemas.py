@@ -8,7 +8,7 @@ the schema an agent reads rather than only in prose.
 from core_shared.models.tasks import TaskIcon
 from pydantic import BaseModel, Field
 
-from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP
+from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP, TaskReadMCP
 
 
 class TaskListMCP(BaseModel):
@@ -58,3 +58,37 @@ class TaskListSummariesMCP(BaseModel):
     """The user's task lists for one archived filter, each with its count."""
 
     lists: list[TaskListSummaryMCP]
+
+
+class OpenTaskListTasksMCP(BaseModel):
+    """A list's open tasks, in the user's manual order."""
+
+    total_count: int = Field(description="How many open tasks the list holds")
+    paged: bool = Field(
+        description=(
+            "Whether this section was cut to page and limit (page_open_tasks). "
+            "When false every open task is here."
+        )
+    )
+    tasks: list[TaskReadMCP]
+
+
+class CompletedTaskListTasksMCP(BaseModel):
+    """One page of a list's done and cancelled tasks, most recently closed first."""
+
+    total_count: int = Field(
+        description="How many done and cancelled tasks the list holds, across pages"
+    )
+    tasks: list[TaskReadMCP]
+
+
+class TaskListTasksMCP(BaseModel):
+    """A task list with its tasks."""
+
+    task_list: TaskListMCP
+    page: int = Field(description="The 1-based page every paged section is on")
+    limit: int = Field(description="The page size every paged section uses")
+    open_tasks: OpenTaskListTasksMCP
+    completed: CompletedTaskListTasksMCP | None = Field(
+        description="The completed page, or null when include_completed was false"
+    )

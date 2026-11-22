@@ -1301,6 +1301,8 @@ is `task-lists`.
 | `POST /api/task-lists/{list_id}/archive` | Archive a list: read-only until unarchived. No body. Its tasks and its `position` are untouched | 200 with the list (`archived: true`, `archived_at` set); already archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
 | `POST /api/task-lists/{list_id}/unarchive` | Unarchive a list: back among the active lists in its old place, writable again. No body | 200 with the list (`archived: false`, `archived_at: null`); not archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
 | `GET /api/task-lists/{list_id}/history` | The list's field-level change history, most recent first, paginated (`?page=`, `?limit=` 1–100, default 20). The shared `HistoryListResponse` shape with type `task_list_history`; field names `__created__`, `name`, `icon`, `archived_at` (null → instant archives, instant → null unarchives) | 200 (a list whose events have not been projected yet is `data: []`, not 404; an archived list is readable); 400 an out-of-range id, `page` or `limit`; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
+| `GET /api/task-lists/{list_id}/tasks` | The list's **open** tasks in your manual order (`position`, then id), each in the task read shape `GET /api/tasks/{task_id}` answers (list, due date or due journal, flag, icon, contacts, `overdue`). Unpaginated; `meta.total` is the count | 200 (an empty list is `data: []`, `meta.total: 0`; an archived list is readable, each row's `task_list.archived` true); 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
+| `GET /api/task-lists/{list_id}/tasks/completed` | The list's **done and cancelled** tasks, most recently closed first (`closed_at`, then the newest id), paginated (`?page=`, `?limit=` 1–100, default 20) with the shared pagination `meta` and `links`. Rows are the task read shape; `status` marks a cancelled one | 200 (a page past the end is `data: []` and still carries `total_count`; an archived list is readable); 400 an out-of-range id, `page` or `limit`; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 
 Conventions this surface pins down:
 
@@ -1369,11 +1371,22 @@ Conventions this surface pins down:
   history.
 - The matching MCP tools are `create_task_list`, `update_task_list`,
   `get_task_list`, `list_task_lists`, `move_task_list`, `archive_task_list`,
-  `unarchive_task_list` and `get_task_list_history`, documented in their
+  `unarchive_task_list`, `get_task_list_history` and `list_task_list_tasks`, documented in their
   docstrings and parameter schemas. `update_task_list` clears the icon with
   `clear_icon=true`, because a tool cannot tell a null argument from an omitted
   one. Their integer arguments (`task_list_id`, `index`) take only JSON
   integers, as REST does: `true` or `"1"` is refused rather than read as `1`.
+- **A list's tasks are two reads on REST, one on MCP.** The open tasks are the
+  list's working set and come back whole; the done and cancelled ones grow
+  without bound and are paged. The list page loads them at different times —
+  its Completed group is collapsed and fetched when opened — so they are two
+  routes, rather than one route whose pagination changes with a filter. Both
+  resolve the list first, so another user's list is a 404 rather than an empty
+  answer (the repository reads an unowned list as empty). `list_task_list_tasks`
+  answers the list, its open tasks and, unless `include_completed` is false, a
+  completed page in one call: `page` and `limit` always page the completed
+  tasks, and page the open tasks too when `page_open_tasks` is true. Each
+  section reports its own `total_count`.
 
 ## Contact Important Date Endpoints
 

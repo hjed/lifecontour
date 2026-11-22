@@ -1723,15 +1723,139 @@ tests 3 repeats each); pre-commit.
 - [ ] Future-dated journal; never together with a due date.
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 21: Read a list's tasks
+#### Phase 21: Read a list's tasks ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 19.
 **Estimated diff:** ~110 production → **~1,000 tracked** · one capability on REST and MCP together
+· **Actual:** ~630 production → **~2,330 tracked** (2,198 insertions, 134 deletions excluding this
+document: about 630 net production — the read service's three list reads and their helpers 260, the
+REST schemas, renderers and two routes 165, the MCP tool and its schemas 140, `TaskListTasks` /
+`TaskReadModelPage` 40, and the MCP task renderers moved out of `tools.py` into `read_models.py`
+(about 105 lines moved, not new); about 1,430 tests; 26 architecture docs). Production ran ×5.7
+on the estimate: the estimate priced one read, and the phase shipped two REST reads, an MCP tool
+with three paging options (user decision), the list-ref seeding that keeps the read's statement
+count flat, and the docstrings both surfaces publish. Tests ran ×2.3 production, inside the
+capability band.
 
 **Acceptance Criteria:**
 
-- [ ] Open in order; closed paged.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Open in order; closed paged.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a list's tasks can be read on REST and MCP, which together with Phases 3 and 15 completes the
+sub-iteration criterion "reading one list returns its open tasks in manual order and its closed
+tasks most-recently-closed first, paged".
+- `TaskReadService` (`app/core/tasks/services/task_read_service.py`), read-only, no transaction:
+  - `read_models_on_list(user_id, list_id, *, limit=None, offset=0)`: the open tasks in
+    `(position, id)` order, every one by default, or sliced **before** assembly when given a
+    `limit`.
+  - `read_closed_models_on_list(…, *, limit, offset)`: one page of done and cancelled tasks, most
+    recently closed first.
+  - `read_list_with_tasks(…, *, page, limit, page_open_tasks, include_completed)`: both in one
+    answer, for the MCP tool.
+  - Each **resolves the list first** (`find_by_id`), so an unknown or another user's list is
+    `TaskListNotFoundError` rather than the empty list the repository would read, and reads the
+    timezone once.
+  - The resolved list seeds `_assemble`'s list refs (`known_lists`), so the read makes no
+    second list statement. The journal and single-task reads still batch through `find_by_ids`.
+- `core_shared.models.tasks`: `TaskReadModelPage(models, total)` and
+  `TaskListTasks(task_list, open_tasks, completed)`, both frozen, beside `TaskPage`.
+- **REST:**
+  - `GET /api/task-lists/{list_id}/tasks`: the open tasks, unpaginated, `meta.total`.
+  - `GET /api/task-lists/{list_id}/tasks/completed?page=&limit=`: the shared pagination `meta`
+    and `links`; `page`/`limit` reuse `HistoryPageQuery`/`HistoryLimitQuery`.
+  - Rows are the `TaskReadResource` every task read answers.
+  - Answers: 400 for an out-of-range id, page or limit; 404 `TASK_LIST_NOT_FOUND`. An archived
+    list is readable.
+- **MCP:** `list_task_list_tasks(task_list_id, include_completed=true, page=1, limit=20,
+  page_open_tasks=false)` answers
+  `{task_list, page, limit, open_tasks: {total_count, paged, tasks}, completed: {total_count, tasks} | null}`.
+  - `page`/`limit` always page the completed tasks, and the open ones too when
+    `page_open_tasks` is set.
+  - `completed` is null, and nothing is read for it, when `include_completed` is false.
+  - Integers are `JsonIntOnly` and booleans `JsonBool`.
+  - The server's *Task lists* guidance names the tool.
+  - The task renderers (`task_mcp_fields`, `task_read_mcp`) moved to
+    `app/mcp/domains/tasks/read_models.py`, because `tools.py` imports `task_list_tools.py`.
+- `api-design.md` (*Task List Endpoints*: two rows, the split and the MCP options) and
+  `domain-architecture.md` (*A list's tasks*) updated.
+
+**Tests:**
+- **Unit:**
+  - `tests/unit/tasks/test_task_read_service_task_list.py` (22): the list resolved before any
+    task read on all three reads; repository order; batching at 2 and 6 tasks; no `find_by_ids`;
+    timezone read once; the open slice reaching only its page's links, with its total, past-the-end
+    and argument refusals; closed pass-through and past-the-end; the combined read's single list
+    and timezone read, its shared page, `page_open_tasks` and `include_completed=false` with no
+    closed read; the page type frozen.
+  - `test_task_read_service_list.py`: a journal's list tasks still read their lists in one batch.
+  - `tests/unit/api/test_task_list_tasks_serialisation.py`: the open meta has no pagination keys;
+    completed meta and links on the first, last and past-the-end pages.
+  - `test_task_list_tools_schema.py`: bounds and defaults published, read-only, output shape,
+    docstring.
+  - `test_server.py`: the guidance names the tool.
+  - `test_task_endpoint_docs.py`: order, paging and the indistinguishable 404 on both routes.
+- **Integration:**
+  - `tests/integration/api/test_task_list_tasks_endpoints.py`:
+    - manual order with a position tie, done and cancelled both absent from open;
+    - empty list; the full read shape (list ref, due date, flag, icon, contacts, due journal,
+      overdue); archived list;
+    - completed order with cancelled marked, two pages with meta and links, past the end, an
+      empty completed page's meta and links;
+    - 400s for id, page and limit; 404;
+    - another user's real list, with open and closed tasks, answering the unknown-list 404 with
+      nothing leaked.
+  - The two routes in `CROSS_USER_REQUESTS` (`test_task_list_ownership.py`) and in the 401 table.
+  - `test_task_read_model_integration.py::TestAListsOwnPageCostsTheSameAtAnySize`: the same
+    statement count at 2 and 6 tasks, open and closed, with exactly one list-only statement.
+    Mutation-checked: it fails with the seeding removed.
+  - `tests/integration/mcp/test_task_list_tools_mcp.py::TestListTaskListTasksTool` /
+    `TestListTaskListTasksRefusals`:
+    - defaults; `include_completed=false`; completed paging with open whole; `page_open_tasks`
+      pages; a section running out first; empty and archived lists;
+    - "Not found" for unknown and another user's list (identical, nothing leaked);
+    - coerced integers and booleans refused;
+    - each out-of-range argument refused naming its bound.
+- No E2E: no frontend file changed (ITER21-002 Phases 4 and 11 render this).
+- **Gates run locally:**
+  - ruff format/check and mypy (backend, core_shared);
+  - backend unit (5,919 passed under `-m unit`); core_shared (868);
+  - the full backend integration suite in ten foreground chunks (all passed);
+  - pre-commit on the changed files.
+
+**Decisions (recorded during implementation):**
+- **MCP shape** (user decision in plan review): one tool returning the list with its tasks, with
+  an option to leave the completed tasks out and one page size that may also page the open tasks.
+  `page`/`limit` follow the existing paged MCP reads (`get_task_history`,
+  `get_task_list_history`).
+- **Two REST routes, not a `?status=` filter**: open is the working set and unpaged, completed
+  grows and is paged, and the list page fetches Completed only when it is opened.
+- **Open paging slices in the service**: open tasks are working-list sized, so the Phase 14 port
+  stays unpaged and its tests unchanged; the slice happens before assembly.
+- **The MCP tool reads through one service call** (from the implementation review), so the list
+  and the timezone are read once and the paging arithmetic is not in the tool.
+- **Not added to `READ_ONLY_TOOL_NAMES`**: that list is the curated toolset the AI summary
+  generators hand Gemini, not a registry of read-only tools, and holds no task tools; adding one
+  would widen what the summaries see.
+- **`meta.total` on the open route**, as the journal and upcoming listings name an unpaged count;
+  the paged route uses the shared `total_count`.
+- **The two MCP sections are not read in one snapshot**: reads open no transaction, so a task
+  closed between them can appear in both. The tool's docstring says so.
+- Frontend `TaskAttributes` (the Phase 19 note) deferred to ITER21-002 Phase 1 (user decision).
+
+**Notes for later phases:**
+- *Phase 25:* the open order here is `(position, id)`, the order a move answers in. Reordering
+  changes nothing about these reads.
+- *Phase 15's note on reading one list:* superseded. The single-list REST read stays the list
+  alone; the open-task count of one list is `meta.total` on its open route and
+  `open_tasks.total_count` on the MCP tool.
+- *ITER21-002 Phase 1:* `frontend/src/types/tasks.ts`'s `TaskAttributes` still lacks
+  `task_list_id`, `due_date`, `flagged` and `icon` (and `TaskReadAttributes` lacks `task_list` and
+  `overdue`); type both routes' responses there. The completed route's `links.next` is absent on
+  the last page.
+- *ITER21-002 Phases 4 and 11:* the list page reads `GET …/tasks` for its body and
+  `GET …/tasks/completed` when the Completed group opens; a cancelled row is `status: cancelled`.
 
 #### Phase 22: Change a list task's due date
 

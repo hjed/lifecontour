@@ -92,6 +92,12 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
         LIST_ROUTE + "/tasks",
         body={"data": {"type": "tasks", "attributes": {"text": "Hijacked"}}},
     ),
+    # The reads of a list's tasks. The repository answers an unowned list as an
+    # empty one, so without the service's list check these would be 200s;
+    # ``test_task_list_tasks_endpoints.py`` also seeds the foreign list's tasks
+    # and asserts none of them leaks.
+    CrossUserRequest("GET", LIST_ROUTE + "/tasks"),
+    CrossUserRequest("GET", LIST_ROUTE + "/tasks/completed"),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.
