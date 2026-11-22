@@ -337,7 +337,13 @@ export function useUpdateAppearance() {
       storeSavedSettings(queryClient, response, ['theme_palette']);
     },
     onError: (error: Error, _palette, context) => {
-      applyPalette(context?.previous ?? DEFAULT_PALETTE);
+      // Logout clears every query and resets the palette; a save that fails
+      // after it must not paint the signed-out page in the old account's.
+      const signedOut =
+        queryClient.getQueryData(userSettingsKeys.detail()) === undefined;
+      if (!signedOut) {
+        applyPalette(context?.previous ?? DEFAULT_PALETTE);
+      }
       toast.error(error.message);
     },
   });
