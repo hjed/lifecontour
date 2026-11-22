@@ -956,3 +956,65 @@ class TestTheListCostsOneStatement:
             await read_service.read_model(USER_ID, task_id)
 
         assert not any("task_lists" in statement for statement in statements)
+
+
+class TestAListsOwnPageCostsTheSameAtAnySize:
+    """Reading a list's tasks: a constant number of statements, whatever the
+    task count, and the list read once — to authorise — never again for the
+    tasks' list refs."""
+
+    @staticmethod
+    async def _statements_for(
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        *,
+        open_tasks: int,
+        closed: bool,
+    ) -> list[str]:
+        task_list = await seed_task_list(async_connection, "Packing")
+        assert task_list.id is not None
+        contact_id = await create_contact(async_connection)
+        status = TaskStatus.DONE if closed else TaskStatus.NOT_DONE
+        for position in range(open_tasks):
+            task_id = await create_list_task(
+                async_connection,
+                task_list_id=task_list.id,
+                position=position,
+                status=status,
+            )
+            await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+
+        with recorded_statements(async_connection) as statements:
+            if closed:
+                page = await read_service.read_closed_models_on_list(
+                    USER_ID, task_list.id, limit=20, offset=0
+                )
+            else:
+                page = await read_service.read_models_on_list(USER_ID, task_list.id)
+
+        assert len(page.models) == open_tasks
+        # Statements reading lists alone: the task reads also name
+        # ``task_lists``, in the subquery that scopes the list to its owner.
+        list_reads = [
+            statement
+            for statement in statements
+            if "FROM task_lists" in statement and "FROM tasks" not in statement
+        ]
+        assert len(list_reads) == 1
+        return statements
+
+    @pytest.mark.parametrize("closed", [False, True])
+    async def test_two_tasks_and_six_cost_the_same_statements(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        closed: bool,
+    ) -> None:
+        two = await self._statements_for(
+            read_service, async_connection, open_tasks=2, closed=closed
+        )
+        six = await self._statements_for(
+            read_service, async_connection, open_tasks=6, closed=closed
+        )
+
+        assert len(two) == len(six)

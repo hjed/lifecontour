@@ -222,3 +222,82 @@ class TestTheResultShapeIsPublished:
             "source",
             "created_at",
         }
+
+
+class TestTheListTasksRead:
+    """``list_task_list_tasks``: a list with its tasks, with the paging an
+    agent controls published in the schema it reads."""
+
+    async def test_takes_a_list_id_and_the_paging_options(self) -> None:
+        schema = (await _tools())["list_task_list_tasks"].input_schema
+        properties = schema["properties"]
+
+        assert set(properties) == {
+            "task_list_id",
+            "include_completed",
+            "page",
+            "limit",
+            "page_open_tasks",
+        }
+        assert schema["required"] == ["task_list_id"]
+        assert (
+            properties["task_list_id"]["minimum"],
+            properties["task_list_id"]["maximum"],
+        ) == (1, INT32_MAX)
+        assert (properties["page"]["minimum"], properties["page"]["maximum"]) == (
+            1,
+            INT32_MAX,
+        )
+        assert (properties["limit"]["minimum"], properties["limit"]["maximum"]) == (
+            1,
+            100,
+        )
+        assert properties["page"]["default"] == 1
+        assert properties["limit"]["default"] == 20
+        assert properties["include_completed"]["type"] == "boolean"
+        assert properties["include_completed"]["default"] is True
+        assert properties["page_open_tasks"]["type"] == "boolean"
+        assert properties["page_open_tasks"]["default"] is False
+
+    async def test_is_read_only(self) -> None:
+        annotations = (await _tools())["list_task_list_tasks"].annotations
+
+        assert annotations is not None
+        assert annotations.read_only_hint is True
+
+    async def test_answers_with_the_list_and_both_sections(self) -> None:
+        schema = (await _tools())["list_task_list_tasks"].output_schema
+
+        assert schema is not None, "list_task_list_tasks publishes no outputSchema"
+        properties = schema["properties"]
+        assert set(properties) == {
+            "task_list",
+            "page",
+            "limit",
+            "open_tasks",
+            "completed",
+        }
+        assert set(_item(schema, properties["task_list"])["properties"]) == (
+            _LIST_FIELDS
+        )
+        open_tasks = _item(schema, properties["open_tasks"])
+        assert set(open_tasks["properties"]) == {"total_count", "paged", "tasks"}
+        (completed_ref,) = [
+            option
+            for option in properties["completed"]["anyOf"]
+            if option.get("type") != "null"
+        ]
+        completed = _item(schema, completed_ref)
+        assert set(completed["properties"]) == {"total_count", "tasks"}
+        task = _item(schema, open_tasks["properties"]["tasks"]["items"])
+        assert {"task_list", "due_date", "overdue", "flagged", "icon"} <= set(
+            task["properties"]
+        )
+
+    async def test_describes_the_order_the_paging_and_the_options(self) -> None:
+        description = (await _tools())["list_task_list_tasks"].description or ""
+
+        assert "manual order" in description
+        assert "most recently closed first" in description
+        for option in ("include_completed", "page_open_tasks", "limit", "page"):
+            assert f"``{option}``" in description, option

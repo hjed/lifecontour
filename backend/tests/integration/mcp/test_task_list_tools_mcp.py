@@ -2,7 +2,7 @@
 
 Covers ``create_task_list``, ``get_task_list``, ``list_task_lists``,
 ``update_task_list``, ``move_task_list``, ``archive_task_list``,
-``unarchive_task_list`` and ``get_task_list_history``.
+``unarchive_task_list``, ``get_task_list_history`` and ``list_task_list_tasks``.
 
 The rules are proven against the services in
 ``tests/integration/tasks/test_task_list_service_integration.py``. These tests
@@ -11,7 +11,7 @@ agent gets back (flagged ``isError``), the provenance a tool records, and that
 another user's list is answered exactly as a missing one.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -19,6 +19,7 @@ from core_shared.models.tasks import MAX_TASK_LIST_NAME_LENGTH, TaskIcon, TaskSt
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.api.common.identifiers import INT32_MAX
 from tests.integration.mcp.http_helpers import (
     extract_mcp_tool_error,
     extract_typed_tool_result,
@@ -29,6 +30,7 @@ from tests.integration.tasks.task_seeding import (
     LIST_LIFE,
     OTHER_USER_ID,
     USER_ID,
+    backdate_closed_at,
     count,
     create_list_task,
     delete_task_list_row,
@@ -848,3 +850,321 @@ class TestListTaskListsCarriesOpenTaskCounts:
         assert [
             (each["name"], each["open_task_count"]) for each in result["lists"]
         ] == [("Mine", 0)]
+
+
+CLOSED_BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+
+async def _closed_task(
+    conn: AsyncConnection,
+    task_list_id: int,
+    status: TaskStatus,
+    *,
+    minutes: int,
+    user_id: str = USER_ID,
+) -> int:
+    """A closed task on the list, closed ``minutes`` after a fixed instant."""
+    task_id = await create_list_task(
+        conn, task_list_id=task_list_id, status=status, user_id=user_id
+    )
+    await backdate_closed_at(conn, task_id, CLOSED_BASE + timedelta(minutes=minutes))
+    return task_id
+
+
+def _task_ids(section: dict[str, Any]) -> list[int]:
+    return [task["id"] for task in section["tasks"]]
+
+
+class TestListTaskListTasksTool:
+    """A list with its tasks, as an agent reads it: the open ones in the
+    user's order, and the completed ones most recently closed first, paged."""
+
+    async def test_by_default_answers_every_open_task_and_the_first_completed_page(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Packing")
+        assert task_list.id is not None
+        second = await create_list_task(
+            clean_database, task_list_id=task_list.id, position=2
+        )
+        first = await create_list_task(
+            clean_database, task_list_id=task_list.id, position=1
+        )
+        done = await _closed_task(
+            clean_database, task_list.id, TaskStatus.DONE, minutes=1
+        )
+        cancelled = await _closed_task(
+            clean_database, task_list.id, TaskStatus.CANCELLED, minutes=2
+        )
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client, "list_task_list_tasks", task_list_id=task_list.id
+            )
+
+        assert result["task_list"]["id"] == task_list.id
+        assert result["task_list"]["name"] == "Packing"
+        assert (result["page"], result["limit"]) == (1, 20)
+        assert result["open_tasks"]["total_count"] == 2
+        assert result["open_tasks"]["paged"] is False
+        assert _task_ids(result["open_tasks"]) == [first, second]
+        assert result["completed"]["total_count"] == 2
+        assert _task_ids(result["completed"]) == [cancelled, done]
+        assert [task["status"] for task in result["completed"]["tasks"]] == [
+            "cancelled",
+            "done",
+        ]
+        assert result["open_tasks"]["tasks"][0]["task_list"]["name"] == "Packing"
+
+    async def test_without_completed_tasks_answers_null_for_them(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Packing")
+        assert task_list.id is not None
+        open_task = await create_list_task(clean_database, task_list_id=task_list.id)
+        await _closed_task(clean_database, task_list.id, TaskStatus.DONE, minutes=1)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "list_task_list_tasks",
+                task_list_id=task_list.id,
+                include_completed=False,
+            )
+
+        assert result["completed"] is None
+        assert _task_ids(result["open_tasks"]) == [open_task]
+
+    async def test_the_page_and_limit_page_the_completed_tasks_only_by_default(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Packing")
+        assert task_list.id is not None
+        opened = [
+            await create_list_task(
+                clean_database, task_list_id=task_list.id, position=position
+            )
+            for position in range(3)
+        ]
+        closed = [
+            await _closed_task(
+                clean_database, task_list.id, TaskStatus.DONE, minutes=minute
+            )
+            for minute in range(3)
+        ]
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "list_task_list_tasks",
+                task_list_id=task_list.id,
+                page=2,
+                limit=2,
+            )
+
+        assert _task_ids(result["completed"]) == [closed[0]]
+        assert result["completed"]["total_count"] == 3
+        assert _task_ids(result["open_tasks"]) == opened
+        assert result["open_tasks"]["paged"] is False
+
+    async def test_page_open_tasks_pages_the_open_tasks_too(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Packing")
+        assert task_list.id is not None
+        opened = [
+            await create_list_task(
+                clean_database, task_list_id=task_list.id, position=position
+            )
+            for position in range(3)
+        ]
+
+        async with authenticated_lifespan_client() as client:
+            first = await _call(
+                client,
+                "list_task_list_tasks",
+                task_list_id=task_list.id,
+                limit=2,
+                page_open_tasks=True,
+            )
+            second = await _call(
+                client,
+                "list_task_list_tasks",
+                task_list_id=task_list.id,
+                limit=2,
+                page=2,
+                page_open_tasks=True,
+            )
+
+        assert _task_ids(first["open_tasks"]) == opened[:2]
+        assert _task_ids(second["open_tasks"]) == opened[2:]
+        for result in (first, second):
+            assert result["open_tasks"]["total_count"] == 3
+            assert result["open_tasks"]["paged"] is True
+
+    async def test_a_section_that_runs_out_first_is_empty_and_keeps_its_total(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """Page 2 of size 1: past the one open task, inside the two closed."""
+        task_list = await seed_task_list(clean_database, "Packing")
+        assert task_list.id is not None
+        await create_list_task(clean_database, task_list_id=task_list.id)
+        older = await _closed_task(
+            clean_database, task_list.id, TaskStatus.DONE, minutes=1
+        )
+        await _closed_task(clean_database, task_list.id, TaskStatus.DONE, minutes=2)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "list_task_list_tasks",
+                task_list_id=task_list.id,
+                page=2,
+                limit=1,
+                page_open_tasks=True,
+            )
+
+        assert result["open_tasks"] == {"total_count": 1, "paged": True, "tasks": []}
+        assert _task_ids(result["completed"]) == [older]
+        assert result["completed"]["total_count"] == 2
+
+    async def test_an_empty_list_answers_empty_sections(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Empty")
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client, "list_task_list_tasks", task_list_id=task_list.id
+            )
+
+        assert result["open_tasks"] == {"total_count": 0, "paged": False, "tasks": []}
+        assert result["completed"] == {"total_count": 0, "tasks": []}
+
+    async def test_an_archived_list_is_readable(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        task_list = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(clean_database, task_list_id=task_list.id)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client, "list_task_list_tasks", task_list_id=task_list.id
+            )
+
+        assert result["task_list"]["archived"] is True
+        assert _task_ids(result["open_tasks"]) == [task_id]
+        assert result["open_tasks"]["tasks"][0]["task_list"]["archived"] is True
+
+
+class TestListTaskListTasksRefusals:
+    async def test_an_unknown_list_is_not_found(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "list_task_list_tasks", task_list_id=999_999
+            )
+
+        assert refused["error"] == "Not found"
+
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        """A real list of theirs, with open and closed tasks, leaks nothing."""
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert foreign.id is not None
+        await create_list_task(
+            clean_database,
+            task_list_id=foreign.id,
+            user_id=OTHER_USER_ID,
+            text="their secret errand",
+        )
+        await _closed_task(
+            clean_database,
+            foreign.id,
+            TaskStatus.DONE,
+            minutes=1,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "list_task_list_tasks", task_list_id=foreign.id
+            )
+            missing = await _refused(
+                client, "list_task_list_tasks", task_list_id=999_999
+            )
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert "secret errand" not in str(refused)
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            ({"task_list_id": "1"}, "must be a JSON integer"),
+            ({"limit": "2"}, "must be a JSON integer"),
+            ({"page": True}, "must be a JSON integer"),
+            ({"include_completed": "false"}, "must be a JSON boolean"),
+            ({"page_open_tasks": 1}, "must be a JSON boolean"),
+        ],
+        ids=repr,
+    )
+    async def test_a_coerced_argument_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+        message: str,
+    ) -> None:
+        task_list = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "list_task_list_tasks",
+                {"task_list_id": task_list.id, **arguments},
+            )
+
+        assert '"isError":true' in response.text
+        assert message in response.text
+
+    @pytest.mark.parametrize(
+        ("arguments", "bound"),
+        [
+            ({"limit": 0}, "greater than or equal to 1"),
+            ({"limit": 101}, "less than or equal to 100"),
+            ({"page": 0}, "greater than or equal to 1"),
+            ({"page": INT32_MAX + 1}, f"less than or equal to {INT32_MAX}"),
+            ({"task_list_id": 0}, "greater than or equal to 1"),
+        ],
+        ids=repr,
+    )
+    async def test_an_out_of_range_argument_is_refused_naming_its_bound(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+        bound: str,
+    ) -> None:
+        """Refused by the schema bound itself, not by anything downstream."""
+        task_list = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "list_task_list_tasks",
+                {"task_list_id": task_list.id, **arguments},
+            )
+
+        assert '"isError":true' in response.text
+        (argument,) = arguments
+        assert argument in response.text
+        assert bound in response.text

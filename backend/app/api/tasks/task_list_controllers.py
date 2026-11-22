@@ -1,5 +1,5 @@
-"""Task list API endpoints: create, read, list, update, move, archive, unarchive
-and the list's history.
+"""Task list API endpoints: create, read, list, update, move, archive, unarchive,
+the list's history, and reading the tasks on a list.
 
 Thin by design, like the task controller: every rule lives in
 ``TaskListService`` (the ``@transactional`` writes and their events; the move
@@ -32,6 +32,12 @@ from app.api.history.pages import (
     history_offset,
     history_page_response,
 )
+from app.api.tasks.schemas import (
+    CompletedListTasksResponse,
+    ListTasksResponse,
+    to_completed_list_tasks_response,
+    to_list_tasks_response,
+)
 from app.api.tasks.task_list_schemas import (
     TaskListCollectionResponse,
     TaskListCreateRequest,
@@ -47,6 +53,7 @@ from app.core.history.services.task_list_history_service import (
 )
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
+from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(tags=["tasks"])
@@ -193,6 +200,77 @@ async def get_task_list_history(
         self_url=f"{get_request_base_url(request)}/api/task-lists/{list_id}/history",
         page=page,
         limit=limit,
+    )
+
+
+@router.get("/task-lists/{list_id}/tasks")
+@inject
+async def list_task_list_tasks(
+    list_id: DatabaseIdPath,
+    request: Request,
+    task_read_service: FromDishka[TaskReadService],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> ListTasksResponse:
+    """List the open tasks on one of your lists, in your manual order.
+
+    Every task that is not done is returned, and the collection is
+    not paginated: a list's open tasks are its working set. Done and cancelled
+    tasks are read separately, a page at a time, from
+    `GET /api/task-lists/{list_id}/tasks/completed`. Each row is the task read
+    shape `GET /api/tasks/{task_id}` answers — its list, due date or due
+    journal, flag, icon, contacts and `overdue`. A task on a list never lapses.
+
+    An archived list's tasks are readable; `task_list.archived` on each row
+    says they are read-only until the list is unarchived.
+
+    No transaction is opened on this path.
+
+    Raises:
+        400: An out-of-range id.
+        404: No such list, or it is not yours — indistinguishably, so a refusal
+             cannot be used to probe for other users' lists.
+    """
+    page = await task_read_service.read_models_on_list(user.id, list_id)
+    return to_list_tasks_response(page, get_request_base_url(request))
+
+
+@router.get("/task-lists/{list_id}/tasks/completed")
+@inject
+async def list_completed_task_list_tasks(
+    list_id: DatabaseIdPath,
+    request: Request,
+    task_read_service: FromDishka[TaskReadService],
+    user: FromDishka[SessionUser],  # Require authentication
+    page: HistoryPageQuery = 1,
+    limit: HistoryLimitQuery = 20,
+) -> CompletedListTasksResponse:
+    """List one page of the done and cancelled tasks on one of your lists.
+
+    The list page's Completed group: most recently closed first, by when each
+    task was done or cancelled — editing a closed task does not move it, and
+    reopening one removes it. A cancelled task is marked by its `status`.
+    Paginated with `page` and `limit` (1–100, default 20); `meta` carries the
+    total and `links` the neighbouring pages. A page past the end is an
+    ordinary empty answer and still reports the total.
+
+    An archived list's completed tasks are readable. No transaction is opened
+    on this path.
+
+    Raises:
+        400: An out-of-range id, a `limit` outside 1–100, or a `page` outside
+             the `INTEGER` range.
+        404: No such list, or it is not yours — indistinguishably.
+    """
+    result = await task_read_service.read_closed_models_on_list(
+        user.id, list_id, limit=limit, offset=history_offset(page, limit)
+    )
+    base_url = get_request_base_url(request)
+    return to_completed_list_tasks_response(
+        result,
+        self_url=f"{base_url}/api/task-lists/{list_id}/tasks/completed",
+        page=page,
+        limit=limit,
+        base_url=base_url,
     )
 
 

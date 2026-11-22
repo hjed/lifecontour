@@ -162,6 +162,8 @@ class TestAuthenticationRequirements:
             ),
             ("POST", "/api/task-lists/1/archive", None),
             ("POST", "/api/task-lists/1/unarchive", None),
+            ("GET", "/api/task-lists/1/tasks", None),
+            ("GET", "/api/task-lists/1/tasks/completed", None),
         ],
     )
     def test_task_list_endpoints_require_auth(self, client, method, path, body):

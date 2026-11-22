@@ -42,6 +42,7 @@ from core_shared.models.tasks import (
     TaskLinkRole,
     TaskListRef,
     TaskReadModel,
+    TaskReadModelPage,
     TaskStatus,
     UpcomingTasks,
 )
@@ -58,8 +59,11 @@ from app.api.common.identifiers import INT32_MAX, DatabaseId
 from app.api.common.schemas import (
     JsonApiCreateRequest,
     JsonApiLinks,
+    JsonApiMeta,
     JsonApiResponse,
     JsonApiUpdateRequest,
+    create_pagination_links,
+    create_pagination_meta,
 )
 from app.shared.calendar_date import IsoCalendarDate
 from app.shared.patch import UNSET, Unset
@@ -1087,4 +1091,86 @@ def to_journal_tasks_response(
                 ],
             )
         ),
+    )
+
+
+class ListTasksMeta(BaseModel):
+    """The open listing's metadata: how many open tasks the list holds.
+
+    Its own model rather than the shared ``JsonApiMeta``, whose fields are the
+    pagination ones: the open tasks are returned whole, so borrowing that model
+    would advertise page controls that do not exist.
+    """
+
+    total: int = Field(
+        ...,
+        description=(
+            "How many open tasks the list holds. Equal to the length of data: "
+            "every open task is returned."
+        ),
+    )
+
+
+class ListTasksResponse(BaseModel):
+    """Response model for a list's open tasks, in the user's manual order."""
+
+    data: list[TaskReadResource] = Field(
+        ..., description="The list's open tasks, in the user's manual order"
+    )
+    meta: ListTasksMeta = Field(..., description="How many there are")
+
+
+class CompletedListTasksResponse(BaseModel):
+    """Response model for one page of a list's done and cancelled tasks."""
+
+    data: list[TaskReadResource] = Field(
+        ...,
+        description=(
+            "One page of the list's done and cancelled tasks, most recently "
+            "closed first"
+        ),
+    )
+    meta: JsonApiMeta = Field(..., description="Pagination metadata")
+    links: JsonApiLinks = Field(..., description="Pagination links")
+
+
+def to_list_tasks_response(
+    page: TaskReadModelPage, base_url: str = ""
+) -> ListTasksResponse:
+    """Render a list's open tasks as their listing response.
+
+    Pure, like the other renderers: no request, no connection, no service.
+
+    Args:
+        page: Every open task on the list, already in manual order
+        base_url: Prefix for each row's ``self`` link
+    """
+    return ListTasksResponse(
+        data=[to_task_read_resource(model, base_url) for model in page.models],
+        meta=ListTasksMeta(total=page.total),
+    )
+
+
+def to_completed_list_tasks_response(
+    result: TaskReadModelPage,
+    *,
+    self_url: str,
+    page: int,
+    limit: int,
+    base_url: str = "",
+) -> CompletedListTasksResponse:
+    """Render one page of a list's closed tasks, with pagination meta and links.
+
+    Args:
+        result: The page's read models and the total across every page
+        self_url: The completed listing's absolute URL without a query; the
+            links append ``page`` and ``limit`` to it
+        page: The 1-based page this is
+        limit: The page size
+        base_url: Prefix for each row's ``self`` link
+    """
+    return CompletedListTasksResponse(
+        data=[to_task_read_resource(model, base_url) for model in result.models],
+        meta=create_pagination_meta(result.total, page, limit),
+        links=create_pagination_links(self_url, page, limit, result.total),
     )

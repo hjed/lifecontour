@@ -29,12 +29,8 @@ from core_shared.models.tasks import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
     MAX_UPCOMING_DAYS_AHEAD,
     JournalTaskGroups,
-    Task,
     TaskIcon,
-    TaskJournalRef,
     TaskLinkRole,
-    TaskListRef,
-    TaskReadModel,
     TaskStatus,
     TaskValidationError,
     UpcomingTasks,
@@ -53,18 +49,16 @@ from app.mcp.domains.tasks.placement import (
     OnList,
     resolve_create_placement,
 )
+from app.mcp.domains.tasks.read_models import task_mcp_fields, task_read_mcp
 from app.mcp.domains.tasks.schemas import (
     GroupedTaskMCP,
     JournalTasksResponse,
     TaskContactLinkResponse,
-    TaskContactMCP,
     TaskDeletedResponse,
     TaskGroupsMCP,
     TaskHistoryEntryMCP,
     TaskHistoryResponse,
     TaskJournalLinkResponse,
-    TaskJournalRefMCP,
-    TaskListRefMCP,
     TaskMCP,
     TaskReadMCP,
     UpcomingTasksResponse,
@@ -75,6 +69,7 @@ from app.mcp.domains.tasks.task_list_tools import (
     create_task_list,
     get_task_list,
     get_task_list_history,
+    list_task_list_tasks,
     list_task_lists,
     move_task_list,
     unarchive_task_list,
@@ -134,35 +129,6 @@ def _journal_link(
     """
     return TaskJournalLinkResponse(
         task_id=task_id, journal_id=journal_id, attached=attached, changed=changed
-    )
-
-
-def _task_fields(task: Task, intermediate_journal_ids: list[int]) -> TaskMCP:
-    """The answer every task-returning tool gives.
-
-    ``intermediate_journal_ids`` is passed in rather than read here, and every
-    caller supplies one, so a task looks the same whichever tool produced it —
-    ``get_task`` included, which builds on these fields rather than beside them.
-    Before that tool existed a trail left out of a write's answer was
-    *unreachable* rather than merely inconvenient; it is now readable directly,
-    and the field stays on every answer so an agent needs one shape, not two.
-    """
-    if task.id is None:
-        raise ValueError("A task answer needs a persisted task")
-    return TaskMCP(
-        id=task.id,
-        text=task.text,
-        status=task.status,
-        # Null for an anchor a list task does not have.
-        creating_journal_id=task.creating_journal_id,
-        due_journal_id=task.due_journal_id,
-        intermediate_journal_ids=intermediate_journal_ids,
-        task_list_id=task.task_list_id,
-        due_date=task.due_date,
-        flagged=task.flagged,
-        icon=task.icon,
-        created_at=task.created_at.isoformat() if task.created_at else None,
-        updated_at=task.updated_at.isoformat() if task.updated_at else None,
     )
 
 
@@ -287,7 +253,7 @@ async def create_task(
                 source=Provenance.MCP,
                 changed_by="mcp",
             )
-    return _task_fields(created, trail)
+    return task_mcp_fields(created, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -335,7 +301,7 @@ async def set_task_status(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return _task_fields(updated, trail)
+    return task_mcp_fields(updated, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -496,7 +462,7 @@ async def retarget_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return _task_fields(retargeted, trail)
+    return task_mcp_fields(retargeted, trail)
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
@@ -585,7 +551,7 @@ async def update_task(
         source=Provenance.MCP,
         changed_by="mcp",
     )
-    return _task_fields(updated, trail)
+    return task_mcp_fields(updated, trail)
 
 
 @tool(annotations=DESTRUCTIVE_WRITE)
@@ -745,67 +711,6 @@ async def detach_intermediate_journal_from_task(
     return _journal_link(task_id, journal_id, attached=False, changed=changed)
 
 
-def _journal_ref(ref: TaskJournalRef) -> TaskJournalRefMCP:
-    """One of a task's journals, as a read tool hands it over.
-
-    The date is a **date**, already resolved in the user's timezone — the same
-    one the lapse rule judged the task against. Sending an instant would invite
-    an agent to re-derive the day in UTC and disagree with the verdict beside it.
-    """
-    return TaskJournalRefMCP(
-        id=ref.id, title=ref.title, date=ref.date, cancelled=ref.cancelled
-    )
-
-
-def _optional_journal_ref(ref: TaskJournalRef | None) -> TaskJournalRefMCP | None:
-    """An anchor's journal, or null for an anchor a list task does not have."""
-    return None if ref is None else _journal_ref(ref)
-
-
-def _list_ref(ref: TaskListRef | None) -> TaskListRefMCP | None:
-    """The task's list, or null for a journal-only task."""
-    if ref is None:
-        return None
-    return TaskListRefMCP(
-        id=ref.id, name=ref.name, icon=ref.icon, archived=ref.archived
-    )
-
-
-def _read_model(model: TaskReadModel) -> TaskReadMCP:
-    """A task as the read tools return it.
-
-    A **superset** of what the write tools return: every field ``_task_fields``
-    carries is here, including ``intermediate_journal_ids``, with the resolved
-    journals, the contacts and the lapse added. An agent that learned the shape
-    from ``create_task`` does not have to learn a second one to read the task
-    back.
-    """
-    return TaskReadMCP(
-        **_task_fields(
-            model.task, [ref.id for ref in model.intermediate_journals]
-        ).model_dump(),
-        creating_journal=_optional_journal_ref(model.creating_journal),
-        due_journal=_optional_journal_ref(model.due_journal),
-        intermediate_journals=[
-            _journal_ref(ref) for ref in model.intermediate_journals
-        ],
-        contacts=[
-            TaskContactMCP(
-                id=contact.id,
-                display_name=contact.display_name,
-                photo_url=contact.photo_url,
-            )
-            for contact in model.contacts
-        ],
-        # Taken from the model rather than recomputed from the reason, so the
-        # flag and the reason can never disagree about the same task.
-        lapsed=model.lapsed,
-        lapse_reason=model.lapse_reason,
-        task_list=_list_ref(model.task_list),
-        overdue=model.overdue,
-    )
-
-
 def _groups(groups: JournalTaskGroups) -> JournalTasksResponse:
     """A journal's tasks, nested under the role each link holds.
 
@@ -825,7 +730,7 @@ def _groups(groups: JournalTaskGroups) -> JournalTasksResponse:
             **{
                 str(role): [
                     GroupedTaskMCP(
-                        **_read_model(model).model_dump(),
+                        **task_read_mcp(model).model_dump(),
                         link_roles=list(groups.roles_for(model.task.id or 0)),
                     )
                     for model in groups.for_role(role)
@@ -879,7 +784,7 @@ async def get_task(
     user_id = await get_current_user_id()
 
     model = await task_read_service.read_model(user_id, task_id)
-    return _read_model(model)
+    return task_read_mcp(model)
 
 
 @tool(annotations=READ_ONLY)
@@ -955,7 +860,7 @@ def _upcoming(upcoming: UpcomingTasks) -> UpcomingTasksResponse:
             days_ahead=upcoming.window.days_ahead,
         ),
         total=upcoming.total,
-        tasks=[_read_model(model) for model in upcoming.tasks],
+        tasks=[task_read_mcp(model) for model in upcoming.tasks],
     )
 
 
@@ -1118,3 +1023,4 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(archive_task_list)
     mcp.add_tool(unarchive_task_list)
     mcp.add_tool(get_task_list_history)
+    mcp.add_tool(list_task_list_tasks)
