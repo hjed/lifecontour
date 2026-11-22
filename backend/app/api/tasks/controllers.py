@@ -569,7 +569,10 @@ async def retarget_task(
              is written: not the status, not the anchor, not the link. Or the
              task is on a list and done or cancelled
              (``TASK_LIST_TASK_CLOSED``): a list task's date change never
-             reopens it, so no acknowledgement makes this succeed.
+             reopens it, so no acknowledgement makes this succeed. Or the task
+             is on a list and not due in a journal
+             (``TASK_LIST_TASK_NOT_DUE_IN_JOURNAL``): it has no due journal to
+             leave.
     """
     attributes = retarget_request.data.attributes
     retargeted, trail = await task_service.retarget_due_journal_with_trail(

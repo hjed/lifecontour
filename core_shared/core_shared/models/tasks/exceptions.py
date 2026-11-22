@@ -223,6 +223,36 @@ class TaskListTaskClosedError(TaskDomainError):
         self.status = status
 
 
+class TaskListTaskNotDueInJournalError(TaskDomainError):
+    """Exception raised when a task on a list with no due journal is retargeted.
+
+    Retargeting moves a task from the journal it is due in to another one, and
+    keeps the one it left as a mention. A list task that is undated, or due on
+    a date, has no due journal to leave; giving it one is a due-journal change
+    of a list task's own, which does not exist yet. It is refused here rather
+    than failing on the anchor it lacks.
+
+    That includes the race: a journal delete that commits while a retarget
+    waits on the journal's lock detaches the task, so the retarget's locked
+    read finds it undated and gets this refusal.
+
+    **Temporary**, alongside :class:`TaskListTaskClosedError`: when a list
+    task's due journal can be set, this error and its REST code go.
+
+    **409**: the request is well formed, and what it conflicts with is the
+    task's state.
+    """
+
+    def __init__(self, task_id: int):
+        super().__init__(
+            f"Task {task_id} is on a list and not due in a journal, so there is "
+            f"no due journal to retarget it from. A task on a list cannot be "
+            f"given a due journal yet.",
+            409,
+        )
+        self.task_id = task_id
+
+
 class TaskAnchorJournalNotFoundError(TaskDomainError):
     """Exception raised when one of a task's journal anchors is unreachable.
 

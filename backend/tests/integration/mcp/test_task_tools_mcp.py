@@ -4545,6 +4545,39 @@ class TestRetargetingAClosedListTask:
 
 
 @pytest.mark.integration
+class TestRetargetingAListTaskNotDueInAJournal:
+    """``retarget_task`` refuses a list task with no due journal to leave."""
+
+    async def test_is_refused_naming_why_and_left_as_it_was(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        later_id = await create_journal(
+            journal_repository, title="Later trip", days_offset=9
+        )
+        task_id = await create_list_task(clean_database, task_list_id=list_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "retarget_task", task_id=task_id, due_journal_id=later_id
+            )
+
+        assert payload["error"] == "Task error"
+        assert "not due in a journal" in payload["message"]
+        row = (
+            await clean_database.execute(
+                sa_text("SELECT due_journal_id FROM tasks WHERE id = :id"),
+                {"id": task_id},
+            )
+        ).one()
+        assert row.due_journal_id is None
+        assert await task_events(clean_database, task_id=task_id) == []
+
+
+@pytest.mark.integration
 class TestCreateTaskOnAListRefusals:
     """Each refusal is actionable, and nothing is written."""
 

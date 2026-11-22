@@ -41,6 +41,7 @@ from core_shared.models.tasks import (
     TaskJournalIsAnchorError,
     TaskListNotFoundError,
     TaskListTaskClosedError,
+    TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -1349,6 +1350,9 @@ class TaskService:
                 caller has not acknowledged that retargeting reopens it.
             TaskListTaskClosedError: When the task is on a list and done or
                 cancelled: a list task's date change never reopens it.
+            TaskListTaskNotDueInJournalError: When the task is on a list and
+                has no due journal to leave — undated, due on a date, or
+                detached by a journal delete this retarget waited on.
             TaskListArchivedError: When the task is on an archived list —
                 retargeting onto the journal it is already due in included.
         """
@@ -1369,10 +1373,12 @@ class TaskService:
             return peeked
 
         # Retargeting applies the journal-only rules. A list task that has a due
-        # journal reaches it too; an undated one has no journal to leave, and
-        # gets a due-journal change of its own when list tasks have one.
+        # journal reaches it too; one that is undated or due on a date has no
+        # journal to leave, and is refused before any lock is taken.
+        if peeked.due_journal_id is None:
+            raise TaskListTaskNotDueInJournalError(task_id)
         journals = await self._lock_retarget_journals(
-            user_id, peeked.require_anchor("due"), due_journal_id
+            user_id, peeked.due_journal_id, due_journal_id
         )
 
         # Only now the task row, and every rule below is decided from *this*
@@ -1387,7 +1393,11 @@ class TaskService:
         # The journal actually being left, which is the one linked and announced
         # below. It comes from here rather than from the peek even though they
         # almost always agree — see the docstring's third read.
-        previous_due_journal_id = task.require_anchor("due")
+        previous_due_journal_id = task.due_journal_id
+        # A journal delete that committed while this waited on the journal's
+        # lock has detached the task: refused as the peek's check would have.
+        if previous_due_journal_id is None:
+            raise TaskListTaskNotDueInJournalError(task_id)
         if previous_due_journal_id == due_journal_id:
             return task
         # A retarget leaves the task not done, and a list task's date change

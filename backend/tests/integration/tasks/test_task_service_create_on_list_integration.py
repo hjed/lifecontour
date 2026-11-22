@@ -37,6 +37,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskListArchivedError,
     TaskListNotFoundError,
+    TaskListTaskNotDueInJournalError,
     TaskStatus,
 )
 from sqlalchemy import text
@@ -694,3 +695,82 @@ class TestAJournalDeleteRacingTheCreate:
                     "TaskCreated",
                     "TaskJournalLinksRemoved",
                 ]
+
+
+# ---------------------------------------------------------------------------
+# A journal delete racing a retarget of the list task due in it.
+# ---------------------------------------------------------------------------
+
+
+def _retarget_onto(
+    owner: str, task_id: int, journal_id: int, outcome: list[BaseException]
+) -> Callable[[AsyncConnection], Any]:
+    """Retarget the task, recording a refusal rather than raising it."""
+
+    async def run(connection: AsyncConnection) -> None:
+        service = service_on(connection, SqlUserSettingsRepository(connection))
+        try:
+            await service.retarget_due_journal(
+                user_id=owner,
+                task_id=task_id,
+                due_journal_id=journal_id,
+                transaction=connection,
+            )
+        except TaskListTaskNotDueInJournalError as error:
+            outcome.append(error)
+
+    return run
+
+
+@pytest.mark.slow
+class TestAJournalDeleteRacingARetarget:
+    @pytest.mark.asyncio
+    async def test_a_retarget_during_the_delete_waits_and_is_refused_cleanly(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """The delete detaches the task while the retarget waits on its journal.
+
+        The retarget peeked the journal before the delete committed, so it
+        reads the task again under its lock, finds it undated, and refuses it
+        rather than failing on the anchor it no longer has.
+        """
+        async with _committed_list_and_journal(async_engine) as (
+            owner,
+            list_id,
+            journal_id,
+        ):
+            async with async_engine.begin() as setup:
+                later_id = await create_journal(
+                    SqlJournalRepository(setup),
+                    title="Later trip",
+                    days_offset=9,
+                    user_id=owner,
+                )
+                task_id = await create_list_task(
+                    setup,
+                    task_list_id=list_id,
+                    due_journal_id=journal_id,
+                    user_id=owner,
+                )
+            refused: list[BaseException] = []
+
+            await overlap(
+                async_engine,
+                _delete_journal(journal_id),
+                _retarget_onto(owner, task_id, later_id, refused),
+            )
+
+            assert len(refused) == 1
+            assert isinstance(refused[0], TaskListTaskNotDueInJournalError)
+            async with async_engine.connect() as check:
+                row = (
+                    await check.execute(
+                        text("SELECT due_journal_id FROM tasks WHERE id = :id"),
+                        {"id": task_id},
+                    )
+                ).one()
+                assert row.due_journal_id is None
+                assert [
+                    event.event_type
+                    for event in await task_events(check, task_id=task_id)
+                ] == ["TaskJournalLinksRemoved"]

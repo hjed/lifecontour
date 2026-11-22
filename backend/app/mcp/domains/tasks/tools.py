@@ -459,7 +459,9 @@ async def retarget_task(
 
     A task on a list that is done or cancelled is refused too, acknowledgement
     or not: changing a list task's date never reopens it. A not-done task on a
-    list is moved as usual and stays not done.
+    list is moved as usual and stays not done. A task on a list that is not
+    due in a journal (undated, or due on a date) is refused: it has no due
+    journal to move from.
     """
     user_id = await get_current_user_id()
 

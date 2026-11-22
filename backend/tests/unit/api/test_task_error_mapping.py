@@ -19,6 +19,7 @@ from core_shared.models.tasks import (
     TaskJournalIsAnchorError,
     TaskListArchivedError,
     TaskListTaskClosedError,
+    TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -55,6 +56,16 @@ class TestTaskErrorMapping:
         assert error.code == "TASK_LIST_TASK_CLOSED"
         assert error.status == "409"
         assert "never reopens it" in (error.detail or "")
+
+    def test_a_list_task_with_no_due_journal_retarget_maps_to_a_conflict(
+        self,
+    ) -> None:
+        response = create_domain_error_response(TaskListTaskNotDueInJournalError(7))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_TASK_NOT_DUE_IN_JOURNAL"
+        assert error.status == "409"
+        assert "not due in a journal" in (error.detail or "")
 
     def test_due_journal_not_future_maps_to_its_own_code(self) -> None:
         """A past due journal is a 400 — a rejected request, not a missing one."""

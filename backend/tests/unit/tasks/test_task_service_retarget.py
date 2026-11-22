@@ -38,6 +38,7 @@ from core_shared.models.tasks import (
     TaskDomainError,
     TaskDueJournalNotFutureError,
     TaskListTaskClosedError,
+    TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -2173,3 +2174,65 @@ class TestAClosedTaskOnAListIsNotRetargeted:
 
         with pytest.raises(TaskReopenNotAcknowledgedError):
             await retarget(service, mock_transaction)
+
+
+def make_list_task_not_due_in_a_journal(due_date: datetime.date | None) -> Task:
+    """A task on a list with no due journal: undated, or due on a date."""
+    return replace(
+        make_list_task_due_in_a_journal(TaskStatus.NOT_DONE),
+        due_journal_id=None,
+        due_date=due_date,
+    )
+
+
+@pytest.mark.unit
+class TestAListTaskNotDueInAJournalIsNotRetargeted:
+    """A list task with no due journal has none to leave, so retarget refuses it.
+
+    Temporary, until a list task's due journal can be set under list rules.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("due_date", [None, TOMORROW], ids=["undated", "due-date"])
+    async def test_is_refused_before_any_journal_is_locked(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        due_date: datetime.date | None,
+    ) -> None:
+        task = make_list_task_not_due_in_a_journal(due_date)
+        stored_task(mock_task_repo, peeked=task, locked=task)
+
+        with pytest.raises(TaskListTaskNotDueInJournalError) as raised:
+            await retarget(service, mock_transaction)
+
+        assert raised.value.task_id == TASK_ID
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_not_awaited()
+        mock_task_repo.find_by_id_for_update.assert_not_awaited()
+        mock_task_repo.save.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_journal_delete_between_the_peek_and_the_lock_is_refused(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """The delete detached the task while the retarget waited on its journal."""
+        stored_task(
+            mock_task_repo,
+            peeked=make_list_task_due_in_a_journal(TaskStatus.NOT_DONE),
+            locked=make_list_task_not_due_in_a_journal(None),
+        )
+
+        with pytest.raises(TaskListTaskNotDueInJournalError):
+            await retarget(service, mock_transaction)
+
+        mock_task_repo.save.assert_not_awaited()
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()

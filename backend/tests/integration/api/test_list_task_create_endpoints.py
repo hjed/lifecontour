@@ -358,6 +358,49 @@ class TestCreatingDueInAJournal:
         assert _error(response)["code"] == "TASK_LIST_ARCHIVED"
 
 
+class TestRetargetingAListTaskNotDueInAJournal:
+    """A list task with no due journal has none to leave: retarget refuses it.
+
+    Temporary, until a list task's due journal can be set under list rules.
+    """
+
+    @pytest.mark.parametrize(
+        "attributes", [{}, {"due_date": "2099-12-31"}], ids=["undated", "due-date"]
+    )
+    async def test_is_a_conflict_and_is_left_as_it_was(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        attributes: dict[str, object],
+    ) -> None:
+        list_id = await seed_task_list_id(async_connection)
+        later_id = await create_journal(journal_repository, days_offset=9)
+        created = await _create(authenticated_client, list_id, **attributes)
+        task_id = int(created.json()["data"]["id"])
+        events_before = len(await task_events(async_connection, task_id=task_id))
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget",
+            json={
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": later_id},
+                }
+            },
+        )
+
+        assert response.status_code == 409
+        error = _error(response)
+        assert error["code"] == "TASK_LIST_TASK_NOT_DUE_IN_JOURNAL"
+        assert "not due in a journal" in error["detail"]
+        read = (await authenticated_client.get(f"/api/tasks/{task_id}")).json()
+        assert read["data"]["attributes"]["due_journal_id"] is None
+        assert len(await task_events(async_connection, task_id=task_id)) == (
+            events_before
+        )
+
+
 class TestRetargetingAClosedListTaskDueInAJournal:
     """A list task this create makes due in a journal reaches the retarget route.
 
