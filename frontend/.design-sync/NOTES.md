@@ -319,3 +319,12 @@ moved, which is why `canary` is `null` and no `[SPOT_CHECK]` sheets appear.
 - Preview cards that drive real controls (`MobileSidebar`, `UserMenu`,
   `ActivityItem`, `ContextMenu`) depend on current DOM structure and Radix event
   semantics; they are the first to break on a Radix upgrade.
+
+## Vega migration
+
+The ui/ primitives moved from new-york to shadcn **Vega** (`radix-vega`). Previews
+captured before it show the old sizes (40px buttons), solid destructive buttons
+and `rounded-lg` cards; a full re-sync re-captures them. The extra button sizes
+(`xs`, `icon-xs`, `icon-sm`, `icon-lg`) are listed in `conventions.md`. Default
+and icon buttons gain a 40px floor only on a coarse pointer (`touch-target`), so
+desktop previews show Vega's 36px.

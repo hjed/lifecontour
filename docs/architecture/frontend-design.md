@@ -14,6 +14,34 @@ This document provides comprehensive frontend design patterns and component guid
 - Use Tailwind CSS classes for styling with semantic color tokens
 - Implement responsive design with mobile-first approach using Tailwind breakpoints
 
+### The ui/ primitives: shadcn Vega
+
+`components/ui/` holds shadcn's **Vega** style (`components.json` → `radix-vega`):
+React 19 function components with `data-slot` attributes, built on the unified
+`radix-ui` package. `globals.css` imports `shadcn/tailwind.css`, which supplies the
+state variants they style with (`data-checked:`, `data-open:`, ... mapped onto
+Radix's `data-state`); without it those classes emit nothing.
+
+Updating or adding a primitive with `pnpm dlx shadcn@latest add <name> --overwrite`:
+
+- **Check what else it rewrote.** Registry dependencies are rewritten too (adding
+  `dialog` rewrites `button`), and the CLI adds the `cn` npm package. Revert both.
+- **Point `cn` back at `@/lib/utils`.** The CLI writes `import { cn } from "cn"`
+  whatever `aliases.utils` says.
+- **Re-apply the local changes**, each documented in place and covered by a test:
+
+| File | Local change | Guarded by |
+| --- | --- | --- |
+| `button.tsx` | `lg` is 40px; default/icon carry `touch-target` / `touch-target-square`, a coarse-pointer floor in the components layer (so a call site's own `min-h-11` still wins) | `ui/__tests__/button.test.tsx`, `globals-css.test.ts`, `auth/login.spec.ts`, `new-dialog.spec.ts` |
+| `select.tsx` | `SelectContent` defaults to `position='popper'` (Vega's `item-aligned` opens over the trigger, where the opening tap picks an option) | `ui/__tests__/select.test.tsx` |
+| `popover.tsx` | content scrolls within `--radix-popover-content-available-height` | `ui/__tests__/popover.test.tsx` |
+| `calendar.tsx` | slot components at module scope (inline ones remount the grid and lose clicks) | `ui/__tests__/calendar.test.tsx` |
+| `card.tsx` | `CardTitle` is an `h3` rendering its children; `CardDescription` a `p` | `components/ui/card.test.tsx` |
+| `table.tsx` | `role="table"`, `scope="col"` headers, `TableRowHeader` (`th scope="row"`) | `components/ui/table.test.tsx` |
+| `input-group.tsx` | jsx-a11y disable on the addon's click-to-focus (pointer convenience) | lint |
+
+Badges are `h-5`; a badge whose text wraps (e.g. `JournalContactBadge`) adds `h-auto`.
+
 ### Form Validation Guidelines
 
 - Use React Hook Form with Zod for validation

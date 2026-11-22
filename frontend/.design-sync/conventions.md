@@ -1,7 +1,7 @@
 ## How to build with this system
 
 These are the real components from the Lifecontour app (a self-hosted journal,
-people and adventures app): shadcn/ui "new-york" primitives on Radix, styled
+people and adventures app): shadcn/ui "Vega" (`radix-vega`) primitives on Radix, styled
 with Tailwind CSS v4 and a semantic CSS-variable theme. Australian English and
 metric units throughout; dates read like `14 July 2026`.
 
@@ -65,7 +65,8 @@ There is no exported `cn()` helper — pass plain `className` strings.
 - `components/<group>/<Name>/<Name>.d.ts` — the real prop contract, including
   variant unions (e.g. `Button` takes
   `variant?: "default" | "secondary" | "destructive" | "outline" | "link" | "ghost"`
-  and `size?: "default" | "sm" | "lg" | "icon"`).
+  and `size?: "default" | "xs" | "sm" | "lg" | "icon" | "icon-xs" | "icon-sm" | "icon-lg"`).
+  `destructive` is a tinted button (red text on a pale red fill), not a solid one.
 
 Compound components ship all their parts on `window.Lifecontour` even though
 only the parent has a card: `Card` + `CardHeader` / `CardTitle` / `CardDescription` /
