@@ -194,6 +194,16 @@ repos:
         entry: uvx python3 -c "import sys, tomllib; [tomllib.load(open(f, 'rb')) for f in sys.argv[1:]]"
         language: system
         files: \.toml$
+      # Relock every uv project when a manifest or lock changes. A
+      # core_shared/pyproject.toml edit also invalidates the five locks that
+      # record core_shared's requirements, so this fixes all of them. If it
+      # rewrites a lock, the commit stops; stage the relocked files and retry.
+      - id: uv-lock-python
+        name: uv lock (every Python project)
+        entry: scripts/relock-python.sh
+        language: system
+        files: (^|/)(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
 
   # Secret scanning of staged changes with the committed .gitleaks.toml and
   # .gitleaksignore. Keep rev in step with GITLEAKS_VERSION in ci.yml.

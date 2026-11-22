@@ -28,8 +28,8 @@ The CI/CD pipeline is implemented using GitHub Actions and includes:
   Docker services
 - `core-shared-unit-test`: Runs the `core_shared` unit suite (includes the worker
   tooling-standardisation and locked-install governance tests); runs on every PR
-- `python-locks`: Runs `uv lock --check` for all six uv projects (backend, `core_shared`,
-  the four workers) whenever any `pyproject.toml` or `uv.lock` changes. See
+- `python-locks`: Runs `scripts/relock-python.sh --check` (`uv lock --check` for every
+  committed `uv.lock`) whenever any `pyproject.toml`, `uv.lock` or the script changes. See
   [Locked Python installs](#locked-python-installs)
 - `worker-lint`: Per-worker matrix — `ruff check`, `ruff format --check`, and
   `mypy --config-file ../../mypy.ini .` against the shared tooling config
@@ -95,12 +95,43 @@ being silently re-resolved.
   `core_shared`'s requirements.
 - **Security scan:** `security.yml` runs `pip-audit` over each project's
   `uv export --locked` (dev groups and extras included), not over a fresh resolution.
-- **Changing dependencies:** edit `pyproject.toml`, then run `uv lock` in that project. After
-  editing `core_shared/pyproject.toml`, also run `uv lock` in `backend/` and each
-  `integration_workers/<name>/`. Commit the locks with the manifest.
+- **Changing dependencies:** edit `pyproject.toml` and commit. The `uv-lock-python`
+  pre-commit hook runs `scripts/relock-python.sh`, which relocks every project. That
+  includes the five dependents of `core_shared`. If the hook rewrites a lock, the commit
+  stops so you can stage it. Run the script by hand any time with
+  `scripts/relock-python.sh`, or check without writing using `--check`.
 - **Updates:** the locks only move when a PR moves them, and Dependabot's weekly `uv` updates
   (see [Dependabot](#dependabot-githubdependabotyml)) are how security and bug fixes reach
-  production.
+  production. Dependabot relocks only the directory it bumps, so
+  [`relock-dependents.yml`](#relocking-core_shared-dependents) relocks the rest.
+
+#### Relocking core_shared dependents
+
+`.github/workflows/relock-dependents.yml` runs on Dependabot PRs that change
+`core_shared/pyproject.toml`. It runs `scripts/relock-python.sh` on the PR branch and pushes
+the relocked dependents as `chore(deps): relock core_shared dependents`.
+
+- **Scope:** the trigger is `pull_request` to `main` with that one path, and the job runs only
+  when both the actor and the PR author are `dependabot[bot]` and the head is in this
+  repository. Its own push re-triggers the workflow with the App as actor, so that run is
+  skipped. It never runs on human or stacked PRs.
+- **Credential:** the push must re-trigger CI, and a `GITHUB_TOKEN` push does not. The job
+  therefore mints a token for a GitHub App. One-time setup:
+  1. Create a private GitHub App (Settings → Developer settings → GitHub Apps) with no
+     webhook, and with **Contents: read and write** and **Pull requests: read and write**
+     repository permissions.
+  2. Install it on this repository only.
+  3. Generate a private key, and add `RELOCK_APP_ID` (the App ID) and `RELOCK_APP_PRIVATE_KEY`
+     (the `.pem` contents) as **Dependabot** secrets (Settings → Secrets and variables →
+     Dependabot). Dependabot-triggered runs can't read Actions secrets.
+- **Failure modes:**
+  - *Missing secrets:* the job fails with an error that names them. Relock by hand.
+  - *Unresolvable:* a new `core_shared` requirement conflicts with a worker's `==` pin, e.g.
+    `pydantic>=2.14.4` against google's `pydantic==2.14.3`. The job comments on the PR with
+    uv's error and fails. Bump the pin, run the script and push.
+- **Dependabot rebases:** once the App has pushed, Dependabot stops rebasing that PR. To get a
+  fresh one, comment `@dependabot recreate`. That drops the relock commit, and the workflow
+  relocks the new PR.
 
 #### Stacked PRs
 
@@ -166,7 +197,13 @@ verified against `GITLEAKS_SHA256`) and runs `scripts/secret_scan.py` over a
   repository's secrets and a write token, so checking out and running a fork's code in it
   hands that code the secrets.
 - Workflows that run on PRs reference no repository secrets, so fork PRs run CI unchanged.
-  The only secret in any workflow is `GITHUB_TOKEN` in `release.yml`, which runs on tags.
+  The only Actions secret in any workflow is `GITHUB_TOKEN` in `release.yml`, which runs on
+  tags.
+- The one exception is `relock-dependents.yml`. It reads the relock App's key from
+  **Dependabot** secrets, which only Dependabot-triggered runs receive (forks never do). Its
+  job runs only for Dependabot's own same-repository PRs. A governance test
+  (`core_shared/tests/unit/test_relock_python_dependents.py`) pins its trigger, gate and
+  secrets.
 
 ### 2. Security Scanning (`.github/workflows/security.yml`)
 

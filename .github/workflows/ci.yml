@@ -125,6 +125,7 @@ jobs:
             python_locks:
               - '**/pyproject.toml'
               - '**/uv.lock'
+              - 'scripts/relock-python.sh'
             # Test infrastructure only the E2E suite exercises.
             e2e_infra:
               - 'docker/oauth-login-consent/**'
@@ -215,15 +216,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       - name: Check every uv.lock matches its pyproject.toml
-        run: |
-          status=0
-          for project in backend core_shared integration_workers/google integration_workers/immich integration_workers/snipeit integration_workers/strava; do
-            if ! uv lock --check --directory "$project"; then
-              echo "::error file=$project/uv.lock::$project/uv.lock is stale; run \`uv lock\` in $project"
-              status=1
-            fi
-          done
-          exit $status
+        run: scripts/relock-python.sh --check
 
   backend-lint:
     name: Backend Linting
