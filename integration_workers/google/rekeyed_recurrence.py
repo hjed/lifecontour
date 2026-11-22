@@ -284,16 +284,15 @@ def _live_instances(
     earlier has its last old occurrence on that day, after the last new one.
     """
     live = [event for event in instances if event.status != "cancelled"]
-    # Where the rule put each instance: one moved far ahead must not stretch
-    # the window over dates Google never expanded.
+    # Only an instance still at its slot shows how far Google expanded the
+    # rule: a moved one (an exception) keeps a slot that may lie far past
+    # that, or far before where it now sits, either way proving nothing
+    # about the dates between.
     slots = [
-        s
+        start
         for event in live
-        if (
-            s := start_moment(event.original_start_time, zone)
-            or event_start(event, zone)
-        )
-        is not None
+        if (start := event_start(event, zone)) is not None
+        and start_moment(event.original_start_time, zone) in (None, start)
     ]
     if not slots:
         return None
