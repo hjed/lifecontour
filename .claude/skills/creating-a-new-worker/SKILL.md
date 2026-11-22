@@ -586,9 +586,10 @@ are matrix-driven and need no per-worker copy — only the registration below):
    ```
    The `worker-unit-test` and `worker-integration-test` jobs already read
    `fromJSON(needs.changes.outputs.workers)`, so no further edits are needed there.
-4. `integration_workers/<name>` in the project list of the `python-locks` job (and of the
-   `pip-audit` loop in `.github/workflows/security.yml`). The locked-install governance
-   test fails until every committed `uv.lock` is in both.
+4. `integration_workers/<name>` in the project list of the `pip-audit` loop in
+   `.github/workflows/security.yml`. The locked-install governance test fails until every
+   committed `uv.lock` is in it. The `python-locks` job and `scripts/relock-python.sh` find
+   the new lock on their own.
 
 ### `.github/workflows/release.yml`
 

@@ -172,18 +172,3 @@ def test_pip_audit_reads_every_exported_lock() -> None:
     assert "uv export -q --locked" in content
     unaudited = [str(p) for p in _locked_projects() if str(p) not in content]
     assert not unaudited, f"security.yml pip-audit does not cover {unaudited}"
-
-
-def test_python_locks_job_checks_every_lock() -> None:
-    content = _read(CI_WORKFLOW)
-    match = re.search(
-        r"^  python-locks:\n(?P<body>(?:    .*\n|\n)+)", content, re.MULTILINE
-    )
-    assert match, "ci.yml: missing the python-locks job"
-    body = match["body"]
-    assert "needs: changes" in body, "python-locks must sit behind the stack gate"
-    assert "uv lock --check" in body
-    projects = _locked_projects()
-    assert Path("backend") in projects, f"lock discovery is broken: {projects}"
-    unchecked = [str(p) for p in projects if str(p) not in body]
-    assert not unchecked, f"python-locks does not check {unchecked}"
