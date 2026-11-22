@@ -23,6 +23,7 @@ async def test_get_user_settings_reports_an_unset_timezone_as_null(
     assert data["data"]["type"] == "user_settings"
     assert data["data"]["attributes"]["timezone"] is None
     assert data["data"]["attributes"]["default_country"] is None
+    assert data["data"]["attributes"]["theme_palette"] is None
 
 
 async def test_patch_and_get_user_settings(authenticated_client: AsyncClient):
@@ -79,12 +80,17 @@ async def test_patch_default_country_alone_leaves_the_timezone_unset(
 
     assert response.status_code == 200
     attributes = response.json()["data"]["attributes"]
-    assert attributes == {"timezone": None, "default_country": "NZ"}
+    assert attributes == {
+        "timezone": None,
+        "default_country": "NZ",
+        "theme_palette": None,
+    }
 
     get_response = await authenticated_client.get("/api/user-settings")
     assert get_response.json()["data"]["attributes"] == {
         "timezone": None,
         "default_country": "NZ",
+        "theme_palette": None,
     }
 
 
@@ -102,6 +108,7 @@ async def test_patch_timezone_keeps_the_default_country(
     assert response.json()["data"]["attributes"] == {
         "timezone": "Australia/Perth",
         "default_country": "AU",
+        "theme_palette": None,
     }
 
 
@@ -120,6 +127,7 @@ async def test_patch_null_default_country_clears_it(
     assert response.json()["data"]["attributes"] == {
         "timezone": "Europe/London",
         "default_country": None,
+        "theme_palette": None,
     }
 
 
@@ -131,14 +139,54 @@ async def test_patch_null_default_country_clears_it(
         {"default_country": ""},
         {"default_country": "ZZ"},
         {"timezone": None},
+        {"theme_palette": "rainbow"},
     ],
-    ids=["alpha-3", "lowercase", "empty", "not-a-country", "null-timezone"],
+    ids=[
+        "alpha-3",
+        "lowercase",
+        "empty",
+        "not-a-country",
+        "null-timezone",
+        "unknown-palette",
+    ],
 )
 async def test_patch_user_settings_rejects_invalid_values(
     authenticated_client: AsyncClient, body: dict[str, str | None]
 ) -> None:
-    """Country must be ISO 3166-1 alpha-2; the timezone cannot be cleared."""
+    """Country must be ISO 3166-1 alpha-2, the timezone cannot be cleared,
+    and the palette must be one the app ships."""
     response = await authenticated_client.patch("/api/user-settings", json=body)
 
     assert response.status_code == 400
     assert "errors" in response.json()
+
+
+async def test_patch_theme_palette_saves_and_null_clears_it(
+    authenticated_client: AsyncClient,
+) -> None:
+    """The palette persists to the account and keeps the other settings."""
+    await authenticated_client.patch(
+        "/api/user-settings", json={"timezone": "Australia/Sydney"}
+    )
+
+    saved = await authenticated_client.patch(
+        "/api/user-settings", json={"theme_palette": "emerald"}
+    )
+    assert saved.status_code == 200
+    assert saved.json()["data"]["attributes"] == {
+        "timezone": "Australia/Sydney",
+        "default_country": None,
+        "theme_palette": "emerald",
+    }
+
+    fetched = await authenticated_client.get("/api/user-settings")
+    assert fetched.json()["data"]["attributes"]["theme_palette"] == "emerald"
+
+    cleared = await authenticated_client.patch(
+        "/api/user-settings", json={"theme_palette": None}
+    )
+    assert cleared.json()["data"]["attributes"] == {
+        "timezone": "Australia/Sydney",
+        "default_country": None,
+        "theme_palette": None,
+    }

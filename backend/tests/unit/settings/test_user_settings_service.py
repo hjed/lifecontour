@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.settings.models import UserSettings, UserSettingsChanges
+from app.core.settings.models import ThemePalette, UserSettings, UserSettingsChanges
 from app.core.settings.services.user_settings_service import UserSettingsService
 
 
@@ -75,6 +75,18 @@ class TestUpdateSettings:
         await settings_service.update_settings(
             user_id="user-1",
             changes=UserSettingsChanges(timezone="Europe/London"),
+            transaction=mock_transaction,
+        )
+
+        mock_contacts_reimport.force_full_contacts_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_palette_change_leaves_the_contacts_alone(
+        self, settings_service, mock_contacts_reimport, mock_transaction
+    ) -> None:
+        await settings_service.update_settings(
+            user_id="user-1",
+            changes=UserSettingsChanges(theme_palette=ThemePalette.EMERALD),
             transaction=mock_transaction,
         )
 

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
-from app.core.settings.models import UserSettings, UserSettingsChanges
+from app.core.settings.models import ThemePalette, UserSettings, UserSettingsChanges
 
 pytestmark = pytest.mark.integration
 
@@ -99,3 +99,53 @@ class TestSqlUserSettingsRepository:
         assert fetched is not None
         assert fetched.timezone is None
         assert await user_settings_repo.get_timezone("u5") == "UTC"
+
+    @pytest.mark.asyncio
+    async def test_update_round_trips_the_theme_palette(
+        self, user_settings_repo: SqlUserSettingsRepository
+    ) -> None:
+        saved = await user_settings_repo.update(
+            "u6", UserSettingsChanges(theme_palette=ThemePalette.EMERALD)
+        )
+        assert saved.theme_palette is ThemePalette.EMERALD
+
+        fetched = await user_settings_repo.get_by_user_id("u6")
+        assert fetched is not None
+        assert fetched.theme_palette is ThemePalette.EMERALD
+        assert fetched.timezone is None
+
+    @pytest.mark.asyncio
+    async def test_a_palette_update_keeps_the_other_settings(
+        self, user_settings_repo: SqlUserSettingsRepository
+    ) -> None:
+        await user_settings_repo.update(
+            "u7",
+            UserSettingsChanges(timezone="Europe/London", default_country="GB"),
+        )
+
+        saved = await user_settings_repo.update(
+            "u7", UserSettingsChanges(theme_palette=ThemePalette.EMERALD)
+        )
+
+        assert saved.timezone == "Europe/London"
+        assert saved.default_country == "GB"
+        assert saved.theme_palette is ThemePalette.EMERALD
+
+    @pytest.mark.asyncio
+    async def test_other_updates_keep_the_palette_and_null_clears_it(
+        self, user_settings_repo: SqlUserSettingsRepository
+    ) -> None:
+        await user_settings_repo.update(
+            "u8", UserSettingsChanges(theme_palette=ThemePalette.EMERALD)
+        )
+
+        kept = await user_settings_repo.update(
+            "u8", UserSettingsChanges(timezone="Europe/Paris")
+        )
+        assert kept.theme_palette is ThemePalette.EMERALD
+
+        cleared = await user_settings_repo.update(
+            "u8", UserSettingsChanges(theme_palette=None)
+        )
+        assert cleared.theme_palette is None
+        assert cleared.timezone == "Europe/Paris"
