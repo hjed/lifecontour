@@ -113,11 +113,22 @@ export async function updateUserSettings(
   return response.json();
 }
 
-export function useUserSettings() {
+interface UseUserSettingsOptions {
+  /**
+   * `false` holds the read, e.g. for a caller mounted app-wide that has no
+   * signed-in user yet (the read would only 401).
+   */
+  enabled?: boolean;
+}
+
+export function useUserSettings({
+  enabled = true,
+}: UseUserSettingsOptions = {}) {
   return useQuery({
     queryKey: userSettingsKeys.detail(),
     queryFn: fetchUserSettings,
     staleTime: 10 * 60 * 1000, // 10 minutes
+    enabled,
   });
 }
 

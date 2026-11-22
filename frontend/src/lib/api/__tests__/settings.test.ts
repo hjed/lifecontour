@@ -86,6 +86,32 @@ describe('settings API', () => {
       });
     });
 
+    it('PATCHes an explicit null to return to the default palette', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            id: 'user-1',
+            type: 'user_settings',
+            attributes: {
+              timezone: null,
+              default_country: null,
+              theme_palette: null,
+            },
+          },
+        }),
+      } as Response);
+
+      await updateUserSettings({ theme_palette: null });
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/user-settings', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme_palette: null }),
+      });
+    });
+
     it('throws the API error detail on failure', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -262,6 +288,22 @@ describe('settings API', () => {
    * key outlives a session it can hand one account's zone to the next person
    * to use the browser.
    */
+  describe('useUserSettings', () => {
+    it('does not read the settings while disabled (e.g. signed out)', async () => {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+
+      const { result } = renderHook(() => useUserSettings({ enabled: false }), {
+        wrapper: wrapper(queryClient),
+      });
+
+      // A settings read on the login page is a guaranteed 401.
+      await waitFor(() => expect(result.current.fetchStatus).toBe('idle'));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('useUserTimezone', () => {
     const BROWSER_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
