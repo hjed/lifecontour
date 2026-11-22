@@ -368,7 +368,13 @@ test('capture README screenshots', async ({ authenticatedPage: page }) => {
     await expect(p.getByTestId('journals-list-ready')).toBeVisible();
     await selectCalendarView(p, 'Month');
     await p.getByRole('button', { name: 'Hide Filters' }).click();
-    await expect(p.getByText('Claustral Canyon').first()).toBeVisible();
+    // Wait on a journal dated today: the month grid always contains today,
+    // while entries seeded days away can fall outside it near a month's end.
+    await expect(
+      p
+        .getByTestId('calendar-month-view')
+        .getByText('Project kickoff with Jordan')
+    ).toBeVisible();
     // Tall enough for the whole month, so nothing scrolls under the header.
     await p.setViewportSize({ width: 1440, height: 1100 });
     await p.evaluate(() => window.scrollTo(0, 0));
