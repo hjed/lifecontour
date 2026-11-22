@@ -15,6 +15,7 @@ import { WriteConflictDialog } from '@/components/shared/WriteConflictDialog';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
 import { createAppQueryClient } from '@/lib/query-client';
+import { PaletteProvider } from '@/lib/theme/PaletteProvider';
 
 interface ProvidersProps {
   children: React.ReactNode;
@@ -33,7 +34,9 @@ export function Providers({ children }: ProvidersProps) {
         disableTransitionOnChange
       >
         <AuthProvider>
-          {children}
+          {/* The account's colour palette (data-palette on <html>); mode stays
+              with next-themes above. */}
+          <PaletteProvider>{children}</PaletteProvider>
 
           {/* Toast notifications */}
           {/* Colours come from ui/sonner.tsx, which maps sonner's

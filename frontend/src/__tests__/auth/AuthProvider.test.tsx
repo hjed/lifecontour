@@ -15,6 +15,7 @@ import {
 } from '@/test-utils';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { TIMEZONE_STORAGE_KEY } from '@/lib/api/settings';
+import { PALETTE_ATTRIBUTE, PALETTE_STORAGE_KEY } from '@/lib/theme/palettes';
 import { OAuthProvider } from '@/types/auth';
 
 // Test component to access auth context
@@ -195,6 +196,28 @@ describe('AuthProvider', () => {
     await waitFor(() => {
       expect(localStorage.getItem(TIMEZONE_STORAGE_KEY)).toBeNull();
     });
+  });
+
+  /**
+   * The palette mirror is keyed by browser too: left behind, the login page
+   * and the next account's first paint would wear the previous user's palette.
+   */
+  it('clears the cached palette whenever no user is authenticated', async () => {
+    localStorage.setItem(PALETTE_STORAGE_KEY, 'emerald');
+    document.documentElement.setAttribute(PALETTE_ATTRIBUTE, 'emerald');
+
+    (fetch as jest.Mock).mockResolvedValueOnce(
+      createMockResponses.sessionNotAuthenticated()
+    );
+
+    renderWithProviders(<TestComponent />);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(PALETTE_STORAGE_KEY)).toBeNull();
+    });
+    expect(document.documentElement.hasAttribute(PALETTE_ATTRIBUTE)).toBe(
+      false
+    );
   });
 
   it('should clear error when clearError is called', async () => {
