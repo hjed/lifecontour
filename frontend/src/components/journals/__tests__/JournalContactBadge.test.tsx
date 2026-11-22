@@ -181,6 +181,13 @@ describe('JournalContactBadge', () => {
       expect(maybeStatus).toHaveAttribute('aria-label', 'Status: MAYBE');
     });
 
+    it('lets a long name wrap rather than clip in the fixed-height badge', () => {
+      // shadcn's badge is `h-5`; a wrapping badge has to opt out of it.
+      render(<JournalContactBadge contacts={mockContacts} />);
+
+      expect(screen.getByTestId('contact-badge-1')).toHaveClass('h-auto');
+    });
+
     it('renders role badges', () => {
       render(<JournalContactBadge contacts={mockContacts} />);
       const roleBadge = screen.getByTestId('contact-role-1');

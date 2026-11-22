@@ -443,7 +443,7 @@ function ContactBadge({
     <Badge
       variant='secondary'
       className={cn(
-        'max-w-full min-w-0 shrink flex-nowrap gap-1.5 overflow-visible py-0.5 pr-1 pl-1 text-xs whitespace-normal',
+        'h-auto max-w-full min-w-0 shrink flex-nowrap gap-1.5 overflow-visible py-0.5 pr-1 pl-1 text-xs whitespace-normal',
         contact.status === AttendeeStatus.DECLINED && 'opacity-60'
       )}
       data-testid={`contact-badge-${contact.id}`}
