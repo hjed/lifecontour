@@ -64,4 +64,38 @@ describe('SelectContent', () => {
       'p-1'
     );
   });
+
+  /**
+   * Local to this app: Vega keys the trigger height off `data-[size=…]:`,
+   * which outranks a caller's plain `h-7` (JournalContactBadge, PitchEditor)
+   * and which cn() cannot merge. The height is a plain class chosen by size.
+   */
+  it('lets a caller set the trigger height', () => {
+    render(
+      <Select>
+        <SelectTrigger aria-label='Compact' className='h-7 text-xs'>
+          <SelectValue />
+        </SelectTrigger>
+      </Select>
+    );
+
+    const trigger = document.querySelector('[data-slot=select-trigger]');
+    expect(trigger).toHaveClass('h-7');
+    expect(trigger).not.toHaveClass('h-9');
+    expect(trigger?.className).not.toMatch(/data-\[size=[a-z]+\]:h-/);
+  });
+
+  it('sizes the trigger from its size prop by default', () => {
+    render(
+      <Select>
+        <SelectTrigger aria-label='Small' size='sm'>
+          <SelectValue />
+        </SelectTrigger>
+      </Select>
+    );
+
+    expect(document.querySelector('[data-slot=select-trigger]')).toHaveClass(
+      'h-8'
+    );
+  });
 });
