@@ -165,7 +165,12 @@ slot, not at the end of that day.
 Known limits, both from the backend's processing lag:
 - if a recurrence is re-timed twice within the lag, the middle set's links
   may not exist yet when the worker looks. The next time-ranged listing
-  cleans them up;
+  cleans them up. The same holds when the two re-times make two sweeps queue
+  opposite merges (A into B, then B into A): the second finds its sibling
+  already merged away and leaves the survivor unchanged rather than
+  cancelling it, but the survivor keeps the dead link, with the live id only
+  as an alias, until a time-ranged listing or a change to that occurrence
+  lets the adoption take the alias back;
 - if one instance moved more than a day earlier in Google and the backend
   has not yet applied the move, the journal still has the old date. A
   sync-token batch in that window that shows the symptom for the same
