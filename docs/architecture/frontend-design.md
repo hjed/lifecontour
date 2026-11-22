@@ -28,16 +28,22 @@ Updating or adding a primitive with `pnpm dlx shadcn@latest add <name> --overwri
   `dialog` rewrites `button`), and the CLI adds the `cn` npm package. Revert both.
 - **Point `cn` back at `@/lib/utils`.** The CLI writes `import { cn } from "cn"`
   whatever `aliases.utils` says.
+- **Keep caller-overridable defaults plain.** Vega keys some sizes off `data-[side=…]:` /
+  `data-[size=…]:` selectors. Those outrank a caller's plain class and `cn()` cannot merge
+  across variants, so any default a caller overrides (width, height) is chosen in JS instead.
 - **Re-apply the local changes**, each documented in place and covered by a test:
 
 | File | Local change | Guarded by |
 | --- | --- | --- |
 | `button.tsx` | `lg` is 40px; default/icon carry `touch-target` / `touch-target-square`, a coarse-pointer floor in the components layer (so a call site's own `min-h-11` still wins) | `ui/__tests__/button.test.tsx`, `globals-css.test.ts`, `auth/login.spec.ts`, `new-dialog.spec.ts` |
-| `select.tsx` | `SelectContent` defaults to `position='popper'` (Vega's `item-aligned` opens over the trigger, where the opening tap picks an option) | `ui/__tests__/select.test.tsx` |
-| `popover.tsx` | content scrolls within `--radix-popover-content-available-height` | `ui/__tests__/popover.test.tsx` |
+| `select.tsx` | `SelectContent` defaults to `position='popper'` (Vega's `item-aligned` opens over the trigger, where the opening tap picks an option); the `p-1` inset is on the viewport, not `SelectGroup`, since most callers have no group; trigger height is a plain class chosen by `size` | `ui/__tests__/select.test.tsx` |
+| `popover.tsx` | content scrolls within `--radix-popover-content-available-height`; `PopoverTitle` is typed as the `div` it renders | `ui/__tests__/popover.test.tsx`, type-check |
 | `calendar.tsx` | slot components at module scope (inline ones remount the grid and lose clicks); focus ring on the month/year dropdown wrapper | `ui/__tests__/calendar.test.tsx` |
-| `card.tsx` | `CardTitle` is an `h3` rendering its children; `CardDescription` a `p` | `components/ui/card.test.tsx` |
+| `card.tsx` | no `overflow-hidden` (it clipped in-place dropdowns such as `ContactSearchCombobox`); `CardContent` is only the inset, not Vega's `flex flex-col gap-3`; `CardTitle` is an `h3` rendering its children; `CardDescription` a `p` | `components/ui/card.test.tsx`, `contact-relationships.spec.ts` |
 | `table.tsx` | `role="table"`, `scope="col"` headers, `TableRowHeader` (`th scope="row"`) | `components/ui/table.test.tsx` |
+| `alert-dialog.tsx` | `AlertDialogAction`/`AlertDialogCancel` pass `className` to `Button`, so caller colours replace the variant's | `ui/__tests__/alert-dialog.test.tsx` |
+| `dropdown-menu.tsx` | content sizes to its items (no `w-(--radix-dropdown-menu-trigger-width)`); most triggers are icon buttons | `ui/__tests__/dropdown-menu.test.tsx` |
+| `sheet.tsx` | each side's position, size and border are plain classes chosen by `side` (not `data-[side=…]:`), so a caller's `w-64` wins | `ui/__tests__/sheet.test.tsx` |
 | `input-group.tsx` | jsx-a11y disable on the addon's click-to-focus (pointer convenience) | lint |
 
 Badges are `h-5`; a badge whose text wraps (e.g. `JournalContactBadge`) adds `h-auto`.
