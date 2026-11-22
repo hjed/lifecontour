@@ -8,18 +8,28 @@ schema to look like.
 ``MigrationTemplates`` serves the first upgrade of a fresh throwaway database
 from a template database already migrated to that revision, so each test does
 not migrate an empty database from base. Every later command runs alembic.
+
+Alembic runs in-process (``run_alembic_in_process``): a subprocess paid about a
+second per command to start an interpreter and import the app.
+``run_alembic_subprocess`` keeps the CLI path operators use covered.
 """
 
 import importlib.util
+import logging
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+import traceback
+from argparse import Namespace
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from io import StringIO
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol
 
+from alembic import command as alembic_command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, create_engine, text
@@ -30,6 +40,13 @@ from sqlalchemy.pool import NullPool
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _VERSIONS = _BACKEND_DIR / "app" / "migrations" / "versions"
 _TEMPLATE_PID = re.compile(r"^tpl_(\d+)_")
+# The format of alembic.ini's console handler, so captured output reads as the
+# CLI's did.
+_LOG_FORMAT = "%(levelname)-5.5s [%(name)s] %(message)s"
+_COMMANDS: dict[str, Callable[[Config, str], None]] = {
+    "upgrade": alembic_command.upgrade,
+    "downgrade": alembic_command.downgrade,
+}
 
 
 class RunAlembic(Protocol):
@@ -81,6 +98,82 @@ def run_alembic_subprocess(
     return f"{result.stdout}\n{result.stderr}"
 
 
+def migrations_config(
+    database_url: str | None = None, *, x_args: Mapping[str, str] | None = None
+) -> Config:
+    """An alembic ``Config`` for the app's migrations, built without alembic.ini.
+
+    Without an ini file ``env.py`` skips ``fileConfig``, which would otherwise
+    disable every logger already created in this process. ``script_location``
+    is absolute, so the working directory does not matter. ``database_url``
+    reaches ``env.py`` through ``Config.attributes``, ahead of ``DATABASE_URL``.
+    """
+    config = Config(
+        stdout=StringIO(),
+        cmd_opts=Namespace(
+            x=[f"{key}={value}" for key, value in (x_args or {}).items()]
+        ),
+    )
+    config.set_main_option("script_location", str(_VERSIONS.parent))
+    if database_url is not None:
+        config.attributes["database_url"] = database_url
+    return config
+
+
+def run_alembic_in_process(
+    database_url: str,
+    command: str,
+    target: str,
+    *,
+    x_args: Mapping[str, str] | None = None,
+) -> str:
+    """Run ``alembic [-x k=v ...] <command> <target>`` inside this process.
+
+    Same contract as ``run_alembic_subprocess``: returns alembic's log output,
+    raises ``RuntimeError`` carrying it (and the traceback) when the command
+    fails. Only ``upgrade`` and ``downgrade`` are supported.
+    """
+    run = _COMMANDS.get(command)
+    if run is None:
+        raise ValueError(f"unsupported alembic command {command!r}")
+    config = migrations_config(database_url, x_args=x_args)
+    output = StringIO()
+    with _capture_alembic_logs(output):
+        try:
+            run(config, target)
+        except Exception as exc:
+            raise RuntimeError(
+                f"alembic {command} {target} failed:\n{output.getvalue()}\n"
+                f"{traceback.format_exc()}"
+            ) from exc
+    return output.getvalue()
+
+
+@contextmanager
+def _capture_alembic_logs(output: StringIO) -> Iterator[None]:
+    """Send the ``alembic`` logger's INFO lines to ``output`` for one command.
+
+    It inherits WARNING from the root logger, so its level is raised to INFO;
+    propagation is off so the lines are not repeated in pytest's capture. Every
+    setting is restored afterwards.
+    """
+    logger = logging.getLogger("alembic")
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    level, propagate, disabled = logger.level, logger.propagate, logger.disabled
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.disabled = False
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+        logger.propagate = propagate
+        logger.disabled = disabled
+
+
 def _admin_engine(admin_url: URL) -> Engine:
     """A synchronous engine for ``CREATE``/``DROP DATABASE`` on the server."""
     return create_engine(
@@ -112,11 +205,7 @@ class MigrationTemplates:
         self._admin_url = admin_url
         self._prefix = prefix
         self._engine = _admin_engine(admin_url)
-        # alembic.ini's ``script_location`` is relative to the working
-        # directory, so pin it: pytest may be launched from the repository root.
-        config = Config(str(_BACKEND_DIR / "alembic.ini"))
-        config.set_main_option("script_location", str(_VERSIONS.parent))
-        self._script = ScriptDirectory.from_config(config)
+        self._script = ScriptDirectory.from_config(migrations_config())
         self._sources: dict[str, str | None] = {}
         self._fresh: set[str] = set()
         self.clones = 0
@@ -176,7 +265,7 @@ class MigrationTemplates:
         )
         self._recreate(name, source)
         try:
-            run_alembic_subprocess(
+            run_alembic_in_process(
                 self._admin_url.set(database=name).render_as_string(
                     hide_password=False
                 ),

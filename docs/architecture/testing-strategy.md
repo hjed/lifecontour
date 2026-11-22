@@ -327,6 +327,14 @@ the upgrade under test included, runs alembic for real. Use the shared `throwawa
 `run_alembic` fixtures rather than local copies, or a file pays the full migration from base on
 every test.
 
+`run_alembic` runs alembic **in-process** (`run_alembic_in_process`), saving the ~1s of interpreter
+start and app import a `python -m alembic` subprocess paid per command. Its `Config` is built
+without `alembic.ini` (`migrations_config`), because `env.py` would otherwise call `fileConfig` and
+disable every logger already created in the test process; the URL reaches `env.py` through
+`Config.attributes["database_url"]`, ahead of `DATABASE_URL`. A migration's log lines (the
+`alembic.runtime.migration` logger) are what `run_alembic` returns. The session's `upgrade head`
+and `run_alembic_subprocess` keep the CLI path covered.
+
 ### MCP Integration Testing Guidelines
 
 Every app the integration suite builds without MCP auth mounts **one shared FastMCP server**
