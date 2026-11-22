@@ -428,7 +428,8 @@ class TestRekeyedAdoption:
         calendar_id = await create_calendar(async_connection)
         processor = build_processor(async_connection)
         journal_id = await _seed(processor, calendar_id)
-        await processor.process_event(_adoption(calendar_id, journal_id))
+        first = _adoption(calendar_id, journal_id)
+        await processor.process_event(first)
         later = NEW_START + timedelta(minutes=30)
         later_id = f"{RECURRENCE}_{later:%Y%m%dT%H%M%SZ}"
         second = _event(
@@ -442,10 +443,43 @@ class TestRekeyedAdoption:
         )
         await processor.process_event(second)
 
-        result = await processor.process_event(_adoption(calendar_id, journal_id))
+        # Redelivered: the same event, stamped before the re-key that overtook it.
+        result = await processor.process_event(first)
 
         assert result["status"] == "skipped"
         assert await _journal_ids(async_connection) == [journal_id]
         assert (await _journal(async_connection, journal_id)).external_event_id == (
             later_id
         )
+
+    async def test_two_re_keys_queued_together_apply_in_order(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Re-timed twice before the backend caught up, the worker sent A->B
+        then A->C. Applied in order, the newer one wins: C is Google's."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journal_id = await _seed(processor, calendar_id)
+        first = _adoption(calendar_id, journal_id)
+        latest = NEW_START + timedelta(minutes=30)
+        latest_id = f"{RECURRENCE}_{latest:%Y%m%dT%H%M%SZ}"
+        second = _event(
+            "journal_event.updated",
+            calendar_id,
+            latest_id,
+            latest,
+            etag='"etag-latest"',
+            existing_journal_id=journal_id,
+            rekeyed_from=OLD_ID,
+        )
+        await processor.process_event(first)
+
+        result = await processor.process_event(second)
+
+        assert result["status"] == "success"
+        assert await _journal_ids(async_connection) == [journal_id]
+        journal = await _journal(async_connection, journal_id)
+        assert journal.external_event_id == latest_id
+        assert journal.event_date_range_start == latest

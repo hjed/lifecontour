@@ -377,7 +377,10 @@ retired in one of two ways:
 - **Adopted:** when exactly one new instance of the same recurrence falls on
   that local day, the worker sends it as an update of the old journal carrying
   `rekeyed_from`. The backend re-points the journal's link at the new event
-  only while the link still names `rekeyed_from`. The series is unchanged, and
+  only while the link still names `rekeyed_from`, or names another instance
+  of the same recurrence that an adoption synced *earlier* moved it to. Each
+  adoption records its `sync_timestamp` on the link, so a redelivered older
+  adoption is skipped and a newer one still applies. The series is unchanged, and
   the update merges against the synced base like any other, so local edits are
   kept. If the journal is gone, or its link has moved on, the instance is
   created instead.
