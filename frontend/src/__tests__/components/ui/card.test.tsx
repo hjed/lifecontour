@@ -112,6 +112,27 @@ describe('Card Components', () => {
   });
 
   describe('CardContent', () => {
+    // Local to this app: Vega makes CardContent a flex column with a gap,
+    // which stacked callers that lay out a row with their own `flex`
+    // (OutdoorLogbookStats, the DailySummaryView spinner). Content keeps
+    // only the card's inset and leaves layout to the caller.
+    it('leaves layout to the caller', () => {
+      render(
+        <CardContent className='flex items-center' data-testid='card-content'>
+          Content
+        </CardContent>
+      );
+
+      const content = screen.getByTestId('card-content');
+      expect(content).toHaveClass(
+        'flex',
+        'items-center',
+        'px-(--card-spacing)'
+      );
+      expect(content).not.toHaveClass('flex-col');
+      expect(content.className).not.toMatch(/\bgap-/);
+    });
+
     it('renders children correctly', () => {
       render(
         <CardContent data-testid='card-content'>
