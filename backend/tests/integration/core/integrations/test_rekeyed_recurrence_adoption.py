@@ -381,3 +381,37 @@ class TestRekeyedAdoption:
         journal = await _journal(async_connection, journal_id)
         assert journal.external_event_id == NEW_ID
         assert journal.event_date_range_start == NEW_START
+
+    async def test_a_non_recurring_update_for_another_link_still_applies(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """An additive Strava merge keeps several activities on one journal
+        but one link: updates for the others are not stale."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        created = await processor.process_event(
+            sync_event(
+                "journal_event.created",
+                calendar_id=calendar_id,
+                external_event_id="activity-1",
+                title="Ride",
+                integration_source="strava",
+            )
+        )
+        journal_id = created["journal_id"]
+
+        result = await processor.process_event(
+            sync_event(
+                "journal_event.updated",
+                calendar_id=calendar_id,
+                external_event_id="activity-2",
+                title="Ride",
+                etag='"etag-2"',
+                existing_journal_id=journal_id,
+                integration_source="strava",
+            )
+        )
+
+        assert result["status"] == "success"

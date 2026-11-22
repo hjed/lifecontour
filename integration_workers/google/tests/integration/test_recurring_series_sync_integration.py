@@ -842,3 +842,33 @@ class TestRekeyedRecurrenceIntegration:
             for event_type, data in await self._outbox(db_session)
             if event_type == "journal_event.updated"
         } == set(journals)
+
+    async def test_a_sub_daily_series_is_covered_only_to_its_last_listed_slot(
+        self, db_session
+    ) -> None:
+        """Endless with two slots a day, Google may stop expanding mid-day:
+        the later slots on that day were never listed, so are not gone."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        morning = [self._day(weeks) for weeks in (1, 2)]
+        evening = [start + timedelta(hours=10) for start in morning]
+        for start in (*morning, evening[0]):
+            await self._linked_journal(db_session, calendar_uuid, start)
+        unlisted_evening = await self._linked_journal(
+            db_session, calendar_uuid, evening[1]
+        )
+
+        result, _ = await self._sync(
+            db_session,
+            [self._instance(start) for start in (*morning, evening[0])],
+            sync_type="full",
+        )
+
+        assert result["status"] == "success"
+        cancelled = [
+            data["existing_journal_id"]
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.cancelled"
+        ]
+        assert unlisted_evening not in cancelled

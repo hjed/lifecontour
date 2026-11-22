@@ -301,12 +301,28 @@ def _live_instances(
         ]
         if not slots:
             return None
-        last_day = max(slots).astimezone(zone).date()
-        window_end = datetime.combine(last_day + timedelta(days=1), time(), tzinfo=zone)
+        window_end = _expansion_end(slots, zone)
     return LiveInstances(
         event_ids=frozenset(event.id for event in live),
         window_start=window_start,
         window_end=window_end,
+    )
+
+
+def _expansion_end(slots: Sequence[datetime], zone: ZoneInfo) -> datetime:
+    """Where an endless rule's listing stops proving instances gone (exclusive).
+
+    Through the last listed local day when the rule has at most one slot a
+    day: a recurrence moved earlier has its last old occurrence on that day,
+    after the last new one. A sub-daily rule may stop expanding mid-day, so
+    its later slots that day were never listed: it ends at its last slot.
+    """
+    last = max(slots)
+    days = {slot.astimezone(zone).date() for slot in slots}
+    if len(days) < len(slots):
+        return last + timedelta(microseconds=1)
+    return datetime.combine(
+        last.astimezone(zone).date() + timedelta(days=1), time(), tzinfo=zone
     )
 
 
