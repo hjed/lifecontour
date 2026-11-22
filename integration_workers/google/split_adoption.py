@@ -32,7 +32,7 @@ Two instances pair when all of these hold:
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -61,24 +61,33 @@ class LinkedInstance:
 
 
 @dataclass(frozen=True)
-class SplitTarget:
-    """The journal a new instance adopts, and the series it adopts from.
+class InstanceAdoption:
+    """The journal a new instance adopts in place of an old instance's.
 
     ``old_event_id`` is the old instance whose cancellation the adoption makes
     redundant: it is dropped only once the new instance has adopted the
     journal, never on the pairing alone.
+
+    Two kinds, which the backend handles differently:
+
+    - a split (``adopted_from`` set): the new instance belongs to another
+      recurrence, and the old one's series folds into the new one's;
+    - a re-key (``rekeyed``): the same recurrence re-issued its instance ids
+      (``rekeyed_recurrence``), so the series is unchanged and only the link
+      moves to the new id.
     """
 
     journal_id: int
-    adopted_from: str
     old_event_id: str
+    adopted_from: str | None = None
+    rekeyed: bool = False
 
 
 @dataclass(frozen=True)
 class SplitPairing:
     """New event id -> the journal it adopts (and the old event it replaces)."""
 
-    targets: Mapping[str, SplitTarget] = field(default_factory=dict)
+    targets: Mapping[str, InstanceAdoption] = field(default_factory=dict)
 
 
 def _normalised(title: str | None) -> str:
@@ -94,12 +103,12 @@ def _event_zone(name: str | None) -> ZoneInfo | None:
         return None
 
 
-def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:
-    """The event's local start day, or ``None`` when it has none we can read.
+def event_start(event: GoogleEvent, zone: ZoneInfo) -> datetime | None:
+    """The event's start as an aware instant, or ``None`` when unreadable.
 
-    Runs before the sync loop's per-event error boundary, so a malformed
-    start must not raise: the event is simply not a split half, and the loop
-    rejects it on its own.
+    An all-day event starts at midnight in ``zone``. Runs before the sync
+    loop's per-event error boundary, so a malformed start must not raise:
+    the event is simply not a candidate, and the loop rejects it on its own.
     """
     if event.start is None:
         return None
@@ -112,12 +121,20 @@ def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:
                 moment = moment.replace(
                     tzinfo=_event_zone(event.start.time_zone) or zone
                 )
-            return moment.astimezone(zone).date()
+            return moment
         if event.start.date:
-            return date.fromisoformat(event.start.date)
+            return datetime.combine(
+                date.fromisoformat(event.start.date), time(), tzinfo=zone
+            )
     except ValueError:
         return None
     return None
+
+
+def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:
+    """The event's local start day, or ``None`` when it has none we can read."""
+    moment = event_start(event, zone)
+    return None if moment is None else moment.astimezone(zone).date()
 
 
 def pair_split_instances(
@@ -153,7 +170,7 @@ def pair_split_instances(
             if day is not None:
                 new_by_key[(day, _normalised(event.summary))].append(event)
 
-    targets: dict[str, SplitTarget] = {}
+    targets: dict[str, InstanceAdoption] = {}
     for key, olds in old_by_key.items():
         news = new_by_key.get(key, [])
         if len(olds) != 1 or len(news) != 1:
@@ -164,7 +181,7 @@ def pair_split_instances(
         adopted_from = root_recurring_event_id(old_event.recurring_event_id)
         if adopted_from is None:  # pragma: no cover - filtered above
             continue
-        targets[new_event.id] = SplitTarget(
+        targets[new_event.id] = InstanceAdoption(
             journal_id=old_link.journal_id,
             adopted_from=adopted_from,
             old_event_id=old_event.id,
@@ -179,7 +196,7 @@ def _has_both_halves(events: Sequence[GoogleEvent]) -> bool:
     )
 
 
-def _parse(raw_events: Sequence[dict[str, Any]]) -> list[GoogleEvent]:
+def parse_events(raw_events: Sequence[dict[str, Any]]) -> list[GoogleEvent]:
     """The batch's events, leaving out any the sync loop will itself reject."""
     events = []
     for raw in raw_events:
@@ -201,7 +218,7 @@ async def find_split_pairing(
     A batch without both a cancelled and a live recurring instance cannot
     hold a split, so it costs no query at all.
     """
-    events = _parse(raw_events)
+    events = parse_events(raw_events)
     if not _has_both_halves(events):
         return SplitPairing()
     result = await session.execute(

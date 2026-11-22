@@ -4857,6 +4857,7 @@ async def _sync_calendar_inbound(
     from event_transformer import GoogleEventTransformer
     from inbound_sync import InboundSyncAction, InboundSyncClassifier
     from recurrence import root_recurring_event_id
+    from rekeyed_recurrence import find_rekeyed_instances
     from split_adoption import find_split_pairing
 
     classifier = InboundSyncClassifier()
@@ -4937,12 +4938,43 @@ async def _sync_calendar_inbound(
     split_pairing = await find_split_pairing(
         session, calendar_id, all_raw_events, user_timezone
     )
+    # Re-timing a whole recurrence re-issues every instance id, and
+    # Google never cancels the old ones. Each orphaned link is
+    # adopted by its day's new instance or cancelled here instead
+    # (``rekeyed_recurrence``). A sync-token batch holds only what
+    # changed, so the loader asks Google; a time-ranged listing is
+    # already Google's whole view.
+    rekeyed = await find_rekeyed_instances(
+        session,
+        client,
+        calendar_id,
+        google_calendar_id,
+        all_raw_events,
+        user_timezone,
+        listing_time_min=(
+            None
+            if "sync_token" in list_kwargs
+            else datetime.fromisoformat(list_kwargs["time_min"])
+        ),
+    )
+    adoptions = {**rekeyed.targets, **split_pairing.targets}
+    all_raw_events = [
+        *all_raw_events,
+        *(
+            {
+                "id": retired.external_event_id,
+                "status": "cancelled",
+                "recurringEventId": retired.recurring_event_id,
+            }
+            for retired in rekeyed.retired
+        ),
+    ]
     # Old instances whose journal a new instance has adopted. Live
     # events go first, so an old cancellation is only dropped once
     # its partner really adopted the journal - not when the partner
     # was sent elsewhere (the cross-calendar de-dupe, say).
     adopted_old_event_ids: set[str] = set()
-    if split_pairing.targets:
+    if adoptions:
         all_raw_events = sorted(
             all_raw_events, key=lambda e: e.get("status") == "cancelled"
         )
@@ -5062,19 +5094,25 @@ async def _sync_calendar_inbound(
                         metrics.get("events_deduplicated", 0) + 1
                     )
 
-            split_target = split_pairing.targets.get(google_event.id)
-            if action == InboundSyncAction.CREATE_JOURNAL and split_target is not None:
-                deduped_journal_id = split_target.journal_id
+            adoption = adoptions.get(google_event.id)
+            if action == InboundSyncAction.CREATE_JOURNAL and adoption is not None:
+                deduped_journal_id = adoption.journal_id
                 action = InboundSyncAction.UPDATE_JOURNAL
-                metrics["events_split_adopted"] = (
-                    metrics.get("events_split_adopted", 0) + 1
+                metric = (
+                    "events_rekey_adopted"
+                    if adoption.rekeyed
+                    else "events_split_adopted"
                 )
-            split_adopted_from = (
-                split_target.adopted_from
-                if split_target is not None
-                and deduped_journal_id == split_target.journal_id
+                metrics[metric] = metrics.get(metric, 0) + 1
+            # Adopted only when nothing (the cross-calendar de-dupe, say)
+            # sent the new instance to another journal.
+            adopted = (
+                adoption
+                if adoption is not None and deduped_journal_id == adoption.journal_id
                 else None
             )
+            split_adopted_from = adopted.adopted_from if adopted else None
+            rekeyed_from = adopted.old_event_id if adopted and adopted.rekeyed else None
 
             # An unchanged event is skipped on its ETag, so its
             # participants are re-synced once when that would
@@ -5235,10 +5273,7 @@ async def _sync_calendar_inbound(
             # An adoption carries the content too, for the
             # backend's fallback when the adopted journal has
             # gone; it never overwrites the journal's notes.
-            if (
-                action == InboundSyncAction.CREATE_JOURNAL
-                or split_adopted_from is not None
-            ):
+            if action == InboundSyncAction.CREATE_JOURNAL or adopted:
                 journal_data["content"] = journal.content
             calendar_info_data = {
                 "calendar_id": str(calendar_id),
@@ -5293,6 +5328,7 @@ async def _sync_calendar_inbound(
                     google_event.recurring_event_id
                 ),
                 split_adopted_from=split_adopted_from,
+                rekeyed_from=rekeyed_from,
                 # The keys of Google's values: the base the backend records
                 # for the next push to merge against (#1899).
                 synced_entries=serialise_synced_entries(
@@ -5306,8 +5342,8 @@ async def _sync_calendar_inbound(
             metrics["events_processed"] += 1
             # Only an adoption actually sent makes the old
             # instance's cancellation redundant.
-            if split_target is not None and split_adopted_from:
-                adopted_old_event_ids.add(split_target.old_event_id)
+            if adopted is not None:
+                adopted_old_event_ids.add(adopted.old_event_id)
 
         except Exception as e:  # noqa: BLE001
             logger.error(

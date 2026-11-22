@@ -321,3 +321,41 @@ class TestIsPermissionDenied:
         error = google_http_error(status, _forbidden_content("forbidden"))
 
         assert is_permission_denied(error) is False
+
+
+@pytest.mark.asyncio
+async def test_list_instances_pages_through_every_instance(
+    mock_auth_service, mock_google_calendar_service
+) -> None:
+    """``list_instances`` follows ``nextPageToken`` and returns every item."""
+    from google_client import GoogleAPIClient
+
+    mock_instances = mock_google_calendar_service.events.return_value.instances
+    mock_instances.return_value.execute.side_effect = [
+        {"items": [{"id": "r_1"}, {"id": "r_2"}], "nextPageToken": "page-2"},
+        {"items": [{"id": "r_3"}]},
+    ]
+
+    client = GoogleAPIClient(
+        auth_service=mock_auth_service,
+        google_account_email="test@example.com",
+        google_client_id="client_id",
+        google_client_secret="client_secret",
+        user_id=1,
+    )
+
+    with patch.object(
+        client, "_get_calendar_service", return_value=mock_google_calendar_service
+    ):
+        result = await client.list_instances(
+            "work@example.com", "r", time_min="2026-11-01T00:00:00+00:00"
+        )
+
+    assert [item["id"] for item in result] == ["r_1", "r_2", "r_3"]
+    assert mock_instances.call_args_list[0].kwargs == {
+        "calendarId": "work@example.com",
+        "eventId": "r",
+        "maxResults": 2500,
+        "timeMin": "2026-11-01T00:00:00+00:00",
+    }
+    assert mock_instances.call_args_list[1].kwargs["pageToken"] == "page-2"

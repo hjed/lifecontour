@@ -24,6 +24,24 @@ def _no_merged_aliases():
         yield repo_class
 
 
+@pytest.fixture(autouse=True)
+def _no_rekeyed_instances():
+    """No recurrence here re-issued its instance ids.
+
+    The loader reads links from the database, and would otherwise consume the
+    scripted session's results. It is covered against a real database in
+    ``tests/integration/test_recurring_series_sync_integration.py``; tests of
+    the loop's handling of a plan set this mock's ``return_value``.
+    """
+    from rekeyed_recurrence import RekeyedPlan
+
+    with patch(
+        "rekeyed_recurrence.find_rekeyed_instances",
+        AsyncMock(return_value=RekeyedPlan()),
+    ) as finder:
+        yield finder
+
+
 def _make_google_event(
     *,
     event_id: str = "google-event-1",
@@ -2246,3 +2264,321 @@ class TestSyncRefreshesAccessRoles:
             result = await sync_calendar_events(ctx, "test@example.com", "user-1")
 
         assert result["status"] == "success"
+
+
+class TestRekeyedRecurrence:
+    """A recurrence re-timed as a whole re-issues every instance id, and
+    Google never cancels the old ones. The loop acts on the loader's plan:
+    new instances adopt the old journals, and retired ids nobody adopted are
+    cancelled as if Google had said so."""
+
+    RECURRENCE = "dc7pp0jpb9fdfg6b6csu2jbfes"
+
+    @pytest.fixture(autouse=True)
+    def mock_metrics_collector(self):
+        from core_shared.metrics import MetricsCollector
+
+        with patch("worker.metrics_collector", spec_set=MetricsCollector) as mock_mc:
+            yield mock_mc
+
+    @pytest.fixture
+    def mock_session(self) -> AsyncMock:
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        return session
+
+    @pytest.fixture
+    def mock_ctx(self, mock_session: AsyncMock) -> dict[str, Any]:
+        factory = MagicMock(return_value=mock_session)
+        return make_arq_ctx(session_factory=factory, redis=make_mock_redis())
+
+    @classmethod
+    def _instance(cls, day: int, hour: int = 3, minute: int = 30) -> str:
+        return f"{cls.RECURRENCE}_202612{day:02d}T{hour:02d}{minute:02d}00Z"
+
+    @classmethod
+    def _new_event(cls, day: int, **overrides: Any) -> dict[str, Any]:
+        start = f"2026-12-{day:02d}T03:30:00Z"
+        return _make_google_event(
+            event_id=cls._instance(day),
+            summary="Retro",
+            start_dt=start,
+            end_dt=f"2026-12-{day:02d}T04:30:00Z",
+            recurring_event_id=cls.RECURRENCE,
+            **overrides,
+        )
+
+    @classmethod
+    def _retired(cls, day: int, journal_id: int) -> Any:
+        from rekeyed_recurrence import RetiredInstance
+
+        return RetiredInstance(
+            external_event_id=cls._instance(day, minute=0),
+            recurring_event_id=cls.RECURRENCE,
+            journal_id=journal_id,
+        )
+
+    @classmethod
+    def _adoption(cls, day: int, journal_id: int) -> Any:
+        from split_adoption import InstanceAdoption
+
+        return InstanceAdoption(
+            journal_id=journal_id,
+            old_event_id=cls._instance(day, minute=0),
+            rekeyed=True,
+        )
+
+    @staticmethod
+    def _no_link() -> MagicMock:
+        result = MagicMock()
+        result.fetchone.return_value = None
+        return result
+
+    @classmethod
+    def _old_link(cls, journal_id: int) -> tuple[MagicMock, MagicMock]:
+        """An old instance's link lookup and its journal's (future) end."""
+        from datetime import UTC, datetime, timedelta
+
+        link = MagicMock()
+        link.fetchone.return_value = MagicMock(
+            journal_id=journal_id,
+            external_version='"etag-old"',
+            sync_capability="bidirectional",
+            sync_status="synced",
+            recurring_event_id=cls.RECURRENCE,
+            external_identity=None,
+        )
+        end = MagicMock()
+        end.scalar.return_value = datetime.now(UTC) + timedelta(days=30)
+        return link, end
+
+    @staticmethod
+    def _calendar_and_token(token: str | None = None) -> list[MagicMock]:
+        cal_result = MagicMock()
+        cal_result.fetchall.return_value = [_make_calendar_row()]
+        token_result = MagicMock()
+        token_result.scalar.return_value = token
+        return [cal_result, token_result]
+
+    @staticmethod
+    async def _sync(
+        mock_ctx: dict[str, Any],
+        items: list[dict[str, Any]],
+        sync_type: str = "full",
+        list_events: AsyncMock | None = None,
+    ) -> dict[str, Any]:
+        from worker import sync_calendar_events
+
+        client = MagicMock()
+        client.list_events = list_events or AsyncMock(
+            return_value={"items": items, "nextSyncToken": "new-sync-token"}
+        )
+        with patch("worker._create_google_client", return_value=client):
+            return await sync_calendar_events(
+                mock_ctx, "test@example.com", "user-1", sync_type
+            )
+
+    @pytest.mark.asyncio
+    async def test_rekeyed_instances_adopt_the_old_journals(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """Each new id updates its old journal, and no old id is cancelled."""
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            targets={
+                self._instance(7): self._adoption(7, 100),
+                self._instance(14): self._adoption(14, 101),
+                self._instance(21): self._adoption(21, 102),
+            },
+            retired=(
+                self._retired(7, 100),
+                self._retired(14, 101),
+                self._retired(21, 102),
+            ),
+        )
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            self._no_link(),
+            self._no_link(),
+            self._no_link(),
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._sync(
+            mock_ctx, [self._new_event(7), self._new_event(14), self._new_event(21)]
+        )
+
+        assert result["status"] == "success"
+        added = [call.args[0] for call in mock_session.add.call_args_list]
+        assert [e.event_type for e in added] == ["journal_event.updated"] * 3
+        assert [
+            (
+                e.event_data["external_event_id"],
+                e.event_data["existing_journal_id"],
+                e.event_data["rekeyed_from"],
+                e.event_data["split_adopted_from"],
+            )
+            for e in added
+        ] == [
+            (self._instance(day), journal_id, self._instance(day, minute=0), None)
+            for day, journal_id in ((7, 100), (14, 101), (21, 102))
+        ]
+        # Carried for the backend's fallback when the adopted journal has gone.
+        assert added[0].event_data["journal_data"]["content"] == "Weekly sync"
+        assert result["events_rekey_adopted"] == 3
+
+    @pytest.mark.asyncio
+    async def test_unadopted_retired_instances_are_cancelled_after_live_events(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """A move to another day pairs nothing: the new instance is created
+        and the old id is cancelled, exactly as an explicit cancellation."""
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            retired=(self._retired(7, 100),)
+        )
+        old_link, old_end = self._old_link(100)
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            self._no_link(),  # the new instance
+            old_link,  # the retired id's link
+            old_end,  # its journal's end, for the past-event skip
+            MagicMock(),  # sync token save
+        ]
+
+        result = await self._sync(mock_ctx, [self._new_event(8)])
+
+        assert result["status"] == "success"
+        added = [call.args[0] for call in mock_session.add.call_args_list]
+        assert [e.event_type for e in added] == [
+            "journal_event.created",
+            "journal_event.cancelled",
+        ]
+        cancelled = added[1].event_data
+        assert cancelled["external_event_id"] == self._instance(7, minute=0)
+        assert cancelled["existing_journal_id"] == 100
+        assert cancelled["recurring_event_id"] == self.RECURRENCE
+        assert added[0].event_data["rekeyed_from"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_new_instance_deduped_elsewhere_leaves_the_cancellation(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """Sent to another journal by the cross-calendar de-dupe, the new
+        instance adopted nothing, so the old journal must still be cancelled."""
+        from rekeyed_recurrence import RekeyedPlan
+
+        _no_rekeyed_instances.return_value = RekeyedPlan(
+            targets={self._instance(7): self._adoption(7, 100)},
+            retired=(self._retired(7, 100),),
+        )
+        identity_hit = MagicMock()
+        identity_hit.fetchone.return_value = MagicMock(journal_id=77)
+        old_link, old_end = self._old_link(100)
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token(),
+            self._no_link(),
+            identity_hit,  # cross-calendar de-dupe finds journal 77
+            old_link,
+            old_end,
+            MagicMock(),
+        ]
+
+        result = await self._sync(
+            mock_ctx,
+            [
+                self._new_event(
+                    7,
+                    ical_uid="shared@google.com",
+                    original_start_dt="2026-12-07T03:30:00Z",
+                )
+            ],
+        )
+
+        assert result["status"] == "success"
+        added = [call.args[0] for call in mock_session.add.call_args_list]
+        assert [e.event_type for e in added] == [
+            "journal_event.updated",
+            "journal_event.cancelled",
+        ]
+        assert added[0].event_data["existing_journal_id"] == 77
+        assert added[0].event_data["rekeyed_from"] is None
+        assert added[1].event_data["existing_journal_id"] == 100
+        assert result.get("events_rekey_adopted", 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_time_ranged_listing_is_passed_as_complete(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """A full sync's listing is Google's whole view from its time_min."""
+        from datetime import UTC, datetime, timedelta
+
+        mock_session.execute.side_effect = [*self._calendar_and_token(), MagicMock()]
+
+        await self._sync(mock_ctx, [])
+
+        listing_time_min = _no_rekeyed_instances.call_args.kwargs["listing_time_min"]
+        assert listing_time_min is not None
+        assert abs(
+            listing_time_min - (datetime.now(UTC) - timedelta(days=3650))
+        ) < timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_a_sync_token_listing_is_passed_as_partial(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """An incremental batch holds only what changed."""
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token("old-token"),
+            MagicMock(),
+        ]
+
+        await self._sync(mock_ctx, [], sync_type="incremental")
+
+        assert _no_rekeyed_instances.call_args.kwargs["listing_time_min"] is None
+
+    @pytest.mark.asyncio
+    async def test_the_invalid_token_fallback_is_passed_as_complete(
+        self,
+        mock_ctx: dict[str, Any],
+        mock_session: AsyncMock,
+        _no_rekeyed_instances: AsyncMock,
+    ) -> None:
+        """After a 410 the sync re-lists by time_min, so the listing is whole."""
+        from googleapiclient.errors import HttpError
+
+        mock_session.execute.side_effect = [
+            *self._calendar_and_token("invalid-token"),
+            MagicMock(),  # clear the token
+            MagicMock(),  # save the new token
+        ]
+        gone = HttpError(resp=MagicMock(status=410), content=b"gone")
+
+        await self._sync(
+            mock_ctx,
+            [],
+            sync_type="incremental",
+            list_events=AsyncMock(
+                side_effect=[gone, {"items": [], "nextSyncToken": "new"}]
+            ),
+        )
+
+        assert _no_rekeyed_instances.call_args.kwargs["listing_time_min"] is not None

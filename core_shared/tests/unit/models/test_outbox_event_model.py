@@ -15,6 +15,7 @@ from core_shared.models.outbox import OutboxEvent
 from core_shared.models.outbox_events import (
     ImmichAlbumSyncEventData,
     JournalSeriesCancelledEventData,
+    JournalSyncEventData,
     parse_outbox_event_data,
 )
 
@@ -222,3 +223,36 @@ class TestCreateJournalSyncEventRecurring:
         )
 
         assert event.event_data["split_adopted_from"] is None
+
+    def test_rekeyed_from_in_payload(self) -> None:
+        """A re-key adoption names the old instance id whose journal it takes."""
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="r-1_20261214T033000Z",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="updated",
+            existing_journal_id=7,
+            recurring_event_id="r-1",
+            rekeyed_from="r-1_20261214T030000Z",
+        )
+
+        assert event.event_data["rekeyed_from"] == "r-1_20261214T030000Z"
+        assert (
+            JournalSyncEventData.model_validate(event.event_data).rekeyed_from
+            == "r-1_20261214T030000Z"
+        )
+
+    def test_rekeyed_from_is_absent_from_older_payloads(self) -> None:
+        event = OutboxEvent.create_journal_sync_event(
+            journal_data={},
+            calendar_info_data={},
+            integration_source="google",
+            external_event_id="evt-2",
+            calendar_id="00000000-0000-0000-0000-000000000001",
+            sync_action="updated",
+        )
+        older = {k: v for k, v in event.event_data.items() if k != "rekeyed_from"}
+
+        assert JournalSyncEventData.model_validate(older).rekeyed_from is None
