@@ -58,7 +58,7 @@ export function FavouriteToggle({
       aria-pressed={isFavourite}
       data-testid='favourite-toggle'
       className={cn(
-        'hover:bg-yellow-50 hover:text-yellow-600 focus-visible:ring-yellow-500',
+        'hover:bg-warning/10 hover:text-warning focus-visible:ring-warning',
         className
       )}
     >
@@ -67,8 +67,8 @@ export function FavouriteToggle({
           iconSizes[size],
           'transition-colors',
           isFavourite
-            ? 'fill-yellow-400 text-yellow-400'
-            : 'text-gray-400 hover:text-yellow-400'
+            ? 'fill-warning text-warning'
+            : 'text-muted-foreground hover:text-warning'
         )}
         aria-hidden='true'
         data-testid={isFavourite ? 'favourite-icon' : undefined}

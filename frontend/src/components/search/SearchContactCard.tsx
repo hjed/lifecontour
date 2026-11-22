@@ -33,7 +33,7 @@ export function SearchContactCard({
           {signals.isFavourite && (
             <Badge
               variant='secondary'
-              className='gap-1 bg-yellow-100 text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+              className='bg-warning/15 text-warning gap-1 text-xs'
               aria-label='Favourite contact'
             >
               <Star className='h-3 w-3 fill-current' aria-hidden='true' />
@@ -66,7 +66,7 @@ export function SearchContactCard({
           {signals.hasSummary && (
             <Badge
               variant='secondary'
-              className='gap-1 bg-purple-100 text-xs text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+              className='gap-1 text-xs'
               aria-label='AI summary available'
             >
               <Sparkles className='h-3 w-3' aria-hidden='true' />

@@ -58,7 +58,7 @@ export function HealthStatus({
       <DialogContent className='max-w-md'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <Cpu className='h-5 w-5 text-blue-500' />
+            <Cpu className='text-info h-5 w-5' />
             Worker & Connection Health
           </DialogTitle>
         </DialogHeader>

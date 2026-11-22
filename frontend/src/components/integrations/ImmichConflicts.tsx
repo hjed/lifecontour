@@ -50,14 +50,14 @@ function ConflictItem({ conflict, onResolve, isResolving }: ConflictItemProps) {
 
   return (
     <div
-      className='rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20'
+      className='border-warning/30 bg-warning/10 rounded-lg border p-4'
       data-testid={`conflict-item-${conflict.id}`}
     >
       <div className='flex items-start justify-between gap-4'>
         <div className='min-w-0 flex-1'>
           <div className='flex items-center gap-2'>
-            <AlertTriangle className='h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-400' />
-            <h4 className='truncate text-sm font-medium text-amber-800 dark:text-amber-300'>
+            <AlertTriangle className='text-warning h-4 w-4 flex-shrink-0' />
+            <h4 className='text-warning truncate text-sm font-medium'>
               {attributes.externalEntityName || 'Unknown Person'}
             </h4>
             <Badge variant='outline' className='text-xs'>
@@ -70,7 +70,7 @@ function ConflictItem({ conflict, onResolve, isResolving }: ConflictItemProps) {
 
           {attributes.candidateContacts.length > 0 && (
             <div className='mt-3'>
-              <p className='text-xs font-medium text-amber-700 dark:text-amber-400'>
+              <p className='text-warning text-xs font-medium'>
                 Possible matches ({attributes.candidateContacts.length}{' '}
                 contacts):
               </p>
@@ -100,7 +100,7 @@ function ConflictItem({ conflict, onResolve, isResolving }: ConflictItemProps) {
           )}
 
           <div className='mt-3'>
-            <p className='text-xs font-medium text-amber-700 dark:text-amber-400'>
+            <p className='text-warning text-xs font-medium'>
               Or search for a different contact:
             </p>
             <div className='mt-1'>
@@ -210,7 +210,7 @@ export function ImmichConflicts({ connected = false }: ImmichConflictsProps) {
       aria-label='Immich synchronisation conflicts'
     >
       <div className='flex items-center gap-2'>
-        <AlertTriangle className='h-4 w-4 text-amber-600 dark:text-amber-400' />
+        <AlertTriangle className='text-warning h-4 w-4' />
         <h3 className='text-sm font-medium'>
           Synchronisation Conflicts
           <Badge variant='secondary' className='ml-2'>

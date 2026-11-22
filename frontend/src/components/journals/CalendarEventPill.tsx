@@ -46,7 +46,7 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
             )}
             {event.hasPendingReviews && (
               <div
-                className='flex flex-row items-center gap-1 rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-bold text-red-200 uppercase'
+                className='flex flex-row items-center gap-1 rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-bold uppercase'
                 data-testid='needs-review-badge'
                 role='img'
                 aria-label='Needs Review'
@@ -94,7 +94,7 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
           <span className='truncate'>{event.title}</span>
           {event.hasPendingReviews && (
             <div
-              className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
+              className='bg-destructive h-2 w-2 shrink-0 rounded-full shadow-sm'
               data-testid='needs-review-badge'
               role='img'
               aria-label='Needs Review'
@@ -128,7 +128,7 @@ export function CalendarEventPill({ event, variant }: CalendarEventPillProps) {
         <span className='truncate'>{event.title}</span>
         {event.hasPendingReviews && (
           <div
-            className='h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-sm'
+            className='bg-destructive h-2 w-2 shrink-0 rounded-full shadow-sm'
             data-testid='needs-review-badge'
             role='img'
             aria-label='Needs Review'

@@ -82,12 +82,12 @@ function getActivityType(
 function getActivityIcon(type: 'created' | 'updated' | 'deleted') {
   switch (type) {
     case 'created':
-      return <PlusCircle className='h-4 w-4 text-green-500' />;
+      return <PlusCircle className='text-success h-4 w-4' />;
     case 'deleted':
-      return <Trash2 className='h-4 w-4 text-red-500' />;
+      return <Trash2 className='text-destructive h-4 w-4' />;
     case 'updated':
     default:
-      return <Edit className='h-4 w-4 text-blue-500' />;
+      return <Edit className='text-info h-4 w-4' />;
   }
 }
 
