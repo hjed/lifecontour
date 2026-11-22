@@ -61,6 +61,7 @@ from app.api.common.schemas import (
     JsonApiResponse,
     JsonApiUpdateRequest,
 )
+from app.shared.patch import UNSET, Unset
 
 RESOURCE_TYPE_DESC = "Resource type"
 TASK_RESOURCE_TYPE: Literal["tasks"] = "tasks"
@@ -217,13 +218,20 @@ class TaskCreateRequest(JsonApiCreateRequest[TaskCreateData]):
 class TaskUpdateAttributes(BaseModel):
     """Attributes a client may send to update a task.
 
-    The text and the status, and **both are optional individually**: JSON:API
-    sends the attributes that changed, so a client rewording a task sends no
-    status and one completing it sends no text. Sending both is a single change
-    to a single resource, which is why the service applies them under one read
-    and one write rather than as two calls that could half-succeed.
+    The text, the status, the flag and the icon, and **each is optional
+    individually**: JSON:API sends the attributes that changed, so a client
+    rewording a task sends no status and one completing it sends no text.
+    Sending several is a single change to a single resource, which is why the
+    service applies them under one read and one write rather than as separate
+    calls that could half-succeed.
 
-    What is refused is a body naming *neither*. Down in the service that is
+    **The flag and icon apply to every task**, journal-only ones included, in
+    any status. The two differ on ``null``, as the list ``PATCH`` does:
+    ``"icon": null`` **clears** the icon while an absent ``icon`` leaves it
+    alone (told apart with ``model_fields_set``, through :meth:`icon_change`),
+    whereas a task is always flagged or not, so ``"flagged": null`` is refused.
+
+    What is refused is a body naming *no change*. Down in the service that is
     simply nothing to do; out here it is a client that built a request wrong,
     and answering 200 would tell it the edit it thinks it made was applied.
 
@@ -252,6 +260,25 @@ class TaskUpdateAttributes(BaseModel):
             "unchanged."
         ),
     )
+    flagged: StrictBool | None = Field(
+        default=None,
+        description=(
+            "true to flag the task as one that matters, false to unflag it. Any "
+            "task, in any status. A real boolean; null is refused. Omit to "
+            "leave it unchanged."
+        ),
+    )
+    icon: TaskIcon | None = Field(
+        default=None,
+        description=(
+            "Icon key from the fixed set, or null to clear the icon. Any task, "
+            "in any status. Omit to leave it unchanged."
+        ),
+    )
+
+    def icon_change(self) -> TaskIcon | None | Unset:
+        """The icon as the service takes it: a key, ``None`` to clear, or UNSET."""
+        return self.icon if "icon" in self.model_fields_set else UNSET
 
     @model_validator(mode="after")
     def _must_name_a_change(self) -> TaskUpdateAttributes:
@@ -262,9 +289,24 @@ class TaskUpdateAttributes(BaseModel):
         as "not sent" is the only interpretation that does not invent a fourth
         state. A body carrying nothing but nulls therefore names no change and
         is refused here like any other.
+
+        The icon is the exception the other way: ``{"icon": null}`` clears it,
+        so it is a change on its own. The flag cannot be null at all.
         """
-        if self.text is None and self.status is None:
-            raise ValueError("An update must name at least one of 'text' or 'status'.")
+        if "flagged" in self.model_fields_set and self.flagged is None:
+            raise ValueError(
+                "'flagged' cannot be null: a task is either flagged or not."
+            )
+        if (
+            self.text is None
+            and self.status is None
+            and self.flagged is None
+            and "icon" not in self.model_fields_set
+        ):
+            raise ValueError(
+                "An update must name at least one of 'text', 'status', "
+                "'flagged' or 'icon'."
+            )
         return self
 
 

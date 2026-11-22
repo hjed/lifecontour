@@ -479,6 +479,27 @@ async def stored_text(conn: AsyncConnection, task_id: int) -> str:
     )
 
 
+async def stored_marks(conn: AsyncConnection, task_id: int) -> tuple[bool, str | None]:
+    """The ``flagged`` and ``icon`` columns as the database holds them."""
+    row = (
+        await conn.execute(
+            text("SELECT flagged, icon FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).one()
+    return bool(row.flagged), row.icon
+
+
+async def mark_task(
+    conn: AsyncConnection, task_id: int, *, flagged: bool, icon: str | None
+) -> None:
+    """Give a seeded task a flag and an icon directly, below every layer."""
+    await conn.execute(
+        text("UPDATE tasks SET flagged = :flagged, icon = :icon WHERE id = :task_id"),
+        {"task_id": task_id, "flagged": flagged, "icon": icon},
+    )
+
+
 async def backdate_updated_at(conn: AsyncConnection, task_id: int) -> datetime:
     """Move a task's ``updated_at`` into the past, and return where it was put.
 
@@ -786,8 +807,9 @@ async def seed_archived_list_task(
 async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
     """Everything a task write could change, read straight from the tables.
 
-    Existence, status, text, both anchors, and both kinds of link — so one
-    equality says a refused write left the task exactly as it was.
+    Existence, status, text, both anchors, both kinds of link, and the flag
+    and icon — so one equality says a refused write left the task exactly as it
+    was.
     """
     if not await task_exists(conn, task_id):
         return (False,)
@@ -798,6 +820,7 @@ async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
         await stored_anchors(conn, task_id),
         await intermediate_journal_ids(conn, task_id),
         await linked_contact_ids(conn, task_id),
+        await stored_marks(conn, task_id),
     )
 
 

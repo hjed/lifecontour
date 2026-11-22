@@ -8,7 +8,7 @@ phase makes each task write consult it.
 
 What is pinned here, against mocked ports:
 
-- each of the seven writes refuses a task on an archived list with
+- each task write (a flag and icon edit included) refuses a task on an archived list with
   ``TaskListArchivedError``, and writes and publishes nothing first — except
   the delete, whose statement *is* its read, so it refuses after the statement
   and leaves undoing it to the unit of work (proved against a real database in
@@ -28,6 +28,7 @@ import pytest
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.tasks import (
     Task,
+    TaskIcon,
     TaskList,
     TaskListArchivedError,
     TaskNotFoundError,
@@ -195,6 +196,16 @@ async def _update_text(service: TaskService, tx: AsyncMock) -> object:
     )
 
 
+async def _flag_and_icon(service: TaskService, tx: AsyncMock) -> object:
+    return await service.update_task(
+        user_id=USER_ID,
+        task_id=TASK_ID,
+        flagged=True,
+        icon=TaskIcon.TENT,
+        transaction=tx,
+    )
+
+
 async def _delete(service: TaskService, tx: AsyncMock) -> object:
     await service.delete_task(user_id=USER_ID, task_id=TASK_ID, transaction=tx)
     return None
@@ -242,6 +253,7 @@ async def _detach(service: TaskService, tx: AsyncMock) -> object:
 WRITES: list[tuple[str, Write]] = [
     ("set_status", _set_status),
     ("update_text", _update_text),
+    ("flag_and_icon", _flag_and_icon),
     ("delete", _delete),
     ("retarget", _retarget),
     ("link_contact", _link_contact),
@@ -431,6 +443,22 @@ class TestNoOpsAreRefusedToo:
                 status=TaskStatus.NOT_DONE,
                 transaction=mock_transaction,
             )
+
+    @pytest.mark.asyncio
+    async def test_resending_the_flag_and_icon_it_already_has(
+        self, service: TaskService, task_repo: AsyncMock, mock_transaction: AsyncMock
+    ) -> None:
+        """An unflagged, icon-less task "set" to unflagged and no icon."""
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                flagged=False,
+                icon=None,
+                transaction=mock_transaction,
+            )
+
+        task_repo.save.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_retargeting_onto_the_journal_it_is_already_due_in(

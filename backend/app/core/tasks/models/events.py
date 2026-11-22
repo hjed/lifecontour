@@ -222,10 +222,10 @@ class TaskCreated(DomainEvent):
 class TaskUpdated(DomainEvent):
     """Event raised when a field of the task changes.
 
-    Four kinds of change reach this one type: a reword, a status move, a contact
-    being linked or unlinked, and a **contact merge** moving a task's people onto
-    the survivor. They arrive from different write paths —
-    :meth:`TaskService.update_task` owns text and status,
+    Five kinds of change reach this one type: a reword, a status move, a flag or
+    icon change, a contact being linked or unlinked, and a **contact merge**
+    moving a task's people onto the survivor. They arrive from different write
+    paths — :meth:`TaskService.update_task` owns text, status, flag and icon,
     :meth:`TaskService.link_contact` / :meth:`~TaskService.unlink_contact` own
     membership, and ``TaskContactMergeService`` owns the merge — but each is one
     write announcing one event.
@@ -260,6 +260,11 @@ class TaskUpdated(DomainEvent):
     and reading a name would add a query to a method that performs none — and
     would fail on exactly the contact a user had just deleted, which is the one
     :meth:`~TaskService.unlink_contact` is most likely to be called about.
+
+    **The flag and the icon** are ``flagged: (old_bool, new_bool)`` and
+    ``icon: (old_key, new_key)``, where a key is the ``TaskIcon`` value and
+    ``None`` is "no icon" — so a cleared icon is ``(key, None)``. The field names
+    are the history labels; the web app words them.
 
     **Only what actually moved is named.** Setting a task's text to the text it
     already has puts no ``text`` key here, so a subscriber never has to tell a

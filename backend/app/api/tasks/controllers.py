@@ -420,7 +420,7 @@ async def update_task(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TaskResponse:
-    """Change a task's text, its status, or both.
+    """Change a task's text, status, flag or icon — any of them, in one write.
 
     A task is reached by its own id here rather than through a journal, because
     neither change involves a journal at all: marking a task done or cancelled
@@ -430,14 +430,19 @@ async def update_task(
     task **collection** — the specification is explicit that no screen lists
     every task — only this member route.
 
-    Both attributes are optional and at least one must be present, because
-    JSON:API sends the attributes that changed. When both arrive they are one
+    Every attribute is optional and at least one must be present, because
+    JSON:API sends the attributes that changed. When several arrive they are one
     change: the service applies them under a single read and a single write, so
     a request can never be half-applied.
 
+    The flag and the icon apply to **every** task, journal-only ones included,
+    in any status. ``"icon": null`` clears the icon; an absent ``icon`` leaves
+    it alone.
+
     Raises:
-        400: An unknown status, blank text, an unknown attribute, a body naming
-             no change at all, or a body id that disagrees with the path.
+        400: An unknown status, blank text, an unknown attribute, a null or
+             non-boolean flag, an icon outside the fixed set, a body naming no
+             change at all, or a body id that disagrees with the path.
         404: The task does not exist or is not yours; the two are the same
              answer by design.
         409: The transition is refused. Only leaving *cancelled* is: a cancelled
@@ -462,6 +467,8 @@ async def update_task(
         task_id=task_id,
         text=attributes.text,
         status=attributes.status,
+        flagged=attributes.flagged,
+        icon=attributes.icon_change(),
         transaction=connection,
         source=Provenance.UI,
         changed_by="ui",

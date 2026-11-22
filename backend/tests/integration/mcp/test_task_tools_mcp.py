@@ -63,13 +63,16 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     linked_contact_ids,
     mark_journal_as_event,
+    mark_task,
     seed_task_list,
     stored_anchors,
+    stored_marks,
     stored_status,
     stored_text,
     stored_updated_at,
     task_events,
     task_exists,
+    task_state,
 )
 
 
@@ -106,8 +109,8 @@ async def _set_task_status(client: Any, **arguments: Any) -> dict[str, Any]:
     return extract_mcp_json_payload(response.text)
 
 
-async def _update_task_text(client: Any, **arguments: Any) -> dict[str, Any]:
-    response = await _raw_call(client, "update_task_text", arguments)
+async def _update_task(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "update_task", arguments)
     assert response.status_code == 200
     return extract_mcp_json_payload(response.text)
 
@@ -961,7 +964,11 @@ class TestIdsOutsideTheColumnsRange:
 
 @pytest.mark.integration
 class TestUpdateTaskTextTool:
-    """Rewording over MCP, asserted against the same rules as the endpoint."""
+    """Rewording over MCP, asserted against the same rules as the endpoint.
+
+    These began as the ``update_task_text`` tests; ``update_task`` replaced that
+    tool and must keep every one of its answers, so they now call it unchanged.
+    """
 
     @pytest.mark.parametrize("status", ["not_done", "done", "cancelled"])
     async def test_the_text_is_editable_in_every_status(
@@ -981,7 +988,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="reworded")
+            payload = await _update_task(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert payload["id"] == task_id
@@ -1005,7 +1012,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="reworded")
+            payload = await _update_task(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert await stored_text(clean_database, task_id) == "reworded"
@@ -1023,7 +1030,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="reworded")
+            payload = await _update_task(client, task_id=task_id, text="reworded")
 
         assert "error" not in payload
         assert await count(clean_database, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
@@ -1044,9 +1051,7 @@ class TestUpdateTaskTextTool:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _refused(
-                client, "update_task_text", task_id=task_id, text="   "
-            )
+            payload = await _refused(client, "update_task", task_id=task_id, text="   ")
 
         assert "text" in payload["message"]
         assert await stored_text(clean_database, task_id) == "print the permit"
@@ -1074,10 +1079,10 @@ class TestUpdateTaskTextTool:
 
         async with authenticated_lifespan_client() as client:
             foreign = await _refused(
-                client, "update_task_text", task_id=foreign_task, text="reworded"
+                client, "update_task", task_id=foreign_task, text="reworded"
             )
             absent = await _refused(
-                client, "update_task_text", task_id=999_999, text="reworded"
+                client, "update_task", task_id=999_999, text="reworded"
             )
 
         assert foreign["error"] == absent["error"] == "Not found"
@@ -1092,11 +1097,11 @@ class TestUpdateTaskTextTool:
         clean_database: AsyncConnection,
         task_anchors: tuple[int, int],
     ):
-        """Two tools, two decisions: rewording is not a way to change a status.
+        """A status move has its own tool: rewording is not a way to change one.
 
-        The combined write exists for the ``PATCH`` body that genuinely carries
-        both. A model gets one tool per intent, so smuggling a status through
-        this one is refused by the transport before the service is reached.
+        The task's own fields share ``update_task``; the lifecycle stays on
+        ``set_task_status``, so a status sent here is refused by the transport
+        before the service is reached.
         """
         creating_id, due_id = task_anchors
         task_id = await create_task(
@@ -1106,13 +1111,167 @@ class TestUpdateTaskTextTool:
         async with authenticated_lifespan_client() as client:
             response = await _raw_call(
                 client,
-                "update_task_text",
+                "update_task",
                 {"task_id": task_id, "text": "reworded", "status": "done"},
             )
 
         assert '"isError":true' in response.text
         assert "unexpected_keyword_argument" in response.text
         assert await stored_status(clean_database, task_id) == "not_done"
+
+
+@pytest.mark.integration
+class TestUpdateTaskFlagAndIcon:
+    """A task's flag and icon over MCP, journal-only tasks included."""
+
+    async def _task(self, conn: AsyncConnection, task_anchors: tuple[int, int]) -> int:
+        creating_id, due_id = task_anchors
+        return await create_task(
+            conn, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+    async def test_a_journal_only_task_is_flagged_and_given_an_icon(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(clean_database, task_anchors)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task(
+                client, task_id=task_id, flagged=True, icon="tent"
+            )
+
+        assert "error" not in payload
+        assert (payload["flagged"], payload["icon"]) == (True, "tent")
+        assert payload["task_list_id"] is None
+        assert await stored_marks(clean_database, task_id) == (True, "tent")
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskUpdated"
+        assert event.payload["changed_fields"] == {
+            "flagged": [False, True],
+            "icon": [None, "tent"],
+        }
+        assert (event.payload["source"], event.payload["changed_by"]) == (
+            "mcp",
+            "mcp",
+        )
+
+    async def test_unflagging_and_clearing_the_icon(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(clean_database, task_anchors)
+        await mark_task(clean_database, task_id, flagged=True, icon="star")
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task(
+                client, task_id=task_id, flagged=False, clear_icon=True
+            )
+
+        assert (payload["flagged"], payload["icon"]) == (False, None)
+        assert await stored_marks(clean_database, task_id) == (False, None)
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert event.payload["changed_fields"] == {
+            "flagged": [True, False],
+            "icon": ["star", None],
+        }
+
+    async def test_text_and_flag_together_are_one_event(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ):
+        task_id = await self._task(clean_database, task_anchors)
+
+        async with authenticated_lifespan_client() as client:
+            await _update_task(client, task_id=task_id, text="reworded", flagged=True)
+
+        (event,) = await task_events(clean_database, task_id=task_id)
+        assert set(event.payload["changed_fields"]) == {"text", "flagged"}
+
+    async def test_a_lapsed_task_can_still_be_flagged(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        past_id = await create_journal(
+            journal_repository, title="Last week", days_offset=-7
+        )
+        task_id = await create_task(
+            clean_database, creating_journal_id=past_id, due_journal_id=past_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task(client, task_id=task_id, flagged=True)
+
+        assert "error" not in payload
+        assert await stored_marks(clean_database, task_id) == (True, None)
+
+    @pytest.mark.parametrize(
+        ("arguments", "field"),
+        [
+            ({"icon": "tent", "clear_icon": True}, "icon"),
+            ({}, "change"),
+            ({"icon": "rocket-ship"}, "icon"),
+            ({"flagged": "true"}, "flagged"),
+        ],
+        ids=["icon-and-clear", "nothing-named", "unknown-icon", "string-flag"],
+    )
+    async def test_a_malformed_call_is_refused_and_changes_nothing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_anchors: tuple[int, int],
+        arguments: dict[str, Any],
+        field: str,
+    ):
+        task_id = await self._task(clean_database, task_anchors)
+        before = await task_state(clean_database, task_id)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client, "update_task", {"task_id": task_id, **arguments}
+            )
+
+        assert response.status_code == 200
+        assert '"isError":true' in response.text
+        assert field in response.text
+        assert await task_state(clean_database, task_id) == before
+        assert await task_events(clean_database, task_id=task_id) == []
+
+    async def test_another_users_task_is_not_found_and_left_alone(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        foreign_journal = await create_journal(
+            journal_repository,
+            title="Somebody else's day",
+            days_offset=7,
+            user_id=OTHER_USER_ID,
+        )
+        foreign_task = await create_task(
+            clean_database,
+            creating_journal_id=foreign_journal,
+            due_journal_id=foreign_journal,
+            user_id=OTHER_USER_ID,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "update_task", task_id=foreign_task, flagged=True, icon="tent"
+            )
+
+        assert refused["error"] == "Not found"
+        assert await stored_marks(clean_database, foreign_task) == (False, None)
+        assert await task_events(clean_database, task_id=foreign_task) == []
 
 
 @pytest.mark.integration
@@ -1327,7 +1486,7 @@ class TestTheToolsRecordMcpProvenance:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(
+            payload = await _update_task(
                 client,
                 task_id=task_id,
                 text="print the permit and the map",
@@ -3942,7 +4101,7 @@ class TestListTasksThroughTheTools:
         assert payload["due_journal_id"] is None
         assert await stored_status(clean_database, task_id) == "done"
 
-    async def test_update_task_text_on_a_list_task_answers_with_null_anchors(
+    async def test_update_task_on_a_list_task_answers_with_null_anchors(
         self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
     ) -> None:
         """The reword succeeds and its answer carries the null anchors."""
@@ -3951,7 +4110,7 @@ class TestListTasksThroughTheTools:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="reworded")
+            payload = await _update_task(client, task_id=task_id, text="reworded")
 
         assert payload["text"] == "reworded"
         assert payload["creating_journal_id"] is None
@@ -4081,7 +4240,7 @@ class TestTaskToolsCarryListDueDateFlagIconAndOverdue:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _update_task_text(client, task_id=task_id, text="wrap it")
+            payload = await _update_task(client, task_id=task_id, text="wrap it")
 
         assert payload["task_list_id"] == list_id
         assert payload["due_date"] is None

@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskStatus
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_relationship_repository import (
@@ -271,6 +271,16 @@ async def _act_update_text(fixtures: _Fixtures, seeded: Seeded) -> None:
         user_id=USER_ID,
         task_id=seeded.task_id,
         text=UPDATED_TEXT,
+        transaction=fixtures.connection,
+    )
+
+
+async def _act_flag_and_icon(fixtures: _Fixtures, seeded: Seeded) -> None:
+    await fixtures.service.update_task(
+        user_id=USER_ID,
+        task_id=seeded.task_id,
+        flagged=True,
+        icon=TaskIcon.TENT,
         transaction=fixtures.connection,
     )
 
@@ -512,6 +522,14 @@ WRITE_PATHS: list[WritePath] = [
         seed=_seed_bare_task,
         act=_act_update_text,
         expects=["updated:text"],
+    ),
+    WritePath(
+        name="flag and icon",
+        ports=frozenset({"save"}),
+        seed=_seed_bare_task,
+        act=_act_flag_and_icon,
+        # One event carrying both, as a reword and a completion share one.
+        expects=["updated:flagged+icon"],
     ),
     WritePath(
         name="status change",

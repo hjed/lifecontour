@@ -102,6 +102,22 @@ export function taskEntryDescription(
   // calls immutable is exactly what a history exists to record.
   if (field_name === 'creating_journal_id') return 'Creating journal changed';
 
+  // The flag is stored as the backend's `str(bool)`, so "True" is the flagged
+  // side. Named on a contact's feed, where the reader needs to know which task.
+  if (field_name === 'flagged') {
+    const description = new_value === 'True' ? 'Flagged' : 'Unflagged';
+    return surface === 'contact' ? named(description) : description;
+  }
+
+  // Icon keys are stable identifiers, not wording, so the line says what
+  // happened rather than quoting the key.
+  if (field_name === 'icon') {
+    let description = 'Icon changed';
+    if (old_value === null) description = 'Icon set';
+    else if (new_value === null) description = 'Icon cleared';
+    return surface === 'contact' ? named(description) : description;
+  }
+
   if (field_name.startsWith(JOURNAL_FIELD_PREFIX)) {
     return new_value ? 'Linked to a journal' : 'Unlinked from a journal';
   }

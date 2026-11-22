@@ -60,7 +60,10 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
     """Each write tool, with arguments that would succeed on an active list."""
     return [
         ("set_task_status", {"task_id": s.task_id, "status": "done"}),
-        ("update_task_text", {"task_id": s.task_id, "text": "pack the spare torch"}),
+        ("update_task", {"task_id": s.task_id, "text": "pack the spare torch"}),
+        ("update_task:flag", {"task_id": s.task_id, "flagged": True}),
+        ("update_task:icon", {"task_id": s.task_id, "icon": "tent"}),
+        ("update_task:clear-icon", {"task_id": s.task_id, "clear_icon": True}),
         ("delete_task", {"task_id": s.task_id}),
         ("retarget_task", {"task_id": s.task_id, "due_journal_id": s.later_journal_id}),
         (
@@ -84,7 +87,10 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
 
 TOOLS = [
     "set_task_status",
-    "update_task_text",
+    "update_task",
+    "update_task:flag",
+    "update_task:icon",
+    "update_task:clear-icon",
     "delete_task",
     "retarget_task",
     "link_task_to_contact",
@@ -107,7 +113,8 @@ class TestEveryWriteToolRefuses:
         before = await task_state(clean_database, seeded.task_id)
 
         async with authenticated_lifespan_client() as client:
-            response = await _raw_call(client, tool, arguments)
+            # A case id may name a variant after a colon; the tool is before it.
+            response = await _raw_call(client, tool.split(":")[0], arguments)
 
         refused = extract_mcp_tool_error(response.text)
         assert refused["error"] == "Task error"

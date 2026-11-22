@@ -51,9 +51,9 @@ async def set_task_status_schema() -> dict[str, Any]:
 
 
 @pytest.fixture
-async def update_task_text_schema() -> dict[str, Any]:
-    """The ``update_task_text`` tool as an MCP client actually sees it."""
-    return await _tool_schema("update_task_text")
+async def update_task_schema() -> dict[str, Any]:
+    """The ``update_task`` tool as an MCP client actually sees it."""
+    return await _tool_schema("update_task")
 
 
 @pytest.fixture
@@ -453,26 +453,68 @@ class TestTheContactLinkToolsDocumentThemselves:
         assert "role" in description
 
 
-class TestUpdateTaskTextToolParameters:
-    """What an AI client may send to reword a task."""
+def _types(node: dict[str, Any]) -> set[str]:
+    """The JSON types a property allows, through a nullable ``anyOf``."""
+    if "anyOf" in node:
+        return {option.get("type", "ref") for option in node["anyOf"]}
+    return {node["type"]}
 
-    def test_the_task_and_the_text_are_required(
-        self, update_task_text_schema: dict[str, Any]
+
+class TestUpdateTaskToolParameters:
+    """What an AI client may send to change a task's text, flag or icon.
+
+    ``update_task`` replaced ``update_task_text`` (ITER21-001 Phase 28, user
+    decision): one tool for a task's own independent fields, as one ``PATCH``
+    carries them. Status stays on ``set_task_status``.
+    """
+
+    def test_only_the_task_is_required(
+        self, update_task_schema: dict[str, Any]
     ) -> None:
-        required = set(update_task_text_schema["input_schema"]["required"])
+        required = set(update_task_schema["input_schema"]["required"])
 
-        assert required == {"task_id", "text"}
+        assert required == {"task_id"}
+
+    def test_the_parameters_are_text_flag_and_icon(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        properties = update_task_schema["input_schema"]["properties"]
+
+        assert set(properties) == {"task_id", "text", "flagged", "icon", "clear_icon"}
+
+    def test_the_icon_is_the_fixed_set_or_null(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        schema = update_task_schema["input_schema"]
+
+        assert _enum_values(schema, "icon") == [i.value for i in TaskIcon]
+        assert "null" in _types(schema["properties"]["icon"])
+
+    def test_the_flag_is_a_boolean_or_null(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        flagged = update_task_schema["input_schema"]["properties"]["flagged"]
+
+        assert _types(flagged) == {"boolean", "null"}
+
+    def test_clearing_the_icon_is_its_own_boolean(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        clear_icon = update_task_schema["input_schema"]["properties"]["clear_icon"]
+
+        assert clear_icon["type"] == "boolean"
+        assert clear_icon["default"] is False
 
     def test_injected_collaborators_are_not_part_of_the_contract(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
-        properties = update_task_text_schema["input_schema"]["properties"]
+        properties = update_task_schema["input_schema"]["properties"]
 
         assert "task_service" not in properties
         assert "db_connection" not in properties
 
     def test_no_journal_parameter_is_offered(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
         """ "Updating a task never requires a journal" — specification, verbatim.
 
@@ -480,50 +522,87 @@ class TestUpdateTaskTextToolParameters:
         only thing the service could do with it is create an intermediate link
         the user never asked for. Intermediate links are explicit only.
         """
-        properties = update_task_text_schema["input_schema"]["properties"]
+        properties = update_task_schema["input_schema"]["properties"]
 
         assert not [name for name in properties if "journal" in name]
 
     def test_no_status_parameter_is_offered(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
-        """Two tools, two decisions: rewording is not a way to change a status.
+        """A status move is a lifecycle step with its own tool and its own rules.
 
-        The combined write exists for the ``PATCH`` body that genuinely carries
-        both. A model has a tool per intent, so it never has to reason about
-        what leaving a field out will do.
+        Field edits share this tool; ``set_task_status`` keeps the transition
+        matrix and its refusal wording to itself.
         """
-        properties = update_task_text_schema["input_schema"]["properties"]
+        properties = update_task_schema["input_schema"]["properties"]
 
         assert "status" not in properties
 
     def test_the_schema_has_no_now_parameter(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
-        assert "now" not in update_task_text_schema["input_schema"]["properties"]
+        assert "now" not in update_task_schema["input_schema"]["properties"]
+
+    async def test_update_task_text_is_gone(self) -> None:
+        """Removed rather than kept beside it: ``update_task`` covers rewording."""
+        mcp: FastMCP[None] = FastMCP(name="Test")
+        register_task_tools(mcp)
+
+        async with Client(mcp) as client:
+            names = {tool.name for tool in await client.list_tools()}
+
+        assert "update_task_text" not in names
+        assert "update_task" in names
 
 
-class TestUpdateTaskTextDocumentsItself:
+class TestUpdateTaskDocumentsItself:
     """What a model has to know before it calls this rather than after."""
 
     def test_the_tool_has_a_description(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
-        assert len(update_task_text_schema["description"]) > 0
+        assert len(update_task_schema["description"]) > 0
 
-    def test_the_description_says_text_is_editable_in_any_status(
-        self, update_task_text_schema: dict[str, Any]
+    def test_the_description_says_it_is_editable_in_any_status(
+        self, update_task_schema: dict[str, Any]
     ) -> None:
         """Otherwise a model will not try to fix a typo on a cancelled task."""
-        description = update_task_text_schema["description"].lower()
+        description = update_task_schema["description"].lower()
 
         assert "any status" in description
 
+    def test_the_description_says_journal_only_tasks_are_included(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        """The specification: flag and icon "apply to every task"."""
+        description = update_task_schema["description"].lower()
+
+        assert "journal-only" in description
+
+    def test_the_description_points_status_at_its_own_tool(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        assert "set_task_status" in update_task_schema["description"]
+
+    def test_the_description_says_an_archived_list_refuses_it(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        description = update_task_schema["description"].lower()
+
+        assert "archived" in description
+        assert "unarchive" in description
+
+    def test_the_description_says_how_to_clear_the_icon(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        """A model that sends ``icon: null`` would otherwise expect it cleared."""
+        assert "clear_icon" in update_task_schema["description"]
+
     def test_the_text_parameter_says_it_replaces_rather_than_appends(
-        self, update_task_text_schema: dict[str, Any]
+        self, update_task_schema: dict[str, Any]
     ) -> None:
         """A model that assumes otherwise will send a fragment and lose the rest."""
-        description = update_task_text_schema["input_schema"]["properties"]["text"][
+        description = update_task_schema["input_schema"]["properties"]["text"][
             "description"
         ].lower()
 
@@ -1261,7 +1340,7 @@ class TestTheResultShapeIsPublished:
             ("create_task", _TASK_FIELDS),
             ("set_task_status", _TASK_FIELDS),
             ("retarget_task", _TASK_FIELDS),
-            ("update_task_text", _TASK_FIELDS),
+            ("update_task", _TASK_FIELDS),
             ("delete_task", {"deleted", "task_id"}),
             ("link_task_to_contact", {"task_id", "contact_id", "linked", "changed"}),
             (

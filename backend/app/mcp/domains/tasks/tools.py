@@ -27,11 +27,13 @@ from core_shared.models.tasks import (
     MAX_UPCOMING_DAYS_AHEAD,
     JournalTaskGroups,
     Task,
+    TaskIcon,
     TaskJournalRef,
     TaskLinkRole,
     TaskListRef,
     TaskReadModel,
     TaskStatus,
+    TaskValidationError,
     UpcomingTasks,
 )
 from fastmcp import FastMCP
@@ -86,6 +88,7 @@ from app.mcp.shared.dependencies import (
     get_task_service,
     mcp_depends,
 )
+from app.shared.patch import UNSET, Unset
 
 
 def _contact_link(
@@ -440,44 +443,87 @@ async def retarget_task(
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
-@mcp_unified_error_handler("update_task_text", "task")
-async def update_task_text(
+@mcp_unified_error_handler("update_task", "task")
+async def update_task(
     task_id: Annotated[
-        int, Field(ge=1, le=INT32_MAX, description="The id of the task to reword.")
+        int, Field(ge=1, le=INT32_MAX, description="The id of the task to change.")
     ],
     text: Annotated[
-        str,
+        str | None,
         Field(
             description=(
                 "The task's new text. Replaces the existing text entirely — "
-                "send the whole commitment, not an addition to it. Required "
-                "and non-empty."
+                "send the whole commitment, not an addition to it. Non-empty. "
+                "Omit to keep it."
             )
         ),
-    ],
+    ] = None,
+    flagged: Annotated[
+        JsonBool | None,
+        Field(
+            description=(
+                "true to flag the task as one that matters, false to unflag "
+                "it. A JSON boolean. Omit to keep it."
+            )
+        ),
+    ] = None,
+    icon: Annotated[
+        TaskIcon | None,
+        Field(description="A new icon from the fixed set of keys. Omit to keep it."),
+    ] = None,
+    clear_icon: Annotated[
+        JsonBool,
+        Field(description="Remove the task's icon. Cannot be combined with icon."),
+    ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
 ) -> TaskMCP:
     """
-    Reword a task, in any status.
+    Change a task's own fields: reword it, flag or unflag it, or set, change or
+    remove its icon — in any status.
 
-    Text is editable at any time and in any status, including on a task that is
-    done or cancelled and on one whose due journal has already passed — nothing
-    about a task's state makes its wording unfixable.
+    Only the arguments you supply are changed, and everything you supply in
+    one call is one change. Name at least one; values the task already has
+    change nothing. To remove the icon pass clear_icon=true rather than a null
+    icon, since an omitted icon means "keep it".
 
-    No journal is involved and none is linked: rewording a task does not attach
-    it to whatever journal the conversation happens to be about. Use the journal
-    link tools for that.
+    Every task takes a flag and an icon — journal-only tasks included, and
+    tasks that are done, cancelled, or whose due journal has already passed.
+    The flag marks a task as one that matters; it does not reorder a list and
+    there are no priority levels. Text is editable at any time and in any
+    status too: nothing about a task's state makes its wording unfixable.
+
+    The status is not changed here: use set_task_status. No journal is involved
+    and none is linked — use the journal link tools for that.
 
     A task on an archived list is read-only, as the list is: this is refused,
     even when it would change nothing, until the list is unarchived.
     """
+    # Argument shape, not a domain rule: the clear flag exists only because a
+    # tool cannot tell a null argument from an omitted one.
+    if clear_icon and icon is not None:
+        raise TaskValidationError(
+            "icon", "Pass either an icon or clear_icon=true, not both"
+        )
+    if text is None and flagged is None and icon is None and not clear_icon:
+        raise TaskValidationError(
+            "update",
+            "Name a change: new text, flagged, a new icon, or clear_icon=true",
+        )
+
     user_id = await get_current_user_id()
+    icon_change: TaskIcon | None | Unset = UNSET
+    if clear_icon:
+        icon_change = None
+    elif icon is not None:
+        icon_change = icon
 
     updated, trail = await task_service.update_task_with_trail(
         user_id=user_id,
         task_id=task_id,
         text=text,
+        flagged=flagged,
+        icon=icon_change,
         transaction=db_connection,
         source=Provenance.MCP,
         changed_by="mcp",
@@ -997,7 +1043,7 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(create_task)
     mcp.add_tool(set_task_status)
     mcp.add_tool(retarget_task)
-    mcp.add_tool(update_task_text)
+    mcp.add_tool(update_task)
     mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)
     mcp.add_tool(unlink_task_from_contact)

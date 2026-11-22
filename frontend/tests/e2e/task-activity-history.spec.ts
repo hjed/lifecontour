@@ -148,6 +148,67 @@ test.describe('Task activity history', () => {
     await expect(row.getByTestId('activity-feed')).toBeHidden();
   });
 
+  test('a flag and icon set on a journal-only task read as history lines', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const data = new TestDataManager(page);
+    testCleanup(async () => data.cleanup());
+
+    const [creating, due] = await data.createTaskAnchorJournals('Marks');
+    const task = await data.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: due.id,
+      text: 'Charge the head torch',
+    });
+
+    // No control sets these until the task details panel exists, so the
+    // write goes through the endpoint that panel will use.
+    const response = await page.request.patch(`/api/tasks/${task.id}`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: {
+        data: {
+          type: 'tasks',
+          id: String(task.id),
+          attributes: { flagged: true, icon: 'tent' },
+        },
+      },
+    });
+    await expect(response).toBeOK();
+
+    const historyPath = `/api/tasks/${task.id}/history`;
+    await waitForHistoryEntry(
+      page.request,
+      historyPath,
+      attrs => attrs.field_name === 'flagged' && attrs.new_value === 'True'
+    );
+    await waitForHistoryEntry(
+      page.request,
+      historyPath,
+      attrs => attrs.field_name === 'icon' && attrs.new_value === 'tent'
+    );
+
+    await page.goto(`/journals/${creating.id}`);
+    const row = page.getByTestId(`journal-task-${task.id}`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const trigger = row.getByRole('button', {
+      name: 'Show history for “Charge the head torch”',
+    });
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await trigger.click();
+
+    const feed = row.getByTestId('activity-feed');
+    await expect(feed).toBeVisible();
+    await expect(feed.getByText('Flagged', { exact: true })).toBeVisible({
+      timeout: PROJECTION_TIMEOUT,
+    });
+    await expect(feed.getByText('Icon set', { exact: true })).toBeVisible({
+      timeout: PROJECTION_TIMEOUT,
+    });
+  });
+
   test('a task linked to a contact appears on their activity history and offers no action', async ({
     authenticatedPage,
     testCleanup,
