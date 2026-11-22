@@ -6,66 +6,12 @@ idempotency unique index. Runs against an isolated throwaway database so the sha
 session database is untouched.
 """
 
-import os
-import subprocess
-import sys
-from collections.abc import AsyncGenerator
-from pathlib import Path
-
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
-THROWAWAY_DB_NAME = "pms_field_history_migration_test"
-BACKEND_DIR = Path(__file__).resolve().parents[3]
-
-
-def _run_alembic(database_url: str, target: str) -> None:
-    """Run ``alembic upgrade <target>`` against the given database."""
-    env = {
-        **os.environ,
-        "ENVIRONMENT": "test",
-        "DATABASE_URL": database_url,
-    }
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", target],
-        cwd=str(BACKEND_DIR),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"alembic upgrade {target} failed:\n{result.stdout}\n{result.stderr}"
-        )
-
-
-@pytest_asyncio.fixture
-async def throwaway_database(async_engine: AsyncEngine) -> AsyncGenerator[URL]:
-    """Create and drop an isolated database derived from the test engine URL."""
-    base_url: URL = async_engine.url
-    admin_url = base_url.set(database="postgres")
-    target_url = base_url.set(database=THROWAWAY_DB_NAME)
-
-    admin_engine = create_async_engine(
-        admin_url.render_as_string(hide_password=False),
-        isolation_level="AUTOCOMMIT",
-    )
-    try:
-        async with admin_engine.connect() as conn:
-            await conn.execute(
-                text(f"DROP DATABASE IF EXISTS {THROWAWAY_DB_NAME} WITH (FORCE)")
-            )
-            await conn.execute(text(f"CREATE DATABASE {THROWAWAY_DB_NAME}"))
-        yield target_url
-    finally:
-        async with admin_engine.connect() as conn:
-            await conn.execute(
-                text(f"DROP DATABASE IF EXISTS {THROWAWAY_DB_NAME} WITH (FORCE)")
-            )
-        await admin_engine.dispose()
+from tests.integration.migration_helpers import RunAlembic
 
 
 @pytest.mark.integration
@@ -74,12 +20,12 @@ class TestFieldHistoryMigration:
     """0087 rename migration round-trip."""
 
     async def test_rename_preserves_rows_and_adds_idempotency_schema(
-        self, throwaway_database: URL
+        self, throwaway_database: URL, run_alembic: RunAlembic
     ) -> None:
         url_str = throwaway_database.render_as_string(hide_password=False)
 
         # 1. Migrate to the revision just before the rename.
-        _run_alembic(url_str, "0086")
+        run_alembic(url_str, "upgrade", "0086")
 
         # 2. Insert a legacy row into the pre-rename table.
         engine = create_async_engine(url_str)
@@ -97,7 +43,7 @@ class TestFieldHistoryMigration:
             await engine.dispose()
 
         # 3. Apply the rename migration.
-        _run_alembic(url_str, "head")
+        run_alembic(url_str, "upgrade", "head")
 
         # 4. Assert the row survived under the new table name with NULL event_id,
         #    the old table name is gone, and the idempotency schema exists.

@@ -6,7 +6,7 @@ import os
 import subprocess
 import time
 from base64 import b64encode
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,6 +32,12 @@ from app.infrastructure.search.meilisearch_client import (
     get_meilisearch_client,
 )
 from app.infrastructure.search.search_indexer import SearchIndexer
+from tests.integration.migration_helpers import (
+    MigrationTemplates,
+    RunAlembic,
+    drop_stale_templates,
+    run_alembic_subprocess,
+)
 from tests.integration.sse_helpers import reset_sse_starlette_appstatus_event
 
 # Constants
@@ -1235,20 +1241,38 @@ async def task_anchors(journal_repository: Any) -> tuple[int, int]:
     return creating_id, due_id
 
 
+@pytest.fixture(scope="session")
+def migration_templates(setup_test_database: None) -> Iterator[MigrationTemplates]:
+    """The session's template databases, one per revision migration tests start at.
+
+    Templates left by a crashed earlier session are dropped first; this
+    session's are dropped when it ends.
+    """
+    from sqlalchemy.engine import make_url
+
+    admin_url = make_url(get_test_database_url()).set(database="postgres")
+    drop_stale_templates(admin_url)
+    templates = MigrationTemplates(admin_url, prefix=f"tpl_{os.getpid()}")
+    try:
+        yield templates
+    finally:
+        templates.drop_all()
+
+
 @pytest.fixture
-def run_alembic() -> Any:
+def run_alembic(migration_templates: MigrationTemplates) -> RunAlembic:
     """Return a helper that runs ``alembic [-x k=v ...] <command> <target>``.
 
     Shared by migration round-trip tests so each does not re-implement the
     subprocess invocation; ``x_args`` become alembic ``-x`` arguments. Returns
-    alembic's output (stdout then stderr, where its log lines go). Typed as
-    ``tests.integration.migration_helpers.RunAlembic``.
-    """
-    import sys
-    from collections.abc import Mapping
-    from pathlib import Path
+    alembic's output (stdout then stderr, where its log lines go).
 
-    backend_dir = Path(__file__).resolve().parents[2]
+    The first ``upgrade`` of a fresh ``throwaway_database``, when it carries no
+    ``x_args``, is served by cloning a template already migrated to that
+    revision instead of migrating from base. Every other command — the
+    migration under test included — runs alembic for real.
+    """
+    from sqlalchemy.engine import make_url
 
     def _run(
         database_url: str,
@@ -1257,41 +1281,29 @@ def run_alembic() -> Any:
         *,
         x_args: Mapping[str, str] | None = None,
     ) -> str:
-        env = {
-            **os.environ,
-            "ENVIRONMENT": "test",
-            "DATABASE_URL": database_url,
-        }
-        x_flags = [
-            flag
-            for key, value in (x_args or {}).items()
-            for flag in ("-x", f"{key}={value}")
-        ]
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", *x_flags, command, target],
-            cwd=str(backend_dir),
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"alembic {command} {target} failed:\n{result.stdout}\n{result.stderr}"
-            )
-        return f"{result.stdout}\n{result.stderr}"
+        db_name = make_url(database_url).database
+        if db_name is not None and migration_templates.is_fresh(db_name):
+            if command == "upgrade" and not x_args:
+                migration_templates.clone_into(db_name, target)
+                return f"cloned {db_name} from the template at {target}"
+            migration_templates.forget(db_name)
+        return run_alembic_subprocess(database_url, command, target, x_args=x_args)
 
     return _run
 
 
 @pytest_asyncio.fixture
 async def throwaway_database(
-    request: pytest.FixtureRequest, async_engine: AsyncEngine
+    request: pytest.FixtureRequest,
+    async_engine: AsyncEngine,
+    migration_templates: MigrationTemplates,
 ) -> AsyncGenerator[Any]:
     """Create and drop an isolated database derived from the test engine URL.
 
     The database name is unique per test and process so migration round-trip
     tests can run in parallel without colliding with each other or the shared
-    session database.
+    session database. It is registered as fresh, so ``run_alembic`` may serve
+    its first upgrade from a template.
     """
     import re
 
@@ -1311,8 +1323,10 @@ async def throwaway_database(
                 text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
             )
             await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+        migration_templates.register_fresh(db_name)
         yield target_url
     finally:
+        migration_templates.forget(db_name)
         async with admin_engine.connect() as conn:
             await conn.execute(
                 text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')

@@ -4,21 +4,35 @@
   building one registers every tool and generates its JSON schemas, which used
   to be most of each API and MCP test's setup. These tests pin what may and may
   not share it.
+- Migration tests start from a template database cloned at the revision they
+  first upgrade to, rather than migrating an empty database from base. These
+  tests pin that the clone matches a real migration and that every later
+  command still runs alembic.
 """
 
 import copy
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
 from contextlib import AbstractAsyncContextManager
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from fastmcp import FastMCP
+from sqlalchemy import text
+from sqlalchemy.engine import URL
+from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.applications import Starlette
 
 from app.infrastructure.config import Settings
 from app.main import create_app
 from app.mcp.shared.read_only_tools import create_read_only_mcp_server
 from tests.integration.mcp.http_helpers import call_mcp_tool
+from tests.integration.migration_helpers import (
+    MigrationTemplates,
+    RunAlembic,
+    run_alembic_subprocess,
+)
 
 LifespanClientFactory = Callable[[], AbstractAsyncContextManager[Any]]
 
@@ -99,3 +113,149 @@ class TestSharedMcpServer:
             async with authenticated_lifespan_client() as client:
                 payload = await call_mcp_tool(client, "list_journal_types", {})
                 assert payload["journal_types"]
+
+
+async def _schema_fingerprint(
+    engine_url: str,
+) -> tuple[str, frozenset[tuple[Any, ...]]]:
+    """The revision and every public column's shape in the database at ``engine_url``."""
+    engine = create_async_engine(engine_url)
+    try:
+        async with engine.connect() as conn:
+            version = (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+            columns = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT table_name, column_name, data_type, is_nullable,
+                               column_default
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        """
+                    )
+                )
+            ).fetchall()
+            return str(version), frozenset(tuple(row) for row in columns)
+    finally:
+        await engine.dispose()
+
+
+async def _revision(engine_url: str) -> str:
+    version, _ = await _schema_fingerprint(engine_url)
+    return version
+
+
+@pytest.fixture
+def isolated_templates(throwaway_database: URL) -> Iterator[MigrationTemplates]:
+    """A template registry of this test's own, so its builds are observable."""
+    templates = MigrationTemplates(
+        throwaway_database.set(database="postgres"),
+        prefix=f"tpl_{os.getpid()}_t",
+    )
+    try:
+        yield templates
+    finally:
+        templates.drop_all()
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestMigrationTemplates:
+    """The first upgrade of a fresh throwaway database is cloned, not migrated.
+
+    Every later command runs real alembic, so a migration under test still runs.
+    """
+
+    async def test_a_clone_matches_a_real_migration_to_the_same_revision(
+        self, throwaway_database: URL, isolated_templates: MigrationTemplates
+    ) -> None:
+        real_url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic_subprocess(real_url, "upgrade", "0134")
+        cloned_name = f"{throwaway_database.database}_c"
+        cloned_url = throwaway_database.set(database=cloned_name).render_as_string(
+            hide_password=False
+        )
+
+        isolated_templates.clone_into(cloned_name, "0134")
+        try:
+            assert await _schema_fingerprint(cloned_url) == (
+                await _schema_fingerprint(real_url)
+            )
+        finally:
+            isolated_templates.drop_database(cloned_name)
+
+    def test_revisions_resolve_whatever_the_working_directory(
+        self,
+        throwaway_database: URL,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """``alembic.ini`` names its scripts relative to the working directory."""
+        monkeypatch.chdir(tmp_path)
+
+        templates = MigrationTemplates(
+            throwaway_database.set(database="postgres"),
+            prefix=f"tpl_{os.getpid()}_cwd",
+        )
+
+        assert templates.template_name("head").startswith(f"tpl_{os.getpid()}_cwd_")
+
+    def test_a_later_revision_is_built_from_the_nearest_template(
+        self, throwaway_database: URL, isolated_templates: MigrationTemplates
+    ) -> None:
+        name = str(throwaway_database.database)
+
+        isolated_templates.clone_into(name, "0133")
+        isolated_templates.clone_into(name, "0135")
+
+        assert isolated_templates.template_source("0133") is None
+        assert isolated_templates.template_source("0135") == (
+            isolated_templates.template_name("0133")
+        )
+
+    async def test_the_first_upgrade_of_a_fresh_database_is_a_clone(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        migration_templates: MigrationTemplates,
+    ) -> None:
+        url = throwaway_database.render_as_string(hide_password=False)
+        clones = migration_templates.clones
+
+        run_alembic(url, "upgrade", "0133")
+
+        assert migration_templates.clones == clones + 1
+        assert await _revision(url) == "0133"
+
+    async def test_a_second_command_runs_real_alembic(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        migration_templates: MigrationTemplates,
+    ) -> None:
+        url = throwaway_database.render_as_string(hide_password=False)
+        run_alembic(url, "upgrade", "0133")
+        clones = migration_templates.clones
+
+        output = run_alembic(url, "upgrade", "0134")
+
+        assert migration_templates.clones == clones
+        assert "Running upgrade 0133 -> 0134" in output
+        assert await _revision(url) == "0134"
+
+    async def test_a_first_upgrade_with_x_args_runs_real_alembic(
+        self,
+        throwaway_database: URL,
+        run_alembic: RunAlembic,
+        migration_templates: MigrationTemplates,
+    ) -> None:
+        url = throwaway_database.render_as_string(hide_password=False)
+        clones = migration_templates.clones
+
+        output = run_alembic(url, "upgrade", "0002", x_args={"unused": "value"})
+
+        assert migration_templates.clones == clones
+        assert "Running upgrade 0001 -> 0002" in output
+        assert await _revision(url) == "0002"
