@@ -1,7 +1,7 @@
 """Integration tests: every task write tool refuses a task on an archived list.
 
-The MCP half of Phase 18, over the real MCP endpoint. Each of the eight task
-write tools answers an archived list's task with a "Task error" whose message
+The MCP half of Phase 18, over the real MCP endpoint, and creating a task on an
+archived list. Each of the eight task write tools answers an archived list's task with a "Task error" whose message
 names unarchiving as the way out — the same text the REST surface carries — and
 leaves the task as it was. ``get_task`` still answers, because an archived
 list's tasks stay readable.
@@ -25,12 +25,15 @@ from tests.integration.mcp.http_helpers import (
 )
 from tests.integration.tasks.task_seeding import (
     ArchivedListTask,
+    count,
     seed_archived_list_task,
     task_events,
     task_state,
 )
 
 pytestmark = pytest.mark.integration
+
+COUNT_LIST_TASKS = "SELECT COUNT(*) FROM tasks WHERE task_list_id = :task_list_id"
 
 
 @pytest_asyncio.fixture
@@ -122,6 +125,48 @@ class TestEveryWriteToolRefuses:
         assert "unarchive" in refused["message"]
         assert await task_state(clean_database, seeded.task_id) == before
         assert await task_events(clean_database, task_id=seeded.task_id) == []
+
+
+class TestCreatingOnAnArchivedListIsRefused:
+    """``create_task`` naming an archived list: a create, so it has its own test.
+
+    The table above compares an existing task before and after; a create has no
+    task to compare, so this asserts the list gained nothing instead.
+    """
+
+    async def test_the_create_is_refused_naming_the_way_out(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        seeded: ArchivedListTask,
+    ) -> None:
+        before = await count(
+            clean_database, COUNT_LIST_TASKS, {"task_list_id": seeded.task_list_id}
+        )
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "create_task",
+                {"task_list_id": seeded.task_list_id, "text": "pack the spare torch"},
+            )
+
+        refused = extract_mcp_tool_error(response.text)
+        assert refused["error"] == "Task error"
+        assert "archived" in refused["message"]
+        assert "unarchive" in refused["message"]
+        assert (
+            await count(
+                clean_database, COUNT_LIST_TASKS, {"task_list_id": seeded.task_list_id}
+            )
+            == before
+        )
+        assert [
+            event
+            for event in await task_events(clean_database)
+            if event.event_type == "TaskCreated"
+            and event.payload.get("task_list_id") == seeded.task_list_id
+        ] == []
 
 
 class TestReadsStayOpen:

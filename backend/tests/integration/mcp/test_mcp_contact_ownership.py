@@ -78,7 +78,11 @@ from tests.integration.foreign_contact_seeding import (
     snapshot,
 )
 from tests.integration.mcp.http_helpers import call_mcp_tool, call_mcp_tool_error
-from tests.integration.tasks.task_seeding import create_journal, create_task
+from tests.integration.tasks.task_seeding import (
+    create_journal,
+    create_task,
+    seed_task_list,
+)
 
 # What an absent id looks like, for each kind of id a call can vary.
 MISSING_ID = 999_999
@@ -148,6 +152,7 @@ class OwnedState:
     own_journal_id: int
     own_future_journal_id: int
     own_task_id: int
+    own_task_list_id: int
     own_conflict_id: int
     their_conflict_id: int
 
@@ -160,6 +165,7 @@ class OwnedState:
             "own_journal_id": self.own_journal_id,
             "own_future_journal_id": self.own_future_journal_id,
             "own_task_id": self.own_task_id,
+            "own_task_list_id": self.own_task_list_id,
             "own_conflict_id": self.own_conflict_id,
             "their_conflict_id": self.their_conflict_id,
             "person_id": IMMICH_PERSON_ID,
@@ -341,6 +347,17 @@ CROSS_USER_CALLS: tuple[CrossUserCall, ...] = (
             "contact_ids": ["{contact_id}"],
         },
     ),
+    # The same tool placing the task on a list: the list path resolves the
+    # contacts itself, so it needs its own proof that they are owner-scoped.
+    CrossUserCall(
+        "create_task",
+        {
+            "task_list_id": "{own_task_list_id}",
+            "text": "Lend them the rope",
+            "contact_ids": ["{contact_id}"],
+        },
+        label="on a list",
+    ),
     CrossUserCall(
         "link_task_to_contact",
         {"task_id": "{own_task_id}", "contact_id": "{contact_id}"},
@@ -432,6 +449,8 @@ async def _seed_mcp_state(connection: AsyncConnection) -> OwnedState:
         due_journal_id=own_future_journal_id,
         user_id=TEST_USER_ID,
     )
+    own_task_list = await seed_task_list(connection, "Mine", user_id=TEST_USER_ID)
+    assert own_task_list.id is not None
     own_conflict_id = (
         await connection.execute(
             _SEED_CONFLICT, {"user_id": TEST_USER_ID, "person_id": "person-mine"}
@@ -474,6 +493,7 @@ async def _seed_mcp_state(connection: AsyncConnection) -> OwnedState:
         own_journal_id=own_journal_id,
         own_future_journal_id=own_future_journal_id,
         own_task_id=own_task_id,
+        own_task_list_id=own_task_list.id,
         own_conflict_id=own_conflict_id,
         their_conflict_id=their_conflict_id,
     )

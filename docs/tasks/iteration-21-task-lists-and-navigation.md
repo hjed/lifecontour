@@ -1600,16 +1600,118 @@ full backend integration suite in chunks (about 4,650 passed, 7 pre-existing ski
 - *Phase 29 (list delete):* lock the list's tasks before the list, or a task write holding its task
   lock and waiting for the list share lock will deadlock against it.
 
-#### Phase 19: Create a task on a list 🚧 IN PROGRESS
+#### Phase 19: Create a task on a list ✅ DONE
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ DONE
 **Prerequisites:** Phase 12, Phase 15, Phase 16, Phase 18.
 **Estimated diff:** ~170 production → **~1,500 tracked** · one capability on REST and MCP together
+· **Actual:** ~600 production → **~3,000 tracked** (2,995 insertions, 241 deletions excluding this
+document: 600 production — service 188, MCP tool and placement 187, repository and port 74, REST
+schema and route 89, event 16, shared ISO-date type 41, docstrings about half of it; 2,201 backend
+tests; 164 E2E; 30 architecture docs). Production ran ×3.5 on the estimate: the MCP placement
+decision, a shared date type and the docstrings the domain carries. Tests ran ×1.6 on the
+multiplier, covering the service, repository, REST and MCP layers, two concurrency races and the
+guard inventories.
 
 **Acceptance Criteria:**
 
-- [ ] Undated or with a due date; joins the bottom; refused on an archived list; the created event carries the list; server task guidance rewritten.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Undated or with a due date; joins the bottom; refused on an archived list; the created event carries the list; server task guidance rewritten.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a task can be created on one of the user's lists with no journal, undated or due on a
+date that is today or later in the user's timezone. It joins the bottom of the list, closed tasks
+included.
+- `TaskService.create_list_task` / `create_list_task_with_trail` (`@transactional`). The list is read
+  with `find_by_id_for_update` (`FOR NO KEY UPDATE`) **first**, then contacts are resolved,
+  `TaskList.ensure_writable()` is called, and Phase 13's `ensure_due_date_allowed` is applied against
+  `today_in` the user's timezone. Refusals: entity rules → `TASK_LIST_NOT_FOUND` → contact 404 →
+  `TASK_LIST_ARCHIVED` (409) → `TASK_DUE_DATE_IN_PAST` (400). The contact-linking and publishing
+  tail is shared with the journal create (`_link_and_announce_created`).
+- `SqlTaskRepository.save()` no longer refuses a list task: `_insert` locks the list (Phase 14's
+  `_lock_list`) and inserts `task_list_id`, `due_date` and `position = _BOTTOM_OF_LIST` in one
+  statement. An update still never writes membership.
+- `TaskCreated` carries `task_list_id` and `due_date` (ISO string), both required with no default;
+  its journal ids are nullable. The journal create still narrows its anchors with `require_anchor`.
+  The history projection and daily-summary invalidation are unchanged (a list task invalidates
+  nothing while the summary leaves list tasks out).
+- **REST** `POST /api/task-lists/{list_id}/tasks` (`ListTaskCreateRequest`: `text`, optional
+  `due_date`, optional `contact_ids`, closed at every level), answering 201 with the task resource.
+- **MCP**: the existing `create_task` takes either placement (user decision): `task_list_id` with an
+  optional `due_date`, or both journal ids as before. `app/mcp/domains/tasks/placement.py`'s pure
+  `resolve_create_placement` returns `InJournals | OnList` and refuses any other mix as a "Task
+  error" naming the field. `text` now comes first and the journal ids are optional.
+  `JsonIntOnly`/`JsonIsoDate` are nested inside `| None`, so an explicit `null` reads as absent.
+- `app/shared/calendar_date.py`'s `IsoCalendarDate` (`YYYY-MM-DD` strings only) is the due-date type
+  on both surfaces (`JsonIsoDate` on MCP), so a number is never read as a timestamp.
+- Server instructions, the `tools.py` module docstring and the `create_task` / `create_task_list`
+  docstrings say tasks may live on lists and carry due dates. `api-design.md`,
+  `domain-architecture.md` and `database-design.md` are updated.
+
+**Tests:** unit `test_task_service_create_on_list.py` (saved shape, event payload and provenance,
+the update lock never the share lock, today/yesterday in Sydney, no timezone read when undated,
+each refusal with nothing written, precedence: contact before archived, archived before a past
+date, contacts linked once, the event naming the contacts actually linked), `test_task_events.py`
+(the list payload, the two new keys required, the exact journal-only dict),
+`test_task_create_placement.py` (both placements and seven refused mixes, each naming its field),
+`test_task_tools_schema.py` (two tests replaced: only `text` is required; the only date offered is a
+`format: date` string whose description states the rule), `test_arguments.py` (`JsonIsoDate`, and
+the nested optional `JsonIntOnly` accepting `null`), `test_list_task_create_schemas.py`,
+`test_server.py` (rewritten guidance), plus one test each in the history projection and
+daily-summary invalidation suites. Integration: `test_task_repository_list_columns_integration.py`
+(the save-refusal test replaced; stored columns, 0 on an empty list, below open *and* closed,
+owner-scoped bottom, another user's list → not found with no row, two overlapping inserts take
+consecutive places), `test_task_service_create_on_list_integration.py` (row, position, date and
+contacts; one outbox event with the list and the date; reads back on its list and not overdue;
+listed as *mentioned* once linked to a journal; archived and another user's list write nothing;
+Sydney timezone vs UTC fallback; `overlap` both ways — a create during an archive waits and is
+refused, an archive during a create waits for it), the event-completeness inventory (two
+`WritePath`s), `api/test_list_task_create_endpoints.py` (201, bottom, contacts, UI provenance;
+400 past date, validation errors, blank text with `meta.field`, out-of-range ids; 404 list and
+contact; 409 archived; a second user's list → 404 identical to a missing one, nothing written), the
+list ownership guard (`CROSS_USER_REQUESTS` entry), `mcp/test_task_tools_mcp.py` (on a list:
+undated at the bottom, dated with contacts, nulls as absent, MCP provenance; refusals: past date,
+archived, blank text, unknown contact, coerced ids and dates, each placement mix naming its field,
+another user's list → "Not found"), `test_mcp_contact_ownership.py` (a `create_task` "on a list"
+entry with a seeded list), and `test_task_tools_archived_list_mcp.py` (its own create test). E2E
+(`journal-tasks.spec.ts`): Phase 12's injected task and Phase 17's stubbed preview are replaced with
+real list tasks (`TestDataManager.createTaskList` / `createListTask`) linked as mentions. The first
+now shows under **Mentioned**, and the second deletes for real and reads both tasks back unlinked.
+Gates run locally: ruff format/check and mypy; backend unit (5,828 passed); the full backend
+integration suite in chunks (4,626 passed, 7 pre-existing skips); `pnpm quality:check`; jest (3,230
+passed); `journal-tasks.spec.ts` on Firefox and Mobile Chrome (25 passed, and the two rewritten
+tests 3 repeats each); pre-commit.
+
+**Decisions (recorded during implementation):**
+- **One MCP tool** (user decision in plan review): `create_task` takes a list, rather than a new
+  `create_list_task` tool. REST keeps a list-scoped route, because the existing create's path names
+  a journal.
+- **The create takes the list's update lock first**, the one exception to Phase 18's "task, then
+  its list" with `_hold_list_writable`: it has no task row, and share-then-update would be a lock
+  upgrade two concurrent creates deadlock on. `_hold_list_writable`'s docstring names it.
+- **`save()` places the list task** (the Phase 10 note) rather than a new port method, so the
+  event-completeness inventory keeps `ports={"save"}`.
+- **A separate service method**, so the journal create's contract and tests are untouched.
+- **The archived create is tested in its own files**, because the archived-list suites compare an
+  existing task's state, which a create does not have.
+- **Known inconsistency:** the existing journal-id arguments are plain `int`, so fastmcp accepts
+  `"1"`; the new `task_list_id` is `JsonIntOnly` and refuses it. Tightening the journal ids would
+  change today's contract.
+- **Independent review** found nothing blocking. From it: stale "no list task can be created"
+  comments corrected, `TaskCreated` made keyword-only, the concurrency and list seeding helpers
+  shared as `committed_task_list` / `seed_task_list_id` in `task_seeding.py`, the ISO date pattern
+  limited to ASCII digits, and the E2E delete asserting both tasks stay on their list.
+
+**Notes for later phases:**
+- *Phase 20:* allow `due_journal_id` beside `task_list_id` in `resolve_create_placement`, adding
+  there the refusal of `due_journal_id` with `due_date` so "never together" stays in that pure
+  function; give `OnList` an optional `due_journal_id` and `create_list_task` the parameter; add
+  `due_journal_id` to `ListTaskCreateAttributes`, whose `extra="forbid"` refuses it today. Consider
+  moving the journal ids to `JsonIntOnly`.
+- *Phase 21 and the web UI:* `frontend/src/types/tasks.ts`'s `TaskAttributes` still lacks
+  `task_list_id`, `due_date`, `flagged` and `icon`, which every response carries; the E2E helpers
+  read them through a local type.
+- *Phase 29 (list delete):* `TestDataManager` archives the lists it created, since they cannot be
+  deleted yet; switch its cleanup to a delete.
 
 #### Phase 20: Create on a list with a due journal
 

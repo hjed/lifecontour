@@ -4693,8 +4693,8 @@ async def _seeded_list_id(
 class TestListTasksOnTheRestSurface:
     """A task on a list reads and is written through every task route.
 
-    Seeded as a row: nothing in the product creates a list task yet, so this is
-    the only way to show the readers cope with one before it can arrive.
+    Seeded as a row, so each shape a list task can take — either anchor, a due
+    date, a position — is shown without driving the writes that produce it.
     """
 
     async def test_get_a_list_task_with_no_journal_answers_with_null_anchors(

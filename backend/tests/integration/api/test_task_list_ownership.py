@@ -84,6 +84,14 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     # fallback; the owner-on-the-rows branch is driven in
     # ``test_task_list_history_endpoints.py``.
     CrossUserRequest("GET", LIST_ROUTE + "/history"),
+    # A valid body, so the refusal can only come from the ownership check. That
+    # no task was written on the foreign list is asserted in
+    # ``test_list_task_create_endpoints.py``.
+    CrossUserRequest(
+        "POST",
+        LIST_ROUTE + "/tasks",
+        body={"data": {"type": "tasks", "attributes": {"text": "Hijacked"}}},
+    ),
 )
 
 # ``(method, route)`` -> why its ownership is asserted somewhere else instead.

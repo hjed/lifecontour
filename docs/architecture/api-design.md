@@ -504,8 +504,8 @@ wording changes. One code covering several fields is what makes this necessary:
 a refusal a client can place from the code alone (`TASK_DUE_JOURNAL_NOT_FUTURE`,
 `TASK_DUE_DATE_IN_PAST`, `TASK_JOURNAL_IS_ANCHOR`) needs no meta and has none.
 `TASK_DUE_DATE_IN_PAST` (400) refuses a list task's due date before today in the
-user's timezone; it is mapped ahead of the first endpoint that can set a due date
-(see *[List-task dates and overdue derivation](./domain-architecture.md#list-task-dates-and-overdue-derivation)*).
+user's timezone, naming both days; `POST /api/task-lists/{list_id}/tasks` and the
+`create_task` MCP tool raise it (see *[List-task dates and overdue derivation](./domain-architecture.md#list-task-dates-and-overdue-derivation)*).
 `TASK_LIST_CHANGED` (409) refuses a list membership write — a reorder naming a
 task and the neighbour it should follow, or a removal — when, once the list's
 lock is held, either task has closed or left the list. A plain edit locks only
@@ -878,9 +878,10 @@ export.
 
 ## Task Endpoints
 
-Tasks are commitments anchored to two journals — the one a task arose in and the
-future-dated one it is due in — so creation hangs off the journal path rather
-than a top-level collection. There is deliberately **no unbounded `/api/tasks`
+A task is either anchored to two journals — the one it arose in and the
+future-dated one it is due in — or on a list, with no journal and an optional due
+date. So creation hangs off the journal path or the list path rather than a
+top-level collection. There is deliberately **no unbounded `/api/tasks`
 collection**: no endpoint lists *all* tasks, because no screen does. A task's own
 member routes under `/api/tasks/` exist for operations that involve no journal at
 all. There are exactly two listings, and each is bounded by something: a
@@ -890,6 +891,7 @@ a capped span of days. Neither can be widened into a task browser.
 | Verb + path | Purpose | Status |
 |---|---|---|
 | `POST /api/journals/{journal_id}/tasks` | Create a task in the journal it arose from. Body attributes: `text`, `due_journal_id`, optional `contact_ids` | 201; 400 empty text, unknown attribute, or a due journal that is not future-dated; 404 either journal anchor unknown/not-owned, or an unknown contact |
+| `POST /api/task-lists/{list_id}/tasks` | Create a task at the bottom of one of your lists, with no journal. Body attributes: `text`, optional `due_date` (`YYYY-MM-DD`, today or later in your timezone), optional `contact_ids`. MCP: `create_task` with `task_list_id` | 201 with the task; 400 empty text (`TASK_VALIDATION_ERROR`, `meta.field` = `text`), an unknown attribute (a due journal included, for now), a due date that is not a `YYYY-MM-DD` string (`VALIDATION_ERROR`), a due date before today (`TASK_DUE_DATE_IN_PAST`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned, or an unknown contact; 409 `TASK_LIST_ARCHIVED` |
 | `GET /api/tasks/{task_id}` | Read one task whole: its journals **by role** (each with title, date and whether it is a cancelled event), its contacts, and `lapsed` with `lapse_reason` | 200; 400 an out-of-range id; 404 task unknown/not-owned |
 | `GET /api/journals/{journal_id}/tasks` | The journal's tasks, **grouped by link role** — due here, created here, mentioned here. Optional `?role=due\|created\|mentioned` | 200 (a journal with no tasks answers three empty groups); 400 an out-of-range id or an unknown `role`; 404 journal unknown/not-owned |
 | `GET /api/tasks/upcoming` | Not-done tasks due between **today and `?days_ahead=` days ahead** (default 7, both ends inclusive), anchored on today in your timezone. Done, cancelled and lapsed tasks excluded, and so are tasks on a list (journal-only for now) | 200 (an empty window is a 200 with `data: []`, never a 404); 400 `days_ahead` below 0 or above 90 |
@@ -1249,7 +1251,10 @@ Conventions this surface pins down:
   `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks`,
   `list_upcoming_tasks` and `get_task_history`
   (documented in their docstrings and
-  parameter schemas, per the MCP documentation convention). **A task's own
+  parameter schemas, per the MCP documentation convention). `create_task` takes
+  either placement — both journal ids, or a `task_list_id` with an optional
+  `due_date` — and refuses any other mix as a "Task error" naming the argument.
+  **A task's own
   independent fields share `update_task`** — text, flag and icon, every argument
   optional and only what is supplied changed, mirroring the `PATCH` body. `clear_icon=true` removes the icon, because a
   tool cannot tell a null argument from an omitted one, and naming no change is
@@ -1331,15 +1336,16 @@ Conventions this surface pins down:
   owner's lists are locked for the move — and by a create before it computes
   the bottom — so concurrent moves and creates serialize.
 - **An archived list is read-only, and so are its tasks**: every write to one
-  but unarchive — the update and the move — and every write to a task on one —
-  `PATCH /api/tasks/{task_id}` (text, status, flag and icon), retarget, delete, and the
-  contact and intermediate-journal relationship routes, with their MCP tools —
-  answers 409 `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message
+  but unarchive — the update, the move and creating a task on it — and every
+  write to a task on one — `PATCH /api/tasks/{task_id}` (text, status, flag and
+  icon), retarget, delete, and the contact and intermediate-journal relationship
+  routes, with their MCP tools — answers 409 `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message
   naming unarchiving as the way out. Each list write checks
   `TaskList.ensure_writable()` right after its locked read, and each task write
   checks it on the task's list, held `FOR SHARE` for the unit of work, so even
   a no-op is refused and an archive cannot land between the check and the
-  write. Reads stay open, and another user's task is still a plain 404.
+  write. Creating a task on a list holds the list `FOR NO KEY UPDATE` instead,
+  because its insert computes the bottom of that list under the same lock. Reads stay open, and another user's task is still a plain 404.
 - **Archive and unarchive are actions, and idempotent.** They are their own
   routes, not a `PATCH` attribute. Archiving an archived list (or unarchiving an
   active one) answers the list unchanged and records nothing, so a retry

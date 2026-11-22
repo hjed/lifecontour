@@ -1,8 +1,9 @@
 """Task API endpoints.
 
-A task is created *from* a journal, so the creating journal is the path journal
-and never a body field — the body says only what the commitment is, when it is
-due, and who it involves.
+A task is created either *from* a journal or *on* a list. From a journal, the
+creating journal is the path journal and never a body field — the body says only
+what the commitment is, when it is due, and who it involves. On a list, the list
+is the path and the task has no journal; the body may name the day it is due.
 
 The controller is deliberately thin. Every invariant — both anchors exist and
 belong to the acting user, the due journal is future-dated, referenced contacts
@@ -76,6 +77,7 @@ from app.api.history.pages import (
 )
 from app.api.tasks.schemas import (
     JournalTasksResponse,
+    ListTaskCreateRequest,
     TaskAttributes,
     TaskContactLinkRequest,
     TaskCreateRequest,
@@ -401,6 +403,46 @@ async def create_task(
         due_journal_id=attributes.due_journal_id,
         text=attributes.text,
         transaction=connection,
+        contact_ids=attributes.contact_ids,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return TaskResponse(
+        data=_to_resource(created, trail, get_request_base_url(request))
+    )
+
+
+@router.post("/task-lists/{list_id}/tasks", status_code=status.HTTP_201_CREATED)
+@inject
+async def create_list_task(
+    list_id: DatabaseIdPath,
+    task_request: ListTaskCreateRequest,
+    request: Request,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskResponse:
+    """Create a task at the bottom of one of your lists.
+
+    The task has no journal. The body says what it is, optionally the day it is
+    due — today or later in your timezone — and who it involves.
+
+    Raises:
+        400: Empty text, an unknown attribute (a due journal included, which
+             this create does not take yet), a due date that is not a
+             ``YYYY-MM-DD`` string, or a due date before today
+             (``TASK_DUE_DATE_IN_PAST``, naming both days).
+        404: The list does not exist or is not yours, or a referenced contact
+             does not exist.
+        409: The list is archived (``TASK_LIST_ARCHIVED``); unarchive it first.
+    """
+    attributes = task_request.data.attributes
+    created, trail = await task_service.create_list_task_with_trail(
+        user_id=user.id,
+        task_list_id=list_id,
+        text=attributes.text,
+        transaction=connection,
+        due_date=attributes.due_date,
         contact_ids=attributes.contact_ids,
         source=Provenance.UI,
         changed_by="ui",
