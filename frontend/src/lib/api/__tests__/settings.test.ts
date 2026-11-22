@@ -525,6 +525,34 @@ describe('settings API', () => {
       expect(attributes?.theme_palette).toBe('emerald');
     });
 
+    it('leaves a signed-out page alone when a save fails after logout', async () => {
+      // An Emerald user picks Default, then signs out before the save fails.
+      let fail: (value: Response) => void = () => {};
+      mockFetch.mockReturnValueOnce(
+        new Promise<Response>(resolve => {
+          fail = resolve;
+        })
+      );
+      const { result, queryClient } = renderAppearance();
+      queryClient.setQueryData(
+        userSettingsKeys.detail(),
+        settingsResponse('emerald')
+      );
+
+      result.current.mutate('default');
+      await waitFor(() => expect(result.current.isPending).toBe(true));
+      // Logout clears every query and resets the page to the default palette.
+      queryClient.getQueryCache().clear();
+      fail({
+        ok: false,
+        status: 500,
+        json: async () => ({ errors: [{ detail: 'boom' }] }),
+      } as Response);
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(root.hasAttribute(PALETTE_ATTRIBUTE)).toBe(false);
+    });
+
     it('puts the previous palette back when the save fails', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
