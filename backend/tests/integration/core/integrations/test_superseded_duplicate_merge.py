@@ -395,3 +395,29 @@ async def test_a_manual_merge_keeps_a_private_description_private(
         )
     ).scalar()
     assert private is True
+
+
+async def test_opposite_merges_queued_together_never_cancel_the_survivor(
+    async_connection: AsyncConnection,
+    clean_database: None,  # noqa: ARG001
+) -> None:
+    """Re-timed and re-timed back before the backend caught up, two syncs
+    queued A->B and B->A. After A->B, B holds A's id as an alias and may be
+    Google's live occurrence: B->A must leave it alone, not cancel it."""
+    processor, calendar_id, old, sibling = await _pair(async_connection)
+    await processor.process_event(_superseded_cancellation(calendar_id, old, sibling))
+    back = sync_event(
+        "journal_event.cancelled",
+        calendar_id=calendar_id,
+        external_event_id=NEW_ID,
+        start=NEW_START,
+        existing_journal_id=sibling,
+        recurring_event_id=RECURRENCE,
+    )
+    back.event_data["superseded_by_journal_id"] = old
+
+    result = await processor.process_event(back)
+
+    assert result["status"] == "skipped"
+    assert await event_state(async_connection, sibling) == "confirmed"
+    assert await _alias_owner(async_connection, OLD_ID) == sibling

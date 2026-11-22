@@ -1289,6 +1289,17 @@ class JournalOutboxEventProcessor:
         )
         return True
 
+    async def _holds_alias_in_recurrence(
+        self, journal_id: int, calendar_id: UUID, recurring_event_id: str
+    ) -> bool:
+        """Whether a merge left this journal answering for another instance of
+        the recurrence in this calendar."""
+        return any(
+            alias.calendar_id == calendar_id
+            and alias.recurring_event_id == recurring_event_id
+            for alias in await self.merged_alias_repo.aliases_for_journal(journal_id)
+        )
+
     def _journal_merge_service(self) -> JournalMergeService:
         """A merge service over this connection, built as the merge tool builds it."""
         from app.core.journal.adapters.sql.journal_repository import (
@@ -1546,6 +1557,30 @@ class JournalOutboxEventProcessor:
                 "merged_journal_id": existing_journal_id,
                 "external_event_id": external_event_id,
                 "action": "merged",
+            }
+        if (
+            payload.superseded_by_journal_id is not None
+            and recurring_event_id
+            and await self._holds_alias_in_recurrence(
+                existing_journal_id, UUID(calendar_id), recurring_event_id
+            )
+        ):
+            # A merge the other way has already folded another instance of
+            # this recurrence into this journal (re-timed and back before the
+            # backend caught up), and that instance may be Google's live one.
+            # Left as it is, a later sweep retires the dead link and the
+            # adoption takes the alias back as the link.
+            logger.info(
+                "Merge declined for a journal holding an absorbed instance - "
+                "left unchanged",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_CANCELLED,
+                "reason": "holds_absorbed_instance",
+                "journal_id": existing_journal_id,
             }
         if payload.superseded_by_journal_id is not None and _already_over(linked):
             # The worker skips its past-event check for a merge, which keeps
