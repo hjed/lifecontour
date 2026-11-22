@@ -285,15 +285,21 @@ class ContactResolver:
         return row.id if row else None
 
 
-def _rekey_superseded(
+# ``reference_data`` key: the ``sync_timestamp`` of the re-key adoption that
+# last moved the link. The worker stamps its events in sync order, so it tells
+# two adoptions of one journal apart when they are applied out of that order.
+_REKEYED_AT_KEY = "rekeyed_at"
+
+
+def _rekey_moved_within(
     link: SeriesLinkedJournal | None, payload: JournalSyncEventData
 ) -> bool:
-    """Whether a later re-key of the same recurrence has adopted the journal.
+    """Whether another re-key of this recurrence has moved the link meanwhile.
 
     The link names neither the old id nor this event but another instance of
-    this recurrence: the adoption is a replay overtaken by a newer one, and
-    this event is gone. A link moved anywhere else (or gone) leaves this
-    event live but unjournalled, so it is created instead.
+    the same recurrence. Which adoption is Google's current one is decided by
+    when each was synced (``_rekeyed_after``). A link moved anywhere else (or
+    gone) leaves this event live but unjournalled, so it is created instead.
     """
     return (
         link is not None
@@ -767,7 +773,9 @@ class JournalOutboxEventProcessor:
         rekeyed_link_synced_at: datetime | None = None
         if payload.rekeyed_from is not None:
             rekeyed_link = await self._locked_rekey_link(existing_journal_id, payload)
-            if _rekey_superseded(rekeyed_link, payload):
+            if _rekey_moved_within(rekeyed_link, payload) and (
+                await self._rekeyed_after(existing_journal_id, payload)
+            ):
                 logger.info(
                     "Re-key adoption skipped - a later instance has adopted it",
                     journal_id=existing_journal_id,
@@ -779,9 +787,10 @@ class JournalOutboxEventProcessor:
                     "reason": "adoption_superseded",
                     "journal_id": existing_journal_id,
                 }
-            if rekeyed_link is None or rekeyed_link.external_event_id not in (
-                payload.rekeyed_from,
-                external_event_id,
+            if rekeyed_link is None or not (
+                rekeyed_link.external_event_id
+                in (payload.rekeyed_from, external_event_id)
+                or _rekey_moved_within(rekeyed_link, payload)
             ):
                 logger.info(
                     "Re-key adoption stale - the journal has moved on, creating",
@@ -1062,6 +1071,8 @@ class JournalOutboxEventProcessor:
                 synced_entries=payload.synced_entries,
                 user_timezone=user_timezone,
             )
+        if payload.rekeyed_from is not None:
+            await self._record_rekeyed_at(existing_journal_id, payload)
 
         # Surface any journal that turns out to describe the same event
         await self._flag_duplicate_journals(
@@ -1137,6 +1148,62 @@ class JournalOutboxEventProcessor:
             "journal_id": saved_journal.id,
             "external_event_id": external_event_id,
         }
+
+    async def _rekeyed_after(
+        self, journal_id: int, payload: JournalSyncEventData
+    ) -> bool:
+        """Whether the adoption that last moved the link was synced after this.
+
+        A link with no recorded adoption time was moved before times were
+        kept: this adoption, the one being applied now, is taken as newer.
+        """
+        stored = (
+            await self.connection.execute(
+                text("""
+                    SELECT CASE WHEN reference_data IS JSON OBJECT
+                                THEN reference_data::jsonb ->> CAST(:key AS text)
+                           END
+                    FROM journal_external_event_links
+                    WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+                """),
+                {
+                    "key": _REKEYED_AT_KEY,
+                    "journal_id": journal_id,
+                    "calendar_id": UUID(payload.calendar_id),
+                },
+            )
+        ).scalar()
+        if not stored:
+            return False
+        try:
+            return datetime.fromisoformat(stored) >= datetime.fromisoformat(
+                payload.sync_timestamp
+            )
+        except ValueError:
+            return False
+
+    async def _record_rekeyed_at(
+        self, journal_id: int, payload: JournalSyncEventData
+    ) -> None:
+        """Keep on the link when the re-key adoption that moved it was synced."""
+        await self.connection.execute(
+            text("""
+                UPDATE journal_external_event_links
+                SET reference_data = (
+                    CASE WHEN reference_data IS JSON OBJECT
+                         THEN reference_data::jsonb
+                         ELSE '{}'::jsonb
+                    END || jsonb_build_object(CAST(:key AS text), CAST(:at AS text))
+                )::text
+                WHERE journal_id = :journal_id AND calendar_id = :calendar_id
+            """),
+            {
+                "key": _REKEYED_AT_KEY,
+                "at": payload.sync_timestamp,
+                "journal_id": journal_id,
+                "calendar_id": UUID(payload.calendar_id),
+            },
+        )
 
     async def _locked_rekey_link(
         self, journal_id: int, payload: JournalSyncEventData
