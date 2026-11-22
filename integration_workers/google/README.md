@@ -150,6 +150,14 @@ except that a past journal is then left unchanged. A recurrence with more
 than one live journal on any day merges nothing, because there a retired slot
 beside a live one may be a deleted occurrence rather than a duplicate.
 
+Re-timing back after such a merge makes Google re-issue ids the surviving
+journal holds as merged aliases. An aliased instance is normally skipped, but
+one whose planned adoption is of the very journal the alias belongs to is
+not: it is sent as that adoption, and the backend releases the alias and
+makes the id the journal's link again. A merge also keeps a private
+description private when either journal had one, so notes kept off the
+calendar are never pushed to it from the survivor.
+
 For an endless rule with more than one slot a day, Google may stop
 expanding it partway through a day, so its window ends at the last listed
 slot, not at the end of that day.

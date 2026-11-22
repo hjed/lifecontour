@@ -926,10 +926,17 @@ class JournalOutboxEventProcessor:
         # edit the survivor.
         if existing_link is None:
             merged_alias = await self._merged_alias_for(payload)
-            if merged_alias is not None:
+            if merged_alias is not None and not (
+                # A re-time back reuses an id a merge absorbed into this very
+                # journal: the adoption takes it back as the journal's link.
+                payload.rekeyed_from is not None
+                and merged_alias.journal_id == existing_journal_id
+            ):
                 return _skipped_as_merged(
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
+            if merged_alias is not None:
+                await self.merged_alias_repo.release(merged_alias)
 
         # A plain update for a recurring instance the journal's link no longer
         # names: another instance adopted the journal (a split or a re-key)

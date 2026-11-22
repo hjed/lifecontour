@@ -5051,15 +5051,24 @@ async def _sync_calendar_inbound(
             # absorbed. The backend refuses to re-import it anyway;
             # asking here keeps a full sync from sending a create
             # for every event a merge ever absorbed.
-            is_merged_alias = (
-                existing_link is None
-                and await MergedAliasRepository(session).find_alias(
+            merged_alias = (
+                await MergedAliasRepository(session).find_alias(
                     user_id=str(user_id),
                     payload_source="google",
                     external_id=google_event.id,
                     external_identity=build_event_identity(google_event),
                 )
-                is not None
+                if existing_link is None
+                else None
+            )
+            # Re-timed back after a merge, Google re-issues an id the journal
+            # holds as a merged alias: the planned adoption of that same
+            # journal takes it back rather than skipping it.
+            planned = adoptions.get(google_event.id)
+            is_merged_alias = merged_alias is not None and not (
+                planned is not None
+                and planned.rekeyed
+                and merged_alias.journal_id == planned.journal_id
             )
 
             # Classify the event
