@@ -877,6 +877,29 @@ class JournalOutboxEventProcessor:
                     EVENT_TYPE_JOURNAL_EVENT_UPDATED, merged_alias, external_event_id
                 )
 
+        # A plain update for an event the journal's link no longer names: the
+        # journal was adopted by another event (a split or a re-key) after
+        # this update was queued. Re-pointing the link would undo that.
+        if (
+            existing_link is None
+            and payload.split_adopted_from is None
+            and payload.rekeyed_from is None
+            and await self._link_moved_on(
+                existing_journal_id, UUID(calendar_id), external_event_id
+            )
+        ):
+            logger.info(
+                "Stale update skipped - the journal now links another event",
+                journal_id=existing_journal_id,
+                external_event_id=external_event_id,
+            )
+            return {
+                "status": "skipped",
+                "event_type": EVENT_TYPE_JOURNAL_EVENT_UPDATED,
+                "reason": "link_moved_on",
+                "journal_id": existing_journal_id,
+            }
+
         # If no external link exists, create one to make ETag tracking
         # and idempotency work on subsequent runs
         if existing_link is None:

@@ -39,7 +39,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
-from calendar_models import GoogleEvent
+from calendar_models import GoogleEvent, GoogleEventStartEnd
 from recurrence import root_recurring_event_id
 
 # Mirrors the sync's past-cancellation skip: a cancellation of an occurrence
@@ -103,32 +103,33 @@ def _event_zone(name: str | None) -> ZoneInfo | None:
         return None
 
 
-def event_start(event: GoogleEvent, zone: ZoneInfo) -> datetime | None:
-    """The event's start as an aware instant, or ``None`` when unreadable.
+def start_moment(value: GoogleEventStartEnd | None, zone: ZoneInfo) -> datetime | None:
+    """A Google start (or original start) as an aware instant, or ``None``.
 
-    An all-day event starts at midnight in ``zone``. Runs before the sync
-    loop's per-event error boundary, so a malformed start must not raise:
+    An all-day value starts at midnight in ``zone``. Runs before the sync
+    loop's per-event error boundary, so a malformed value must not raise:
     the event is simply not a candidate, and the loop rejects it on its own.
     """
-    if event.start is None:
+    if value is None:
         return None
     try:
-        if event.start.date_time:
-            moment = datetime.fromisoformat(event.start.date_time)
+        if value.date_time:
+            moment = datetime.fromisoformat(value.date_time)
             if moment.tzinfo is None:
                 # A bare local time is in the event's own zone (``timeZone``),
                 # not the worker's.
-                moment = moment.replace(
-                    tzinfo=_event_zone(event.start.time_zone) or zone
-                )
+                moment = moment.replace(tzinfo=_event_zone(value.time_zone) or zone)
             return moment
-        if event.start.date:
-            return datetime.combine(
-                date.fromisoformat(event.start.date), time(), tzinfo=zone
-            )
+        if value.date:
+            return datetime.combine(date.fromisoformat(value.date), time(), tzinfo=zone)
     except ValueError:
         return None
     return None
+
+
+def event_start(event: GoogleEvent, zone: ZoneInfo) -> datetime | None:
+    """The event's start as an aware instant, or ``None`` when unreadable."""
+    return start_moment(event.start, zone)
 
 
 def _local_day(event: GoogleEvent, zone: ZoneInfo) -> date | None:

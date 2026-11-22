@@ -712,3 +712,68 @@ class TestRekeyedRecurrenceIntegration:
             (event_type, data["existing_journal_id"])
             for event_type, data in await self._outbox(db_session)
         ] == [("journal_event.updated", last_journal)]
+
+    async def test_a_far_moved_exception_does_not_stretch_the_window(
+        self, db_session
+    ) -> None:
+        """An occurrence moved far ahead keeps its scheduled slot: the window
+        ends where Google stopped expanding the rule, not where it moved."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        first, second = self._day(1), self._day(2)
+        unlisted = self._day(10)
+        for start in (first, second, unlisted):
+            await self._linked_journal(db_session, calendar_uuid, start)
+        moved = self._instance(first)
+        moved["originalStartTime"] = {"dateTime": first.isoformat()}
+        moved_to = first + timedelta(weeks=20)
+        moved["start"] = {"dateTime": moved_to.isoformat()}
+        moved["end"] = {"dateTime": (moved_to + timedelta(hours=1)).isoformat()}
+
+        result, _ = await self._sync(
+            db_session, [moved, self._instance(second)], sync_type="full"
+        )
+
+        assert result["status"] == "success"
+        # The listed instances are ordinary updates; nothing is retired.
+        assert "journal_event.cancelled" not in [
+            event_type for event_type, _ in await self._outbox(db_session)
+        ]
+        assert result.get("events_rekey_adopted", 0) == 0
+
+    async def test_google_is_asked_from_before_a_locally_moved_slot(
+        self, db_session
+    ) -> None:
+        """A journal postponed locally (not yet pushed) is still at its slot in
+        Google, so the listing must start before that slot."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session, sync_token="token")
+        slot = self._day(1)
+        journal_id = await self._linked_journal(db_session, calendar_uuid, slot)
+        await db_session.execute(
+            text(
+                "UPDATE journals SET event_date_range_start = :later,"
+                " event_date_range_end = :later WHERE id = :id"
+            ),
+            {"later": slot + timedelta(days=8), "id": journal_id},
+        )
+        await db_session.commit()
+        still_live = self._instance(slot)
+        new = self._instance(self._day(2, minute=30))
+
+        result, client = await self._sync(
+            db_session,
+            [new],
+            sync_type="incremental",
+            instances=[still_live, new],
+        )
+
+        assert result["status"] == "success"
+        client.list_instances.assert_awaited_once_with(
+            "primary", self.RECURRENCE, (slot - timedelta(days=1)).isoformat()
+        )
+        assert [event_type for event_type, _ in await self._outbox(db_session)] == [
+            "journal_event.created"
+        ]

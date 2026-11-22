@@ -115,7 +115,12 @@ orphaned links and retires them:
   returned: Google expands an endless recurrence only so far (about 730
   instances), and a link past that may still be live. The whole day is
   included because a recurrence moved earlier has its last old occurrence
-  after the last new one. A master that can't be read is treated as endless;
+  after the last new one. A master that can't be read is treated as endless.
+  Both sides are measured by **slot**, when the rule scheduled the instance
+  (`originalStartTime`, or the `<recurrence>_<slot>` id of a link), so an
+  occurrence moved far ahead cannot stretch the window, and a journal moved
+  locally is still placed where Google has it. `list_instances` is asked
+  from before the earlier of a link's slot and its journal's date;
 - it never retires outbound-only links, or legacy links with no recorded
   recurrence. A failed `list_instances` retires nothing.
 

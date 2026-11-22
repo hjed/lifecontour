@@ -353,3 +353,31 @@ class TestRekeyedAdoption:
 
         assert result["status"] == "skipped"
         assert await event_state(async_connection, journal_id) == "confirmed"
+
+    async def test_a_delayed_update_for_the_old_id_leaves_the_adoption(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """An update for the old id queued before the adoption, delivered
+        after it, must not point the journal back at an event that is gone."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journal_id = await _seed(processor, calendar_id)
+        await processor.process_event(_adoption(calendar_id, journal_id))
+
+        result = await processor.process_event(
+            _event(
+                "journal_event.updated",
+                calendar_id,
+                OLD_ID,
+                OLD_START,
+                etag='"etag-old-2"',
+                existing_journal_id=journal_id,
+            )
+        )
+
+        assert result["status"] == "skipped"
+        journal = await _journal(async_connection, journal_id)
+        assert journal.external_event_id == NEW_ID
+        assert journal.event_date_range_start == NEW_START

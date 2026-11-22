@@ -56,6 +56,7 @@ def _link(
     recurrence: str | None = R,
     sync_capability: str = "bidirectional",
     external_event_id: str | None = None,
+    slot: datetime | None = None,
 ) -> RecurrenceLink:
     return RecurrenceLink(
         external_event_id=external_event_id
@@ -63,6 +64,7 @@ def _link(
         recurring_event_id=recurrence,
         journal_id=journal_id,
         start=moment,
+        slot=slot or moment,
         sync_capability=sync_capability,
     )
 
@@ -256,3 +258,29 @@ def test_an_endless_or_unknown_rule_is_unbounded() -> None:
         }
     )
     assert not rule_is_bounded({})
+
+
+def test_a_link_is_placed_in_the_window_by_its_slot() -> None:
+    """A journal moved locally into the window is still the occurrence Google
+    scheduled past it, which Google never listed."""
+    beyond = WINDOW_END + timedelta(days=7)
+    links = [_link(OLD_TIMES[0], 100, slot=beyond)]
+
+    plan = plan_rekeyed_instances(
+        [_live(NEW_TIMES[0])], links, _google_has(NEW_TIMES[0]), SYDNEY
+    )
+
+    assert plan.retired == ()
+
+
+def test_an_instance_id_names_its_slot() -> None:
+    from rekeyed_recurrence import instance_slot
+
+    assert instance_slot(f"{R}_20261214T030000Z", SYDNEY) == datetime(
+        2026, 12, 14, 3, 0, tzinfo=UTC
+    )
+    assert instance_slot(f"{R}_20261214", SYDNEY) == datetime(
+        2026, 12, 14, tzinfo=SYDNEY
+    )
+    assert instance_slot("not-an-instance", SYDNEY) is None
+    assert instance_slot(f"{R}_R20261214T030000", SYDNEY) is None
