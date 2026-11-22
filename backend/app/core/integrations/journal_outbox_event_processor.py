@@ -74,6 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
 from app.core.integrations.adapters.sql.journal_event_link_repository import (
+    SeriesLinkedJournal,
     SqlJournalEventLinkRepository,
 )
 from app.core.integrations.adapters.sql.strava_athlete_mapping_repository import (
@@ -744,8 +745,10 @@ class JournalOutboxEventProcessor:
 
         # The recurrence re-issued its instance ids, and this instance adopts
         # the journal the old id was linked to.
+        rekeyed_link_synced_at: datetime | None = None
         if payload.rekeyed_from is not None:
-            if await self._rekey_is_stale(existing_journal_id, payload):
+            rekeyed_link = await self._rekeyed_link(existing_journal_id, payload)
+            if rekeyed_link is None:
                 logger.info(
                     "Re-key adoption stale - the journal has moved on, creating",
                     journal_id=existing_journal_id,
@@ -755,6 +758,9 @@ class JournalOutboxEventProcessor:
             # The worker sends the description for that fallback create; an
             # adoption never writes it over the journal's notes.
             journal_data = {k: v for k, v in journal_data.items() if k != "content"}
+            # The re-point below rewrites the link's ``updated_at``; local
+            # edits are judged against when the old link last synced.
+            rekeyed_link_synced_at = rekeyed_link.link_updated_at
 
         # A split-off recurrence adopting this journal (see ``split_adoption``)
         split_adoption = None
@@ -904,7 +910,9 @@ class JournalOutboxEventProcessor:
                 "Blocking inbound content update due to private_description",
                 journal_id=existing_journal_id,
             )
-        link_updated_at = existing_link.updated_at if existing_link else None
+        link_updated_at = rekeyed_link_synced_at or (
+            existing_link.updated_at if existing_link else None
+        )
         adopting = split_adoption is not None
         reference_data = existing_link.reference_data if existing_link else None
         base = recorded_calendar_base(reference_data)
@@ -1070,10 +1078,10 @@ class JournalOutboxEventProcessor:
             "external_event_id": external_event_id,
         }
 
-    async def _rekey_is_stale(
+    async def _rekeyed_link(
         self, journal_id: int, payload: JournalSyncEventData
-    ) -> bool:
-        """Whether a re-key adoption no longer describes the journal's link.
+    ) -> SeriesLinkedJournal | None:
+        """The journal's link a re-key adoption moves, or ``None`` when stale.
 
         Holds the recurrence's lock first, the one its cancellations take, so
         a cancellation of the old id cannot interleave. The adoption applies
@@ -1089,10 +1097,12 @@ class JournalOutboxEventProcessor:
                 calendar_id, payload.recurring_event_id
             )
         current = await self.link_repo.find_by_journal(journal_id, calendar_id)
-        return current is None or current.external_event_id not in (
+        if current is None or current.external_event_id not in (
             payload.rekeyed_from,
             payload.external_event_id,
-        )
+        ):
+            return None
+        return current
 
     async def _link_moved_on(
         self, journal_id: int, calendar_id: UUID, external_event_id: str

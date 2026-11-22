@@ -78,6 +78,7 @@ def _event(
     etag: str = '"etag-1"',
     existing_journal_id: int | None = None,
     rekeyed_from: str | None = None,
+    synced: bool = True,
 ) -> OutboxEvent:
     event = sync_event(
         event_type,
@@ -90,14 +91,17 @@ def _event(
         recurring_event_id=RECURRENCE,
         series_recurring_event_id=RECURRENCE,
     )
-    event.event_data["synced_entries"] = _keys(title, start)
+    if synced:
+        event.event_data["synced_entries"] = _keys(title, start)
     event.event_data["rekeyed_from"] = rekeyed_from
     return event
 
 
-async def _seed(processor: JournalOutboxEventProcessor, calendar_id: str) -> int:
+async def _seed(
+    processor: JournalOutboxEventProcessor, calendar_id: str, *, synced: bool = True
+) -> int:
     created = await processor.process_event(
-        _event("journal_event.created", calendar_id, OLD_ID, OLD_START)
+        _event("journal_event.created", calendar_id, OLD_ID, OLD_START, synced=synced)
     )
     assert created["status"] == "success"
     journal_id: int = created["journal_id"]
@@ -105,7 +109,7 @@ async def _seed(processor: JournalOutboxEventProcessor, calendar_id: str) -> int
 
 
 def _adoption(
-    calendar_id: str, journal_id: int, *, title: str = "Retro"
+    calendar_id: str, journal_id: int, *, title: str = "Retro", synced: bool = True
 ) -> OutboxEvent:
     """The worker's adopting update: the new id and time, aimed at the journal."""
     return _event(
@@ -117,6 +121,7 @@ def _adoption(
         etag='"etag-new"',
         existing_journal_id=journal_id,
         rekeyed_from=OLD_ID,
+        synced=synced,
     )
 
 
@@ -157,15 +162,21 @@ async def _journal_ids(connection: AsyncConnection) -> list[int]:
     return list(result.scalars())
 
 
-async def _edit(connection: AsyncConnection, journal_id: int, **values: str) -> None:
-    """A local edit made after the last sync."""
+async def _edit(
+    connection: AsyncConnection,
+    journal_id: int,
+    *,
+    at: datetime = LATER,
+    **values: str,
+) -> None:
+    """A local edit made after the last sync (at ``at``)."""
     assignments = ", ".join(f"{column} = :{column}" for column in values)
     await connection.execute(
         text(
             f"UPDATE journals SET {assignments}, updated_at = :later"  # noqa: S608
             " WHERE id = :id"
         ),
-        {**values, "later": LATER, "id": journal_id},
+        {**values, "later": at, "id": journal_id},
     )
 
 
@@ -218,6 +229,28 @@ class TestRekeyedAdoption:
         journal = await _journal(async_connection, journal_id)
         assert journal.title == "My retro"
         assert journal.event_date_range_start == NEW_START
+
+    async def test_a_local_rename_survives_an_adoption_without_a_base(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """Without a recorded base, local edits are judged against when the
+        link last synced - the old link's time, not the re-point's."""
+        calendar_id = await create_calendar(async_connection)
+        processor = build_processor(async_connection)
+        journal_id = await _seed(processor, calendar_id, synced=False)
+        await _edit(
+            async_connection, journal_id, at=datetime.now(UTC), title="My retro"
+        )
+
+        await processor.process_event(
+            _adoption(calendar_id, journal_id, title="Retro - NYX", synced=False)
+        )
+
+        journal = await _journal(async_connection, journal_id)
+        assert journal.title == "My retro"
+        assert journal.external_event_id == NEW_ID
 
     async def test_googles_rename_applies_with_the_adoption(
         self,

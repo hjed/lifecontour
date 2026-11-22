@@ -231,3 +231,28 @@ def test_days_are_read_in_the_users_zone() -> None:
 
     assert plan.targets == {}
     assert [r.journal_id for r in plan.retired] == [100]
+
+
+def test_a_rule_with_an_end_bounds_the_recurrence() -> None:
+    from rekeyed_recurrence import rule_is_bounded
+
+    assert rule_is_bounded(
+        {"recurrence": ["RRULE:FREQ=WEEKLY;UNTIL=20270101T000000Z;BYDAY=MO"]}
+    )
+    assert rule_is_bounded({"recurrence": ["RRULE:FREQ=DAILY;COUNT=10"]})
+    assert rule_is_bounded({"recurrence": ["RDATE;VALUE=DATE:20261214"]})
+
+
+def test_an_endless_or_unknown_rule_is_unbounded() -> None:
+    from rekeyed_recurrence import rule_is_bounded
+
+    assert not rule_is_bounded({"recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=MO"]})
+    assert not rule_is_bounded(
+        {
+            "recurrence": [
+                "RRULE:FREQ=WEEKLY;COUNT=3",
+                "RRULE:FREQ=MONTHLY;BYMONTHDAY=1",
+            ]
+        }
+    )
+    assert not rule_is_bounded({})

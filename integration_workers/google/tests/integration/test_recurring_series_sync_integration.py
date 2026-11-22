@@ -517,6 +517,7 @@ class TestRekeyedRecurrenceIntegration:
         *,
         sync_type: str,
         instances: list[dict] | Exception | None = None,
+        rule: str = "RRULE:FREQ=WEEKLY;BYDAY=MO",
     ) -> tuple[dict, MagicMock]:
         client = MagicMock()
         client.list_events = AsyncMock(
@@ -525,6 +526,12 @@ class TestRekeyedRecurrenceIntegration:
         client.list_instances = AsyncMock(
             side_effect=instances if isinstance(instances, Exception) else None,
             return_value=instances or [],
+        )
+        client.get_event = AsyncMock(
+            return_value={
+                "id": TestRekeyedRecurrenceIntegration.RECURRENCE,
+                "recurrence": [rule],
+            }
         )
         with patch("worker._create_google_client", return_value=client):
             result = await sync_calendar_events(
@@ -651,3 +658,57 @@ class TestRekeyedRecurrenceIntegration:
         assert [event_type for event_type, _ in await self._outbox(db_session)] == [
             "journal_event.created"
         ]
+
+    async def test_an_earlier_finite_series_adopts_its_last_occurrence(
+        self, db_session
+    ) -> None:
+        """Moved earlier, the last old occurrence starts after the last new
+        one. A rule with an end is listed whole, so it is still adopted."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        olds = [self._day(weeks) for weeks in (1, 2, 3)]
+        news = [start - timedelta(hours=1) for start in olds]
+        journals = [
+            await self._linked_journal(db_session, calendar_uuid, start)
+            for start in olds
+        ]
+
+        result, _ = await self._sync(
+            db_session,
+            [self._instance(start) for start in news],
+            sync_type="full",
+            rule="RRULE:FREQ=WEEKLY;COUNT=3",
+        )
+
+        assert result.get("events_rekey_adopted") == 3
+        adopted = {
+            data["existing_journal_id"]
+            for event_type, data in await self._outbox(db_session)
+            if event_type == "journal_event.updated"
+        }
+        assert adopted == set(journals)
+
+    async def test_an_earlier_endless_series_adopts_its_last_listed_day(
+        self, db_session
+    ) -> None:
+        """Endless, Google lists only so far: a link on the last listed day is
+        covered, one on a later day is not."""
+        from datetime import timedelta
+
+        calendar_uuid = await self._calendar(db_session)
+        last_old, beyond = self._day(2), self._day(3)
+        last_journal = await self._linked_journal(db_session, calendar_uuid, last_old)
+        await self._linked_journal(db_session, calendar_uuid, beyond)
+
+        result, _ = await self._sync(
+            db_session,
+            [self._instance(last_old - timedelta(hours=1))],
+            sync_type="full",
+        )
+
+        assert result.get("events_rekey_adopted") == 1
+        assert [
+            (event_type, data["existing_journal_id"])
+            for event_type, data in await self._outbox(db_session)
+        ] == [("journal_event.updated", last_journal)]

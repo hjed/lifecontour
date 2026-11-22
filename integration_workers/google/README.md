@@ -108,10 +108,14 @@ orphaned links and retires them:
   A time-ranged listing (a full sync, or the fallback after an invalid token)
   already is Google's whole view, so it is used as is - no unlinked instance
   needed, which is what sweeps up orphans left from before this existed;
-- it only retires links inside the window Google answered for: from the
-  query's `time_min` to the last instance Google returned. Google expands an
-  endless recurrence only so far (about 730 instances), and a link past that
-  may still be live;
+- it only retires links inside the window Google answered for, which starts
+  at the query's `time_min`. When every rule on the recurring master ends
+  (`UNTIL` or `COUNT`), Google lists every instance and the window has no
+  end. Otherwise it ends with the local day of the last instance Google
+  returned: Google expands an endless recurrence only so far (about 730
+  instances), and a link past that may still be live. The whole day is
+  included because a recurrence moved earlier has its last old occurrence
+  after the last new one. A master that can't be read is treated as endless;
 - it never retires outbound-only links, or legacy links with no recorded
   recurrence. A failed `list_instances` retires nothing.
 
