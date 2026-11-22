@@ -6,7 +6,11 @@
 @import 'tw-animate-css';
 @plugin '@tailwindcss/typography';
 
-/* Dark mode variant - replaced @custom-variant for SonarQube compatibility */
+/* `dark:` follows the `.dark` class next-themes toggles on <html>, as shadcn
+   generates it. Without this, Tailwind v4 keys `dark:` off
+   prefers-color-scheme, so the in-app Light/Dark toggle would be ignored
+   wherever the OS setting differs. */
+@custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.625rem;
@@ -25,6 +29,16 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Status tokens (shadcn ships only `destructive`). Identical in every
+     palette so a status reads the same whichever palette is chosen. The
+     light values are dark enough for small text on the background; the
+     foregrounds are for text on a solid status fill. */
+  --success: oklch(0.527 0.154 150.069);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.555 0.163 48.998);
+  --warning-foreground: oklch(0.985 0 0);
+  --info: oklch(0.5 0.134 242.749);
+  --info-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -59,6 +73,12 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.792 0.209 151.711);
+  --success-foreground: oklch(0.205 0 0);
+  --warning: oklch(0.828 0.189 84.429);
+  --warning-foreground: oklch(0.205 0 0);
+  --info: oklch(0.746 0.16 232.661);
+  --info-foreground: oklch(0.205 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -82,6 +102,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -97,6 +120,12 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -130,10 +159,9 @@
   }
 }
 
-/* Prose colors follow the app's semantic theme tokens. The app toggles
-   dark mode via a `.dark` class, not prefers-color-scheme, so
-   `dark:prose-invert` would key off the wrong signal. Kept unlayered so it
-   wins over the typography plugin's defaults in the utilities layer. */
+/* Prose colors follow the app's semantic theme tokens, so they track the
+   palette and mode without `dark:prose-invert`. Kept unlayered so it wins
+   over the typography plugin's defaults in the utilities layer. */
 .prose {
   --tw-prose-body: var(--color-foreground);
   --tw-prose-headings: var(--color-foreground);

@@ -38,21 +38,22 @@ semantic token classes below over raw palette colours** (`bg-neutral-900`,
 | Quiet fill        | `bg-secondary` `text-secondary-foreground` `bg-muted` `text-muted-foreground` |
 | Hover / highlight | `bg-accent` `text-accent-foreground`                                          |
 | Danger            | `bg-destructive` `text-destructive`                                           |
+| Status            | `text-success` `text-warning` `text-info`, tints like `bg-success/10`         |
 | Lines & focus     | `border-border` `border-input` `ring-ring`                                    |
 | Nav surface       | `bg-sidebar` `text-sidebar-foreground` `bg-sidebar-accent`                    |
 | Data viz          | `bg-chart-1` … `bg-chart-5`                                                   |
 
 Each works with the `bg-` / `text-` / `border-` / `ring-` prefix. Radius follows
-`--radius`: `rounded-sm|md|lg|xl`. Spacing, `grid-cols-*`, `max-w-*`,
+`--radius`: `rounded-sm|md|lg|xl|2xl|3xl|4xl`. Status tokens also have a
+`-foreground` (`text-success-foreground`) for text on a solid status fill. Spacing, `grid-cols-*`, `max-w-*`,
 `text-xs…5xl`, `font-medium|semibold|bold`, `shadow-xs…xl` and the `sm:` `md:`
 `lg:` breakpoints are all available.
 
-**Do not use `dark:` variants.** This app toggles dark mode with a `.dark` class,
-but no `@custom-variant dark` is defined, so Tailwind compiles `dark:*` to
-`@media (prefers-color-scheme: dark)` — it follows the OS, not the app, and will
-desync from everything else on the page. The semantic tokens above already
-switch correctly under `.dark`, so use them and write no dark-mode CSS at all.
-To preview dark mode, put `class="dark"` on a wrapping element.
+**Do not use `dark:` variants for colour.** The semantic tokens above already
+switch under the `.dark` class, so write no dark-mode colour CSS at all. (`dark:`
+does follow `.dark` — `@custom-variant dark (&:is(.dark *))` — but a raw colour
+plus a `dark:` twin ignores the user's palette.) To preview dark mode, put
+`class="dark"` on a wrapping element.
 
 There is no exported `cn()` helper — pass plain `className` strings.
 

@@ -28,8 +28,10 @@
  * conventions.md — that file tells the agent these names are safe to use. */
 
 @source inline(
-  '{bg,text,border,ring}-{background,foreground,card,card-foreground,popover,popover-foreground,primary,primary-foreground,secondary,secondary-foreground,muted,muted-foreground,accent,accent-foreground,destructive,border,input,ring,sidebar,sidebar-foreground,sidebar-primary,sidebar-accent,sidebar-border,chart-1,chart-2,chart-3,chart-4,chart-5}'
+  '{bg,text,border,ring}-{background,foreground,card,card-foreground,popover,popover-foreground,primary,primary-foreground,secondary,secondary-foreground,muted,muted-foreground,accent,accent-foreground,destructive,success,success-foreground,warning,warning-foreground,info,info-foreground,border,input,ring,sidebar,sidebar-foreground,sidebar-primary,sidebar-accent,sidebar-border,chart-1,chart-2,chart-3,chart-4,chart-5}'
 );
+@source inline('{bg,border}-{success,warning,info,destructive}/{10,15,30}');
+@source inline('rounded-{2xl,3xl,4xl}');
 @source inline(
   'hover:{bg,text}-{primary,secondary,muted,accent,destructive,accent-foreground}'
 );
