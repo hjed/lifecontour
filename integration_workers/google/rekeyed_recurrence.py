@@ -224,12 +224,20 @@ def plan_rekeyed_instances(
                 rekeyed=True,
             )
     adopted = {target.old_event_id for target in targets.values()}
+    # With more than one slot a day, a retired slot beside a live one may be a
+    # deleted occurrence, not a duplicate: such a recurrence merges nothing.
+    sub_daily = {
+        recurrence
+        for (recurrence, _), journals in siblings.items()
+        if len(journals) > 1
+    }
 
     def superseded_by(link: RecurrenceLink) -> int | None:
         key = (link.recurring_event_id or "", link.start.astimezone(zone).date())
         live_journals = siblings.get(key, set()) - {link.journal_id}
         if (
             link.external_event_id in adopted
+            or key[0] in sub_daily
             or new_by_key.get(key)
             or len(old_by_key[key]) != 1
             or len(live_journals) != 1

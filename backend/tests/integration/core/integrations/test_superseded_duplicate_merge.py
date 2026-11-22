@@ -242,3 +242,29 @@ class TestSupersededDuplicateMerge:
         assert not await journal_exists(async_connection, old)
         assert await event_state(async_connection, sibling) == "confirmed"
         assert await _link_id(async_connection, sibling) == NEW_ID
+
+    async def test_a_past_duplicate_whose_merge_is_declined_is_left_alone(
+        self,
+        async_connection: AsyncConnection,
+        clean_database: None,  # noqa: ARG001
+    ) -> None:
+        """The worker sends a merge even for a past journal; if the merge can
+        no longer run, cancelling it instead would cancel an event that
+        already happened."""
+        calendar_id = await _google_calendar(async_connection)
+        processor = build_processor(async_connection)
+        past = datetime.now(UTC).replace(microsecond=0) - timedelta(days=30)
+        old = await _created(processor, calendar_id, OLD_ID, past)
+        sibling = await _created(
+            processor, calendar_id, NEW_ID, past + timedelta(minutes=30)
+        )
+        await async_connection.execute(
+            text("DELETE FROM journals WHERE id = :id"), {"id": sibling}
+        )
+
+        result = await processor.process_event(
+            _superseded_cancellation(calendar_id, old, sibling)
+        )
+
+        assert result["status"] == "skipped"
+        assert await event_state(async_connection, old) == "confirmed"

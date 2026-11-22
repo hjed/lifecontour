@@ -341,3 +341,24 @@ def test_an_unlinked_candidate_adopts_rather_than_supersedes() -> None:
 
     assert plan.targets[_instance_id(NEW_TIMES[0])].journal_id == 100
     assert plan.retired[0].superseded_by_journal_id is None
+
+
+def test_a_sub_daily_recurrence_merges_nothing() -> None:
+    """With two slots a day, a morning that was deleted beside an afternoon
+    that stays is not a duplicate of it."""
+    morning = [moment - timedelta(hours=4) for moment in OLD_TIMES[:2]]
+    afternoon = list(OLD_TIMES[:2])
+    links = [
+        _link(morning[0], 100, external_event_id=_instance_id(morning[0])),
+        _link(afternoon[0], 200, external_event_id=_instance_id(afternoon[0])),
+        _link(morning[1], 101, external_event_id=_instance_id(morning[1])),
+        _link(afternoon[1], 201, external_event_id=_instance_id(afternoon[1])),
+    ]
+    # The first day's morning was deleted; the second day keeps both slots.
+    live = _google_has(afternoon[0], morning[1], afternoon[1])
+
+    plan = plan_rekeyed_instances([_live(afternoon[1])], links, live, SYDNEY)
+
+    assert [(r.journal_id, r.superseded_by_journal_id) for r in plan.retired] == [
+        (100, None)
+    ]
