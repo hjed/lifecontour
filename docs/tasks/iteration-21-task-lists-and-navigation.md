@@ -1992,15 +1992,141 @@ tasks most-recently-closed first, paged".
 - *ITER21-002 Phases 4 and 11:* the list page reads `GET …/tasks` for its body and
   `GET …/tasks/completed` when the Completed group opens; a cancelled row is `status: cancelled`.
 
-#### Phase 22: Change a list task's due date
+#### Phase 22: Change a list task's due date ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 19.
-**Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together ·
+**Actual:** ~150 production → **~1,800 tracked** (about 1,800 insertions and 35 deletions, excluding
+this document):
+- production, about 150 lines across 7 files: the service 45, the MCP tool and its docstring 55, the
+  REST schema and controller 40, the web history wording 15, the server guidance 1;
+- about 1,600 test lines across 15 files;
+- 13 lines of architecture docs.
+
+Production landed on the estimate. Because the due date joined Phase 28's `update_task` / `PATCH`
+rather than adding a route or a tool, there was no new surface to price. Tests ran ×10 production,
+the top of the capability band, because each surface carries its own set/change/clear, rejection,
+isolation, archived and timezone cases.
 
 **Acceptance Criteria:**
 
-- [ ] Set, change, clear as a plain edit; carried on the task-updated event with its history label.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Set, change, clear as a plain edit; carried on the task-updated event with its history label.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a list task's due date can be set, changed or cleared, in any status, as a plain edit:
+there is no acknowledgement, and the status is kept.
+
+- **Service.** `TaskService.update_task` / `update_task_with_trail` take `due_date: date | None |
+  Unset` (`None` clears, `UNSET` keeps) and a test-only `now`. The checks run in this order:
+  1. not found;
+  2. archived list (409, a no-op included);
+  3. an unchanged date is a no-op, with no clock read, so an overdue task can be resent its own
+     date;
+  4. the entity's invariants refuse a date on a journal-only task (5) or on a task due in a
+     journal (4), as `TaskValidationError` on `due_date`;
+  5. a date being set must be today or later in the user's timezone (`_require_due_date_allowed`,
+     `TaskDueDateInPastError`).
+
+  Clearing never reads the timezone, and no journal is read or locked. One save publishes one
+  `TaskUpdated` carrying `due_date: (iso | None, iso | None)` beside any other field in the same
+  call.
+- **REST.** `PATCH /api/tasks/{id}` takes `due_date` (`IsoCalendarDate`). `null` clears it and an
+  absent date keeps it (`due_date_change()` over `model_fields_set`). `{"due_date": null}` alone
+  counts as a change.
+- **MCP.** `update_task` takes `due_date` (`JsonIsoDate`) and `clear_due_date` (`JsonBool`). Both
+  together are refused, and the "name a change" guard counts them. The tool docstring and the
+  server guidance say that it sets or clears a list task's due date as a plain edit that keeps its
+  status.
+- **History.** No projection change: rows are field `due_date` with ISO days. The web app words
+  them in `taskEntryDescription` as *Due date set to 3 Dec 2026*, *Due date changed from … to …*
+  and *Due date cleared*, named with the task on a contact's feed, formatted by `formatIsoDate` as a
+  calendar day.
+- `api-design.md` (the PATCH row, the history vocabulary, `update_task`'s shared fields, the
+  archived-list write list) and `domain-architecture.md` (`TaskUpdated`) are updated.
+
+**Tests:**
+- **Unit:**
+  - `tests/unit/tasks/test_task_service_due_date.py`:
+    - set, change and clear as ISO pairs, the status kept in every status, no journal touched;
+    - Sydney today accepted, yesterday refused naming both days, UTC fallback;
+    - clear and absent read no timezone; resent past date and clear-when-undated are no-ops;
+    - journal-only and due-in-journal refused before the clock;
+    - one event with text, flag and icon; a refused date refuses the whole call;
+    - not found; the trail wrapper forwarding the date and provenance.
+  - `test_task_service_archived_list.py` (set, past date answered as archived first, no-op clear).
+  - `api/test_task_schemas.py::TestTheUpdateRequestCarriesADueDate`.
+  - `test_task_tools_schema.py`: the two parameters, `format: date`, the rule in the description, and
+    `clear_due_date`.
+  - `test_server.py`.
+  - `history/test_history_service.py` (set, changed and cleared rows, owned).
+  - Jest `history-display.test.ts` (three wordings, a calendar-day parse, named on a contact's
+    feed).
+- **Integration:**
+  - `tasks/test_task_service_due_date_integration.py`:
+    - the row and one outbox event per change;
+    - a closed task re-dated and still closed;
+    - an overdue task re-dated to today reads not overdue;
+    - a resend writes nothing;
+    - Sydney vs UTC fallback;
+    - a task due in a journal keeps it.
+  - `api/test_task_due_date_endpoints.py`:
+    - 200 set, change and clear with UI provenance;
+    - done and cancelled kept;
+    - overdue cleared on read;
+    - a quiet 200 resend;
+    - date + flag as one event;
+    - 400 `TASK_DUE_DATE_IN_PAST`, `TASK_VALIDATION_ERROR` `meta.field=due_date` for journal-only
+      and due-in-journal, and `VALIDATION_ERROR` for numeric, local-format, datetime and empty
+      dates, each writing nothing;
+    - a second user's task 404 byte-identical to an unknown id, left alone.
+  - `mcp/test_task_due_date_mcp.py`:
+    - set, change and clear with MCP provenance;
+    - done kept;
+    - a past date naming the rule and today;
+    - date with clear, numeric, local-format and string-clear refused;
+    - journal-only and due-in-journal refused;
+    - another user's task "Not found".
+  - Archived 409s on both surfaces (`test_task_archived_list_endpoints.py`,
+    `test_task_tools_archived_list_mcp.py`).
+  - The event-completeness inventory's "due date" `WritePath`.
+  - `test_task_history_projection_e2e.py` (a real set then clear, relayed and projected with
+    provenance and owner).
+  - `task_state` now includes the due date and reads anchors nullable, so it describes a list task
+    too.
+- **E2E:** `task-activity-history.spec.ts` "a due date set on a list task reads as a history line"
+  (Firefox and Mobile Chrome, 3 repeats each).
+
+**Gates run locally:**
+- ruff format/check and mypy (backend, core_shared);
+- backend unit (6,079 passed);
+- the full backend integration suite in five foreground chunks (5,174 passed, 7 pre-existing skips);
+- `pnpm quality:check`; jest (3,424 passed);
+- `task-activity-history.spec.ts` on both projects (one unrelated test hit `ERR_NETWORK_CHANGED` once
+  and passed on re-run, 2 repeats);
+- pre-commit.
+
+**Decisions (recorded during implementation):**
+- **The due date joins `update_task` / `PATCH`**, per Phase 28's rule that a task's own fields share
+  one tool. It is cleared with `null` on REST and `clear_due_date` on MCP, as the icon is.
+- **Due journal → due date is refused here and owned by Phase 23** (user decision in plan review,
+  OQ1 = A). The replacement writes an intermediate link and needs Phase 23's journal-first lock
+  order. Phase 23's acceptance criteria now say so.
+- **The no-op comes before the rules**, so re-sending an overdue task's past date, or clearing a
+  date a task does not have, is a quiet 200 rather than a refusal. It is still refused on an
+  archived list.
+- **No daily-summary change.** Invalidation reads the row's due journal and nothing reads
+  `changed_fields["due_date"]`. That is correct while the summary leaves list tasks out.
+
+**Notes for later phases:**
+- *Phase 23:* lift this phase's refusal (see Phase 23's new criterion). Rewrite
+  `test_a_task_due_in_a_journal_takes_no_due_date` in the unit, service-integration, REST and MCP
+  suites to assert the replacement.
+- *ITER21-004 (dashboard and past-day summaries):* a due-date change must invalidate the old and
+  the new day. `daily_summary_invalidation_service._targets_for_task_event` reads only
+  `due_journal_id`, so read the `due_date` pair from `changed_fields` there.
+- *ITER21-002 (details panel):* send `due_date` on the same `PATCH`. The history wording is already
+  in place, and `frontend/src/types/tasks.ts` still lacks `due_date` (Phase 21's note).
 
 #### Phase 23: Change a list task's due journal
 
@@ -2011,6 +2137,7 @@ tasks most-recently-closed first, paged".
 
 - [ ] Set, change, clear; the replaced journal becomes intermediate.
 - [ ] Lifts Phase 20's closed-list-task retarget refusal: a done or cancelled task on a list can have its due journal changed, keeping its status and asking for no acknowledgement; `TaskListTaskClosedError` and `TASK_LIST_TASK_CLOSED` are removed and Phase 20's refusal tests rewritten to assert the change (see Phase 20's notes).
+- [ ] Lifts Phase 22's due-journal refusal: setting a due date on a list task due in a journal replaces the journal, which becomes intermediate (the spec's "replaced … by a due date"); Phase 22's `test_a_task_due_in_a_journal_takes_no_due_date` tests (unit, service integration, REST, MCP) are rewritten to assert it (user decision in Phase 22's plan review).
 - [ ] Lifts Phase 20's not-due-in-a-journal retarget refusal: an undated or due-date list task can be given a due journal; `TaskListTaskNotDueInJournalError` and `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are removed, and a journal delete racing the change still ends cleanly (see Phase 20's notes).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 

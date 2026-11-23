@@ -235,10 +235,11 @@ class TaskCreated(DomainEvent):
 class TaskUpdated(DomainEvent):
     """Event raised when a field of the task changes.
 
-    Five kinds of change reach this one type: a reword, a status move, a flag or
-    icon change, a contact being linked or unlinked, and a **contact merge**
-    moving a task's people onto the survivor. They arrive from different write
-    paths — :meth:`TaskService.update_task` owns text, status, flag and icon,
+    Six kinds of change reach this one type: a reword, a status move, a flag or
+    icon change, a list task's due-date change, a contact being linked or
+    unlinked, and a **contact merge** moving a task's people onto the survivor.
+    They arrive from different write paths — :meth:`TaskService.update_task`
+    owns text, status, flag, icon and due date,
     :meth:`TaskService.link_contact` / :meth:`~TaskService.unlink_contact` own
     membership, and ``TaskContactMergeService`` owns the merge — but each is one
     write announcing one event.

@@ -505,6 +505,17 @@ async def stored_marks(conn: AsyncConnection, task_id: int) -> tuple[bool, str |
     return bool(row.flagged), row.icon
 
 
+async def stored_due_date(conn: AsyncConnection, task_id: int) -> date | None:
+    """The ``due_date`` column as the database holds it."""
+    due_date: date | None = (
+        await conn.execute(
+            text("SELECT due_date FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).scalar_one()
+    return due_date
+
+
 async def mark_task(
     conn: AsyncConnection, task_id: int, *, flagged: bool, icon: str | None
 ) -> None:
@@ -572,6 +583,27 @@ async def stored_anchors(conn: AsyncConnection, task_id: int) -> tuple[int, int]
         )
     ).one()
     return int(row.creating_journal_id), int(row.due_journal_id)
+
+
+async def _stored_anchor_ids(
+    conn: AsyncConnection, task_id: int
+) -> tuple[int | None, int | None]:
+    """The two anchor columns as ``(creating, due)``, either one absent.
+
+    :func:`stored_anchors` narrows both to ``int`` for the journal-only suites;
+    :func:`task_state` must also describe a task on a list, which may hold
+    neither.
+    """
+    row = (
+        await conn.execute(
+            text(
+                "SELECT creating_journal_id, due_journal_id "
+                "FROM tasks WHERE id = :task_id"
+            ),
+            {"task_id": task_id},
+        )
+    ).one()
+    return row.creating_journal_id, row.due_journal_id
 
 
 async def intermediate_journal_ids(conn: AsyncConnection, task_id: int) -> list[int]:
@@ -822,9 +854,9 @@ async def seed_archived_list_task(
 async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
     """Everything a task write could change, read straight from the tables.
 
-    Existence, status, text, both anchors, both kinds of link, and the flag
-    and icon — so one equality says a refused write left the task exactly as it
-    was.
+    Existence, status, text, both anchors, both kinds of link, the flag and
+    icon, and the due date — so one equality says a refused write left the task
+    exactly as it was.
     """
     if not await task_exists(conn, task_id):
         return (False,)
@@ -832,10 +864,11 @@ async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
         True,
         await stored_status(conn, task_id),
         await stored_text(conn, task_id),
-        await stored_anchors(conn, task_id),
+        await _stored_anchor_ids(conn, task_id),
         await intermediate_journal_ids(conn, task_id),
         await linked_contact_ids(conn, task_id),
         await stored_marks(conn, task_id),
+        await stored_due_date(conn, task_id),
     )
 
 

@@ -14,7 +14,7 @@ only way to say when is to name one that already exists; a date field would
 invite a journal to be created implicitly.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from core_shared.models.tasks import Task, TaskIcon, TaskStatus
@@ -376,6 +376,54 @@ class TestTheUpdateRequestCarriesFlagAndIcon:
     def test_an_icon_outside_the_fixed_set_is_refused(self, value: object) -> None:
         with pytest.raises(ValidationError):
             TaskUpdateRequest.model_validate(_update_body(icon=value))
+
+
+class TestTheUpdateRequestCarriesADueDate:
+    """A list task's due date (ITER21-001 Phase 22).
+
+    Like the icon, ``null`` is a value: ``"due_date": null`` clears the date,
+    while an absent date leaves it alone. Only a ``YYYY-MM-DD`` string is a
+    date, the rule the create shares through ``IsoCalendarDate``.
+    """
+
+    def test_a_date_alone_is_a_change(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(due_date="2026-09-01")
+        ).data.attributes
+
+        assert attributes.due_date_change() == date(2026, 9, 1)
+        assert attributes.icon_change() is UNSET
+
+    def test_a_null_date_alone_is_a_change_that_clears_it(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(due_date=None)
+        ).data.attributes
+
+        assert attributes.due_date_change() is None
+
+    def test_an_absent_date_is_left_alone(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(flagged=True)
+        ).data.attributes
+
+        assert attributes.due_date_change() is UNSET
+
+    def test_the_date_travels_with_the_other_fields(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(text="rewritten", flagged=True, due_date="2026-09-01")
+        ).data.attributes
+
+        assert attributes.text == "rewritten"
+        assert attributes.due_date_change() == date(2026, 9, 1)
+
+    @pytest.mark.parametrize(
+        "value",
+        [20260901, "2026-09-01T00:00:00Z", "01/09/2026", "2026-9-1", "", "soon"],
+        ids=["number", "datetime", "local-format", "unpadded", "empty", "word"],
+    )
+    def test_anything_but_an_iso_calendar_date_is_refused(self, value: object) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body(due_date=value))
 
 
 class TestTheUpdateRequestChangesNothingElse:

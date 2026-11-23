@@ -137,6 +137,33 @@ class TestEveryWriteRouteAnswers409:
         _assert_archived(response)
         assert await _snapshot(async_connection, seeded) == before
 
+    @pytest.mark.parametrize(
+        "due_date",
+        ["2099-12-31", "2000-01-01", None],
+        ids=["set", "past-date-still-archived", "clear-a-date-it-does-not-have"],
+    )
+    async def test_patching_the_due_date(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        due_date: str | None,
+    ) -> None:
+        """An undated task, so the refusal is the list's and not the invariant's;
+        archived answers first, before the date is judged or found unchanged."""
+        task_list = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+        before = await task_state(async_connection, task_id)
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_task_body(task_id, due_date=due_date)
+        )
+
+        _assert_archived(response)
+        assert await task_state(async_connection, task_id) == before
+
     async def test_retargeting(
         self,
         authenticated_client: AsyncClient,

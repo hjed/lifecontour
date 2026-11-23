@@ -68,6 +68,13 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
         ("update_task:flag", {"task_id": s.task_id, "flagged": True}),
         ("update_task:icon", {"task_id": s.task_id, "icon": "tent"}),
         ("update_task:clear-icon", {"task_id": s.task_id, "clear_icon": True}),
+        # The seeded task is due in a journal, which no date may join: the
+        # archived answer comes before that invariant, as before every rule.
+        ("update_task:due-date", {"task_id": s.task_id, "due_date": "2099-12-31"}),
+        (
+            "update_task:clear-due-date",
+            {"task_id": s.task_id, "clear_due_date": True},
+        ),
         ("delete_task", {"task_id": s.task_id}),
         ("retarget_task", {"task_id": s.task_id, "due_journal_id": s.later_journal_id}),
         (
@@ -100,6 +107,8 @@ TOOLS = [
     "update_task:flag",
     "update_task:icon",
     "update_task:clear-icon",
+    "update_task:due-date",
+    "update_task:clear-due-date",
     "delete_task",
     "retarget_task",
     "link_task_to_contact",

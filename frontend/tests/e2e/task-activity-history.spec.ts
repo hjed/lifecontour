@@ -21,7 +21,8 @@
  */
 
 import { test, expect } from './fixtures';
-import { TestDataManager } from './data-management';
+import { TestDataManager, utcDayOffset } from './data-management';
+import { formatIsoDate } from '../../src/lib/date-utils';
 
 const PROJECTION_TIMEOUT = 30000;
 
@@ -207,6 +208,71 @@ test.describe('Task activity history', () => {
     await expect(feed.getByText('Icon set', { exact: true })).toBeVisible({
       timeout: PROJECTION_TIMEOUT,
     });
+  });
+
+  test('a due date set on a list task reads as a history line', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const data = new TestDataManager(page);
+    testCleanup(async () => data.cleanup());
+
+    const journal = await data.createFutureJournal({
+      title: 'Coast walk',
+      daysAhead: 3,
+    });
+    const list = await data.createTaskList('Coast walk packing');
+    const task = await data.createListTask({
+      taskListId: list.id,
+      text: 'Buy blister plasters',
+    });
+    // A mention puts the list task on the journal page, where its history
+    // trigger lives until the list page exists.
+    await data.attachTaskMention(task.id, journal.id);
+
+    // The e2e user has no timezone, so the backend's "today" is UTC's; ten
+    // days out is today or later in every zone.
+    const dueDate = utcDayOffset(10).slice(0, 10);
+
+    // No control sets this until the task details panel exists, so the write
+    // goes through the endpoint that panel will use.
+    const response = await page.request.patch(`/api/tasks/${task.id}`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: {
+        data: {
+          type: 'tasks',
+          id: String(task.id),
+          attributes: { due_date: dueDate },
+        },
+      },
+    });
+    await expect(response).toBeOK();
+
+    await waitForHistoryEntry(
+      page.request,
+      `/api/tasks/${task.id}/history`,
+      attrs => attrs.field_name === 'due_date' && attrs.new_value === dueDate
+    );
+
+    await page.goto(`/journals/${journal.id}`);
+    const row = page
+      .getByTestId('journal-tasks-group-mentioned')
+      .getByTestId(`journal-task-${task.id}`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const trigger = row.getByRole('button', {
+      name: 'Show history for “Buy blister plasters”',
+    });
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await trigger.click();
+
+    const feed = row.getByTestId('activity-feed');
+    await expect(
+      feed.getByText(`Due date set to ${formatIsoDate(dueDate)}`, {
+        exact: true,
+      })
+    ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
   });
 
   test('a task linked to a contact appears on their activity history and offers no action', async ({

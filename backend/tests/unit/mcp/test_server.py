@@ -127,3 +127,8 @@ class TestTheTaskGuidanceDescribesListTasks:
         instructions = create_mcp_server().instructions or ""
 
         assert "reorder_list_tasks" in instructions
+
+    def test_says_update_task_sets_or_clears_a_list_tasks_due_date(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "set or clear a list task's due date" in instructions

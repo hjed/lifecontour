@@ -282,7 +282,8 @@ class ListTaskCreateRequest(JsonApiCreateRequest[ListTaskCreateData]):
 class TaskUpdateAttributes(BaseModel):
     """Attributes a client may send to update a task.
 
-    The text, the status, the flag and the icon, and **each is optional
+    The text, the status, the flag, the icon and a list task's due date, and
+    **each is optional
     individually**: JSON:API sends the attributes that changed, so a client
     rewording a task sends no status and one completing it sends no text.
     Sending several is a single change to a single resource, which is why the
@@ -294,12 +295,16 @@ class TaskUpdateAttributes(BaseModel):
     ``"icon": null`` **clears** the icon while an absent ``icon`` leaves it
     alone (told apart with ``model_fields_set``, through :meth:`icon_change`),
     whereas a task is always flagged or not, so ``"flagged": null`` is refused.
+    The due date follows the icon: ``"due_date": null`` clears it, an absent
+    one keeps it (:meth:`due_date_change`). Whether a task may take a date at
+    all — on a list, and not due in a journal — is the entity's rule, and
+    "today or later" the service's, so both answer the same on every surface.
 
     What is refused is a body naming *no change*. Down in the service that is
     simply nothing to do; out here it is a client that built a request wrong,
     and answering 200 would tell it the edit it thinks it made was applied.
 
-    The due journal (Phase 8) and contact links (Phase 11) are edited through
+    The due journal (retarget) and contact links (Phase 11) are edited through
     their own surfaces, and ``extra="forbid"`` is what keeps their absence a
     contract rather than an omission — a field arriving early is refused rather
     than silently dropped.
@@ -339,10 +344,25 @@ class TaskUpdateAttributes(BaseModel):
             "in any status. Omit to leave it unchanged."
         ),
     )
+    due_date: IsoCalendarDate | None = Field(
+        default=None,
+        description=(
+            "A task on a list's due day, as YYYY-MM-DD, or null to clear it. "
+            "Must be today or later in your timezone when set. A plain edit: "
+            "the status is kept, in any status. Setting one is refused for a "
+            "task that is not on a list or that is due in a journal; clearing "
+            "a date a task does not have changes nothing. Omit to leave it "
+            "unchanged."
+        ),
+    )
 
     def icon_change(self) -> TaskIcon | None | Unset:
         """The icon as the service takes it: a key, ``None`` to clear, or UNSET."""
         return self.icon if "icon" in self.model_fields_set else UNSET
+
+    def due_date_change(self) -> date_type | None | Unset:
+        """The due date as the service takes it: a day, ``None`` to clear, or UNSET."""
+        return self.due_date if "due_date" in self.model_fields_set else UNSET
 
     @model_validator(mode="after")
     def _must_name_a_change(self) -> TaskUpdateAttributes:
@@ -354,8 +374,10 @@ class TaskUpdateAttributes(BaseModel):
         state. A body carrying nothing but nulls therefore names no change and
         is refused here like any other.
 
-        The icon is the exception the other way: ``{"icon": null}`` clears it,
-        so it is a change on its own. The flag cannot be null at all.
+        The icon and the due date are the exceptions the other way:
+        ``{"icon": null}`` and ``{"due_date": null}`` clear them, so each is a
+        change on its own — which is why they are tested by presence, not by
+        ``is None``. The flag cannot be null at all.
         """
         if "flagged" in self.model_fields_set and self.flagged is None:
             raise ValueError(
@@ -366,10 +388,11 @@ class TaskUpdateAttributes(BaseModel):
             and self.status is None
             and self.flagged is None
             and "icon" not in self.model_fields_set
+            and "due_date" not in self.model_fields_set
         ):
             raise ValueError(
                 "An update must name at least one of 'text', 'status', "
-                "'flagged' or 'icon'."
+                "'flagged', 'icon' or 'due_date'."
             )
         return self
 

@@ -635,3 +635,62 @@ class TestTheReordersAreRefusedToo:
         )
         task_repo.move_within_list.assert_not_awaited()
         task_repo.arrange_open_tasks.assert_not_awaited()
+
+
+class TestADueDateChangeIsRefusedToo:
+    """The due date is one of the task's own fields, so it is guarded with them.
+
+    Driven against an undated list task rather than the suite's anchored one,
+    which can never take a due date: the archived answer must come first either
+    way, and this proves it is not the invariant answering instead.
+    """
+
+    @pytest.fixture
+    def task(self) -> Task:
+        return make_list_task()
+
+    @pytest.mark.asyncio
+    async def test_setting_a_due_date_is_refused(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                due_date=datetime.date(2099, 1, 1),
+                transaction=mock_transaction,
+            )
+
+        task_repo.save.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_past_date_is_answered_as_archived_first(
+        self, service: TaskService, mock_transaction: AsyncMock
+    ) -> None:
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                due_date=datetime.date(2000, 1, 1),
+                transaction=mock_transaction,
+            )
+
+    @pytest.mark.asyncio
+    async def test_clearing_a_date_it_does_not_have_is_refused(
+        self, service: TaskService, task_repo: AsyncMock, mock_transaction: AsyncMock
+    ) -> None:
+        """A no-op, refused as every no-op on an archived list is."""
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                due_date=None,
+                transaction=mock_transaction,
+            )
+
+        task_repo.save.assert_not_awaited()

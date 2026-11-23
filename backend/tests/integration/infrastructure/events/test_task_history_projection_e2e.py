@@ -18,7 +18,7 @@ reads through it deliberately to pin that the two agree; the rest keep the
 narrower read so a failure points at the projection rather than at the strategy.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from core_shared.models.history import Provenance
@@ -339,6 +339,56 @@ class TestTaskLifecycleProjection:
             e for e in entries if e.field_name == "icon" and e.new_value is None
         )
         assert cleared.source == Provenance.UI
+        assert all(e.user_id == USER_ID for e in entries)
+
+    @pytest.mark.asyncio
+    async def test_a_due_date_set_then_cleared_is_projected_and_owned(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """ITER21-001 Phase 22: a list task's due date, set then cleared.
+
+        The rows hold ISO days, which the web app formats; provenance and the
+        owner come from the event, as for every task row.
+        """
+        service = _task_service(async_connection)
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task_id,
+            transaction=async_connection,
+            due_date=date(2099, 12, 31),
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task_id,
+            transaction=async_connection,
+            due_date=None,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-due-date"
+        )
+
+        entries = await _task_history(async_connection, task_id)
+        assert _values(entries) == {
+            ("due_date", None, "2099-12-31"),
+            ("due_date", "2099-12-31", None),
+        }
+        set_row = next(e for e in entries if e.new_value is not None)
+        assert (set_row.source, set_row.changed_by) == (Provenance.MCP, "mcp")
+        cleared = next(e for e in entries if e.new_value is None)
+        assert (cleared.source, cleared.changed_by) == (Provenance.UI, "ui")
         assert all(e.user_id == USER_ID for e in entries)
 
     @pytest.mark.asyncio

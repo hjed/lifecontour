@@ -25,6 +25,7 @@
  */
 
 import { TaskStatus } from '@/types/tasks';
+import { formatIsoDate } from '@/lib/date-utils';
 import { statusWording } from '@/lib/task-display';
 
 /** The entity whose history is being displayed. */
@@ -115,6 +116,20 @@ export function taskEntryDescription(
     let description = 'Icon changed';
     if (old_value === null) description = 'Icon set';
     else if (new_value === null) description = 'Icon cleared';
+    return surface === 'contact' ? named(description) : description;
+  }
+
+  // A list task's due date is stored as its ISO day and formatted as a
+  // calendar day, so it reads as the day the user chose in any timezone.
+  if (field_name === 'due_date') {
+    let description: string;
+    if (old_value === null && new_value !== null) {
+      description = `Due date set to ${formatIsoDate(new_value)}`;
+    } else if (old_value !== null && new_value !== null) {
+      description = `Due date changed from ${formatIsoDate(old_value)} to ${formatIsoDate(new_value)}`;
+    } else {
+      description = 'Due date cleared';
+    }
     return surface === 'contact' ? named(description) : description;
   }
 

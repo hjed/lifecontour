@@ -470,7 +470,7 @@ async def update_task(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TaskResponse:
-    """Change a task's text, status, flag or icon — any of them, in one write.
+    """Change a task's text, status, flag, icon or due date — any of them, in one write.
 
     A task is reached by its own id here rather than through a journal, because
     neither change involves a journal at all: marking a task done or cancelled
@@ -489,9 +489,17 @@ async def update_task(
     in any status. ``"icon": null`` clears the icon; an absent ``icon`` leaves
     it alone.
 
+    A **task on a list** takes a ``due_date`` the same way: a ``YYYY-MM-DD``
+    day sets or changes it, ``null`` clears it, and the status is kept — a
+    plain edit, with no acknowledgement. A day that is set must be today or
+    later in the user's timezone; resending the one it has changes nothing.
+
     Raises:
         400: An unknown status, blank text, an unknown attribute, a null or
-             non-boolean flag, an icon outside the fixed set, a body naming no
+             non-boolean flag, an icon outside the fixed set, a due date that
+             is not a ``YYYY-MM-DD`` string, is before today
+             (``TASK_DUE_DATE_IN_PAST``) or is set on a task not on a list or
+             due in a journal (``meta.field`` = ``due_date``), a body naming no
              change at all, or a body id that disagrees with the path.
         404: The task does not exist or is not yours; the two are the same
              answer by design.
@@ -519,6 +527,7 @@ async def update_task(
         status=attributes.status,
         flagged=attributes.flagged,
         icon=attributes.icon_change(),
+        due_date=attributes.due_date_change(),
         transaction=connection,
         source=Provenance.UI,
         changed_by="ui",

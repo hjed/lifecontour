@@ -1347,6 +1347,41 @@ class TestTaskUpdated:
         ]
         assert all(row.user_id == "u1" for row in rows)
 
+    @pytest.mark.parametrize(
+        ("change", "old", "new"),
+        [
+            ([None, "2026-09-01"], None, "2026-09-01"),
+            (["2026-09-01", "2026-09-15"], "2026-09-01", "2026-09-15"),
+            (["2026-09-01", None], "2026-09-01", None),
+        ],
+        ids=["set", "changed", "cleared"],
+    )
+    def test_a_due_date_change_lands_one_owned_row_with_its_iso_days(
+        self,
+        service: HistoryService,
+        change: list[str | None],
+        old: str | None,
+        new: str | None,
+    ) -> None:
+        """ITER21-001 Phase 22: the ISO day is stored; the web app formats it."""
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {"due_date": change},
+                "source": Provenance.UI.value,
+                "changed_by": "ui",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "due_date", old, new)
+        ]
+        assert rows[0].user_id == "u1"
+
     def test_a_contact_link_lands_one_row_naming_the_contact(
         self, service: HistoryService
     ) -> None:
