@@ -87,7 +87,7 @@ _TASK_EVENT_TYPES = {
 # Task-list event types (ITER21-001 Phase 7): a list is its own aggregate,
 # projected under ``entity_type='task_list'``. Like the task set, the inventory
 # reads them out of the events module rather than this list.
-_TASK_LIST_EVENT_TYPES = {"TaskListCreated", "TaskListUpdated"}
+_TASK_LIST_EVENT_TYPES = {"TaskListCreated", "TaskListUpdated", "TaskListDeleted"}
 
 
 def _consumer() -> HistoryProjectionConsumer:

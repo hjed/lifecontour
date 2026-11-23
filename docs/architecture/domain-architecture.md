@@ -261,8 +261,16 @@ the *creating* journal where it arose and the *due* journal where it matters.
   order is the task, then its list.** The reorders (`TaskService.reorder_task`,
   `reorder_list_tasks`, ITER21-001 Phase 25) lock the other way round — the list, then its open
   tasks — and are safe only because their list lock is this same `FOR SHARE`, which never waits on
-  a task write's; an exclusive list lock there deadlocked against them. A writer that would lock a
-  list exclusively and then its tasks (deleting a list) must lock the list's tasks first. The delete refuses after its `DELETE … RETURNING
+  a task write's; an exclusive list lock there deadlocked against them. **Deleting a list**
+  (`TaskListService.delete_task_list`, ITER21-001 Phase 29) is refused on an archived list like
+  every other write, serialises with other deletes of the list (an advisory lock), and locks the
+  same way round: the list `FOR SHARE`, then its tasks in id order
+  (`TaskRepository.release_list_tasks`, which deletes every task without both journals and keeps
+  the rest as journal-only tasks), and the list exclusively only at the end, with `NOWAIT` — a
+  holder then may be waiting on one of its tasks, so the delete refuses with `TaskListBusyError`
+  rather than risk a deadlock. It publishes `TaskDeleted` per deleted task, `TaskListMembershipChanged`
+  `{task_list_id: [id, null]}` per kept one, then `TaskListDeleted`. A task write waits for the delete
+  on its task and goes on if the delete kept it, as a journal-only task. A *task* delete refuses after its `DELETE … RETURNING
   task_list_id`, and raising rolls the unit of work back. Merges of journals and contacts still
   re-point an archived list's task links: they are the journal's and the contact's operations.
   **Creating a task on a list** (`TaskService.create_list_task`) is the one exception to that lock

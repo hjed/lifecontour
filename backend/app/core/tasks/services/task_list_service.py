@@ -6,8 +6,8 @@ back together. Reads live in :class:`TaskListReadService`, which takes no event
 publisher and opens no unit of work — the same split ``TaskService`` and
 ``TaskReadService`` make.
 
-Creation, the field update (rename, set or clear the icon), reordering, and
-archiving and unarchiving live here. Every write locks what it reads inside its
+Creation, the field update (rename, set or clear the icon), reordering,
+archiving and unarchiving, and deletion live here. Every write locks what it reads inside its
 unit of work before writing: the field update and the archive pair their one
 list with ``find_by_id_for_update``, a move all the owner's lists. Reordering is
 the one write that publishes no event: the specification keeps it out of
@@ -27,14 +27,17 @@ from core_shared.models.tasks import (
     TaskIcon,
     TaskList,
     TaskListArchiveFilter,
+    TaskListDeletion,
     TaskListNotFoundError,
     reorder_task_lists,
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.core.tasks.models.repositories import TaskListRepository
+from app.core.tasks.models.events import TaskDeleted, TaskListMembershipChanged
+from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
 from app.core.tasks.models.task_list_events import (
     TaskListCreated,
+    TaskListDeleted,
     TaskListFieldChange,
     TaskListUpdated,
 )
@@ -44,17 +47,22 @@ from app.infrastructure.unit_of_work import transactional
 
 
 class TaskListService:
-    """Creates, changes, reorders, archives and unarchives task lists for their owner.
+    """Creates, changes, reorders, archives, unarchives and deletes task lists
+    for their owner.
 
-    Every write but a move announces itself.
+    Every write but a move announces itself. The task repository is here for
+    the delete alone, which deletes or keeps the list's tasks in its own unit
+    of work.
     """
 
     def __init__(
         self,
         task_list_repo: TaskListRepository,
+        task_repo: TaskRepository,
         event_publisher: OutboxEventPublisher,
     ) -> None:
         self.task_list_repo = task_list_repo
+        self.task_repo = task_repo
         self.event_publisher = event_publisher
 
     @transactional
@@ -249,6 +257,99 @@ class TaskListService:
             source=source,
             changed_by=changed_by,
         )
+
+    @transactional
+    async def delete_task_list(
+        self,
+        *,
+        user_id: str,
+        task_list_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> TaskListDeletion:
+        """Hard-delete one of the owner's lists, and its tasks with it.
+
+        **What survives.** A task holding both a creating and a due journal
+        stays, as a journal-only task: off the list, with no position and no due
+        date, everything else as it was. Its lapse is derived on read, so it
+        reads as lapsed if its due journal has passed. Every other task on the
+        list — open or closed — is deleted, its contact and intermediate links
+        with it.
+
+        **An archived list is refused**, as every other write to it is: it is
+        read-only until unarchived, and deleting it is a write.
+
+        **Locks, in order.** Deletes of this list are serialised first, so a
+        second delete waits holding nothing and then finds the list gone. The
+        list is then read under a *share* lock, which keeps
+        out every writer that would add a task to it (they lock the list
+        exclusively) while letting task edits and reorders — which share-lock it
+        too — go on. The repository then locks the list's tasks in id order and
+        releases them, and the list row is deleted last, which the ``RESTRICT``
+        foreign key requires. That last step takes the list exclusively without
+        waiting: another holder then may be queued behind a task this delete
+        holds, so waiting could deadlock, and the delete refuses any holder
+        with a retryable conflict instead.
+
+        **What it announces**, after everything is written, in this order: a
+        ``TaskDeleted`` per deleted task, a ``TaskListMembershipChanged`` from
+        the list to none per kept task, and one ``TaskListDeleted`` closing the
+        list's history.
+
+        Returns:
+            Which tasks were deleted and which were kept.
+
+        Raises:
+            TaskListNotFoundError: No such list, or it belongs to someone else.
+            TaskListArchivedError: The list is archived, and so read-only.
+            TaskListBusyError: Another request held the list when the delete
+                came to remove it; reading it again and retrying succeeds.
+        """
+        await self.task_list_repo.serialize_deletes(task_list_id)
+        stored = await self.task_list_repo.find_by_id_for_share(task_list_id, user_id)
+        if stored is None:
+            raise TaskListNotFoundError(task_list_id)
+        stored.ensure_writable()
+
+        released = await self.task_repo.release_list_tasks(task_list_id, user_id)
+        await self.task_list_repo.delete(task_list_id, user_id)
+
+        for task_id in released.deleted_task_ids:
+            await self.event_publisher.publish(
+                TaskDeleted(
+                    task_id=task_id,
+                    user_id=user_id,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+        for task_id in released.kept_task_ids:
+            await self.event_publisher.publish(
+                TaskListMembershipChanged(
+                    task_id=task_id,
+                    user_id=user_id,
+                    previous_task_list_id=task_list_id,
+                    task_list_id=None,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+        await self.event_publisher.publish(
+            TaskListDeleted(
+                task_list_id=task_list_id,
+                user_id=user_id,
+                name=stored.name,
+                deleted_task_count=len(released.deleted_task_ids),
+                kept_task_count=len(released.kept_task_ids),
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return released
 
     async def _locked(self, user_id: str, task_list_id: int) -> TaskList:
         """The owner's list read under its row lock, or not found."""

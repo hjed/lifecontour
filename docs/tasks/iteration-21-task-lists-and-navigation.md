@@ -2625,16 +2625,111 @@ and pre-commit.
 - *ITER21-002:* the details panel and journal rows edit flag and icon through the same `PATCH`; the
   history wording is already in place.
 
-#### Phase 29: Delete a list
+#### Phase 29: Delete a list ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 21.
-**Estimated diff:** ~150 production → **~1,300 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~150 production → **~1,300 tracked** · one capability on REST and MCP together ·
+**Actual:** ~525 production → **~2,420 tracked** (about 2,365 insertions, 55 deletions excluding
+this document, measured on top of Phase 26: about 525 production lines across 16 files, most of them docstrings — the service
+method and its lock contract about 110, the two SQL adapters about 90, the MCP tool and its schema
+about 65, the event 45, the new error and value object 45; about 1,650 test lines across 22 files;
+30 architecture docs). Production ran ×3.5 on the estimate: the lock design (share, tasks, then
+`NOWAIT`) and its documentation in the port, adapters and two architecture docs were not priced in.
+Tests sat at ×3.4 production, with a concurrency class at both the repository and the service.
 
 **Acceptance Criteria:**
 
-- [ ] Deletes its tasks; both-anchor tasks survive as journal-only.
-- [ ] Emits list-deleted.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Deletes its tasks; both-anchor tasks survive as journal-only.
+- [x] Emits list-deleted.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a list can be hard-deleted, for mistakes.
+- `TaskListService.delete_task_list` (`@transactional`; the service now takes `task_repo`):
+  serialises with other deletes of the list (`TaskListRepository.serialize_deletes`, an advisory
+  lock), reads the list `FOR SHARE` (`find_by_id_for_share`), refuses an archived one (`ensure_writable`, 409
+  `TASK_LIST_ARCHIVED`), then `TaskRepository.release_list_tasks` locks every task of the owner's
+  on the list `FOR NO KEY UPDATE` in id order, deletes those without both journals (links cascade)
+  and clears `task_list_id`, `position` and `due_date` on the rest in one `UPDATE`.
+  `TaskListRepository.delete` then locks the list `FOR UPDATE NOWAIT` and deletes the row; a held
+  list raises the new `TaskListBusyError` (a `TaskListChangedConcurrentlyError`: 409
+  `TASK_LIST_CHANGED`). Answers `TaskListDeletion(task_list_id, deleted_task_ids, kept_task_ids)`
+  (`core_shared.models.tasks`).
+- Events, in order: `TaskDeleted` per deleted task, `TaskListMembershipChanged
+  {task_list_id: [list_id, null]}` per kept task, then the new `TaskListDeleted` (`task_list_id`, `user_id`, `name`,
+  `deleted_task_count`, `kept_task_count`, `source`, `changed_by`), in `TASK_LIST_EVENT_TYPES`.
+  History projects it as `__deleted__` under `task_list` with the name as the old value; the list
+  history stays readable by its owner only.
+- REST `DELETE /api/task-lists/{list_id}` → 204 (`source=ui`); MCP `delete_task_list`
+  (`DESTRUCTIVE_WRITE`, bounded `JsonIntOnly` id) answers `{deleted, task_list_id,
+  deleted_task_ids, kept_task_ids}` (`source=mcp`). Server task-list guidance names it.
+- E2E `TestDataManager` cleanup deletes the lists it created (unarchiving one the test archived),
+  rather than archiving them.
+- `api-design.md` (the DELETE row, `TASK_LIST_CHANGED`'s callers, the event and the MCP tool),
+  `domain-architecture.md` and `database-design.md` (the delete's lock order) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_service_delete.py` (call order share → release →
+delete → publish, not found and archived refused before any task is touched, the events with counts
+and provenance, the answer), `test_task_list_events.py::TestTaskListDeleted`,
+`history/test_history_service.py::TestTaskListDeleted` and the owner/entity-type cases,
+`test_history_projection_consumer.py`, `test_task_list_event_subscriptions.py` (by the event set),
+`api/test_task_error_mapping.py` and `mcp/shared/test_task_error_handling.py` (`TaskListBusyError`),
+`mcp/domains/test_task_list_tools_schema.py::TestTheDeleteTool`, `test_tool_annotations.py`.
+Integration: `test_task_repository_list_queries_integration.py::TestReleaseListTasks` (undated,
+dated, due-journal-only and closed tasks deleted with their links; two-anchor tasks kept open or done
+with text, status, flag, icon and contacts intact; foreign lists and foreign rows untouched; nothing
+published) and `TestReleaseListTasksHoldsItsTasks`; `test_task_list_repository_integration.py`
+(`FOR UPDATE NOWAIT` issued; a list held `FOR SHARE` elsewhere raises `TaskListBusyError`);
+`test_task_list_service_integration.py::TestDeleteTaskList` (empty and mixed lists, outbox order, a
+kept task with a passed journal reads `date_passed`, archived / missing / foreign refused with
+nothing changed, other lists keep their order) and `TestConcurrentDeletes` (an edit, a create and a
+reorder during a delete wait then find nothing; a delete during an edit or reorder waits then
+deletes; a second delete finds nothing; a list held by a task write in flight is busy, not
+deadlocked; a second delete waits for the first's advisory lock; a link write on a kept task
+after the delete goes on; a move off or onto the list racing the delete); the
+completeness inventory's two list-delete `WritePath`s (`deleted`,
+`list-membership-changed`); `test_task_list_history_projection_e2e.py::TestADeletedListsHistoryIsProjected`;
+REST `api/test_task_list_endpoints.py::TestDeleteTaskListEndpoint` (204 then 404, tasks deleted and
+kept, provenance, repeat 404, archived 409, another user's list 404 and intact, bad ids 400),
+`test_task_list_ownership.py`, `test_authentication_requirements.py`,
+`test_task_list_history_endpoints.py::TestARealDeleteEndsTheListsHistory`; MCP
+`mcp/test_task_list_tools_mcp.py::TestDeleteTaskListTool` and three `TestIntegerArgumentsAreNotCoerced`
+cases. E2E: no new UI, so no new spec; `journal-tasks.spec.ts` (which creates lists) run on Firefox
+and Mobile Chrome against the new cleanup. Gates run locally: ruff and mypy (backend, core_shared),
+backend unit suite (6,029), the full backend integration suite in chunks (5,145 passed, 7
+pre-existing skips), core_shared (908), `pnpm quality:check`, the Playwright spec (25 passed) and
+pre-commit.
+
+**Decisions (recorded during implementation):**
+- **An archived list cannot be deleted** (the Phase 6 note): 409 `TASK_LIST_ARCHIVED`, unarchive
+  first — "every list and task write is refused" until unarchive, and Phase 18 already refuses
+  deleting one of its tasks.
+- **The lock order supersedes the "lock the list's tasks first" notes** of Phases 18 and 25: those
+  guard against an *exclusive* list lock before task locks. The delete's first list lock is
+  `FOR SHARE`, compatible with every task write and reorder; it escalates only at the end, with
+  `NOWAIT`, because a holder then may be waiting on one of the delete's tasks. The cost is a
+  retryable 409 when a delete overlaps a reorder or task write on the same list. Two deletes of
+  one list are serialised first by a transaction-scoped advisory lock, so a double-submitted
+  delete answers 204 then 404 rather than two 409s (independent review finding).
+- **A link write on a kept task goes on after the delete** (independent review finding): link
+  writes hold their task `FOR SHARE` (Phase 26), so they wait for the delete and read the task as it
+  left it — journal-only — instead of a list that is gone. A reorder or same-list move that read its
+  task without a lock and then finds the list gone answers not found.
+- **A kept task announces `TaskListMembershipChanged {task_list_id: [list_id, null]}`** (user
+  decision, open question 1): this phase is stacked on Phase 26, which adds the event, so a kept
+  task leaving its deleted list is announced as the membership change it is.
+- **Lock order beside Phase 26's moves:** a move holds its lists (own `FOR SHARE`, target
+  `FOR NO KEY UPDATE`) before its task. A move off a list being deleted holds that list `FOR SHARE`,
+  so the delete's `NOWAIT` refuses with `TASK_LIST_CHANGED`; a move onto it queues on the list like
+  a create, then finds it gone. Neither can close a cycle with the delete.
+- **A read racing a deletion answers not found** (the Phase 15 note), accepted unchanged.
+
+**Notes for later phases:**
+- *ITER21-002:* the list page header's delete confirms first, expects 204, re-reads on 409
+  `TASK_LIST_CHANGED` and offers unarchive on `TASK_LIST_ARCHIVED`. History wording for a list's
+  `__deleted__` row and a task's `task_list_id` row (Phase 17).
+- *ITER21-006 (recurrence):* a task kept by a list delete must stop recurring ("no longer
+  recurring" in the spec); nothing exists to stop yet.
 
 #### Phase 30: Journal page: list tasks
 

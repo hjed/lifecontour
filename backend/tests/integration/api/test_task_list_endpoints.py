@@ -1,5 +1,5 @@
 """Integration tests for the task list endpoints: create, read, list, update, move,
-archive and unarchive.
+archive, unarchive and delete.
 
 The rules themselves (bottom placement, owner scoping, the event) are proven
 against ``TaskListService`` and ``TaskListReadService`` in
@@ -27,6 +27,7 @@ from tests.integration.tasks.task_seeding import (
     count,
     create_list_task,
     seed_task_list,
+    task_exists,
     task_list_events,
 )
 
@@ -514,6 +515,107 @@ class TestArchiveTaskListEndpoint:
         self, authenticated_client: AsyncClient, list_id: str
     ) -> None:
         response = await authenticated_client.post(f"/api/task-lists/{list_id}/archive")
+
+        assert response.status_code == 400
+        assert _error(response.json())["code"] == "VALIDATION_ERROR"
+
+
+class TestDeleteTaskListEndpoint:
+    """``DELETE /api/task-lists/{list_id}``: no body, answers 204."""
+
+    async def test_deletes_the_list_and_answers_no_content(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        assert response.status_code == 204
+        assert response.content == b""
+        read = await authenticated_client.get(f"/api/task-lists/{seeded.id}")
+        assert read.status_code == 404
+
+    async def test_tasks_go_with_it_except_those_holding_both_journals(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        creating_id, due_id = task_anchors
+        deleted = await create_list_task(async_connection, task_list_id=seeded.id)
+        kept = await create_list_task(
+            async_connection,
+            task_list_id=seeded.id,
+            position=1,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        response = await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        assert response.status_code == 204
+        assert not await task_exists(async_connection, deleted)
+        kept_read = await authenticated_client.get(f"/api/tasks/{kept}")
+        assert kept_read.status_code == 200
+        attributes = kept_read.json()["data"]["attributes"]
+        assert (attributes["task_list_id"], attributes["task_list"]) == (None, None)
+
+    async def test_the_event_is_attributed_to_the_browser(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        (event,) = await task_list_events(async_connection)
+        assert event.event_type == "TaskListDeleted"
+        assert (event.payload["source"], event.payload["changed_by"]) == ("ui", "ui")
+
+    async def test_deleting_it_again_is_not_found(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        response = await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_LIST_NOT_FOUND"
+
+    async def test_an_archived_list_is_refused_as_a_conflict(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        response = await authenticated_client.delete(f"/api/task-lists/{seeded.id}")
+
+        assert response.status_code == 409
+        assert _error(response.json())["code"] == "TASK_LIST_ARCHIVED"
+        assert await count(async_connection, _COUNT_LISTS, {"user_id": USER_ID}) == 1
+        assert await task_list_events(async_connection) == []
+
+    async def test_another_users_list_is_not_found_and_survives(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        theirs = await seed_task_list(async_connection, "Theirs", user_id=OTHER_USER_ID)
+
+        response = await authenticated_client.delete(f"/api/task-lists/{theirs.id}")
+
+        assert response.status_code == 404
+        assert _error(response.json())["code"] == "TASK_LIST_NOT_FOUND"
+        assert (
+            await count(async_connection, _COUNT_LISTS, {"user_id": OTHER_USER_ID}) == 1
+        )
+
+    @pytest.mark.parametrize("list_id", ["0", str(INT32_MAX + 1), "abc"])
+    async def test_an_out_of_range_id_is_a_bad_request(
+        self, authenticated_client: AsyncClient, list_id: str
+    ) -> None:
+        response = await authenticated_client.delete(f"/api/task-lists/{list_id}")
 
         assert response.status_code == 400
         assert _error(response.json())["code"] == "VALIDATION_ERROR"

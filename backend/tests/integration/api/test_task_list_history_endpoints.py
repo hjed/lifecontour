@@ -11,12 +11,23 @@ real list write is covered in
 ``tests/integration/infrastructure/events/test_task_list_history_projection_e2e.py``.
 """
 
+import json
 from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient, Response
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.history.adapters.sql.field_history_repository import (
+    SqlFieldHistoryRepository,
+)
+from app.core.history.services.history_service import HistoryService
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.services.task_list_service import TaskListService
+from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from app.infrastructure.events.outbox_repository import OutboxEvent
 from tests.integration.tasks.task_seeding import (
     ARCHIVED_AT_EXAMPLE,
     OTHER_USER_ID,
@@ -163,6 +174,77 @@ class TestADeletedListStillHasAHistory:
     ) -> None:
         foreign_id = await _foreign_list(async_connection, with_history=True)
         await delete_task_list_row(async_connection, foreign_id)
+
+        response = await authenticated_client.get(
+            f"/api/task-lists/{foreign_id}/history"
+        )
+
+        _assert_not_found(response)
+
+
+async def _project_list_deletions(conn: AsyncConnection) -> None:
+    """Project the outbox's ``TaskListDeleted`` rows as the consumer would.
+
+    The relay and the stream belong to the projection tests; what this file
+    asks is what the history read answers once the real delete's row exists.
+    """
+    rows = await conn.execute(
+        text(
+            "SELECT id, event_id, event_type, aggregate_id, event_data, "
+            "occurred_at, created_at FROM outbox_events "
+            "WHERE event_type = 'TaskListDeleted'"
+        )
+    )
+    history = SqlFieldHistoryRepository(conn)
+    for row in rows.all():
+        event = OutboxEvent(
+            id=row.id,
+            event_id=row.event_id,
+            event_type=row.event_type,
+            aggregate_id=row.aggregate_id,
+            event_data=json.loads(row.event_data),
+            occurred_at=row.occurred_at,
+            retry_count=0,
+            created_at=row.created_at,
+        )
+        for entry in HistoryService().project_event(event):
+            await history.record_change(entry)
+
+
+class TestARealDeleteEndsTheListsHistory:
+    """The list's own delete, not a stand-in: its ``__deleted__`` line is the
+    newest entry, readable by the owner and by nobody else."""
+
+    async def test_the_owner_reads_the_history_ending_in_the_deletion(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        list_id = await _own_list(async_connection)
+
+        deleted = await authenticated_client.delete(f"/api/task-lists/{list_id}")
+        await _project_list_deletions(async_connection)
+        response = await authenticated_client.get(f"/api/task-lists/{list_id}/history")
+
+        assert deleted.status_code == 204
+        assert response.status_code == 200
+        assert _fields(response) == ["__deleted__", *NEWEST_FIRST]
+        marker = response.json()["data"][0]["attributes"]
+        assert (marker["old_value"], marker["new_value"]) == ("Packing", None)
+        assert (marker["source"], marker["changed_by"]) == ("ui", "ui")
+
+    async def test_another_user_is_refused_a_deleted_list_history(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        foreign_id = await _foreign_list(async_connection, with_history=True)
+        await TaskListService(
+            task_list_repo=SqlTaskListRepository(async_connection),
+            task_repo=SqlTaskRepository(async_connection),
+            event_publisher=OutboxEventPublisher(async_connection),
+        ).delete_task_list(
+            user_id=OTHER_USER_ID,
+            task_list_id=foreign_id,
+            transaction=async_connection,
+        )
+        await _project_list_deletions(async_connection)
 
         response = await authenticated_client.get(
             f"/api/task-lists/{foreign_id}/history"

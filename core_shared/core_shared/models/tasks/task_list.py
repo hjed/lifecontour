@@ -133,3 +133,22 @@ class TaskListSummary:
 
     task_list: TaskList
     open_task_count: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskListDeletion:
+    """What deleting a list did to its tasks.
+
+    A list's tasks go with it, except those holding both a creating and a due
+    journal: they stay as journal-only tasks. The ids are in ascending order,
+    the order their rows were locked in.
+
+    Attributes:
+        task_list_id: The list that was deleted
+        deleted_task_ids: Tasks deleted with the list, open and closed alike
+        kept_task_ids: Tasks kept as journal-only, no longer on any list
+    """
+
+    task_list_id: int
+    deleted_task_ids: tuple[int, ...]
+    kept_task_ids: tuple[int, ...]

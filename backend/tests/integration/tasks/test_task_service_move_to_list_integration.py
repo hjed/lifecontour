@@ -358,6 +358,7 @@ def _archiving(owner: str, task_list_id: int) -> Step:
         await TaskListService(
             task_list_repo=SqlTaskListRepository(connection),
             event_publisher=OutboxEventPublisher(connection),
+            task_repo=SqlTaskRepository(connection),
         ).archive_task_list(
             user_id=owner, task_list_id=task_list_id, transaction=connection
         )

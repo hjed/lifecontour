@@ -11,6 +11,7 @@ from .exceptions import (
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
     TaskListArchivedError,
+    TaskListBusyError,
     TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListTaskClosedError,
@@ -52,6 +53,7 @@ from .task_list import (
     MAX_TASK_LIST_NAME_LENGTH,
     TaskList,
     TaskListArchiveFilter,
+    TaskListDeletion,
     TaskListSummary,
 )
 from .task_list_order import reorder_task_lists
@@ -95,7 +97,9 @@ __all__ = [
     "TaskList",
     "TaskListArchiveFilter",
     "TaskListArchivedError",
+    "TaskListBusyError",
     "TaskListChangedConcurrentlyError",
+    "TaskListDeletion",
     "TaskListNotFoundError",
     "TaskListTasks",
     "TaskListValidationError",

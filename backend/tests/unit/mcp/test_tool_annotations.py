@@ -63,6 +63,8 @@ DESTRUCTIVE_TOOLS = frozenset(
         "delete_task",
         "unlink_task_from_contact",
         "detach_intermediate_journal_from_task",
+        # Task lists
+        "delete_task_list",
         # Contacts
         "merge_contacts",
         "remove_contact_relationship",

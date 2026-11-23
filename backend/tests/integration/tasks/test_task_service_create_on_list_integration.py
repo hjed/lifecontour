@@ -514,6 +514,7 @@ def _archive(owner: str, task_list_id: int) -> Callable[[AsyncConnection], Any]:
     async def run(connection: AsyncConnection) -> None:
         await TaskListService(
             task_list_repo=SqlTaskListRepository(connection),
+            task_repo=SqlTaskRepository(connection),
             event_publisher=OutboxEventPublisher(connection),
         ).archive_task_list(
             user_id=owner, task_list_id=task_list_id, transaction=connection

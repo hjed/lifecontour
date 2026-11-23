@@ -18,6 +18,8 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalIsAnchorError,
     TaskListArchivedError,
+    TaskListBusyError,
+    TaskListChangedConcurrentlyError,
     TaskListTaskClosedError,
     TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
@@ -246,3 +248,26 @@ class TestAnArchivedListRefusalIsTellableApart:
         assert error.status == "409"
         assert "12" in (error.detail or "")
         assert "unarchive" in (error.detail or "").lower()
+
+
+@pytest.mark.unit
+class TestABusyListIsARetryableConflict:
+    """A list delete that meets another writer on the same list refuses rather
+    than deadlocking; the refusal is the reorder race's own 409, so a surface
+    that already re-reads on ``TASK_LIST_CHANGED`` handles it unchanged."""
+
+    def test_it_is_a_list_changed_conflict(self) -> None:
+        assert issubclass(TaskListBusyError, TaskListChangedConcurrentlyError)
+
+        response = create_domain_error_response(TaskListBusyError(12))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_CHANGED"
+        assert error.status == "409"
+
+    def test_its_message_names_the_list_and_says_to_retry(self) -> None:
+        error = TaskListBusyError(12)
+
+        assert error.task_list_id == 12
+        assert "Task list 12" in error.message
+        assert "retry" in error.message.lower()

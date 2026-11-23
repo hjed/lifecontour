@@ -10,7 +10,8 @@ filed under a task id or fail that inventory.
 ``history-projection`` group subscribes to ``TASK_LIST_EVENT_TYPES`` and files
 their rows under ``entity_type='task_list'`` — ``__created__`` carrying the
 name, then ``name``, ``icon`` and ``archived_at`` pairs as ``changed_fields``
-names them. No other consumer subscribes yet; both facts are pinned by
+names them, and ``__deleted__`` carrying the name the list had when it was
+deleted. No other consumer subscribes yet; both facts are pinned by
 ``tests/unit/infrastructure/events/test_task_list_event_subscriptions.py``.
 
 Payloads are plain dictionaries, for the reasons given in the task events
@@ -29,12 +30,13 @@ from app.core.tasks.models.events import DomainEvent
 
 TASK_LIST_CREATED = "TaskListCreated"
 TASK_LIST_UPDATED = "TaskListUpdated"
+TASK_LIST_DELETED = "TaskListDeleted"
 
 #: Every event type a task list publishes. Extended by each class added here, so
 #: a consumer that comes to subscribe to list events — the list history
 #: projection first — has one definition to read rather than its own copy.
 TASK_LIST_EVENT_TYPES: frozenset[str] = frozenset(
-    {TASK_LIST_CREATED, TASK_LIST_UPDATED}
+    {TASK_LIST_CREATED, TASK_LIST_UPDATED, TASK_LIST_DELETED}
 )
 
 
@@ -120,6 +122,51 @@ class TaskListUpdated(DomainEvent):
                 "task_list_id": task_list_id,
                 "user_id": user_id,
                 "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TaskListDeleted(DomainEvent):
+    """Event raised when a task list is hard-deleted.
+
+    **The event outlives the row.** Once the list is gone this is the only
+    record that it existed, so it carries what a "deleted" history line needs —
+    the owner, which a list-scoped history read authorises on, and the name the
+    list had — rather than leaving a reader to look either up.
+
+    The counts say what happened to the list's tasks: ``deleted_task_count``
+    went with it, ``kept_task_count`` stayed as journal-only tasks. Each of
+    those tasks announces itself too, before this event, so the counts are a
+    summary rather than the record.
+    """
+
+    def __init__(
+        self,
+        task_list_id: int,
+        user_id: str,
+        name: str,
+        deleted_task_count: int,
+        kept_task_count: int,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_list_deleted_{task_list_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_list_id,
+            event_type=TASK_LIST_DELETED,
+            event_data={
+                "task_list_id": task_list_id,
+                "user_id": user_id,
+                "name": name,
+                "deleted_task_count": deleted_task_count,
+                "kept_task_count": kept_task_count,
                 "source": source.value,
                 "changed_by": changed_by,
             },

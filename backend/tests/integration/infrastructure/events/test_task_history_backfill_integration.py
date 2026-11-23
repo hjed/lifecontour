@@ -292,6 +292,7 @@ class TestTheBackfillRepairsTaskListHistory:
     ) -> None:
         lists = TaskListService(
             task_list_repo=SqlTaskListRepository(async_connection),
+            task_repo=SqlTaskRepository(async_connection),
             event_publisher=OutboxEventPublisher(async_connection),
         )
         created = await lists.create_task_list(

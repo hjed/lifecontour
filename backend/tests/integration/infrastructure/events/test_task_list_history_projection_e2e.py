@@ -3,7 +3,7 @@
 Exercises the full async chain a real list write travels:
 
     TaskListService.create_task_list() / update_task_list() /
-    archive_task_list() / unarchive_task_list()
+    archive_task_list() / unarchive_task_list() / delete_task_list()
         -> OutboxEventPublisher (outbox_events row, same unit of work)
         -> OutboxRelay           (-> pms:domain-events stream)
         -> HistoryProjectionConsumer (-> field_history rows)
@@ -33,7 +33,9 @@ from app.core.history.models import FieldHistoryEntry
 from app.core.history.services.task_list_history_service import (
     TaskListHistoryService,
 )
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_service import TaskListService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -41,7 +43,12 @@ from tests.integration.infrastructure.events.projection_harness import (
     relay_and_project,
     replay_stream_through_projection,
 )
-from tests.integration.tasks.task_seeding import OTHER_USER_ID, USER_ID
+from tests.integration.tasks.task_seeding import (
+    OTHER_USER_ID,
+    USER_ID,
+    create_journal,
+    create_list_task,
+)
 
 LIST_ENTITY_TYPE = "task_list"
 LIST_NAME = "Groceries"
@@ -51,6 +58,7 @@ def _list_service(conn: AsyncConnection) -> TaskListService:
     """The real service over the real adapter and publisher on one connection."""
     return TaskListService(
         task_list_repo=SqlTaskListRepository(conn),
+        task_repo=SqlTaskRepository(conn),
         event_publisher=OutboxEventPublisher(conn),
     )
 
@@ -384,6 +392,74 @@ class TestTheListHistoryReadAnswersWithTheProjectedRows:
             )
             == 3
         )
+        with pytest.raises(TaskListNotFoundError):
+            await reader.get_task_list_history(
+                task_list_id=list_id, user_id=OTHER_USER_ID
+            )
+
+
+@pytest.mark.integration
+class TestADeletedListsHistoryIsProjected:
+    @pytest.mark.asyncio
+    async def test_a_delete_closes_the_lists_history_and_its_tasks_own(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """The list's last line names it; a deleted task gets its deletion
+        marker and a kept one a ``task_list_id`` line ending in nothing — and
+        the owner still reads the list's history once the row is gone."""
+        service = _list_service(async_connection)
+        list_id = await _create(service, async_connection)
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        deleted_task = await create_list_task(async_connection, task_list_id=list_id)
+        kept_task = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=1,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        await service.delete_task_list(
+            user_id=USER_ID,
+            task_list_id=list_id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="assistant",
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-list-delete"
+        )
+
+        entries = await _list_history(async_connection, list_id)
+        assert _values(entries) == {
+            ("__created__", None, LIST_NAME),
+            ("__deleted__", LIST_NAME, None),
+        }
+        deleted_marker = next(e for e in entries if e.field_name == "__deleted__")
+        assert deleted_marker.source == Provenance.MCP
+        assert deleted_marker.changed_by == "assistant"
+        assert deleted_marker.user_id == USER_ID
+
+        history = SqlFieldHistoryRepository(async_connection)
+        assert _values(await history.get_entity_history("task", deleted_task)) == {
+            ("__deleted__", None, None)
+        }
+        assert _values(await history.get_entity_history("task", kept_task)) == {
+            ("task_list_id", str(list_id), None)
+        }
+
+        reader = TaskListHistoryService(
+            history_repo=history,
+            task_list_repo=SqlTaskListRepository(async_connection),
+        )
+        read = await reader.get_task_list_history(task_list_id=list_id, user_id=USER_ID)
+        assert [e.field_name for e in read] == ["__deleted__", "__created__"]
         with pytest.raises(TaskListNotFoundError):
             await reader.get_task_list_history(
                 task_list_id=list_id, user_id=OTHER_USER_ID

@@ -19,6 +19,7 @@ from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
     TaskDueJournalNotFutureError,
     TaskListArchivedError,
+    TaskListBusyError,
     TaskListChangedConcurrentlyError,
     TaskNotFoundError,
     TaskStatus,
@@ -120,6 +121,14 @@ class TestTaskErrorsReachTheClient:
         assert response["error"] == "Task error"
         assert "Task 9 is no longer an open task on this list" in response["message"]
         assert "retry" in response["message"]
+
+    async def test_a_busy_list_says_to_retry(self) -> None:
+        """A delete that met another writer on its list: retryable, not missing."""
+        response = await _render(TaskListBusyError(4))
+
+        assert response["error"] == "Task error"
+        assert "Task list 4" in response["message"]
+        assert "retry" in response["message"].lower()
 
 
 class TestTheBranchIsNotTooBroad:

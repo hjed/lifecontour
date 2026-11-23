@@ -23,33 +23,50 @@ import pytest
 from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     MAX_TASK_LIST_NAME_LENGTH,
+    LapseReason,
     TaskIcon,
     TaskList,
     TaskListArchivedError,
     TaskListArchiveFilter,
+    TaskListBusyError,
+    TaskListDeletion,
     TaskListNotFoundError,
     TaskListValidationError,
+    TaskNotFoundError,
+    TaskStatus,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from app.core.contacts.adapters.sql.contact_repository import SqlContactRepository
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_date_resolver import JournalDateResolver
+from app.core.settings.adapters.sql.user_settings_repository import (
+    SqlUserSettingsRepository,
+)
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_read_service import TaskListReadService
 from app.core.tasks.services.task_list_service import TaskListService
+from app.core.tasks.services.task_read_service import TaskReadService
+from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import unit_of_work
-from tests.integration.concurrency_helpers import overlap
+from tests.integration.concurrency_helpers import bounded, overlap
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
+    create_contact,
+    create_journal,
     create_list_task,
+    linked_contact_ids,
     make_task_container,
     seed_task_list,
     stored_status,
     task_events,
+    task_exists,
     task_list_events,
 )
 
@@ -62,6 +79,7 @@ _COUNT_LISTS = "SELECT COUNT(*) FROM task_lists WHERE user_id = :user_id"
 def make_service(conn: AsyncConnection) -> TaskListService:
     return TaskListService(
         task_list_repo=SqlTaskListRepository(conn),
+        task_repo=SqlTaskRepository(conn),
         event_publisher=OutboxEventPublisher(conn),
     )
 
@@ -1185,3 +1203,604 @@ class TestWiring:
             assert isinstance(read_service, TaskListReadService)
         finally:
             await container.close()
+
+
+# --------------------------------------------------------------------------- #
+# Deleting a list
+# --------------------------------------------------------------------------- #
+
+
+async def _delete(
+    conn: AsyncConnection,
+    task_list_id: int,
+    *,
+    user_id: str = USER_ID,
+    source: Provenance = Provenance.UI,
+    changed_by: str = "ui",
+) -> TaskListDeletion:
+    return await make_service(conn).delete_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        transaction=conn,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+async def _list_exists(conn: AsyncConnection, task_list_id: int) -> bool:
+    return (
+        await count(
+            conn,
+            "SELECT COUNT(*) FROM task_lists WHERE id = :id",
+            {"id": task_list_id},
+        )
+        == 1
+    )
+
+
+async def _seeded_list(
+    conn: AsyncConnection, name: str = "Packing", **kwargs: Any
+) -> int:
+    seeded = await seed_task_list(conn, name, **kwargs)
+    assert seeded.id is not None
+    return seeded.id
+
+
+class TestDeleteTaskList:
+    @pytest.mark.asyncio
+    async def test_an_empty_list_is_deleted_and_announced_once(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        list_id = await _seeded_list(async_connection)
+
+        deletion = await _delete(async_connection, list_id)
+
+        assert deletion == TaskListDeletion(
+            task_list_id=list_id, deleted_task_ids=(), kept_task_ids=()
+        )
+        assert not await _list_exists(async_connection, list_id)
+        (event,) = await task_list_events(async_connection, task_list_id=list_id)
+        assert event.event_type == "TaskListDeleted"
+        assert event.payload == {
+            "task_list_id": list_id,
+            "user_id": USER_ID,
+            "name": "Packing",
+            "deleted_task_count": 0,
+            "kept_task_count": 0,
+            "source": "ui",
+            "changed_by": "ui",
+        }
+
+    @pytest.mark.asyncio
+    async def test_tasks_are_deleted_or_kept_and_each_is_announced(
+        self, async_connection: AsyncConnection, journal_repository: Any
+    ) -> None:
+        list_id = await _seeded_list(async_connection)
+        creating_id = await create_journal(journal_repository, title="Arose")
+        due_id = await create_journal(journal_repository, title="Due", days_offset=7)
+        open_task = await create_list_task(async_connection, task_list_id=list_id)
+        done_task = await create_list_task(
+            async_connection, task_list_id=list_id, position=1, status=TaskStatus.DONE
+        )
+        kept = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=2,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        deletion = await _delete(
+            async_connection, list_id, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        assert deletion.deleted_task_ids == (open_task, done_task)
+        assert deletion.kept_task_ids == (kept,)
+        assert not await task_exists(async_connection, open_task)
+        assert not await task_exists(async_connection, done_task)
+        assert await task_exists(async_connection, kept)
+        events = await task_events(async_connection)
+        assert [(e.event_type, e.aggregate_id) for e in events] == [
+            ("TaskDeleted", open_task),
+            ("TaskDeleted", done_task),
+            ("TaskListMembershipChanged", kept),
+        ]
+        assert events[2].payload["changed_fields"] == {"task_list_id": [list_id, None]}
+        assert {e.payload["source"] for e in events} == {"mcp"}
+        (list_event,) = await task_list_events(async_connection, task_list_id=list_id)
+        assert (
+            list_event.payload["deleted_task_count"],
+            list_event.payload["kept_task_count"],
+        ) == (2, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_kept_task_whose_journal_has_passed_reads_as_lapsed(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: Any,
+        read_service: TaskReadService,
+    ) -> None:
+        """Lapse is derived on read, so leaving the list is all it takes."""
+        list_id = await _seeded_list(async_connection)
+        creating_id = await create_journal(
+            journal_repository, title="Arose", days_offset=-10
+        )
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-3)
+        kept = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        await _delete(async_connection, list_id)
+
+        model = await read_service.read_model(USER_ID, kept)
+        assert model.task.task_list_id is None
+        assert model.lapse_reason == LapseReason.DATE_PASSED
+
+    @pytest.mark.asyncio
+    async def test_an_archived_list_is_refused_and_nothing_changes(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        list_id = await _seeded_list(async_connection, archived_at=ARCHIVED_AT)
+        task_id = await create_list_task(async_connection, task_list_id=list_id)
+
+        with pytest.raises(TaskListArchivedError):
+            await _delete(async_connection, list_id)
+
+        assert await _list_exists(async_connection, list_id)
+        assert await task_exists(async_connection, task_id)
+        assert await task_list_events(async_connection) == []
+        assert await task_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_a_missing_or_foreign_list_is_not_found_and_nothing_changes(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        theirs = await _seeded_list(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        their_task = await create_list_task(
+            async_connection, task_list_id=theirs, user_id=OTHER_USER_ID
+        )
+
+        with pytest.raises(TaskListNotFoundError):
+            await _delete(async_connection, theirs)
+        with pytest.raises(TaskListNotFoundError):
+            await _delete(async_connection, 999_999)
+
+        assert await _list_exists(async_connection, theirs)
+        assert await task_exists(async_connection, their_task)
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_the_owners_other_lists_keep_their_order(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        first, middle, last = await seed_lists(async_connection, "A", "B", "C")
+
+        await _delete(async_connection, middle)
+
+        assert await stored_order(async_connection) == [first, last]
+
+
+def _race_owner() -> str:
+    """A one-off owner, so committed rows can be cleaned up by owner."""
+    return f"delete-race-{uuid.uuid4()}"
+
+
+async def _cleanup_owner(async_engine: AsyncEngine, owner: str) -> None:
+    async with async_engine.begin() as cleanup:
+        await cleanup.execute(_DELETE_OWNER_EVENTS, {"user_id": owner})
+        for table in ("tasks", "task_lists", "journals", "contacts"):
+            await cleanup.execute(
+                text(f"DELETE FROM {table} WHERE user_id = :user_id"),  # noqa: S608
+                {"user_id": owner},
+            )
+
+
+def _task_service(conn: AsyncConnection) -> TaskService:
+    return TaskService(
+        task_repo=SqlTaskRepository(conn),
+        task_list_repo=SqlTaskListRepository(conn),
+        journal_repo=SqlJournalRepository(conn),
+        contact_repo=SqlContactRepository(conn),
+        date_resolver=JournalDateResolver(
+            user_settings_repo=SqlUserSettingsRepository(conn)
+        ),
+        event_publisher=OutboxEventPublisher(conn),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestConcurrentDeletes:
+    """A delete queues against every other write on its list and never
+    deadlocks; whichever runs second sees what the first left."""
+
+    @staticmethod
+    async def _seed(
+        async_engine: AsyncEngine, owner: str, task_count: int
+    ) -> tuple[int, list[int]]:
+        async with async_engine.begin() as setup:
+            list_id = await _seeded_list(setup, "Racing", user_id=owner)
+            ids = [
+                await create_list_task(
+                    setup, task_list_id=list_id, position=index, user_id=owner
+                )
+                for index in range(task_count)
+            ]
+        return list_id, ids
+
+    @staticmethod
+    def _deleting(owner: str, list_id: int) -> Any:
+        async def run(connection: AsyncConnection) -> None:
+            await _delete(connection, list_id, user_id=owner)
+
+        return run
+
+    @pytest.mark.asyncio
+    async def test_a_status_edit_during_the_delete_waits_then_finds_no_task(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, (task_id,) = await self._seed(async_engine, owner, 1)
+            outcome: list[BaseException] = []
+
+            async def edit(connection: AsyncConnection) -> None:
+                try:
+                    await _task_service(connection).set_status(
+                        user_id=owner,
+                        task_id=task_id,
+                        status=TaskStatus.DONE,
+                        transaction=connection,
+                    )
+                except TaskNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), edit)
+
+            assert len(outcome) == 1
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_delete_during_a_status_edit_waits_then_deletes(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, (task_id,) = await self._seed(async_engine, owner, 1)
+
+            async def edit(connection: AsyncConnection) -> None:
+                await _task_service(connection).set_status(
+                    user_id=owner,
+                    task_id=task_id,
+                    status=TaskStatus.DONE,
+                    transaction=connection,
+                )
+
+            await overlap(async_engine, edit, self._deleting(owner, list_id))
+
+            async with async_engine.connect() as check:
+                assert not await _list_exists(check, list_id)
+                assert not await task_exists(check, task_id)
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_create_during_the_delete_waits_then_finds_no_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, _ = await self._seed(async_engine, owner, 0)
+            outcome: list[BaseException] = []
+
+            async def create(connection: AsyncConnection) -> None:
+                try:
+                    await _task_service(connection).create_list_task(
+                        user_id=owner,
+                        task_list_id=list_id,
+                        text="too late",
+                        transaction=connection,
+                    )
+                except TaskListNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), create)
+
+            assert len(outcome) == 1
+            async with async_engine.connect() as check:
+                assert (
+                    await count(
+                        check,
+                        "SELECT COUNT(*) FROM tasks WHERE user_id = :user_id",
+                        {"user_id": owner},
+                    )
+                    == 0
+                )
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_delete_during_a_reorder_waits_then_deletes(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, (first, second) = await self._seed(async_engine, owner, 2)
+
+            async def reorder(connection: AsyncConnection) -> None:
+                await _task_service(connection).reorder_task(
+                    user_id=owner,
+                    task_id=first,
+                    after_task_id=second,
+                    transaction=connection,
+                )
+
+            await overlap(async_engine, reorder, self._deleting(owner, list_id))
+
+            async with async_engine.connect() as check:
+                assert not await _list_exists(check, list_id)
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_reorder_during_the_delete_waits_then_finds_no_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, (first, second) = await self._seed(async_engine, owner, 2)
+            outcome: list[BaseException] = []
+
+            async def reorder(connection: AsyncConnection) -> None:
+                try:
+                    await _task_service(connection).reorder_task(
+                        user_id=owner,
+                        task_id=first,
+                        after_task_id=second,
+                        transaction=connection,
+                    )
+                except (TaskNotFoundError, TaskListNotFoundError) as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), reorder)
+
+            assert len(outcome) == 1
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_delete_during_a_move_off_the_list_deletes_without_the_task(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """A move holds its lists before its task; the delete queues on that
+        task, and once the move commits the task is no longer the list's."""
+        owner = _race_owner()
+        try:
+            list_id, (task_id,) = await self._seed(async_engine, owner, 1)
+            async with async_engine.begin() as setup:
+                target = await _seeded_list(setup, "Elsewhere", user_id=owner)
+
+            async def move(connection: AsyncConnection) -> None:
+                await _task_service(connection).move_to_list(
+                    user_id=owner,
+                    task_id=task_id,
+                    task_list_id=target,
+                    transaction=connection,
+                )
+
+            await overlap(async_engine, move, self._deleting(owner, list_id))
+
+            async with async_engine.connect() as check:
+                assert not await _list_exists(check, list_id)
+                assert await task_exists(check, task_id)
+                assert (
+                    await count(
+                        check,
+                        "SELECT COUNT(*) FROM tasks"
+                        " WHERE id = :task_id AND task_list_id = :target",
+                        {"task_id": task_id, "target": target},
+                    )
+                    == 1
+                )
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_move_off_the_list_during_the_delete_waits_then_finds_no_task(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, (task_id,) = await self._seed(async_engine, owner, 1)
+            async with async_engine.begin() as setup:
+                target = await _seeded_list(setup, "Elsewhere", user_id=owner)
+            outcome: list[BaseException] = []
+
+            async def move(connection: AsyncConnection) -> None:
+                try:
+                    await _task_service(connection).move_to_list(
+                        user_id=owner,
+                        task_id=task_id,
+                        task_list_id=target,
+                        transaction=connection,
+                    )
+                except TaskNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), move)
+
+            assert len(outcome) == 1
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_move_onto_the_list_during_the_delete_waits_then_finds_no_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, _ = await self._seed(async_engine, owner, 0)
+            async with async_engine.begin() as setup:
+                source = await _seeded_list(setup, "Elsewhere", user_id=owner)
+                task_id = await create_list_task(
+                    setup, task_list_id=source, position=0, user_id=owner
+                )
+            outcome: list[BaseException] = []
+
+            async def move(connection: AsyncConnection) -> None:
+                try:
+                    await _task_service(connection).move_to_list(
+                        user_id=owner,
+                        task_id=task_id,
+                        task_list_id=list_id,
+                        transaction=connection,
+                    )
+                except TaskListNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), move)
+
+            assert len(outcome) == 1
+            async with async_engine.connect() as check:
+                assert await task_exists(check, task_id)
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_second_delete_waits_then_finds_no_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = _race_owner()
+        try:
+            list_id, _ = await self._seed(async_engine, owner, 1)
+            outcome: list[BaseException] = []
+
+            async def again(connection: AsyncConnection) -> None:
+                try:
+                    await _delete(connection, list_id, user_id=owner)
+                except TaskListNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, self._deleting(owner, list_id), again)
+
+            assert len(outcome) == 1
+            async with async_engine.connect() as check:
+                (event,) = (
+                    await check.execute(
+                        text(
+                            "SELECT event_type FROM outbox_events "
+                            "WHERE event_type = 'TaskListDeleted' "
+                            "AND CAST(event_data AS jsonb) ->> 'user_id' = :user_id"
+                        ),
+                        {"user_id": owner},
+                    )
+                ).all()
+                assert event.event_type == "TaskListDeleted"
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_delete_waits_for_another_delete_before_locking_the_list(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Two deletes of one list must not both hold it ``FOR SHARE``, or each
+        one's ``NOWAIT`` refuses on the other's lock and neither deletes. The
+        second waits for the first's hold before taking any list lock, then
+        finds the list gone."""
+        owner = _race_owner()
+        try:
+            list_id, _ = await self._seed(async_engine, owner, 0)
+            outcome: list[BaseException] = []
+
+            async def hold(connection: AsyncConnection) -> None:
+                await SqlTaskListRepository(connection).serialize_deletes(list_id)
+                await _delete(connection, list_id, user_id=owner)
+
+            async def again(connection: AsyncConnection) -> None:
+                try:
+                    await _delete(connection, list_id, user_id=owner)
+                except TaskListNotFoundError as error:
+                    outcome.append(error)
+
+            await overlap(async_engine, hold, again)
+
+            assert len(outcome) == 1
+            async with async_engine.connect() as check:
+                assert not await _list_exists(check, list_id)
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_link_write_on_a_kept_task_after_the_delete_carries_on(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """A link write holds its task ``FOR SHARE``, so it waits for the delete
+        and then reads the task as the delete left it: journal-only, with its
+        list gone. The write goes on as for any journal-only task rather than
+        answering 404 for the list it would otherwise have seen."""
+        owner = _race_owner()
+        try:
+            async with async_engine.begin() as setup:
+                list_id = await _seeded_list(setup, "Racing", user_id=owner)
+                journals = SqlJournalRepository(setup)
+                creating_id = await create_journal(journals, user_id=owner)
+                due_id = await create_journal(journals, days_offset=7, user_id=owner)
+                kept = await create_list_task(
+                    setup,
+                    task_list_id=list_id,
+                    creating_journal_id=creating_id,
+                    due_journal_id=due_id,
+                    user_id=owner,
+                )
+                contact_id = await create_contact(setup, user_id=owner)
+
+            async def link(connection: AsyncConnection) -> None:
+                await _task_service(connection).link_contact(
+                    user_id=owner,
+                    task_id=kept,
+                    contact_id=contact_id,
+                    transaction=connection,
+                )
+
+            await overlap(async_engine, self._deleting(owner, list_id), link)
+
+            async with async_engine.connect() as check:
+                assert await linked_contact_ids(check, kept) == [contact_id]
+                assert await task_exists(check, kept)
+        finally:
+            await _cleanup_owner(async_engine, owner)
+
+    @pytest.mark.asyncio
+    async def test_a_list_held_by_a_task_write_in_flight_is_busy_not_deadlocked(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """The interleaving the ``NOWAIT`` exists for: another transaction
+        holds the list ``FOR SHARE`` — as a task write or reorder does while it
+        works — when the delete comes to remove it. The delete refuses at once
+        with a retryable conflict, and its own work is undone."""
+        owner = _race_owner()
+        try:
+            list_id, (task_id,) = await self._seed(async_engine, owner, 1)
+
+            async with (
+                async_engine.connect() as holder,
+                async_engine.connect() as deleter,
+            ):
+                held = await SqlTaskListRepository(holder).find_by_id_for_share(
+                    list_id, owner
+                )
+                assert held is not None
+
+                with pytest.raises(TaskListBusyError):
+                    await bounded(_delete(deleter, list_id, user_id=owner))
+                await holder.rollback()
+
+            async with async_engine.connect() as check:
+                assert await _list_exists(check, list_id)
+                assert await task_exists(check, task_id)
+        finally:
+            await _cleanup_owner(async_engine, owner)

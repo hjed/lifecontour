@@ -5,6 +5,8 @@ Each tool returns one of these, which fastmcp publishes as the tool's
 the schema an agent reads rather than only in prose.
 """
 
+from typing import Literal
+
 from core_shared.models.tasks import TaskIcon
 from pydantic import BaseModel, Field
 
@@ -28,6 +30,22 @@ class TaskListMCP(BaseModel):
     )
     created_at: str | None = Field(description="ISO 8601 instant")
     updated_at: str | None = Field(description="ISO 8601 instant")
+
+
+class TaskListDeletedResponse(BaseModel):
+    """A deleted list, and what became of its tasks."""
+
+    deleted: Literal[True]
+    task_list_id: int
+    deleted_task_ids: list[int] = Field(
+        description="Tasks deleted with the list, open and completed alike"
+    )
+    kept_task_ids: list[int] = Field(
+        description=(
+            "Tasks that held both a creating and a due journal and so were kept, "
+            "now journal-only and on no list"
+        )
+    )
 
 
 class TaskListsMCP(BaseModel):

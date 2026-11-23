@@ -35,6 +35,7 @@ from core_shared.models.tasks import (
     TaskJournalRepointing,
     TaskList,
     TaskListArchiveFilter,
+    TaskListDeletion,
     TaskPage,
 )
 
@@ -79,6 +80,14 @@ class TaskRepository(ABC):
       edit of it, which holds the task and asks for that list. Any
       writer that takes a list exclusively must not hold a task lock while it
       waits for that list.
+    - Deleting a list (``TaskListRepository.serialize_deletes``, then
+      :meth:`release_list_tasks`, then ``TaskListRepository.delete``) holds
+      the list ``FOR SHARE``, locks every task on it in id order, and only then
+      asks for the list exclusively — with ``NOWAIT``. Another holder of the
+      list at that point may be queued behind one of those tasks, so waiting
+      could deadlock; the delete refuses any holder with ``TaskListBusyError``
+      (retryable) instead. Deletes of one list are serialised before all this,
+      so two never refuse each other.
 
     Re-locking a row the same transaction holds is free. A journal merge
     re-points task anchors by journal without a list lock, so a merge
@@ -180,6 +189,31 @@ class TaskRepository(ABC):
 
         Raises:
             TaskNotFoundError: When no such task belongs to the user.
+        """
+
+    @abstractmethod
+    async def release_list_tasks(
+        self, task_list_id: int, user_id: str
+    ) -> TaskListDeletion:
+        """Take every task off a list that is about to be deleted.
+
+        Each of the user's tasks on the list is locked, in ascending id, and
+        then either deleted or kept. **Kept** are the tasks holding both a
+        creating and a due journal: they become journal-only — no list, no
+        position, no due date — with everything else as it was. **Deleted** is
+        every other task, open or closed, with its contact and
+        intermediate-journal links.
+
+        The caller must hold the list ``FOR SHARE`` already, inside its unit of
+        work, so no task can join the list between this and the list's own
+        delete. Publishes nothing: announcing the change is the service's.
+
+        Args:
+            task_list_id: The list being deleted
+            user_id: The acting user; another user's tasks are never touched
+
+        Returns:
+            The ids deleted and the ids kept, each ascending.
         """
 
     @abstractmethod
@@ -1054,6 +1088,17 @@ class TaskListRepository(ABC):
         """
 
     @abstractmethod
+    async def serialize_deletes(self, task_list_id: int) -> None:
+        """Hold off any other delete of this list until the unit of work ends.
+
+        A delete share-locks the list and only later takes it exclusively,
+        without waiting; two deletes holding the share lock at once would each
+        refuse on the other's. Taken first, before any row lock, so a second
+        delete waits here holding nothing, then finds the list gone. Locks no
+        row, so no other writer is affected.
+        """
+
+    @abstractmethod
     async def find_by_ids(
         self, task_list_ids: Sequence[int], user_id: str
     ) -> dict[int, TaskList]:
@@ -1126,11 +1171,16 @@ class TaskListRepository(ABC):
     async def delete(self, task_list_id: int, user_id: str) -> None:
         """Hard-delete one of the user's lists.
 
-        Deleting only removes the list row. Once tasks can sit on a list, the
-        service decides their fate first — tasks holding both a creating and a
-        due journal survive as journal-only tasks — so the tasks' list column
-        must not cascade on delete.
+        Deleting only removes the list row. The service decides its tasks'
+        fate first, through ``TaskRepository.release_list_tasks`` — tasks
+        holding both a creating and a due journal survive as journal-only tasks
+        — so the tasks' list column must not cascade on delete.
+
+        **The list is locked without waiting.** The caller holds it
+        ``FOR SHARE`` and every task on it; another holder of the list now may
+        be queued behind one of those tasks, so waiting for it could deadlock.
 
         Raises:
             TaskListNotFoundError: When no list with that id belongs to the user.
+            TaskListBusyError: When another transaction holds the list.
         """

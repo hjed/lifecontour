@@ -12,9 +12,11 @@ from core_shared.models.tasks import (
     TaskIcon,
     TaskList,
     TaskListArchiveFilter,
+    TaskListBusyError,
     TaskListNotFoundError,
 )
 from sqlalchemy import TextClause, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.models.repositories import TaskListRepository
@@ -182,7 +184,16 @@ _LIST_QUERIES = {
     ),
 }
 
+# A delete's exclusive lock on the list, taken without waiting: the caller
+# already holds the list ``FOR SHARE`` and every task on it, so another holder
+# of the list now may be queued behind one of those tasks and waiting could
+# deadlock. See ``TaskRepository``'s lock order.
+_LOCK_FOR_DELETE = text(
+    "SELECT id FROM task_lists WHERE id = :id AND user_id = :user_id FOR UPDATE NOWAIT"
+)
 _DELETE = text("DELETE FROM task_lists WHERE id = :id AND user_id = :user_id")
+# PostgreSQL's ``lock_not_available``, raised by ``NOWAIT``.
+_LOCK_NOT_AVAILABLE = "55P03"
 
 _FIND_BY_IDS = text(
     f"""
@@ -324,13 +335,25 @@ class SqlTaskListRepository(TaskListRepository):
             _REPOSITION, {"user_id": user_id, "ordered_ids": list(ordered_ids)}
         )
 
-    async def delete(self, task_list_id: int, user_id: str) -> None:
-        """Hard-delete one of the user's lists."""
-        result = await self.conn.execute(
-            _DELETE, {"id": task_list_id, "user_id": user_id}
+    async def serialize_deletes(self, task_list_id: int) -> None:
+        """A transaction-scoped advisory lock keyed on the list, not a row lock."""
+        await self.conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"task_list_delete:{task_list_id}"},
         )
-        if result.rowcount == 0:
+
+    async def delete(self, task_list_id: int, user_id: str) -> None:
+        """Hard-delete one of the user's lists, locking it without waiting."""
+        params = {"id": task_list_id, "user_id": user_id}
+        try:
+            locked = (await self.conn.execute(_LOCK_FOR_DELETE, params)).fetchone()
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == _LOCK_NOT_AVAILABLE:
+                raise TaskListBusyError(task_list_id) from error
+            raise
+        if locked is None:
             raise TaskListNotFoundError(task_list_id)
+        await self.conn.execute(_DELETE, params)
 
     async def _lock_owner_lists(self, user_id: str) -> None:
         await self.conn.execute(_LOCK_OWNER_LISTS, {"user_id": user_id})
