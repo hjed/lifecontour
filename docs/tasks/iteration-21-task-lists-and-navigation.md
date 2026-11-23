@@ -2218,7 +2218,10 @@ Gates run locally:
 **Notes for later phases:**
 - *Phase 23 (merged first):* a retarget of a done or cancelled list task is refused with
   `TASK_LIST_TASK_CLOSED`, so this phase's status change is the only way to reopen one, as the spec
-  says (*"reopened by changing its status, not its date"*).
+  says (*"reopened by changing its status, not its date"*). Its message now names the same way out
+  for both statuses — set it back to not done, then change its due journal — where it used to tell
+  a cancelled one its date could not be changed yet (review finding; proved end to end in
+  `test_task_list_reopen_endpoints.py`).
 - *Phase 30:* `statusActions` in `frontend/src/lib/task-display.ts` still offers nothing for a
   cancelled task (pinned by `task-display.test.ts`), so a cancelled list task on a journal page has
   no reopen. Make the offer list-aware: ask the same question as the backend rule, with

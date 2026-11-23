@@ -16,9 +16,11 @@ from core_shared.models.tasks import TaskStatus
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
+    create_journal,
     create_list_task,
     create_task,
     seed_task_list,
@@ -96,6 +98,59 @@ class TestAListTaskIsReopenedByItsStatus:
         assert error["code"] == "TASK_STATUS_TRANSITION_REFUSED"
         assert "retarget" in str(error["detail"]).lower()
         assert await stored_status(async_connection, task_id) == "cancelled"
+
+
+class TestTheClosedRetargetRefusalsWayOutWorks:
+    """``TASK_LIST_TASK_CLOSED`` tells a caller to reopen first, then retarget.
+
+    True for both closed statuses now that a cancelled list task reopens by
+    its status: following the advice succeeds, and the date move keeps the
+    status the reopen gave it.
+    """
+
+    @pytest.mark.parametrize("closed", [TaskStatus.CANCELLED, TaskStatus.DONE])
+    async def test_reopening_then_retargeting_succeeds(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        closed: TaskStatus,
+    ) -> None:
+        due_id = await create_journal(journal_repository, days_offset=5)
+        later_id = await create_journal(journal_repository, days_offset=9)
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=await _list_id(async_connection),
+            due_journal_id=due_id,
+            status=closed,
+        )
+        retarget_body = {
+            "data": {
+                "type": "task-retarget",
+                "attributes": {"due_journal_id": later_id},
+            }
+        }
+
+        refused = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=retarget_body
+        )
+        reopened = await authenticated_client.patch(
+            f"/api/tasks/{task_id}", json=_status_body(task_id, "not_done")
+        )
+        retargeted = await authenticated_client.post(
+            f"/api/tasks/{task_id}/retarget", json=retarget_body
+        )
+
+        (error,) = refused.json()["errors"]
+        assert error["code"] == "TASK_LIST_TASK_CLOSED"
+        assert "Set it back to not done first" in str(error["detail"])
+        assert reopened.status_code == 200
+        assert retargeted.status_code == 200
+        attributes = retargeted.json()["data"]["attributes"]
+        assert (attributes["status"], attributes["due_journal_id"]) == (
+            "not_done",
+            later_id,
+        )
 
 
 class TestAnotherUsersListTask:
