@@ -190,3 +190,13 @@ class TestAuthenticationRequirements:
         )
         assert response.status_code == 401
         assert "Authentication required" in response.json()["errors"][0]["detail"]
+
+    def test_moving_a_task_onto_a_list_requires_auth(self, client: TestClient) -> None:
+        """A valid body, so a 401 cannot be a 400 in disguise."""
+        response = client.post(
+            "/api/tasks/1/move",
+            json={"data": {"type": "task-moves", "attributes": {"task_list_id": 1}}},
+            headers={"Host": "localhost"},
+        )
+        assert response.status_code == 401
+        assert "Authentication required" in response.json()["errors"][0]["detail"]

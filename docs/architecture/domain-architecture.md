@@ -322,7 +322,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
   contacts cost *2N* statements — and the batch is what `TaskService.create_task` and the
   single-contact link surface both use. `remove_contact` stays singular: nothing removes in bulk.
 - **Domain Events**: `TaskCreated`, `TaskUpdated`, `TaskDueJournalRetargeted`, `TaskJournalLinked`,
-  `TaskJournalUnlinked`, `TaskJournalLinksRepointed` and `TaskDeleted`
+  `TaskJournalUnlinked`, `TaskJournalLinksRepointed`, `TaskJournalLinksRemoved`,
+  `TaskListMembershipChanged` and `TaskDeleted`
   (`backend/app/core/tasks/models/events.py`), published by `TaskService` — and, for the last of
   them, by `TaskJournalMergeService` — through
   `OutboxEventPublisher` **inside the same unit of work as the write**, so an event can never exist
@@ -361,6 +362,17 @@ the *creating* journal where it arose and the *due* journal where it matters.
   cause — somebody asking for it — since a create announces its own contacts and a contact delete
   cascades without anyone acting on the task. There is nothing a dedicated type would carry that a
   `changed_fields` entry does not.
+  **List membership is one event, `TaskListMembershipChanged`**, for joining a list, moving between
+  lists and leaving one: its `changed_fields` carries `task_list_id` as `(old, new)` (`None` on the
+  absent side), and it is projected by `TaskUpdated`'s handler. The aggregate is the task, though the
+  type name begins `TaskList`. `TaskService.move_to_list` publishes it; a move to the task's own list
+  is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: the task
+  row (`FOR NO KEY UPDATE`), then both lists in ascending id — the task's own list `FOR SHARE`, the
+  target `FOR NO KEY UPDATE` (the bottom is computed under it) — so two crossing moves cannot
+  deadlock. Because a task can change lists, the link writes (`link_contact`, `unlink_contact`,
+  `attach_intermediate_journal`, `detach_intermediate_journal`) read their task `FOR SHARE` before
+  trusting `task_list_id`, so they wait for an in-flight move; attach and detach lock their journal
+  `FOR KEY SHARE` first, in a journal merge's journal-then-task order.
   **A retarget publishes two events, and is the only task write that publishes more than one.**
   `TaskDueJournalRetargeted` carries the due-journal pair and the reopen (only when the retarget
   actually moved the status, since retargeting always lands a task *not done*); the **automatic
@@ -1577,7 +1589,7 @@ configured timezone, never UTC's date.
 | `JournalTypeAdded` / `JournalTypeRemoved` | The journal's span | `event_count` is derived from types, and removing EVENT takes the journal off the agenda |
 | `ContactSummaryRefreshRequested` **with a `journal_id`** | That journal's span | Attaching or detaching a contact publishes only this, and the summary's contact names and count come from exactly those rows |
 | Journal **tag** events | None | `AgendaEntry` carries no tags and the prompt renders none — checked, and pinned by a negative test, because the dashboard's agenda *card* does show them (**W15**) |
-| `TaskCreated` / `TaskUpdated` / `TaskDueJournalRetargeted` / `TaskJournalLinksRepointed` | The **due** journal's span if it is behind the user, else **today** if that journal starts inside the week ahead | The current day's prompt lists the week's tasks; a past day's lists what was due in *its* journals. A retarget names two journals and so marks both days |
+| `TaskCreated` / `TaskUpdated` / `TaskDueJournalRetargeted` / `TaskJournalLinksRepointed` / `TaskListMembershipChanged` | The **due** journal's span if it is behind the user, else **today** if that journal starts inside the week ahead | The current day's prompt lists the week's tasks; a past day's lists what was due in *its* journals. A retarget names two journals and so marks both days |
 | `TaskDeleted` | **Today** | The payload is deliberately minimal and the row is gone, so no day can be resolved. A past day that named the task keeps doing so — a recorded limitation |
 | `TaskJournalLinked` / `TaskJournalUnlinked` | None | A task's intermediate journals are on the read model and never rendered |
 | `ImportantDateAdded` | **Today**, for each user whose week the date falls in | `update_contact` re-adds every date on every contact save, so without the window test a phone-number edit would cost an AI call for a birthday six months away |

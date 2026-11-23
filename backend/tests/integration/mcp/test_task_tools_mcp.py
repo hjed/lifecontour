@@ -4777,3 +4777,204 @@ class TestCreateTaskOnAListRefusals:
         assert "Packing" not in str(foreign)
         for owner in (USER_ID, OTHER_USER_ID):
             assert await count(clean_database, COUNT_TASKS, {"user_id": owner}) == 0
+
+
+async def _move_task_to_list(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "move_task_to_list", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _membership(conn: AsyncConnection, task_id: int) -> tuple[Any, Any]:
+    row = (
+        await conn.execute(
+            sa_text("SELECT task_list_id, position FROM tasks WHERE id = :id"),
+            {"id": task_id},
+        )
+    ).one()
+    return row.task_list_id, row.position
+
+
+@pytest.mark.integration
+class TestMoveTaskToList:
+    """The move over ``tools/call``: the answers an HTTP client gets."""
+
+    async def test_a_journal_only_task_joins_a_list_and_stops_lapsing(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        creating_id = await create_journal(
+            journal_repository, title="Planning", days_offset=-5
+        )
+        due_id = await create_journal(journal_repository, title="Due", days_offset=-3)
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            before = await _get_task(client, task_id=task_id)
+            payload = await _move_task_to_list(
+                client, task_id=task_id, task_list_id=list_id
+            )
+            after = await _get_task(client, task_id=task_id)
+
+        assert before["lapsed"] is True
+        assert "error" not in payload
+        assert payload["task_list_id"] == list_id
+        assert payload["due_journal_id"] == due_id
+        assert after["lapsed"] is False
+        assert after["overdue"] is True
+        [event] = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskListMembershipChanged"
+        assert event.payload["changed_fields"] == {"task_list_id": [None, list_id]}
+        assert event.payload["source"] == "mcp"
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_list_task_moves_to_the_bottom_of_another_list(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        source = await seed_task_list(clean_database, "Groceries")
+        target = await seed_task_list(clean_database, "Hardware")
+        assert source.id is not None and target.id is not None
+        task_id = await create_list_task(clean_database, task_list_id=source.id)
+        await create_list_task(clean_database, task_list_id=target.id, position=2)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _move_task_to_list(
+                client, task_id=task_id, task_list_id=target.id
+            )
+
+        assert payload["task_list_id"] == target.id
+        assert await _membership(clean_database, task_id) == (target.id, 3)
+
+    async def test_moving_to_its_own_list_changes_nothing(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(clean_database, task_list_id=list_id)
+        await create_list_task(clean_database, task_list_id=list_id, position=1)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _move_task_to_list(
+                client, task_id=task_id, task_list_id=list_id
+            )
+
+        assert payload["task_list_id"] == list_id
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+        assert await task_events(clean_database, task_id=task_id) == []
+
+
+@pytest.mark.integration
+class TestMoveTaskToListRefusals:
+    async def test_an_unknown_task_is_not_found(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "move_task_to_list", task_id=999_999, task_list_id=list_id
+            )
+
+        assert payload["error"] == "Not found"
+
+    async def test_an_unknown_list_is_not_found_and_nothing_moves(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(clean_database, task_list_id=list_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "move_task_to_list", task_id=task_id, task_list_id=999_999
+            )
+
+        assert payload["error"] == "Not found"
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+
+    async def test_another_users_task_is_the_same_answer_as_an_absent_one(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        mine = await seed_task_list_id(clean_database)
+        theirs = await seed_task_list_id(clean_database, user_id=OTHER_USER_ID)
+        task_id = await create_list_task(
+            clean_database, task_list_id=theirs, user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client, "move_task_to_list", task_id=task_id, task_list_id=mine
+            )
+            absent = await _refused(
+                client, "move_task_to_list", task_id=999_999, task_list_id=mine
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert await _membership(clean_database, task_id) == (theirs, 0)
+        assert await task_events(clean_database, task_id=task_id) == []
+
+    async def test_another_users_list_is_the_same_answer_as_an_absent_one(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        mine = await seed_task_list_id(clean_database)
+        theirs = await seed_task_list_id(clean_database, user_id=OTHER_USER_ID)
+        task_id = await create_list_task(clean_database, task_list_id=mine)
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client, "move_task_to_list", task_id=task_id, task_list_id=theirs
+            )
+            absent = await _refused(
+                client, "move_task_to_list", task_id=task_id, task_list_id=999_999
+            )
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert foreign["message"].replace(str(theirs), "X") == absent[
+            "message"
+        ].replace("999999", "X")
+        assert await _membership(clean_database, task_id) == (mine, 0)
+
+    async def test_an_archived_target_is_refused(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        mine = await seed_task_list_id(clean_database)
+        archived = await seed_task_list_id(clean_database, archived=True)
+        task_id = await create_list_task(clean_database, task_list_id=mine)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(
+                client, "move_task_to_list", task_id=task_id, task_list_id=archived
+            )
+
+        assert payload["error"] == "Task error"
+        assert "archived" in payload["message"]
+        assert await _membership(clean_database, task_id) == (mine, 0)
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [{"task_list_id": True}, {"task_list_id": "1"}, {"task_id": "1"}],
+        ids=repr,
+    )
+    async def test_a_non_integer_id_is_refused_rather_than_coerced(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(clean_database, task_list_id=list_id)
+        target = await seed_task_list_id(clean_database)
+
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client,
+                "move_task_to_list",
+                {"task_id": task_id, "task_list_id": target, **arguments},
+            )
+
+        assert '"isError":true' in response.text
+        assert "must be a JSON integer" in response.text
+        assert await _membership(clean_database, task_id) == (list_id, 0)

@@ -701,8 +701,10 @@ class HistoryService:
         (``(None, id)``) or unlinking them (``(id, None)``) projects like any
         other field — one row, naming the person, the right way round.
 
-        **Three other types are mapped here**, which is why this docstring is not
-        only about updates. The third, ``TaskJournalLinksRemoved``, is a journal
+        **Four other types are mapped here**, which is why this docstring is not
+        only about updates. The fourth, ``TaskListMembershipChanged``, is a move
+        onto, between or off task lists: one ``task_list_id`` pair, ``None`` on
+        the side with no list. The third, ``TaskJournalLinksRemoved``, is a journal
         delete's detach of a list task, in the merge's vocabulary with every
         pair ending in ``None``. The second is
         :class:`~app.core.tasks.models.events.TaskJournalLinksRepointed`, which a
@@ -1032,6 +1034,8 @@ _HANDLERS = {
     # And so does a journal delete's detach of a list task: the same
     # ``changed_fields`` vocabulary, every pair ending in ``None``.
     "TaskJournalLinksRemoved": HistoryService._project_task_updated,
+    # A move onto, between or off task lists is a ``task_list_id`` pair.
+    "TaskListMembershipChanged": HistoryService._project_task_updated,
     "TaskDeleted": HistoryService._project_task_deleted,
     # Task-list events (ITER21-001 Phase 7), filed under ``task_list``. They move
     # with ``TASK_LIST_HISTORY_EVENT_TYPES`` in the consumer, both directions

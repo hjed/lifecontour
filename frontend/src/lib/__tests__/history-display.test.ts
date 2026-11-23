@@ -366,3 +366,43 @@ describe('a list task’s due date rows', () => {
     ).toBe('Due date cleared: “Pack the stove”');
   });
 });
+
+describe('a task’s list-membership rows', () => {
+  // The values are list ids, which name nothing a reader can use, so the line
+  // says what happened rather than quoting them.
+  it.each([
+    [null, '7', 'Added to a list'],
+    ['7', '8', 'Moved to another list'],
+    ['7', null, 'Removed from its list'],
+  ])('a list %s → %s reads as “%s”', (oldValue, newValue, expected) => {
+    expect(
+      taskEntryDescription(taskRow('task_list_id', oldValue, newValue), 'task')
+    ).toBe(expected);
+  });
+
+  it('names the task when the row reaches a contact’s feed', () => {
+    expect(
+      taskEntryDescription(
+        {
+          ...taskRow('task_list_id', null, '7'),
+          entity_label: 'Pack the stove',
+        },
+        'contact'
+      )
+    ).toBe('Added to a list: “Pack the stove”');
+  });
+
+  it('leaves another domain’s rows of the same name alone', () => {
+    expect(
+      taskEntryDescription(
+        {
+          entity_type: 'task_list',
+          field_name: 'task_list_id',
+          old_value: null,
+          new_value: '7',
+        },
+        'task'
+      )
+    ).toBeNull();
+  });
+});

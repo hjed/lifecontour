@@ -1,7 +1,7 @@
 """Integration tests: every task write tool refuses a task on an archived list.
 
 The MCP half of Phase 18, over the real MCP endpoint, and creating a task on an
-archived list. Each of the eight task write tools answers an archived list's task with a "Task error" whose message
+archived list. Each task write tool answers an archived list's task with a "Task error" whose message
 names unarchiving as the way out — the same text the REST surface carries — and
 leaves the task as it was. ``get_task`` still answers, because an archived
 list's tasks stay readable.
@@ -77,6 +77,7 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
         ),
         ("delete_task", {"task_id": s.task_id}),
         ("retarget_task", {"task_id": s.task_id, "due_journal_id": s.later_journal_id}),
+        ("move_task_to_list", {"task_id": s.task_id, "task_list_id": s.active_list_id}),
         (
             "link_task_to_contact",
             {"task_id": s.task_id, "contact_id": s.unlinked_contact_id},
@@ -111,6 +112,7 @@ TOOLS = [
     "update_task:clear-due-date",
     "delete_task",
     "retarget_task",
+    "move_task_to_list",
     "link_task_to_contact",
     "unlink_task_from_contact",
     "attach_intermediate_journal_to_task",

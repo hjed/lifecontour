@@ -1713,6 +1713,31 @@ export class TestDataManager {
   }
 
   /**
+   * Move a task onto one of the user's lists, or from one list to another,
+   * through the API. It joins the bottom of the list; a journal-only task keeps
+   * its journals. No control does this until the task's move UI exists.
+   */
+  async moveTaskToList(taskId: string, taskListId: string): Promise<void> {
+    const response = await this.page.request.post(`/api/tasks/${taskId}/move`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: {
+          type: 'task-moves',
+          attributes: { task_list_id: Number.parseInt(taskListId, 10) },
+        },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to move task: ${response.status()} ${await response.text()}`
+      );
+    }
+    console.debug(
+      `📝 [Data Manager] Moved task ${taskId} to list ${taskListId}`
+    );
+  }
+
+  /**
    * Create a task on a list through the API: it has no creating journal, is
    * undated, due on `dueDate` or due in `dueJournalId`, and joins the bottom
    * of the list. Tracked with the other tasks, so cleanup deletes it

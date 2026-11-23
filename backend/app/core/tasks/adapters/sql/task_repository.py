@@ -460,13 +460,36 @@ class SqlTaskRepository(TaskRepository):
         row = result.fetchone()
         return None if row is None else _row_to_task(row)
 
+    async def find_by_id_for_share(self, task_id: int, user_id: str) -> Task | None:
+        """Find one of the user's tasks and hold the row ``FOR SHARE``.
+
+        Conflicts with the ``FOR NO KEY UPDATE`` a move and every task-field
+        write take, so a link write waits for them; does not conflict with
+        another share lock or a link insert's ``FOR KEY SHARE``. Released when
+        the transaction ends.
+        """
+        query = text(
+            f"""
+            SELECT {_TASK_COLUMNS}
+            FROM tasks
+            WHERE id = :task_id AND user_id = :user_id
+            FOR SHARE
+            """
+        )
+        result = await self.conn.execute(
+            query, {"task_id": task_id, "user_id": user_id}
+        )
+        row = result.fetchone()
+        return None if row is None else _row_to_task(row)
+
     async def find_by_id_for_update(self, task_id: int, user_id: str) -> Task | None:
         """Find one of the user's tasks and lock the row against other writers.
 
         ``FOR NO KEY UPDATE`` rather than ``FOR UPDATE``: it blocks the other
         writers this is here to exclude, but not the ``FOR KEY SHARE`` that a
-        link insert's foreign-key check takes on this same row — so attaching a
-        contact to a task never queues behind somebody marking it done.
+        link insert's foreign-key check takes on this same row. The link writes
+        themselves read the task :meth:`find_by_id_for_share` first, so they do
+        queue behind this lock — they must see the list the task is on.
 
         The lock is released when the transaction ends, which is why callers
         must already be inside their unit of work when they call this. A read
@@ -740,9 +763,10 @@ class SqlTaskRepository(TaskRepository):
     async def add_to_list(self, task_id: int, task_list_id: int, user_id: str) -> Task:
         """Put one of the user's tasks at the bottom of one of their lists.
 
-        The list is locked first and the task's row second, by the ``UPDATE``
-        itself — the port's lock order — so the bottom cannot be computed twice
-        for one list by overlapping joins.
+        The list is locked before the ``UPDATE`` writes the task's row, so the
+        bottom cannot be computed twice for one list by overlapping joins. A
+        calling service that has already locked the task (and this list) makes
+        both locks free here.
         """
         await self._lock_list(task_list_id, user_id)
         result = await self.conn.execute(

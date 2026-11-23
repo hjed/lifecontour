@@ -479,6 +479,55 @@ async def retarget_task(
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("move_task_to_list", "task")
+async def move_task_to_list(
+    task_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task to move."),
+        JsonIntOnly,
+    ],
+    task_list_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description=(
+                "The list to put the task on: one of yours, not archived. Must "
+                "be a JSON integer."
+            ),
+        ),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+) -> TaskMCP:
+    """
+    Put a task on one of your lists, or move it from one list to another.
+
+    The task joins the bottom of the list. A journal-only task added to a list
+    keeps its journals and its due journal, and stops lapsing: past its date it
+    is overdue on the list instead. A list task moved to another list keeps its
+    due date or due journal. Status, flag, icon and contacts are kept either
+    way, and a task in any status may move.
+
+    Moving a task to the list it is already on changes nothing. A task on an
+    archived list cannot leave it, and an archived list takes no task, until
+    it is unarchived. An unknown list, or another user's, is not found.
+    """
+    user_id = await get_current_user_id()
+
+    moved, trail = await task_service.move_to_list_with_trail(
+        user_id=user_id,
+        task_id=task_id,
+        task_list_id=task_list_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return task_mcp_fields(moved, trail)
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_task", "task")
 async def update_task(
     task_id: Annotated[
@@ -1064,6 +1113,7 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(create_task)
     mcp.add_tool(set_task_status)
     mcp.add_tool(retarget_task)
+    mcp.add_tool(move_task_to_list)
     mcp.add_tool(update_task)
     mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)

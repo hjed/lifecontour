@@ -121,6 +121,16 @@ async def _retarget(service: TaskService, s: Seeded, tx: AsyncConnection) -> obj
     )
 
 
+async def _move(service: TaskService, s: Seeded, tx: AsyncConnection) -> object:
+    """Off the archived list onto an active one, so the task's own list refuses."""
+    return await service.move_to_list(
+        user_id=USER_ID,
+        task_id=s.task_id,
+        task_list_id=s.active_list_id,
+        transaction=tx,
+    )
+
+
 async def _link(service: TaskService, s: Seeded, tx: AsyncConnection) -> object:
     return await service.link_contact(
         user_id=USER_ID,
@@ -159,6 +169,7 @@ WRITES: list[tuple[str, Write]] = [
     ("update_text", _update_text),
     ("delete", _delete),
     ("retarget", _retarget),
+    ("move_to_list", _move),
     ("link_contact", _link),
     ("unlink_contact", _unlink),
     ("attach_intermediate_journal", _attach),

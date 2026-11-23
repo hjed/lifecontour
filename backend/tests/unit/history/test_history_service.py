@@ -1623,6 +1623,77 @@ class TestTaskDueJournalRetargeted:
         )
 
 
+def _membership_payload(**overrides: Any) -> dict[str, Any]:
+    """A ``TaskListMembershipChanged`` payload as it arrives after the stream."""
+    payload: dict[str, Any] = {
+        "task_id": TASK_ID,
+        "user_id": "u1",
+        "changed_fields": {"task_list_id": [None, NEW_TASK_LIST_ID]},
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+    payload.update(overrides)
+    return payload
+
+
+OLD_TASK_LIST_ID = 31
+NEW_TASK_LIST_ID = 32
+
+
+class TestTaskListMembershipChanged:
+    """A move onto or between lists, projected by the shared field handler."""
+
+    def test_a_journal_only_task_joining_a_list_projects_one_row(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event("TaskListMembershipChanged", _membership_payload())
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "task_list_id", None, str(NEW_TASK_LIST_ID))
+        ]
+
+    def test_a_move_between_lists_projects_the_pair_the_right_way_round(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event(
+                "TaskListMembershipChanged",
+                _membership_payload(
+                    changed_fields={
+                        "task_list_id": [OLD_TASK_LIST_ID, NEW_TASK_LIST_ID]
+                    }
+                ),
+            )
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            (
+                "task",
+                TASK_ID,
+                "task_list_id",
+                str(OLD_TASK_LIST_ID),
+                str(NEW_TASK_LIST_ID),
+            )
+        ]
+
+    def test_the_row_carries_the_actor_owner_and_time(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _task_event(
+                "TaskListMembershipChanged",
+                _membership_payload(source=Provenance.MCP.value, changed_by="mcp"),
+            )
+        )
+
+        assert rows[0].source == Provenance.MCP
+        assert rows[0].changed_by == "mcp"
+        assert rows[0].user_id == "u1"
+        assert rows[0].created_at == OCCURRED_AT
+
+
 class TestTaskJournalLinked:
     def test_projects_one_row_naming_the_journal_gained(
         self, service: HistoryService
@@ -2101,6 +2172,9 @@ def _task_payloads_by_type() -> dict[str, dict[str, Any]]:
             "source": Provenance.MCP.value,
             "changed_by": "mcp",
         },
+        "TaskListMembershipChanged": _membership_payload(
+            changed_fields={"task_list_id": [OLD_TASK_LIST_ID, NEW_TASK_LIST_ID]}
+        ),
         "TaskJournalLinked": {
             "task_id": TASK_ID,
             "user_id": "u1",
@@ -2460,7 +2534,11 @@ class TestEveryTaskListEventTypeIsProjected:
         assert task_list_event_types() <= set(_HANDLERS)
 
     def test_every_task_list_handler_belongs_to_a_real_event_class(self) -> None:
-        list_keys = {key for key in _HANDLERS if key.startswith("TaskList")}
+        # ``TaskListMembershipChanged`` shares the prefix but is a *task* event:
+        # its aggregate is the task whose membership moved.
+        list_keys = {
+            key for key in _HANDLERS if key.startswith("TaskList")
+        } - task_event_types()
 
         assert list_keys == task_list_event_types()
 

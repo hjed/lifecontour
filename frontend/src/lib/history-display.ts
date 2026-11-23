@@ -133,6 +133,15 @@ export function taskEntryDescription(
     return surface === 'contact' ? named(description) : description;
   }
 
+  // The values are list ids, which name nothing a reader can use; the list the
+  // task is on now is on the task itself. Named on a contact's feed, as above.
+  if (field_name === 'task_list_id') {
+    let description = 'Moved to another list';
+    if (old_value === null) description = 'Added to a list';
+    else if (new_value === null) description = 'Removed from its list';
+    return surface === 'contact' ? named(description) : description;
+  }
+
   if (field_name.startsWith(JOURNAL_FIELD_PREFIX)) {
     return new_value ? 'Linked to a journal' : 'Unlinked from a journal';
   }

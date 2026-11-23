@@ -185,6 +185,27 @@ class TestEveryWriteRouteAnswers409:
         _assert_archived(response)
         assert await _snapshot(async_connection, seeded) == before
 
+    async def test_moving_to_another_list(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        seeded: Seeded,
+    ) -> None:
+        before = await _snapshot(async_connection, seeded)
+
+        response = await authenticated_client.post(
+            f"/api/tasks/{seeded.task_id}/move",
+            json={
+                "data": {
+                    "type": "task-moves",
+                    "attributes": {"task_list_id": seeded.active_list_id},
+                }
+            },
+        )
+
+        _assert_archived(response)
+        assert await _snapshot(async_connection, seeded) == before
+
     async def test_deleting(
         self,
         authenticated_client: AsyncClient,

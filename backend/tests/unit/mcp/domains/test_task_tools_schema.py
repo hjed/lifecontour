@@ -1607,3 +1607,62 @@ class TestReorderListTasksSchema:
         if "$ref" in item:
             item = schema["$defs"][item["$ref"].rsplit("/", 1)[-1]]
         assert set(item["properties"]) == _TASK_FIELDS
+
+
+@pytest.fixture
+async def move_task_to_list_schema() -> dict[str, Any]:
+    """The ``move_task_to_list`` tool as an MCP client actually sees it."""
+    return await _tool_schema("move_task_to_list")
+
+
+class TestMoveTaskToListToolParameters:
+    """What an AI client may send to move a task onto or between lists."""
+
+    def test_the_task_and_the_list_are_required(
+        self, move_task_to_list_schema: dict[str, Any]
+    ) -> None:
+        required = set(move_task_to_list_schema["input_schema"]["required"])
+
+        assert required == {"task_id", "task_list_id"}
+
+    @pytest.mark.parametrize("parameter", ["task_id", "task_list_id"])
+    def test_every_id_is_a_bounded_integer(
+        self, move_task_to_list_schema: dict[str, Any], parameter: str
+    ) -> None:
+        schema = move_task_to_list_schema["input_schema"]["properties"][parameter]
+
+        assert schema["type"] == "integer"
+        assert schema["minimum"] == 1
+        assert schema["maximum"] == 2_147_483_647
+
+    def test_nothing_but_the_two_ids_is_offered(
+        self, move_task_to_list_schema: dict[str, Any]
+    ) -> None:
+        """No position: a move joins the bottom; reordering is another tool."""
+        properties = move_task_to_list_schema["input_schema"]["properties"]
+
+        assert set(properties) == {"task_id", "task_list_id"}
+
+    async def test_it_is_an_idempotent_non_destructive_write(self) -> None:
+        mcp: FastMCP[None] = FastMCP(name="Test")
+        register_task_tools(mcp)
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+        annotations = tools["move_task_to_list"].annotations
+
+        assert annotations is not None
+        assert annotations.read_only_hint is False
+        assert annotations.destructive_hint is False
+        assert annotations.idempotent_hint is True
+
+
+class TestMoveTaskToListDocumentsItself:
+    def test_the_description_says_where_the_task_lands_and_what_it_keeps(
+        self, move_task_to_list_schema: dict[str, Any]
+    ) -> None:
+        description = move_task_to_list_schema["description"].lower()
+
+        assert "bottom" in description
+        assert "lapsing" in description
+        assert "journals" in description
+        assert "archived" in description

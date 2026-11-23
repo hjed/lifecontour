@@ -80,7 +80,7 @@ def mock_task_repo() -> AsyncMock:
     The task is journal-only, so the archived-list guard has no list to read.
     """
     repo = AsyncMock()
-    repo.find_by_id.return_value = make_task()
+    repo.find_by_id_for_share.return_value = make_task()
     repo.add_contacts.return_value = [CONTACT_ID]
     repo.remove_contact.return_value = True
     return repo
@@ -265,8 +265,8 @@ class TestLinkingAContact:
     ) -> None:
         """Links are editable in any status, so no status is consulted at all.
 
-        The task is read — the archived-list guard needs its list — but only
-        through the plain read, and nothing is decided from its status.
+        The task is read — the archived-list guard needs its list — through the
+        share lock that waits for a move, and nothing is decided from its status.
         """
         await link(service, mock_transaction)
 
