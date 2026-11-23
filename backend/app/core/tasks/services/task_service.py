@@ -1573,9 +1573,11 @@ class TaskService:
         ``FOR SHARE`` never conflicts with the move's share lock on that list.
         ``add_to_list`` re-takes the target's lock, which it already holds.
 
-        The task lock then re-checks the list the lists were chosen from: a
-        task that changed lists in between is refused (another lock now would
-        break the ascending order), so the caller reads again and retries.
+        The lists were chosen from a read that can be stale by the time they
+        are held, so the task's list is checked twice (see
+        :meth:`_lock_task_still_on`); a task that changed lists in between is
+        refused (another lock now would break the ascending order), and the
+        caller reads again and retries.
 
         Publishes one :class:`TaskListMembershipChanged` carrying the
         ``task_list_id`` pair; position is never announced.
@@ -1626,8 +1628,25 @@ class TaskService:
         """Lock the task row, refusing it if it is no longer on ``task_list_id``.
 
         A move chose and locked its lists from a plain read; this is where it
-        learns whether that read still holds.
+        learns whether that read still holds — twice.
+
+        **First, a plain re-read under the list locks, before waiting for the
+        task.** Nothing can put the task onto the target while the move holds
+        the target exclusively, so a task still on ``task_list_id`` here can
+        only be held by a writer waiting, at most, for a list the move holds
+        ``FOR SHARE`` — no cycle. A task that already reached the target (a
+        move that committed after the first read) may be held by an edit asking
+        for the target ``FOR SHARE``, which waits on this move: waiting for the
+        task then would deadlock, so it is refused without waiting.
+
+        **Then the lock, and the check again**, for a move that took the task
+        off ``task_list_id`` to some other list meanwhile.
         """
+        current = await self.task_repo.find_by_id(task_id, user_id)
+        if current is None:
+            raise TaskNotFoundError(task_id)
+        if current.task_list_id != task_list_id:
+            raise TaskListChangedConcurrentlyError(task_id)
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)

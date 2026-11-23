@@ -854,8 +854,12 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
     queue against a reorder; they hold no task lock first.
   - **A move** (`TaskService.move_to_list`, Phase 26) takes a list exclusively, so it locks its
     lists **before** its task, as a reorder does: both lists in ascending id — its own list
-    `FOR SHARE`, the target `FOR NO KEY UPDATE` — chosen from a plain read, then the task row, which
-    re-checks the list (`TASK_LIST_CHANGED` if the task moved meanwhile), then `add_to_list`. Taking
+    `FOR SHARE`, the target `FOR NO KEY UPDATE` — chosen from a plain read; then a plain re-read of
+    the task, refusing with `TASK_LIST_CHANGED` **before** waiting for it if it moved meanwhile (a
+    task that reached the target may be held by an edit asking for the target `FOR SHARE`, and
+    waiting for it would deadlock; nothing can put it on the target once the move holds it); then
+    the task row, checked again; then `add_to_list`. `TestAStaleMoveAndAnEdit` reproduces the
+    stale-read deadlock. Taking
     the task first deadlocked: two crossing moves each holding their task, and a reorder of one list
     holding it `FOR SHARE` while waiting on the other move's task, closed a cycle
     (`TestCrossingMovesAndAReorder` reproduces it). A reorder of the source list during a move waits
