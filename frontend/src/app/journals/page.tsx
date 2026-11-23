@@ -10,7 +10,14 @@
 
 'use client';
 
-import { Suspense, useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  Suspense,
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+} from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
 import { AuthGuard } from '@/components/auth/AuthGuard';
@@ -132,6 +139,7 @@ function JournalsPageContent() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [anchorDate, setAnchorDate] = useState<string | undefined>();
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewModeState] = useState<CalendarViewMode>('list');
 
   // Load saved view mode on first client render to avoid hydration mismatch
@@ -416,7 +424,10 @@ function JournalsPageContent() {
       </div>
 
       {/* Floating Action / Search Bar */}
-      <div className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-14 z-40 mb-6 py-2 backdrop-blur'>
+      <div
+        ref={toolbarRef}
+        className='bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-14 z-40 mb-6 py-2 backdrop-blur'
+      >
         <Card>
           <CardContent className='pt-4 pb-4'>
             <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
@@ -623,6 +634,7 @@ function JournalsPageContent() {
                     shouldUseSearch ? undefined : fetchPreviousPage
                   }
                   dateBounds={dateBounds}
+                  obscuredTopRef={toolbarRef}
                   collapseEmptyDays={shouldUseSearch || hasActiveFilters}
                   onJumpToDate={date => setAnchorDate(date)}
                   focusDate={anchorDate || format(new Date(), 'yyyy-MM-dd')}

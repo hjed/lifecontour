@@ -573,6 +573,7 @@ describe('DayGroupedJournalList', () => {
       ...today,
     ];
 
+    const originalScrollBy = window.scrollBy;
     let scrollBy: jest.Mock;
 
     beforeEach(() => {
@@ -580,10 +581,31 @@ describe('DayGroupedJournalList', () => {
       window.scrollBy = scrollBy as unknown as typeof window.scrollBy;
     });
 
+    afterEach(() => {
+      window.scrollBy = originalScrollBy;
+    });
+
     /** Pin an element's viewport offset, as jsdom reports 0 for everything. */
     function setViewportTop(element: Element, top: number) {
       element.getBoundingClientRect = () =>
         ({ top, y: top, bottom: top, height: 0 }) as DOMRect;
+    }
+
+    /**
+     * Put the point where older days are inserted above the visible area: the
+     * reader is inside the list, so whatever they are looking at sits below the
+     * insertion and must be held in place.
+     */
+    function hideInsertionPoint() {
+      setViewportTop(screen.getByTestId('journal-top-sentinel'), -50);
+    }
+
+    /** The reader scrolls while the fetch is in flight. */
+    function readerScrolls(anchor: Element, top: number) {
+      setViewportTop(anchor, top);
+      act(() => {
+        window.dispatchEvent(new Event('scroll'));
+      });
     }
 
     function anchorElement() {
@@ -595,6 +617,7 @@ describe('DayGroupedJournalList', () => {
         <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
       );
 
+      hideInsertionPoint();
       const anchor = anchorElement();
       setViewportTop(anchor, 100);
 
@@ -622,11 +645,14 @@ describe('DayGroupedJournalList', () => {
     it('does not scroll when the prepend did not move the anchor', () => {
       // The browser's own scroll anchoring may already have compensated;
       // measuring a real element rather than a height delta keeps this
-      // self-correcting instead of double-correcting.
+      // self-correcting instead of double-correcting. The insertion point is
+      // pinned out of view so the skip is down to the measurement, not to the
+      // visibility gate.
       const { rerender } = render(
         <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
       );
 
+      hideInsertionPoint();
       setViewportTop(anchorElement(), 100);
 
       rerender(
@@ -653,6 +679,7 @@ describe('DayGroupedJournalList', () => {
         <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
       );
 
+      hideInsertionPoint();
       const anchor = anchorElement();
       setViewportTop(anchor, 100);
 
@@ -695,6 +722,7 @@ describe('DayGroupedJournalList', () => {
         screen.getByTestId('journal-day-group-2026-04-26')
       ).toBeInTheDocument();
 
+      hideInsertionPoint();
       const anchor = anchorElement();
       setViewportTop(anchor, 100);
 
@@ -735,6 +763,7 @@ describe('DayGroupedJournalList', () => {
         <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
       );
 
+      hideInsertionPoint();
       const sentinel = screen.getByTestId('journal-bottom-sentinel');
       setViewportTop(sentinel, 100);
 
@@ -749,6 +778,133 @@ describe('DayGroupedJournalList', () => {
       setViewportTop(sentinel, 220);
       rerender(
         <DayGroupedJournalList journals={[]} collapseEmptyDays={false} />
+      );
+
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
+    it('leaves the page alone when the insertion point is in view', () => {
+      // On a phone the filters panel sits above the list. A reader using it
+      // can see the top of the list, so older days arriving there must not
+      // scroll the panel — and an open Select's popup — out from under them.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      setViewportTop(screen.getByTestId('journal-top-sentinel'), 300);
+      const anchor = anchorElement();
+      setViewportTop(anchor, 340);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      setViewportTop(anchor, 460);
+      rerender(
+        <DayGroupedJournalList
+          journals={withOlderDays}
+          collapseEmptyDays={false}
+        />
+      );
+
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('treats an insertion point behind the sticky toolbar as out of view', () => {
+      // The sentinel is observed with a 200px margin, so a reader scrolling up
+      // through the list often has it hidden under the sticky toolbar while
+      // they read the days just below it. Those days must still be held.
+      const toolbar = document.createElement('div');
+      setViewportTop(toolbar, 370);
+      const obscuredTopRef = { current: toolbar };
+
+      const { rerender } = render(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          obscuredTopRef={obscuredTopRef}
+        />
+      );
+
+      setViewportTop(screen.getByTestId('journal-top-sentinel'), 200);
+      const anchor = anchorElement();
+      setViewportTop(anchor, 400);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          obscuredTopRef={obscuredTopRef}
+          isLoadingPrevious
+        />
+      );
+
+      setViewportTop(anchor, 520);
+      rerender(
+        <DayGroupedJournalList
+          journals={withOlderDays}
+          collapseEmptyDays={false}
+          obscuredTopRef={obscuredTopRef}
+        />
+      );
+
+      expect(scrollBy).toHaveBeenCalledWith(0, 120);
+    });
+
+    it('keeps a scroll the reader made while the fetch was in flight', () => {
+      // Restoring the offset captured when the fetch started would undo the
+      // reader's own scroll along with the prepend.
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      hideInsertionPoint();
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      readerScrolls(anchor, 837);
+      rerender(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('compensates only the prepend when the reader also scrolled', () => {
+      const { rerender } = render(
+        <DayGroupedJournalList journals={today} collapseEmptyDays={false} />
+      );
+
+      hideInsertionPoint();
+      const anchor = anchorElement();
+      setViewportTop(anchor, 100);
+
+      rerender(
+        <DayGroupedJournalList
+          journals={today}
+          collapseEmptyDays={false}
+          isLoadingPrevious
+        />
+      );
+
+      readerScrolls(anchor, 837);
+      setViewportTop(anchor, 957);
+      rerender(
+        <DayGroupedJournalList
+          journals={withOlderDays}
+          collapseEmptyDays={false}
+        />
       );
 
       expect(scrollBy).toHaveBeenCalledWith(0, 120);

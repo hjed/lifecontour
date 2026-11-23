@@ -5,9 +5,46 @@
  * in the /journals page.
  */
 
+import { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { waitForContactSearchIndexing } from './utils/test-helpers';
 import { reachForMoreJournals } from './utils/journal-list-scroll';
+
+/**
+ * Whether a `/api/journals` request asks for days before the initial window
+ * (today±3), i.e. a previous page fetched when the reader pages into the past.
+ */
+function isPreviousJournalsPage(url: string): boolean {
+  const { pathname, searchParams } = new URL(url);
+  const start = searchParams.get('start_date') ?? '9999-12-31';
+  return (
+    pathname.endsWith('/api/journals') && start <= relativeDate(-5).slice(0, 10)
+  );
+}
+
+/**
+ * Hold previous-page journal requests until `release()` is called, so a test
+ * can make older days land at an exact moment. Requests pass through to the
+ * real backend once released; every other journals request is untouched.
+ */
+async function holdPreviousJournalsPage(
+  page: Page
+): Promise<{ heldCount: () => number; release: () => void }> {
+  let held = 0;
+  let release: () => void = () => undefined;
+  const released = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(
+    url => isPreviousJournalsPage(url.toString()),
+    async route => {
+      held += 1;
+      await released;
+      await route.continue();
+    }
+  );
+  return { heldCount: () => held, release };
+}
 
 /**
  * Generate an ISO datetime string offset from today by the given number of days.
@@ -1532,6 +1569,113 @@ test.describe('Journal List Page', () => {
       await expect(
         page.getByRole('heading', { name: /Note without Calendar/i })
       ).toBeVisible();
+    });
+
+    test('should keep the calendar filter in view when older days finish loading', async ({
+      authenticatedPage,
+      testCleanup,
+    }) => {
+      // On a phone the filters panel sits above the list. Older days that
+      // arrive while the reader is using it are inserted below the panel, so
+      // nothing they can see should move — an open Select's popup included.
+      const page = authenticatedPage;
+      const dataManager = new (
+        await import('./data-management')
+      ).TestDataManager(page);
+
+      await dataManager.clearAllJournals();
+
+      const timestamp = Date.now();
+      const workCalendarName = `Work Calendar ${timestamp}`;
+      const [workCalendar] = await dataManager.createCalendars([
+        { name: workCalendarName, color: '#FF0000' },
+      ]);
+
+      await dataManager.createJournals([
+        {
+          title: 'Work Event',
+          content: 'Team meeting',
+          event_date_range: { start: relativeDate(-1), end: relativeDate(-1) },
+          types: ['event'],
+          type_data: {
+            event: {
+              calendar_id: workCalendar.id,
+              is_all_day: false,
+              sync_invitees: false,
+            },
+          },
+        },
+        {
+          // Outside the initial today±3 window, so it arrives with the
+          // previous page and gives that page real height.
+          title: 'Older Note',
+          content: 'From last week',
+          event_date_range: { start: relativeDate(-9), end: relativeDate(-9) },
+        },
+      ]);
+
+      testCleanup(async () => {
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        await dataManager.cleanup();
+      });
+
+      // Hold the previous page open until the calendar Select is open, so it
+      // lands mid-interaction every run instead of only on a slow CI runner.
+      const previousPage = await holdPreviousJournalsPage(page);
+
+      await page.goto('/journals');
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).toBeVisible();
+
+      await expect(async () => {
+        await reachForMoreJournals(page, 'past');
+        await expect
+          .poll(previousPage.heldCount, { timeout: 3000 })
+          .toBeGreaterThan(0);
+      }).toPass({ timeout: 30000 });
+
+      const calendarSelect = page
+        .getByTestId('journal-filters')
+        .getByRole('combobox', { name: /calendar/i });
+      await calendarSelect.click();
+      const listbox = page.getByRole('listbox');
+      await expect(listbox).toBeVisible();
+
+      const previousPageResponse = page.waitForResponse(response =>
+        isPreviousJournalsPage(response.url())
+      );
+      previousPage.release();
+      await previousPageResponse;
+      // The open Select aria-hides the rest of the page.
+      await expect(
+        page.getByRole('heading', { name: /Older Note/i, includeHidden: true })
+      ).toBeAttached();
+
+      // The open Select aria-hides its own trigger, so find it by id.
+      await expect(page.locator('#calendar-filter')).toBeInViewport();
+
+      const filteredResponse = page.waitForResponse(
+        response =>
+          response.request().method() === 'GET' &&
+          response.url().includes('/api/journals') &&
+          response.url().includes('calendar_id') &&
+          response.status() === 200
+      );
+      await listbox
+        .getByRole('option', { name: new RegExp(workCalendarName, 'i') })
+        .click();
+      await filteredResponse;
+      await expect(listbox).toBeHidden();
+
+      await expect(page.getByTestId('journals-list-ready')).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Work Event/i })
+      ).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: /Older Note/i })
+      ).toBeHidden();
     });
 
     test('should filter journals by parent (API level)', async ({

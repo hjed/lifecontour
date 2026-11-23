@@ -1,6 +1,13 @@
 'use client';
 
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  ReactNode,
+  RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { eachDayOfInterval, format, parseISO } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { JournalListItem } from '@/components/journals/JournalListItem';
@@ -43,6 +50,12 @@ export interface DayGroupedJournalListProps {
   readonly onJumpToDate?: (date: string) => void;
   readonly focusDate?: string;
   readonly className?: string;
+  /**
+   * Sticky chrome pinned over the top of the viewport (the page toolbar). Its
+   * bottom edge is where the reader's view of the page actually starts; without
+   * it the viewport top is used.
+   */
+  readonly obscuredTopRef?: RefObject<HTMLElement | null>;
 }
 
 export function DayGroupedJournalList({
@@ -60,6 +73,7 @@ export function DayGroupedJournalList({
   onJumpToDate,
   focusDate,
   className = '',
+  obscuredTopRef,
 }: DayGroupedJournalListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -129,6 +143,19 @@ export function DayGroupedJournalList({
   // than a scrollHeight delta keeps this self-correcting — where the browser's
   // own scroll anchoring already did the work the delta is zero and we leave
   // the scroll position alone.
+  //
+  // Two things the reader does are not the prepend's doing and must survive:
+  //
+  // - Scrolling while the fetch is in flight. The captured offset is
+  //   re-measured on every scroll, so only the shift the new days cause is
+  //   undone, not the reader's own movement.
+  // - Looking at something above the list. Older days land just below the top
+  //   sentinel, so when the reader can see that point — on a phone the filters
+  //   panel sits above the list — nothing they are looking at moves, and
+  //   scrolling would carry what they are using (an open Select included)
+  //   off-screen. The view starts below the sticky toolbar, not at the viewport
+  //   top: the sentinel is observed with a 200px margin, so a reader paging up
+  //   often has it hidden under the toolbar while reading the days below it.
   useIsomorphicLayoutEffect(() => {
     if (!isLoadingPrevious) return;
     const element =
@@ -139,6 +166,15 @@ export function DayGroupedJournalList({
       element,
       top: element.getBoundingClientRect().top,
     };
+
+    const rebaseline = () => {
+      // Scroll events arrive a frame late; the fetch may have settled since.
+      const anchor = prependAnchorRef.current;
+      if (!anchor) return;
+      anchor.top = anchor.element.getBoundingClientRect().top;
+    };
+    window.addEventListener('scroll', rebaseline, { passive: true });
+    return () => window.removeEventListener('scroll', rebaseline);
   }, [isLoadingPrevious]);
 
   useIsomorphicLayoutEffect(() => {
@@ -147,11 +183,15 @@ export function DayGroupedJournalList({
     prependAnchorRef.current = null;
 
     if (!anchor.element.isConnected) return;
+    const insertionPoint = topSentinelRef.current?.getBoundingClientRect();
+    const viewTop =
+      obscuredTopRef?.current?.getBoundingClientRect().bottom ?? 0;
+    if (insertionPoint && insertionPoint.bottom > viewTop) return;
     const delta = anchor.element.getBoundingClientRect().top - anchor.top;
     if (delta !== 0) {
       window.scrollBy(0, delta);
     }
-  }, [journals, isLoadingPrevious]);
+  }, [journals, isLoadingPrevious, obscuredTopRef]);
 
   // Record the reader's first reach for older entries. Only attached once the
   // initial scroll-to-today above has settled, so that programmatic scroll is
