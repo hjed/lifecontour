@@ -503,9 +503,11 @@ async def update_task(
              change at all, or a body id that disagrees with the path.
         404: The task does not exist or is not yours; the two are the same
              answer by design.
-        409: The transition is refused. Only leaving *cancelled* is: a cancelled
-             task is reopened by retargeting it onto a new future journal, which
-             returns it to not done, and the message says so.
+        409: The transition is refused. Only a journal-only task leaving
+             *cancelled* is: it is reopened by retargeting it onto a new future
+             journal, which returns it to not done, and the message says so. A
+             task on a list is never refused — a done or cancelled list task is
+             reopened directly by sending ``"status": "not_done"`` here.
     """
     # The only thing this controller decides. It is a transport concern — which
     # of two places names the resource — rather than a domain rule, so it has no
@@ -550,8 +552,10 @@ async def retarget_task(
     """Move a task onto a new due journal, keeping the one it is leaving.
 
     This is how a deadline is extended, and it is the **only** way a cancelled
-    or a done task is reopened: retargeting always leaves the task *not done*.
-    It is also what a refused status transition tells a caller to do.
+    journal-only task is reopened: retargeting always leaves the task *not
+    done*. It is also what a refused status transition tells a caller to do. A
+    task on a list needs no retarget to reopen: ``PATCH /api/tasks/{id}`` with
+    ``"status": "not_done"`` does it directly.
 
     An action sub-resource rather than a field on ``PATCH /api/tasks/{id}``,
     following ``POST /api/journals/{id}/merge``. A retarget is not a field

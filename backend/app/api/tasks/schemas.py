@@ -324,8 +324,10 @@ class TaskUpdateAttributes(BaseModel):
         default=None,
         description=(
             "The status to move the task to: not_done, done, or cancelled. A "
-            "cancelled task cannot be moved back here — retarget it onto a new "
-            "future journal to reopen it as not done. Omit to leave it "
+            "task on a list moves between any of them, so a done or cancelled "
+            "list task is reopened here by sending not_done. A cancelled "
+            "journal-only task cannot be moved back here — retarget it onto a "
+            "new future journal to reopen it as not done. Omit to leave it "
             "unchanged."
         ),
     )
@@ -457,8 +459,9 @@ class TaskRetargetAttributes(BaseModel):
             "always leaves a task not done, so moving a completed task's due "
             "journal reopens it; without this the request is refused with "
             "TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored for any other status — "
-            "retargeting is the documented way out of cancelled and needs no "
-            'confirmation. Must be a JSON boolean: 1, "true" and "yes" are '
+            "retargeting is how a cancelled journal-only task is reopened and "
+            "needs no confirmation (a list task is reopened by its status). "
+            'Must be a JSON boolean: 1, "true" and "yes" are '
             "refused rather than coerced."
         ),
     )

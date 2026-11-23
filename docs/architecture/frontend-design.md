@@ -429,10 +429,14 @@ listing's payload.
   `lib/task-display.ts` beside the lapse wording: `statusActions(status)`
   returns `done + cancel` for a not-done task, `not-done + cancel` for a done
   one, and **nothing at all for a cancelled one**. That last entry is the rule
-  the table exists to state — the service gives cancelled exactly one exit,
-  retargeting onto a new future journal, and refuses `cancelled → done` and
-  `cancelled → not done` alike, so either button could do nothing but draw a
-  409. A test guards the table against drifting from that matrix. A **lapsed**
+  the table exists to state — the service gives a cancelled **journal-only**
+  task exactly one exit, retargeting onto a new future journal, and refuses
+  `cancelled → done` and `cancelled → not done` alike, so either button could do
+  nothing but draw a 409. A test guards the table against drifting from that
+  matrix. **A task on a list is never refused** (ITER21-001 Phase 24): the API
+  reopens a done or cancelled list task directly. The table does not know that
+  yet, so a cancelled list task shown on a journal page offers nothing; making
+  the offer list-aware is ITER21-001 Phase 30's. A **lapsed**
   task is still not done and keeps the full offer: lapsing is a marker on a live
   commitment, never a disabled state.
 - **Cancel is the ordinary action and delete is the exception**, which the
@@ -498,8 +502,9 @@ listing's payload.
 `RetargetTaskDialog` (`components/journals/RetargetTaskDialog.tsx`) is one
 dialog doing four things, because the specification treats them as four
 different acts against one endpoint: extending a deadline, meeting a **lapsed**
-commitment again, bringing a **cancelled** one back — its only exit, since the
-service refuses both status calls out of cancelled — and reopening a **done**
+commitment again, bringing a **cancelled** one back — a journal-only task's
+only exit, since the service refuses both status calls out of cancelled for it
+(a list task is reopened by its status instead) — and reopening a **done**
 task, which the UI must warn about before it happens. The trigger's label, the
 heading and the explanation are chosen per case by `retargetAction(status,
 lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.

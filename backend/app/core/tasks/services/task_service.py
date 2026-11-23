@@ -608,7 +608,9 @@ class TaskService:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's. The two are indistinguishable by design.
             TaskStatusTransitionError: When the transition is refused — that is,
-                when it would leave *cancelled*, which only retargeting does.
+                when a journal-only task would leave *cancelled*, which only
+                retargeting does. A task on a list is never refused: it is
+                reopened directly.
             TaskListArchivedError: When the task is on an archived list —
                 setting a value it already has included.
             TaskValidationError: When a due date is set on a task that is not
@@ -639,7 +641,12 @@ class TaskService:
             changed_fields["text"] = (task.text, text)
 
         if status is not None and status != task.status:
-            if not is_status_transition_allowed(task.status, status):
+            # From the locked row: a list membership write locks the task too,
+            # so the list the rule is asked about cannot change underneath it.
+            # A task on a list is reopened directly; only a journal-only task
+            # is refused leaving cancelled.
+            on_list = task.task_list_id is not None
+            if not is_status_transition_allowed(task.status, status, on_list=on_list):
                 raise TaskStatusTransitionError(task.status, status)
             updated = replace(updated, status=status)
             # ``.value`` because the payload is a wire format and should carry a
@@ -1147,7 +1154,9 @@ class TaskService:
             TaskNotFoundError: When the task does not exist or is not the acting
                 user's. The two are indistinguishable by design.
             TaskStatusTransitionError: When the transition is refused — that is,
-                when it would leave *cancelled*, which only retargeting does.
+                when a journal-only task would leave *cancelled*, which only
+                retargeting does. A task on a list is never refused: it is
+                reopened directly.
         """
         return await self.update_task(
             user_id=user_id,
@@ -1253,10 +1262,11 @@ class TaskService:
         """Move one of the user's tasks onto a new due journal.
 
         This is how a deadline is extended, and it is the **only** way a
-        cancelled or a done task is reopened: retargeting always leaves the task
-        *not done*. It is also the operation
+        cancelled journal-only task is reopened: retargeting always leaves the
+        task *not done*. It is also the operation
         :class:`~core_shared.models.tasks.TaskStatusTransitionError` names when
-        it refuses to let a status call leave *cancelled*.
+        it refuses to let a status call leave *cancelled*. A task on a list
+        needs no retarget to reopen — :meth:`set_status` does it directly.
 
         Two things happen together, in one unit of work:
 
@@ -1363,8 +1373,8 @@ class TaskService:
             transaction: The request connection; the unit of work commits here
             acknowledge_reopen: The caller's confirmation that reopening a *done*
                 task is intended. Ignored for any other status, which needs no
-                confirmation — reopening a cancelled task is the documented way
-                out of cancelled.
+                confirmation — reopening a cancelled journal-only task is the
+                documented way out of cancelled.
             now: The instant "today" is derived from, defaulting to the real
                 clock. **Never bind this from client input**, for the reason
                 :meth:`create_task` gives: a request that could set it would make
@@ -1643,7 +1653,7 @@ class TaskService:
 
         ``source`` and ``changed_by`` are forwarded rather than defaulted, as on
         the other three wrappers. This is the write where losing them costs
-        most: retargeting is the only way a *done* task is reopened, so an
+        most: retargeting reopens a *done* task, so an
         assistant undoing somebody's completion would otherwise be recorded as
         the system having done it.
         """

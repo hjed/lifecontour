@@ -1300,8 +1300,9 @@ export function useUpdateTask() {
 /**
  * Moves a task onto a new due journal, keeping the one it is leaving.
  *
- * This is how a deadline is extended and the only way a cancelled or done task
- * is reopened. A done task's retarget is refused until `acknowledge_reopen`
+ * This is how a deadline is extended and the only way a cancelled journal-only
+ * task is reopened (a list task is reopened by its status, through the task
+ * update). A done task's retarget is refused until `acknowledge_reopen`
  * says the reopen was intended — **which is not a failure**, so it raises no
  * toast: the caller answers it with a confirmation and retries.
  */

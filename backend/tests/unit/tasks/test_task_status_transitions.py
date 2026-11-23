@@ -4,10 +4,12 @@ The rule is pure — it needs no repository, no clock and no user — so it live
 the domain enum's module and is tested here against all nine cells rather than
 being inferred from the service tests that consume it.
 
-Two refusals carry the whole of the specification's lifecycle stance:
-*cancelled* is left only by retargeting the task onto a new future journal
-(Phase 7), which always lands on *not done*. Both edges out of cancelled are
-therefore closed here, and the error says which way out exists.
+Two refusals carry the whole of the specification's lifecycle stance for a
+journal-only task: *cancelled* is left only by retargeting the task onto a new
+future journal (Phase 7), which always lands on *not done*. Both edges out of
+cancelled are therefore closed here, and the error says which way out exists.
+
+A task on a list has no closed cell (ITER21 Phase 24): it is reopened directly.
 """
 
 import pytest
@@ -40,12 +42,12 @@ class TestStatusTransitionMatrix:
     @pytest.mark.parametrize(("current", "target"), ALLOWED)
     def test_allows(self, current: TaskStatus, target: TaskStatus) -> None:
         """Every transition the specification permits is permitted."""
-        assert is_status_transition_allowed(current, target) is True
+        assert is_status_transition_allowed(current, target, on_list=False) is True
 
     @pytest.mark.parametrize(("current", "target"), REFUSED)
     def test_refuses(self, current: TaskStatus, target: TaskStatus) -> None:
         """Neither edge out of cancelled is a status change."""
-        assert is_status_transition_allowed(current, target) is False
+        assert is_status_transition_allowed(current, target, on_list=False) is False
 
     def test_covers_every_pair(self) -> None:
         """The two lists together are the whole matrix, so no cell is untested."""
@@ -56,13 +58,41 @@ class TestStatusTransitionMatrix:
 
     def test_done_is_reversible(self) -> None:
         """The specification's one explicitly reversible transition."""
-        assert is_status_transition_allowed(TaskStatus.DONE, TaskStatus.NOT_DONE)
+        assert is_status_transition_allowed(
+            TaskStatus.DONE, TaskStatus.NOT_DONE, on_list=False
+        )
 
     def test_cancelled_is_reachable_from_every_state(self) -> None:
         """Cancelling is always available, whatever the task is doing now."""
         assert all(
-            is_status_transition_allowed(current, TaskStatus.CANCELLED)
+            is_status_transition_allowed(current, TaskStatus.CANCELLED, on_list=False)
             for current in TaskStatus
+        )
+
+
+@pytest.mark.unit
+class TestListTaskTransitions:
+    """A task on a list is reopened directly, so no cell is closed for it.
+
+    The specification makes reopening a list task a plain status change: a done
+    or cancelled list task is set back to not done without retargeting, because
+    a list task never lapses and has no future-journal rule to revalidate.
+    Cancelled → done is open too (user decision in the Phase 24 plan review),
+    so the whole matrix is open on a list.
+    """
+
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [(current, target) for current in TaskStatus for target in TaskStatus],
+    )
+    def test_allows_every_pair(self, current: TaskStatus, target: TaskStatus) -> None:
+        """Including both edges out of cancelled."""
+        assert is_status_transition_allowed(current, target, on_list=True) is True
+
+    def test_a_cancelled_list_task_reopens_as_not_done(self) -> None:
+        """The specification's direct reopen, named on its own."""
+        assert is_status_transition_allowed(
+            TaskStatus.CANCELLED, TaskStatus.NOT_DONE, on_list=True
         )
 
 

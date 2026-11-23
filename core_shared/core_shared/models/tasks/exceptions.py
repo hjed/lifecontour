@@ -128,8 +128,10 @@ class TaskListChangedConcurrentlyError(TaskDomainError):
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 
-    Only two transitions are refused, and they are the two that would leave
-    *cancelled*. The specification gives a cancelled task exactly one way back:
+    Only two transitions are refused, they are the two that would leave
+    *cancelled*, and only a **journal-only** task is refused them — a task on a
+    list is reopened directly by a status change, so it never raises this. The
+    specification gives a cancelled journal-only task exactly one way back:
     retargeting it onto a new future journal, which revalidates the future-dated
     rule and returns the task to *not done*. So the message does not merely
     refuse — it names the operation that does what the caller was asking for,
@@ -160,10 +162,10 @@ class TaskReopenNotAcknowledgedError(TaskDomainError):
     a completion — an extension of a deadline they had forgotten was already met.
     The acknowledgement is the caller's way of saying the reopening is intended.
 
-    **A cancelled task carries no such gate.** Retargeting is the documented — and
-    only — way out of cancelled, and it is what ``TaskStatusTransitionError``
-    tells a caller to do, so asking them to confirm it would be asking them to
-    confirm the remedy they were just sent to.
+    **A cancelled task carries no such gate.** Retargeting is the documented — and,
+    for a journal-only task, the only — way out of cancelled, and it is what
+    ``TaskStatusTransitionError`` tells a caller to do, so asking them to confirm
+    it would be asking them to confirm the remedy they were just sent to.
 
     **409 rather than 400**, and its own type rather than a validation error. The
     request is well formed and the journal it names is a real, future, owned one;

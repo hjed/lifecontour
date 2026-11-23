@@ -289,11 +289,14 @@ async def set_task_status(
     can still be completed or cancelled where it stands.
 
     Done is reversible — a task marked done can be moved back to not done.
-    Cancelled is not left this way: a cancelled task is reopened by
-    **retargeting** it onto a new future journal, which returns it to not done,
-    so asking here for not_done or done on a cancelled task is refused and the
-    message says what to do instead. Setting the status a task already has
-    changes nothing.
+
+    A task **on a list** (task_list_id set) moves between any statuses: a done
+    or cancelled list task is reopened right here by setting not_done, with no
+    retarget. A cancelled **journal-only** task is not left this way: it is
+    reopened by **retargeting** it onto a new future journal, which returns it
+    to not done, so asking here for not_done or done on a cancelled journal-only
+    task is refused and the message says what to do instead. Setting the status
+    a task already has changes nothing.
 
     A task on an archived list is read-only, as the list is: this is refused,
     even when it would change nothing, until the list is unarchived.
@@ -440,9 +443,10 @@ async def retarget_task(
     """
     Move a task to a different due journal, keeping the one it is leaving.
 
-    This is how a deadline is extended, and it is the only way a cancelled task
-    is reopened — it is what set_task_status tells you to do when it refuses to
-    leave cancelled. The previous due journal is kept automatically as an
+    This is how a deadline is extended, and it is the only way a cancelled
+    journal-only task is reopened — it is what set_task_status tells you to do
+    when it refuses to leave cancelled. A task on a list needs no retarget to
+    reopen: set_task_status with not_done does it. The previous due journal is kept automatically as an
     intermediate journal, so the trail of a repeatedly-deferred task stays
     visible on the journals it passed through.
 
