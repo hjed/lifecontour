@@ -366,10 +366,12 @@ the *creating* journal where it arose and the *due* journal where it matters.
   lists and leaving one: its `changed_fields` carries `task_list_id` as `(old, new)` (`None` on the
   absent side), and it is projected by `TaskUpdated`'s handler. The aggregate is the task, though the
   type name begins `TaskList`. `TaskService.move_to_list` publishes it; a move to the task's own list
-  is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: the task
-  row (`FOR NO KEY UPDATE`), then both lists in ascending id — the task's own list `FOR SHARE`, the
-  target `FOR NO KEY UPDATE` (the bottom is computed under it) — so two crossing moves cannot
-  deadlock. Because a task can change lists, the link writes (`link_contact`, `unlink_contact`,
+  is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: both lists
+  in ascending id — the task's own list `FOR SHARE`, the target `FOR NO KEY UPDATE` (the bottom is
+  computed under it) — chosen from a plain read of the task, then the task row (`FOR NO KEY UPDATE`),
+  which re-checks the list and refuses with `TASK_LIST_CHANGED` if the task moved meanwhile. Lists
+  before the task, as a reorder takes them: a move holding its task while waiting for its target
+  could close a cycle with a crossing move and a reorder of either list. Because a task can change lists, the link writes (`link_contact`, `unlink_contact`,
   `attach_intermediate_journal`, `detach_intermediate_journal`) read their task `FOR SHARE` before
   trusting `task_list_id`, so they wait for an in-flight move; attach and detach lock their journal
   `FOR KEY SHARE` first, in a journal merge's journal-then-task order.

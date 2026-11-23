@@ -9,9 +9,11 @@ What is pinned against mocked ports:
 
 - which repository call is made and which event is published, for a join and
   for a move;
-- the **lock order** — the task row, then the lists in ascending id, the
-  source ``FOR SHARE`` and the target ``FOR NO KEY UPDATE`` — so two crossing
-  moves cannot deadlock;
+- the **lock order** — a plain read of the task, then the lists in ascending
+  id (the source ``FOR SHARE``, the target ``FOR NO KEY UPDATE``), then the
+  task row — so no move holds a task while it waits for a list;
+- the re-check under the task lock: a task that changed lists after the read
+  is refused, writing nothing;
 - the same-list no-op, which writes and publishes nothing;
 - the refusal order: task, target list, the task's own archived list, the
   archived target — each writing and publishing nothing.
@@ -30,6 +32,7 @@ from core_shared.models.tasks import (
     Task,
     TaskList,
     TaskListArchivedError,
+    TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskNotFoundError,
 )
@@ -91,23 +94,36 @@ def lists() -> dict[int, TaskList | None]:
 
 
 @pytest.fixture
+def locked(task: Task) -> dict[int, Task | None]:
+    """The task as the locking read finds it; a test changes it under the move."""
+    return {TASK_ID: task}
+
+
+@pytest.fixture
 def order() -> list[tuple[str, int]]:
     """Every lock taken, in order, as ``(kind, id)``."""
     return []
 
 
 @pytest.fixture
-def task_repo(task: Task, order: list[tuple[str, int]]) -> AsyncMock:
+def task_repo(
+    task: Task, locked: dict[int, Task | None], order: list[tuple[str, int]]
+) -> AsyncMock:
     repo = AsyncMock(spec=TaskRepository)
+
+    async def peek(task_id: int, _user_id: str) -> Task | None:
+        order.append(("peek", task_id))
+        return task if task_id == TASK_ID else None
 
     async def lock_task(task_id: int, _user_id: str) -> Task | None:
         order.append(("task", task_id))
-        return task if task_id == TASK_ID else None
+        return locked.get(task_id)
 
     async def add_to_list(task_id: int, task_list_id: int, _user_id: str) -> Task:
         order.append(("add_to_list", task_list_id))
         return landed(task, task_list_id)
 
+    repo.find_by_id.side_effect = peek
     repo.find_by_id_for_update.side_effect = lock_task
     repo.add_to_list.side_effect = add_to_list
     return repo
@@ -265,18 +281,23 @@ class TestAJournalOnlyTaskJoiningAList:
         await move(service, mock_transaction, TASK_LIST_ID)
 
         task_list_repo.find_by_id_for_share.assert_not_awaited()
-        assert order[:2] == [("task", TASK_ID), ("update", TASK_LIST_ID)]
+        assert order[:3] == [
+            ("peek", TASK_ID),
+            ("update", TASK_LIST_ID),
+            ("task", TASK_ID),
+        ]
 
 
 class TestTheLockOrder:
-    """The task row, then both lists in ascending id.
+    """A plain read of the task, both lists in ascending id, then the task row.
 
-    Every task write locks its task before its list, so the move does
-    too. Two moves crossing between the same pair of lists take the lists in the
-    same order, which is what keeps them from waiting on each other in a cycle.
-    The target is locked for update from the start: ``add_to_list`` computes the
-    bottom under that lock, and upgrading a share lock later would deadlock two
-    moves onto one list.
+    The move takes its target exclusively, so it must not hold a task while it
+    waits for one: two crossing moves and a reorder of either list would wait
+    on each other in a cycle (each move holding its task, the reorder holding
+    the list ``FOR SHARE`` and waiting on a task). Lists first is the order the
+    reorders already use. The target is locked for update from the start:
+    ``add_to_list`` computes the bottom under that lock, and upgrading a share
+    lock later would deadlock two moves onto one list.
     """
 
     @pytest.mark.asyncio
@@ -289,9 +310,10 @@ class TestTheLockOrder:
         await move(service, mock_transaction, HIGHER_LIST_ID)
 
         assert order == [
-            ("task", TASK_ID),
+            ("peek", TASK_ID),
             ("share", TASK_LIST_ID),
             ("update", HIGHER_LIST_ID),
+            ("task", TASK_ID),
             ("add_to_list", HIGHER_LIST_ID),
         ]
 
@@ -305,11 +327,98 @@ class TestTheLockOrder:
         await move(service, mock_transaction, LOWER_LIST_ID)
 
         assert order == [
-            ("task", TASK_ID),
+            ("peek", TASK_ID),
             ("update", LOWER_LIST_ID),
             ("share", TASK_LIST_ID),
+            ("task", TASK_ID),
             ("add_to_list", LOWER_LIST_ID),
         ]
+
+
+class TestATaskThatChangedUnderTheMove:
+    """The lists were chosen from a plain read, so the task lock re-checks it.
+
+    Another move can take the task elsewhere between the read and the lock. The
+    lists this move holds are then the wrong ones, and a lock taken now would
+    break the ascending order, so it refuses — 409, read again and retry.
+    """
+
+    @pytest.mark.parametrize(
+        "now_on",
+        [LOWER_LIST_ID, None],
+        ids=["moved-to-another-list", "removed-from-its-list"],
+    )
+    @pytest.mark.asyncio
+    async def test_a_task_that_changed_lists_is_refused_and_nothing_written(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task: Task,
+        locked: dict[int, Task | None],
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        now_on: int | None,
+    ) -> None:
+        locked[TASK_ID] = replace(
+            task, task_list_id=now_on, position=None if now_on is None else 0
+        )
+
+        with pytest.raises(TaskListChangedConcurrentlyError) as refused:
+            await move(service, mock_transaction, HIGHER_LIST_ID)
+
+        assert refused.value.status_code == 409
+        task_repo.add_to_list.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_journal_only_task_put_on_a_list_meanwhile_is_refused(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        locked: dict[int, Task | None],
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        locked[TASK_ID] = replace(make_list_task(), task_list_id=LOWER_LIST_ID)
+        task_repo.find_by_id.side_effect = None
+        task_repo.find_by_id.return_value = make_task()
+
+        with pytest.raises(TaskListChangedConcurrentlyError):
+            await move(service, mock_transaction, HIGHER_LIST_ID)
+
+        task_repo.add_to_list.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_task_deleted_meanwhile_is_not_found(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        locked: dict[int, Task | None],
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        locked[TASK_ID] = None
+
+        with pytest.raises(TaskNotFoundError):
+            await move(service, mock_transaction, HIGHER_LIST_ID)
+
+        task_repo.add_to_list.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_same_list_no_op_re_checks_too(
+        self,
+        service: TaskService,
+        task: Task,
+        locked: dict[int, Task | None],
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """It would otherwise answer with a list the task is no longer on."""
+        locked[TASK_ID] = replace(task, task_list_id=LOWER_LIST_ID)
+
+        with pytest.raises(TaskListChangedConcurrentlyError):
+            await move(service, mock_transaction, TASK_LIST_ID)
 
 
 class TestMovingToTheListItIsAlreadyOn:
@@ -340,7 +449,11 @@ class TestMovingToTheListItIsAlreadyOn:
         """No position is computed, so no update lock is needed on the list."""
         await move(service, mock_transaction, TASK_LIST_ID)
 
-        assert order == [("task", TASK_ID), ("share", TASK_LIST_ID)]
+        assert order == [
+            ("peek", TASK_ID),
+            ("share", TASK_LIST_ID),
+            ("task", TASK_ID),
+        ]
 
     @pytest.mark.asyncio
     async def test_it_is_still_refused_on_an_archived_list(

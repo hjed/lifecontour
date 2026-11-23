@@ -669,7 +669,9 @@ async def move_task_to_list(
              ``TASK_LIST_NOT_FOUND`` when the list does not exist or is not
              yours. Each pair is one answer by design.
         409: ``TASK_LIST_ARCHIVED`` when the task's current list is archived
-             (named first), or else when the target list is. Nothing is written.
+             (named first), or else when the target list is;
+             ``TASK_LIST_CHANGED`` when the task moved to another list while
+             the move waited — read it again and retry. Nothing is written.
     """
     moved, trail = await task_service.move_to_list_with_trail(
         user_id=user.id,

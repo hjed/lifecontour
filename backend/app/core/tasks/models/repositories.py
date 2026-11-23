@@ -69,12 +69,13 @@ class TaskRepository(ABC):
       cannot form a cycle. (An exclusive list lock here did deadlock against
       them.)
     - Creates on a list take it ``FOR NO KEY UPDATE`` holding no task lock.
-    - A move locks its task, then both lists in ascending id: the task's own
-      list ``FOR SHARE`` and the target ``FOR NO KEY UPDATE``, then calls
-      :meth:`add_to_list`. The one list it takes exclusively is one the task is
-      not yet on, so no reorder of that list holds or waits for the task. A
-      later writer that locks a task and then asks for *the task's own* list
-      exclusively would break this, and must not.
+    - A move takes a list exclusively, so it locks its lists **before** its
+      task, as a reorder does: both in ascending id (the task's own list
+      ``FOR SHARE``, the target ``FOR NO KEY UPDATE``), then the task row,
+      then :meth:`add_to_list`. Holding the task first would let two crossing
+      moves and a reorder of either list wait on each other in a cycle. Any
+      writer that takes a list exclusively must not hold a task lock while it
+      waits for that list.
 
     Re-locking a row the same transaction holds is free. A journal merge
     re-points task anchors by journal without a list lock, so a merge

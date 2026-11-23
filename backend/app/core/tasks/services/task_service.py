@@ -39,6 +39,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalAnchor,
     TaskJournalIsAnchorError,
+    TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListTaskClosedError,
     TaskListTaskNotDueInJournalError,
@@ -1555,14 +1556,26 @@ class TaskService:
         elsewhere. It is still refused on an archived list, as every no-op is.
         Reordering within a list is a separate write.
 
-        **Lock order: the task row, then both lists in ascending id** — the
-        task's own list ``FOR SHARE``, as every task write holds its list, and
-        the target ``FOR NO KEY UPDATE`` from the start, because the bottom is
-        computed under that lock and upgrading a share lock later would deadlock
-        two moves onto one list. Two moves crossing between the same pair of
-        lists take them in the same order, so neither waits on the other in a
-        cycle. ``add_to_list`` re-takes the target's lock, which it already
-        holds.
+        **Lock order: both lists in ascending id, then the task row** — the
+        lists chosen from a plain read of the task. The task's own list is held
+        ``FOR SHARE``, as every task write holds its list, and the target
+        ``FOR NO KEY UPDATE`` from the start, because the bottom is computed
+        under that lock and upgrading a share lock later would deadlock two
+        moves onto one list.
+
+        Lists before the task, unlike the task-field writes, because this write
+        takes a list *exclusively*: holding a task while waiting for one lets
+        two crossing moves and a reorder of either list — which holds its list
+        ``FOR SHARE`` and then waits on that list's tasks — wait on each other
+        in a cycle. Lists first is the order the reorders take, so a move never
+        waits for a list while holding a task, and the cycle cannot form. A
+        task-field write that holds the task while waiting for its own list
+        ``FOR SHARE`` never conflicts with the move's share lock on that list.
+        ``add_to_list`` re-takes the target's lock, which it already holds.
+
+        The task lock then re-checks the list the lists were chosen from: a
+        task that changed lists in between is refused (another lock now would
+        break the ascending order), so the caller reads again and retries.
 
         Publishes one :class:`TaskListMembershipChanged` carrying the
         ``task_list_id`` pair; position is never announced.
@@ -1574,19 +1587,24 @@ class TaskService:
             TaskListArchivedError: The task's own list is archived (named
                 first: nothing about the target can make the move succeed), or
                 else the target is.
+            TaskListChangedConcurrentlyError: The task changed lists between
+                the read that chose the lists and the lock on the task.
         """
-        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
-        if task is None:
+        peeked = await self.task_repo.find_by_id(task_id, user_id)
+        if peeked is None:
             raise TaskNotFoundError(task_id)
-        previous_task_list_id = task.task_list_id
+        previous_task_list_id = peeked.task_list_id
 
         if previous_task_list_id == task_list_id:
             await self._hold_list_writable(task_list_id, task_id, user_id)
-            return task
+            return await self._lock_task_still_on(
+                task_id, user_id, previous_task_list_id
+            )
 
         await self._lock_lists_for_move(
             previous_task_list_id, task_list_id, task_id, user_id
         )
+        await self._lock_task_still_on(task_id, user_id, previous_task_list_id)
         moved = await self.task_repo.add_to_list(task_id, task_list_id, user_id)
 
         await self.event_publisher.publish(
@@ -1601,6 +1619,21 @@ class TaskService:
             )
         )
         return moved
+
+    async def _lock_task_still_on(
+        self, task_id: int, user_id: str, task_list_id: int | None
+    ) -> Task:
+        """Lock the task row, refusing it if it is no longer on ``task_list_id``.
+
+        A move chose and locked its lists from a plain read; this is where it
+        learns whether that read still holds.
+        """
+        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+        if task.task_list_id != task_list_id:
+            raise TaskListChangedConcurrentlyError(task_id)
+        return task
 
     async def _lock_lists_for_move(
         self,
@@ -2119,9 +2152,9 @@ class TaskService:
         its open tasks — and that is safe only because their list lock is this
         same ``FOR SHARE``, which never waits on this one. A writer that locks a
         list *exclusively* and then its tasks — deleting a list — would
-        deadlock against this, and must lock the tasks first. A move holds two
-        lists, and takes them in ascending id after the task, exclusively only
-        the target it is not yet on — see :meth:`move_to_list`.
+        deadlock against this, and must lock the tasks first. A move takes its
+        target exclusively, so it locks both lists, in ascending id, *before*
+        its task — see :meth:`move_to_list`.
 
         **One write does not use this: creating a task on a list.** A create
         has no task row to lock first, and its insert needs ``FOR NO KEY
