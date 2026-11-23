@@ -195,7 +195,8 @@ class TaskListTaskClosedError(TaskDomainError):
     that never changes its status — and the operation that will apply them is a
     due-journal change of a list task's own, which does not exist yet. Until it
     does, a done or cancelled list task is refused here rather than reopened by
-    a date move.
+    a date move. The way out is the same for both: set it back to not done —
+    a list task reopens directly by its status — then change its due journal.
     A not-done one is retargeted as before: the date moves, the old journal is
     kept as a mention and the status is untouched, which already obeys the list
     rules.
@@ -208,17 +209,13 @@ class TaskListTaskClosedError(TaskDomainError):
     """
 
     def __init__(self, task_id: int, status: TaskStatus):
-        # A done task can be set back to not done today; a cancelled one cannot
-        # be reopened at all yet, so only the first is told how.
-        way_out = (
-            "Set it back to not done first, then change its due journal."
-            if status is TaskStatus.DONE
-            else "A cancelled task on a list cannot have its date changed yet."
-        )
+        # A task on a list is reopened directly by its status, done and
+        # cancelled alike, so both are told the same way out.
         super().__init__(
             f"Task {task_id} is on a list and {status}, so its due journal cannot "
             f"be changed while it is closed: changing a list task's date never "
-            f"reopens it. {way_out}",
+            f"reopens it. Set it back to not done first, then change its due "
+            f"journal.",
             409,
         )
         self.task_id = task_id

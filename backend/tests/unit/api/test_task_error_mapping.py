@@ -49,13 +49,18 @@ class TestTaskErrorMapping:
     def test_a_closed_list_task_retarget_maps_to_its_own_conflict(
         self, status: TaskStatus
     ) -> None:
-        """A 409 a client can tell apart from the journal-only reopen gate."""
+        """A 409 a client can tell apart from the journal-only reopen gate.
+
+        Both closed statuses name the same way out: a list task is reopened
+        directly by its status, cancelled included, and then retargeted.
+        """
         response = create_domain_error_response(TaskListTaskClosedError(7, status))
 
         error = response.errors[0]
         assert error.code == "TASK_LIST_TASK_CLOSED"
         assert error.status == "409"
         assert "never reopens it" in (error.detail or "")
+        assert "Set it back to not done first" in (error.detail or "")
 
     def test_a_list_task_with_no_due_journal_retarget_maps_to_a_conflict(
         self,

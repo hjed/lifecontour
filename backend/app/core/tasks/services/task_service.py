@@ -1397,6 +1397,7 @@ class TaskService:
                 caller has not acknowledged that retargeting reopens it.
             TaskListTaskClosedError: When the task is on a list and done or
                 cancelled: a list task's date change never reopens it.
+                Reopening it first with :meth:`set_status` is the way out.
             TaskListTaskNotDueInJournalError: When the task is on a list and
                 has no due journal to leave — undated, due on a date, or
                 detached by a journal delete this retarget waited on.

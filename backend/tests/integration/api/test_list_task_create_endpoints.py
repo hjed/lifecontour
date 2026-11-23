@@ -452,6 +452,7 @@ class TestRetargetingAClosedListTaskDueInAJournal:
         error = _error(response)
         assert error["code"] == "TASK_LIST_TASK_CLOSED"
         assert "never reopens it" in error["detail"]
+        assert "Set it back to not done first" in error["detail"]
         read = (await authenticated_client.get(f"/api/tasks/{task_id}")).json()
         attributes = read["data"]["attributes"]
         assert (attributes["status"], attributes["due_journal_id"]) == (
