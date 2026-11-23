@@ -865,8 +865,19 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
     (`TestCrossingMovesAndAReorder` reproduces it). A reorder of the source list during a move waits
     on the task and then refuses with `TASK_LIST_CHANGED`; a same-list move is a no-op under the
     share lock. **No writer may hold a task lock while it waits for a list exclusively** — a list
-    delete (Phase 29) must take its list before its tasks, or lock the tasks first and never wait
-    on the list while a reorder can hold it.
+    delete takes its list before its tasks and never waits for it exclusively (below).
+  - A list delete (Phase 29) first takes a transaction-scoped advisory lock on the list id, so two
+    deletes of one list serialise rather than refuse each other. It then takes the list
+    `FOR SHARE` — keeping out joins and creates, which
+    lock it exclusively — then every task on it `FOR NO KEY UPDATE ... ORDER BY id`
+    (`TaskRepository.release_list_tasks`), deletes those without both journals and clears
+    `task_list_id`, `position` and `due_date` on the rest in one `UPDATE`, and only then locks the
+    list `FOR UPDATE NOWAIT` to delete its row (the FK is `RESTRICT`, so the tasks must go
+    first). Another holder of the list at that point may be queued behind one of the delete's
+    tasks, so waiting could deadlock; `NOWAIT` refuses any holder with `TaskListBusyError` (409
+    `TASK_LIST_CHANGED`, retryable) and the unit of work rolls back. Task writes that lock their task
+    first (link writes hold it `FOR SHARE`) wait for the delete and read the task it left: a kept
+    one is journal-only, so the write goes on.
 
   A task write locks only its own task, so a reorder's named task or neighbour can still close
   while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError` (409,

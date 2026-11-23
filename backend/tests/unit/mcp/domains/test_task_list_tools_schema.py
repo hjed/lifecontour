@@ -301,3 +301,50 @@ class TestTheListTasksRead:
         assert "most recently closed first" in description
         for option in ("include_completed", "page_open_tasks", "limit", "page"):
             assert f"``{option}``" in description, option
+
+
+class TestTheDeleteTool:
+    """``delete_task_list``: the one destructive list write."""
+
+    async def test_takes_only_a_bounded_list_id(self) -> None:
+        schema = (await _tools())["delete_task_list"].input_schema
+
+        assert set(schema["properties"]) == {"task_list_id"}
+        assert schema["required"] == ["task_list_id"]
+        list_id = schema["properties"]["task_list_id"]
+        assert (list_id["type"], list_id["minimum"], list_id["maximum"]) == (
+            "integer",
+            1,
+            INT32_MAX,
+        )
+
+    async def test_is_a_destructive_write(self) -> None:
+        annotations = (await _tools())["delete_task_list"].annotations
+
+        assert annotations is not None
+        assert annotations.read_only_hint is False
+        assert annotations.destructive_hint is True
+
+    async def test_answers_with_the_deleted_and_kept_task_ids(self) -> None:
+        schema = (await _tools())["delete_task_list"].output_schema
+
+        assert schema is not None, "delete_task_list publishes no outputSchema"
+        assert set(schema["properties"]) == {
+            "deleted",
+            "task_list_id",
+            "deleted_task_ids",
+            "kept_task_ids",
+        }
+        for key in ("deleted_task_ids", "kept_task_ids"):
+            assert schema["properties"][key]["items"]["type"] == "integer", key
+
+    async def test_describes_which_tasks_survive_and_the_archived_refusal(
+        self,
+    ) -> None:
+        """An agent must know what it is about to destroy before it calls."""
+        description = (await _tools())["delete_task_list"].description or ""
+
+        assert "both" in description
+        assert "journal-only" in description
+        assert "archived" in description
+        assert "unarchive" in description.lower()

@@ -22,6 +22,7 @@ from core_shared.models.tasks import (
     Task,
     TaskIcon,
     TaskListChangedConcurrentlyError,
+    TaskListDeletion,
     TaskListNotFoundError,
     TaskNotFoundError,
     TaskPage,
@@ -239,6 +240,39 @@ _REMOVE_FROM_LIST = text(
         updated_at = now()
     WHERE id = :task_id AND user_id = :user_id AND task_list_id = :task_list_id
     RETURNING {_TASK_COLUMNS}
+    """
+)
+
+# A list delete's hold on every task of the caller's on the list, in id order
+# (the port's lock order). ``FOR NO KEY UPDATE`` like every other task lock here,
+# so a link insert's ``KEY SHARE`` is not refused; the ``DELETE`` that follows
+# takes the full row lock itself. Whether a task is kept is decided under the
+# lock, from the anchors it then holds.
+_LOCK_LIST_TASKS_FOR_RELEASE = text(
+    """
+    SELECT id,
+           (creating_journal_id IS NOT NULL AND due_journal_id IS NOT NULL) AS kept
+    FROM tasks
+    WHERE task_list_id = :task_list_id AND user_id = :user_id
+    ORDER BY id
+    FOR NO KEY UPDATE
+    """
+)
+
+_DELETE_RELEASED = text(
+    "DELETE FROM tasks WHERE id = ANY(CAST(:ids AS integer[])) AND user_id = :user_id"
+)
+
+# All three list columns in one statement, as ``_REMOVE_FROM_LIST`` clears
+# them: every CHECK is row-level, and a kept task holds both journals.
+_KEEP_RELEASED = text(
+    """
+    UPDATE tasks
+    SET task_list_id = NULL,
+        position = NULL,
+        due_date = NULL,
+        updated_at = now()
+    WHERE id = ANY(CAST(:ids AS integer[])) AND user_id = :user_id
     """
 )
 
@@ -862,6 +896,30 @@ class SqlTaskRepository(TaskRepository):
                 },
             )
         return await self.find_open_tasks_on_list(task_list_id, user_id)
+
+    async def release_list_tasks(
+        self, task_list_id: int, user_id: str
+    ) -> TaskListDeletion:
+        """Lock the list's tasks, delete those without both journals, keep the rest.
+
+        Both link tables cascade from ``task_id``, so a deleted task's links go
+        with it.
+        """
+        params: dict[str, Any] = {"task_list_id": task_list_id, "user_id": user_id}
+        rows = (await self.conn.execute(_LOCK_LIST_TASKS_FOR_RELEASE, params)).all()
+        deleted = tuple(int(row.id) for row in rows if not row.kept)
+        kept = tuple(int(row.id) for row in rows if row.kept)
+        if deleted:
+            await self.conn.execute(
+                _DELETE_RELEASED, {"ids": list(deleted), "user_id": user_id}
+            )
+        if kept:
+            await self.conn.execute(
+                _KEEP_RELEASED, {"ids": list(kept), "user_id": user_id}
+            )
+        return TaskListDeletion(
+            task_list_id=task_list_id, deleted_task_ids=deleted, kept_task_ids=kept
+        )
 
     async def remove_from_list(self, task_id: int, user_id: str) -> Task:
         """Take one of the user's tasks off its list.

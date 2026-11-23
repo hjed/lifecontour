@@ -513,7 +513,10 @@ its own task, so this can happen however carefully the caller checked first; the
 client re-reads the list and retries. It is mapped ahead of the first endpoint
 that can raise it — `POST /api/tasks/{task_id}/reorder` and the
 `reorder_list_tasks` MCP tool since ITER21-001 Phase 25, removal from a list
-later; see *Tasks on a list* in
+later. `DELETE /api/task-lists/{list_id}` and `delete_task_list` answer it too
+(`TaskListBusyError`, ITER21-001 Phase 29) when another request holds the list
+at the moment the delete removes it — the delete takes the list without
+waiting, because waiting there could deadlock; see *Tasks on a list* in
 [`database-design.md`](./database-design.md).
 
 `TaskAnchorJournalNotFoundError` names **which journal anchor was refused**:
@@ -1311,6 +1314,7 @@ is `task-lists`.
 | `POST /api/task-lists/{list_id}/move` | Move a list to a new place among your **active** lists. Body type `task-list-moves`, attributes: `index` (0 at the top; past the end → the bottom). Answers your active lists in their new order | 200 (a `task-lists` collection); 400 a negative, non-integer or out-of-range index, an unknown attribute or another resource type (`VALIDATION_ERROR`), an out-of-range id; 404 `TASK_LIST_NOT_FOUND`; 409 `TASK_LIST_ARCHIVED` for an archived list |
 | `POST /api/task-lists/{list_id}/archive` | Archive a list: read-only until unarchived. No body. Its tasks and its `position` are untouched | 200 with the list (`archived: true`, `archived_at` set); already archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
 | `POST /api/task-lists/{list_id}/unarchive` | Unarchive a list: back among the active lists in its old place, writable again. No body | 200 with the list (`archived: false`, `archived_at: null`); not archived → 200 unchanged, nothing recorded; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` |
+| `DELETE /api/task-lists/{list_id}` | Delete a list permanently, for mistakes (archiving is the ordinary retirement). No body. Its tasks are deleted with it, open or closed, except tasks holding both a creating and a due journal, which stay as journal-only tasks (no list, position or due date). Publishes `TaskDeleted` per deleted task, `TaskListMembershipChanged {task_list_id: [id, null]}` per kept task, then `TaskListDeleted` | 204; 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` (a repeat delete included); 409 `TASK_LIST_ARCHIVED` (unarchive first); 409 `TASK_LIST_CHANGED` when another request held the list — re-read and retry |
 | `GET /api/task-lists/{list_id}/history` | The list's field-level change history, most recent first, paginated (`?page=`, `?limit=` 1–100, default 20). The shared `HistoryListResponse` shape with type `task_list_history`; field names `__created__`, `name`, `icon`, `archived_at` (null → instant archives, instant → null unarchives) | 200 (a list whose events have not been projected yet is `data: []`, not 404; an archived list is readable); 400 an out-of-range id, `page` or `limit`; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `GET /api/task-lists/{list_id}/tasks` | The list's **open** tasks in your manual order (`position`, then id), each in the task read shape `GET /api/tasks/{task_id}` answers (list, due date or due journal, flag, icon, contacts, `overdue`). Unpaginated; `meta.total` is the count | 200 (an empty list is `data: []`, `meta.total: 0`; an archived list is readable, each row's `task_list.archived` true); 400 an out-of-range id; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
 | `GET /api/task-lists/{list_id}/tasks/completed` | The list's **done and cancelled** tasks, most recently closed first (`closed_at`, then the newest id), paginated (`?page=`, `?limit=` 1–100, default 20) with the shared pagination `meta` and `links`. Rows are the task read shape; `status` marks a cancelled one | 200 (a page past the end is `data: []` and still carries `total_count`; an archived list is readable); 400 an out-of-range id, `page` or `limit`; 404 `TASK_LIST_NOT_FOUND` for a list unknown/not-owned |
@@ -1349,7 +1353,7 @@ Conventions this surface pins down:
   owner's lists are locked for the move — and by a create before it computes
   the bottom — so concurrent moves and creates serialize.
 - **An archived list is read-only, and so are its tasks**: every write to one
-  but unarchive — the update, the move and creating a task on it — and every
+  but unarchive — the update, the move, the delete and creating a task on it — and every
   write to a task on one — `PATCH /api/tasks/{task_id}` (text, status, flag,
   icon and due date), retarget, delete, and the contact and intermediate-journal relationship
   routes, with their MCP tools — answers 409 `TASK_LIST_ARCHIVED` (`TaskListArchivedError`), with a message
@@ -1370,7 +1374,10 @@ Conventions this surface pins down:
   `[null, "<ISO instant>"]` archives, `["<ISO instant>", null]` unarchives. All
   record
   `source=ui` (REST) or `mcp`. **Moving publishes nothing**: reordering is not
-  part of a list's history, and it leaves `updated_at` as it was.
+  part of a list's history, and it leaves `updated_at` as it was. Deleting a
+  list publishes `TaskListDeleted` (`name`, `deleted_task_count`,
+  `kept_task_count`, owner and provenance), projected as the list's last
+  history line, `__deleted__` with the name as its old value.
 - **The history read authorises on the history rows, as the task history read
   does.** The owner stamped on the list's `field_history` rows answers first and
   the owner-scoped live row is only the fallback for a list whose events have
@@ -1382,7 +1389,9 @@ Conventions this surface pins down:
   history.
 - The matching MCP tools are `create_task_list`, `update_task_list`,
   `get_task_list`, `list_task_lists`, `move_task_list`, `archive_task_list`,
-  `unarchive_task_list`, `get_task_list_history` and `list_task_list_tasks`, documented in their
+  `unarchive_task_list`, `delete_task_list` (answers `deleted`, `task_list_id`,
+  `deleted_task_ids` and `kept_task_ids`), `get_task_list_history` and
+  `list_task_list_tasks`, documented in their
   docstrings and parameter schemas. Reordering a list's **tasks** is
   `reorder_list_tasks(task_list_id, task_ids, after_task_id?, before_task_id?)`
   (ITER21-001 Phase 25, user decision): the named open tasks move as one block,

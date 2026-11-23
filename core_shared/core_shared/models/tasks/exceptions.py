@@ -125,6 +125,31 @@ class TaskListChangedConcurrentlyError(TaskDomainError):
         self.task_id = task_id
 
 
+class TaskListBusyError(TaskListChangedConcurrentlyError):
+    """A list delete met another writer holding the same list.
+
+    Deleting a list reads it under a share lock, locks its tasks, and only then
+    takes the list exclusively — without waiting, because by then another
+    holder of the list may be a reorder or a task write queued behind one of
+    the tasks this delete holds, and waiting for it could deadlock. So the
+    delete refuses any holder instead.
+
+    **A subclass of** :class:`TaskListChangedConcurrentlyError`, so it carries
+    the same 409 ``TASK_LIST_CHANGED`` code and the same remedy: read the list
+    again and retry. Only the message differs, naming the list rather than a
+    task.
+    """
+
+    def __init__(self, task_list_id: int):
+        TaskDomainError.__init__(
+            self,
+            f"Task list {task_list_id} is being changed by another request. "
+            "Read the list again and retry.",
+            409,
+        )
+        self.task_list_id = task_list_id
+
+
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 

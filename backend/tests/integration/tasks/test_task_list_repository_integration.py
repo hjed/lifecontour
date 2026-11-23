@@ -16,6 +16,7 @@ an id that does not exist, so only a real foreign row can catch it.
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -23,13 +24,15 @@ from core_shared.models.tasks import (
     TaskIcon,
     TaskList,
     TaskListArchiveFilter,
+    TaskListBusyError,
     TaskListNotFoundError,
 )
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.models.repositories import TaskListRepository
+from tests.integration.concurrency_helpers import bounded
 from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
@@ -494,6 +497,64 @@ class TestDelete:
     ) -> None:
         with pytest.raises(TaskListNotFoundError):
             await repository.delete(999_999, USER_ID)
+
+    async def test_the_delete_statement_locks_the_list_without_waiting(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The caller holds the list's tasks by now, so waiting for another
+        holder of the list would be a deadlock; the lock must not wait."""
+        saved = await save_list(repository, "Groceries")
+        assert saved.id is not None
+
+        with recorded_statements(async_connection) as statements:
+            await repository.delete(saved.id, USER_ID)
+
+        assert any("FOR UPDATE NOWAIT" in each for each in statements)
+
+
+@pytest.mark.slow
+class TestDeleteABusyList:
+    """Another transaction holding the list makes the delete refuse at once."""
+
+    async def test_a_list_held_by_another_transaction_is_busy(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        owner = f"race-{uuid4()}"
+        async with async_engine.connect() as conn:
+            saved = await SqlTaskListRepository(conn).save(
+                TaskList(user_id=owner, name="Racing")
+            )
+            await conn.commit()
+        assert saved.id is not None
+
+        try:
+            async with async_engine.connect() as one, async_engine.connect() as two:
+                held = await SqlTaskListRepository(one).find_by_id_for_share(
+                    saved.id, owner
+                )
+                assert held is not None
+
+                with pytest.raises(TaskListBusyError) as refused:
+                    await bounded(SqlTaskListRepository(two).delete(saved.id, owner))
+                await two.rollback()
+                await one.rollback()
+
+            assert refused.value.task_list_id == saved.id
+        finally:
+            async with async_engine.connect() as cleanup:
+                await cleanup.execute(
+                    text("DELETE FROM task_lists WHERE user_id = :owner"),
+                    {"owner": owner},
+                )
+                await cleanup.commit()
+
+        async with async_engine.connect() as conn:
+            remaining = await conn.execute(
+                text("SELECT COUNT(*) FROM task_lists WHERE id = :id"), {"id": saved.id}
+            )
+            assert remaining.scalar_one() == 0
 
 
 _SELECT_CTID = text("SELECT ctid::text FROM task_lists WHERE id = :list_id")

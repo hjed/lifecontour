@@ -2346,6 +2346,21 @@ def _list_updated_payload(
     return payload
 
 
+def _list_deleted_payload(**overrides: Any) -> dict[str, Any]:
+    """A ``TaskListDeleted`` payload as ``TaskListService`` publishes it."""
+    payload: dict[str, Any] = {
+        "task_list_id": LIST_ID,
+        "user_id": "u1",
+        "name": LIST_NAME,
+        "deleted_task_count": 3,
+        "kept_task_count": 1,
+        "source": Provenance.UI.value,
+        "changed_by": "ui",
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _project_update(
     service: HistoryService, changed_fields: dict[str, Any] | None
 ) -> list[tuple[str, int, str, str | None, str | None]]:
@@ -2487,6 +2502,46 @@ class TestTaskListUpdated:
         assert rows[0].created_at == OCCURRED_AT
 
 
+class TestTaskListDeleted:
+    """The list row is gone, so its history ends with one ``__deleted__`` line
+    carrying the name it had: the only record of what was deleted."""
+
+    def test_projects_a_deleted_marker_carrying_the_name(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _list_event("TaskListDeleted", _list_deleted_payload())
+        )
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task_list", LIST_ID, "__deleted__", LIST_NAME, None)
+        ]
+
+    def test_copies_provenance_actor_event_id_and_event_time(
+        self, service: HistoryService
+    ) -> None:
+        rows = service.project_event(
+            _list_event(
+                "TaskListDeleted", _list_deleted_payload(), event_id="evt-list-3"
+            )
+        )
+
+        assert rows[0].source == Provenance.UI
+        assert rows[0].changed_by == "ui"
+        assert rows[0].event_id == "evt-list-3"
+        assert rows[0].created_at == OCCURRED_AT
+
+    def test_a_missing_source_defaults_to_system(self, service: HistoryService) -> None:
+        payload = _list_deleted_payload()
+        del payload["source"]
+        del payload["changed_by"]
+
+        rows = service.project_event(_list_event("TaskListDeleted", payload))
+
+        assert rows[0].source == Provenance.SYSTEM
+        assert rows[0].changed_by == "system"
+
+
 class TestTaskListHistoryCarriesItsOwner:
     """List rows record their owner, as task rows do, because lists are
     hard-deleted too (Phase 29) and the list history read must not depend on a
@@ -2503,6 +2558,7 @@ class TestTaskListHistoryCarriesItsOwner:
                 ),
                 id="updated",
             ),
+            pytest.param("TaskListDeleted", _list_deleted_payload(), id="deleted"),
         ],
     )
     def test_every_row_carries_the_owner(
@@ -2524,7 +2580,11 @@ class TestTaskListHistoryCarriesItsOwner:
         assert [row.user_id for row in rows] == [None]
 
     def test_the_owner_cases_cover_every_list_event_type(self) -> None:
-        assert task_list_event_types() == {"TaskListCreated", "TaskListUpdated"}
+        assert task_list_event_types() == {
+            "TaskListCreated",
+            "TaskListUpdated",
+            "TaskListDeleted",
+        }
 
 
 class TestEveryTaskListEventTypeIsProjected:
@@ -2558,6 +2618,7 @@ class TestEveryTaskListEventTypeIsProjected:
                 _list_updated_payload({"name": ["a", "b"]}),
                 id="updated",
             ),
+            pytest.param("TaskListDeleted", _list_deleted_payload(), id="deleted"),
         ],
     )
     def test_no_list_row_is_filed_under_a_task_or_a_journal(

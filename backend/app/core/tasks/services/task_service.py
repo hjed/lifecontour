@@ -2180,11 +2180,11 @@ class TaskService:
         do so before calling this. The reorders (:meth:`reorder_task`,
         :meth:`reorder_list_tasks`) lock the other way round — the list, then
         its open tasks — and that is safe only because their list lock is this
-        same ``FOR SHARE``, which never waits on this one. A writer that locks a
-        list *exclusively* and then its tasks — deleting a list — would
-        deadlock against this, and must lock the tasks first. A move takes its
-        target exclusively, so it locks both lists, in ascending id, *before*
-        its task — see :meth:`move_to_list`.
+        same ``FOR SHARE``, which never waits on this one. Deleting a list
+        share-locks it too, locks its tasks, and takes it exclusively only at
+        the end without waiting, so it refuses rather than deadlocks. A move
+        takes its target exclusively, so it locks both lists, in ascending id,
+        *before* its task — see :meth:`move_to_list`.
 
         **One write does not use this: creating a task on a list.** A create
         has no task row to lock first, and its insert needs ``FOR NO KEY
@@ -2196,9 +2196,10 @@ class TaskService:
 
         Raises:
             TaskListArchivedError: The list is archived, and so is the task.
-            TaskNotFoundError: The list cannot be read. Unreachable while the
-                list's foreign key restricts deletes; if it ever happens the
-                task is answered as gone rather than as writable.
+            TaskNotFoundError: The list cannot be read: it was deleted after a
+                plain read of the task (a reorder's, or a same-list move's).
+                Every write that locks its task first waits for a list delete
+                and reads the task it left behind.
         """
         if task_list_id is None:
             return

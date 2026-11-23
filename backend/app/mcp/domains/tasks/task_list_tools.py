@@ -3,7 +3,8 @@ read a list's history, read a list's tasks, and reorder them.
 
 Controller-equivalents, like the task tools: they open no transaction and catch
 no domain error. The writes (``create_task_list``, ``update_task_list``,
-``move_task_list``, ``archive_task_list`` and ``unarchive_task_list``) call the
+``move_task_list``, ``archive_task_list``, ``unarchive_task_list`` and
+``delete_task_list``) call the
 ``@transactional`` ``TaskListService``, which
 commits each list and its event together (a move publishes none);
 ``reorder_list_tasks`` calls the ``@transactional`` ``TaskService`` and
@@ -44,6 +45,7 @@ from app.mcp.domains.tasks.schemas import TaskHistoryEntryMCP, TaskListOrderMCP
 from app.mcp.domains.tasks.task_list_schemas import (
     CompletedTaskListTasksMCP,
     OpenTaskListTasksMCP,
+    TaskListDeletedResponse,
     TaskListHistoryResponse,
     TaskListMCP,
     TaskListsMCP,
@@ -51,7 +53,12 @@ from app.mcp.domains.tasks.task_list_schemas import (
     TaskListSummaryMCP,
     TaskListTasksMCP,
 )
-from app.mcp.shared.annotations import ADDITIVE_WRITE, IDEMPOTENT_WRITE, READ_ONLY
+from app.mcp.shared.annotations import (
+    ADDITIVE_WRITE,
+    DESTRUCTIVE_WRITE,
+    IDEMPOTENT_WRITE,
+    READ_ONLY,
+)
 from app.mcp.shared.arguments import JsonBool, JsonIntOnly
 from app.mcp.shared.decorators import mcp_unified_error_handler
 from app.mcp.shared.dependencies import (
@@ -399,6 +406,49 @@ async def archive_task_list(
         changed_by="mcp",
     )
     return _task_list_fields(archived)
+
+
+@tool(annotations=DESTRUCTIVE_WRITE)
+@mcp_unified_error_handler("delete_task_list", "task list")
+async def delete_task_list(
+    task_list_id: Annotated[
+        int,
+        Field(ge=1, le=INT32_MAX, description="The id of the task list to delete."),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_list_service: TaskListService = mcp_depends(get_task_list_service),
+) -> TaskListDeletedResponse:
+    """
+    Permanently delete one of the user's task lists — for a list made by
+    mistake. To put away a finished list, archive it instead
+    (``archive_task_list``); confirm with the user before deleting.
+
+    Every task on the list is deleted with it, open or completed, except a task
+    that has both a creating and a due journal: that one is kept as a
+    journal-only task on no list (lapsed if its due journal has passed). The
+    answer names both sets of task ids. The list's history stays readable with
+    ``get_task_list_history``, ending in ``__deleted__``.
+
+    An archived list is read-only and is refused: unarchive it first. A list
+    that does not exist or belongs to someone else is reported as not found. If
+    another change to the list is in flight at the same moment the delete is
+    refused; read the list again and retry.
+    """
+    user_id = await get_current_user_id()
+    deletion = await task_list_service.delete_task_list(
+        user_id=user_id,
+        task_list_id=task_list_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    return TaskListDeletedResponse(
+        deleted=True,
+        task_list_id=deletion.task_list_id,
+        deleted_task_ids=list(deletion.deleted_task_ids),
+        kept_task_ids=list(deletion.kept_task_ids),
+    )
 
 
 @tool(annotations=IDEMPOTENT_WRITE)

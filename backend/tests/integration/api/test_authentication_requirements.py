@@ -162,6 +162,7 @@ class TestAuthenticationRequirements:
             ),
             ("POST", "/api/task-lists/1/archive", None),
             ("POST", "/api/task-lists/1/unarchive", None),
+            ("DELETE", "/api/task-lists/1", None),
             ("GET", "/api/task-lists/1/tasks", None),
             ("GET", "/api/task-lists/1/tasks/completed", None),
             (

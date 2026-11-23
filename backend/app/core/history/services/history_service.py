@@ -855,6 +855,28 @@ class HistoryService:
             changed_fields=data.get("changed_fields"),
         )
 
+    def _project_task_list_deleted(
+        self, event: OutboxEvent, data: dict[str, Any]
+    ) -> list[FieldHistoryEntry]:
+        """The marker that closes a list's history, carrying the name it had.
+
+        The list row is gone, so the name travels as the old value: it is all
+        that says *which* list was deleted. The owner comes off the payload as
+        it does for every list row, which is what lets the owner — and nobody
+        else — still read this history once the list is gone.
+        """
+        return [
+            self._row(
+                event,
+                data,
+                entity_type=_TASK_LIST_ENTITY_TYPE,
+                entity_id=data["task_list_id"],
+                field_name=DELETED_MARKER,
+                old_value=data.get("name"),
+                new_value=None,
+            )
+        ]
+
     # -- helpers -------------------------------------------------------------
 
     def _rows_from_changed_fields(
@@ -1042,4 +1064,5 @@ _HANDLERS = {
     # asserted against the list events module.
     "TaskListCreated": HistoryService._project_task_list_created,
     "TaskListUpdated": HistoryService._project_task_list_updated,
+    "TaskListDeleted": HistoryService._project_task_list_deleted,
 }

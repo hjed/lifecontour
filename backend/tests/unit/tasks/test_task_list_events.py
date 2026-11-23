@@ -15,6 +15,7 @@ from core_shared.models.tasks import TaskIcon
 from app.core.tasks.models.task_list_events import (
     TASK_LIST_EVENT_TYPES,
     TaskListCreated,
+    TaskListDeleted,
     TaskListUpdated,
 )
 
@@ -190,3 +191,74 @@ class TestTaskListUpdated:
         assert json.loads(json.dumps(unarchived.event_data))["changed_fields"] == {
             "archived_at": [archived_at, None]
         }
+
+
+def make_deleted(
+    *,
+    deleted_task_count: int = 3,
+    kept_task_count: int = 1,
+    source: Provenance | None = None,
+    changed_by: str | None = None,
+) -> TaskListDeleted:
+    if source is None or changed_by is None:
+        return TaskListDeleted(
+            task_list_id=LIST_ID,
+            user_id=USER_ID,
+            name=NAME,
+            deleted_task_count=deleted_task_count,
+            kept_task_count=kept_task_count,
+        )
+    return TaskListDeleted(
+        task_list_id=LIST_ID,
+        user_id=USER_ID,
+        name=NAME,
+        deleted_task_count=deleted_task_count,
+        kept_task_count=kept_task_count,
+        source=source,
+        changed_by=changed_by,
+    )
+
+
+class TestTaskListDeleted:
+    def test_identifies_itself_as_a_task_list_deleted_event(self) -> None:
+        event = make_deleted()
+
+        assert event.event_type == "TaskListDeleted"
+        assert event.event_id.startswith(f"task_list_deleted_{LIST_ID}_")
+
+    def test_its_type_is_in_the_published_set(self) -> None:
+        """So the history projection, which subscribes to the set, receives it."""
+        assert make_deleted().event_type in TASK_LIST_EVENT_TYPES
+
+    def test_aggregate_id_is_the_integer_list_id(self) -> None:
+        event = make_deleted()
+
+        assert event.aggregate_id == LIST_ID
+        assert isinstance(event.aggregate_id, int)
+
+    def test_payload_carries_exactly_the_documented_keys(self) -> None:
+        """Whole-key. The list row is gone once this is read, so the owner and
+        the name travel on the event: they are all a "deleted" history line
+        has to go on."""
+        event = make_deleted(deleted_task_count=3, kept_task_count=1)
+
+        assert event.event_data == {
+            "task_list_id": LIST_ID,
+            "user_id": USER_ID,
+            "name": NAME,
+            "deleted_task_count": 3,
+            "kept_task_count": 1,
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_provenance_and_actor_are_carried(self) -> None:
+        event = make_deleted(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_the_payload_survives_a_json_round_trip(self) -> None:
+        event = make_deleted()
+
+        assert json.loads(json.dumps(event.event_data)) == event.event_data

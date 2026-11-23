@@ -80,6 +80,9 @@ CROSS_USER_REQUESTS: tuple[CrossUserRequest, ...] = (
     # check would answer 200 as a no-op rather than 404: still caught.
     CrossUserRequest("POST", LIST_ROUTE + "/archive"),
     CrossUserRequest("POST", LIST_ROUTE + "/unarchive"),
+    # A delete that skipped the ownership check would remove the row; the row
+    # is asserted unchanged below, so a 404 *after* deleting cannot pass.
+    CrossUserRequest("DELETE", LIST_ROUTE),
     # The foreign list has no history rows, so this exercises the live-row
     # fallback; the owner-on-the-rows branch is driven in
     # ``test_task_list_history_endpoints.py``.

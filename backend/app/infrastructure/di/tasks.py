@@ -67,16 +67,20 @@ class TaskProvider(Provider):
     def task_list_service(
         self,
         task_list_repo: TaskListRepository,
+        task_repo: TaskRepository,
         event_publisher: OutboxEventPublisher,
     ) -> TaskListService:
         """Provide the task list write service.
 
-        Its publisher is bound to the request connection the repository holds,
+        Its publisher is bound to the request connection the repositories hold,
         as ``TaskService``'s is, so a list write and its event share one unit
-        of work.
+        of work. It takes the task repository too, because deleting a list
+        deletes or keeps its tasks in that same unit.
         """
         return TaskListService(
-            task_list_repo=task_list_repo, event_publisher=event_publisher
+            task_list_repo=task_list_repo,
+            task_repo=task_repo,
+            event_publisher=event_publisher,
         )
 
     @provide(scope=Scope.REQUEST)

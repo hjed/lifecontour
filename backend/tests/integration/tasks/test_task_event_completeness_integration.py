@@ -74,6 +74,8 @@ from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepo
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.models.repositories import (
     TaskAnchorRepository,
@@ -86,6 +88,7 @@ from app.core.tasks.services.task_contact_merge_service import (
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
+from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
     TASK_HISTORY_EVENT_TYPES,
@@ -176,6 +179,8 @@ class Seeded:
     # merge names both people and reading it back off a journal-shaped field is
     # how the two would eventually be passed the wrong way round.
     survivor_contact_id: int = 0
+    # The list a list delete removes.
+    task_list_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -583,6 +588,44 @@ async def _act_merge_the_contact_away(fixtures: _Fixtures, seeded: Seeded) -> No
     )
 
 
+async def _seed_list_with_one_task(
+    fixtures: _Fixtures, *, both_journals: bool
+) -> Seeded:
+    """A list holding one task, seeded as a row: with both journals it is the
+    kind a list delete keeps, without them the kind it deletes."""
+    task_list = await seed_task_list(fixtures.connection)
+    assert task_list.id is not None
+    creating_id, due_id = fixtures.anchors
+    task_id = await create_list_task(
+        fixtures.connection,
+        task_list_id=task_list.id,
+        creating_journal_id=creating_id if both_journals else None,
+        due_journal_id=due_id if both_journals else None,
+    )
+    return Seeded(task_id=task_id, task_list_id=task_list.id)
+
+
+async def _seed_list_with_a_task_it_deletes(fixtures: _Fixtures) -> Seeded:
+    return await _seed_list_with_one_task(fixtures, both_journals=False)
+
+
+async def _seed_list_with_a_task_it_keeps(fixtures: _Fixtures) -> Seeded:
+    return await _seed_list_with_one_task(fixtures, both_journals=True)
+
+
+async def _act_delete_the_list(fixtures: _Fixtures, seeded: Seeded) -> None:
+    """A write reached from the list service rather than ``TaskService``."""
+    await TaskListService(
+        task_list_repo=SqlTaskListRepository(fixtures.connection),
+        task_repo=SqlTaskRepository(fixtures.connection),
+        event_publisher=OutboxEventPublisher(fixtures.connection),
+    ).delete_task_list(
+        user_id=USER_ID,
+        task_list_id=seeded.task_list_id,
+        transaction=fixtures.connection,
+    )
+
+
 WRITE_PATHS: list[WritePath] = [
     WritePath(
         name="create",
@@ -742,6 +785,22 @@ WRITE_PATHS: list[WritePath] = [
         # and the survivor arrives. One event, because one thing happened to the
         # task — the person it names became somebody else.
         expects=["updated:contact-changed+contact-changed"],
+    ),
+    # A list delete reaches each of its tasks through one port, and each task
+    # announces one fact: it went, or it left the list as a journal-only task.
+    WritePath(
+        name="list delete deletes a task",
+        ports=frozenset({"release_list_tasks"}),
+        seed=_seed_list_with_a_task_it_deletes,
+        act=_act_delete_the_list,
+        expects=["deleted"],
+    ),
+    WritePath(
+        name="list delete keeps a task with both journals",
+        ports=frozenset({"release_list_tasks"}),
+        seed=_seed_list_with_a_task_it_keeps,
+        act=_act_delete_the_list,
+        expects=["list-membership-changed"],
     ),
 ]
 

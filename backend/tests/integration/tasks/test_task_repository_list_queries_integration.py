@@ -41,7 +41,7 @@ from core_shared.models.tasks import (
     TaskStatus,
 )
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -49,17 +49,28 @@ from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.concurrency_helpers import overlap
 from tests.integration.tasks.task_seeding import (
+    COUNT_CONTACT_LINKS,
+    COUNT_INTERMEDIATE_JOURNALS,
     FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
     backdate_closed_at,
     backdate_updated_at,
     count,
+    create_contact,
     create_journal,
     create_list_task,
     create_task,
+    link_contact,
+    link_intermediate_journal,
+    linked_contact_ids,
     seed_task_list,
+    stored_anchors,
+    stored_marks,
+    stored_status,
+    stored_text,
     stored_updated_at,
+    task_exists,
 )
 
 DUE_DATE = date(2027, 3, 1)
@@ -761,6 +772,185 @@ class TestRemoveFromList:
 
 
 @pytest.mark.integration
+class TestReleaseListTasks:
+    """A list about to be deleted gives up its tasks: those holding both
+    journals are kept as journal-only tasks, every other one is deleted."""
+
+    async def test_tasks_without_both_journals_are_deleted_open_or_closed(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        journal_ids: tuple[int, int],
+    ) -> None:
+        _, due_id = journal_ids
+        undated = await create_list_task(async_connection, task_list_id=list_id)
+        dated = await create_list_task(
+            async_connection, task_list_id=list_id, position=1, due_date=DUE_DATE
+        )
+        due_in_a_journal = await create_list_task(
+            async_connection, task_list_id=list_id, position=2, due_journal_id=due_id
+        )
+        closed = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=3,
+            status=TaskStatus.DONE,
+        )
+
+        released = await repo.release_list_tasks(list_id, USER_ID)
+
+        assert released.task_list_id == list_id
+        assert released.deleted_task_ids == tuple(
+            sorted((undated, dated, due_in_a_journal, closed))
+        )
+        assert released.kept_task_ids == ()
+        for task_id in (undated, dated, due_in_a_journal, closed):
+            assert not await task_exists(async_connection, task_id)
+
+    async def test_a_deleted_tasks_links_go_with_it(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        journal_ids: tuple[int, int],
+    ) -> None:
+        creating_id, _ = journal_ids
+        task_id = await create_list_task(async_connection, task_list_id=list_id)
+        contact_id = await create_contact(async_connection)
+        await link_contact(async_connection, task_id=task_id, contact_id=contact_id)
+        await link_intermediate_journal(
+            async_connection, task_id=task_id, journal_id=creating_id
+        )
+
+        await repo.release_list_tasks(list_id, USER_ID)
+
+        assert await count(async_connection, COUNT_CONTACT_LINKS, {}) == 0
+        assert await count(async_connection, COUNT_INTERMEDIATE_JOURNALS, {}) == 0
+
+    @pytest.mark.parametrize("status", [TaskStatus.NOT_DONE, TaskStatus.DONE])
+    async def test_a_task_with_both_journals_is_kept_off_any_list(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        journal_ids: tuple[int, int],
+        status: TaskStatus,
+    ) -> None:
+        creating_id, due_id = journal_ids
+        kept = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=4,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+            flagged=True,
+            icon=TaskIcon.LUGGAGE,
+            text="book the hut",
+            status=status,
+        )
+        contact_id = await create_contact(async_connection)
+        await link_contact(async_connection, task_id=kept, contact_id=contact_id)
+
+        released = await repo.release_list_tasks(list_id, USER_ID)
+
+        assert released.kept_task_ids == (kept,)
+        assert released.deleted_task_ids == ()
+        assert await _membership(async_connection, kept) == (None, None, None)
+        assert await stored_anchors(async_connection, kept) == journal_ids
+        assert await stored_text(async_connection, kept) == "book the hut"
+        assert await stored_status(async_connection, kept) == status.value
+        assert await stored_marks(async_connection, kept) == (
+            True,
+            TaskIcon.LUGGAGE.value,
+        )
+        assert await linked_contact_ids(async_connection, kept) == [contact_id]
+
+    async def test_a_mixed_list_splits_by_anchors(
+        self,
+        async_connection: AsyncConnection,
+        repo: SqlTaskRepository,
+        list_id: int,
+        journal_ids: tuple[int, int],
+    ) -> None:
+        creating_id, due_id = journal_ids
+        first_kept = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+        deleted = await create_list_task(
+            async_connection, task_list_id=list_id, position=1
+        )
+        second_kept = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            position=2,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        released = await repo.release_list_tasks(list_id, USER_ID)
+
+        assert released.deleted_task_ids == (deleted,)
+        assert released.kept_task_ids == (first_kept, second_kept)
+        assert (
+            await count(
+                async_connection,
+                "SELECT COUNT(*) FROM tasks WHERE task_list_id = :list_id",
+                {"list_id": list_id},
+            )
+            == 0
+        )
+
+    async def test_an_empty_list_releases_nothing(
+        self, repo: SqlTaskRepository, list_id: int
+    ) -> None:
+        released = await repo.release_list_tasks(list_id, USER_ID)
+
+        assert (released.deleted_task_ids, released.kept_task_ids) == ((), ())
+
+    async def test_another_users_list_releases_nothing(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository
+    ) -> None:
+        their_list = await _list_id(async_connection, "Theirs", user_id=OTHER_USER_ID)
+        their_task = await create_list_task(
+            async_connection, task_list_id=their_list, user_id=OTHER_USER_ID
+        )
+
+        released = await repo.release_list_tasks(their_list, USER_ID)
+
+        assert (released.deleted_task_ids, released.kept_task_ids) == ((), ())
+        assert await _membership(async_connection, their_task) == (their_list, 0, None)
+
+    async def test_another_users_row_on_this_list_is_not_touched(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository, list_id: int
+    ) -> None:
+        """The foreign key is single-column, so another owner's row can point
+        at this list; only the acting user's tasks are released. (The list's
+        own delete then refuses on the foreign key rather than strand it.)"""
+        mine = await create_list_task(async_connection, task_list_id=list_id)
+        theirs = await create_list_task(
+            async_connection, task_list_id=list_id, position=1, user_id=OTHER_USER_ID
+        )
+
+        released = await repo.release_list_tasks(list_id, USER_ID)
+
+        assert released.deleted_task_ids == (mine,)
+        assert await _membership(async_connection, theirs) == (list_id, 1, None)
+
+    async def test_it_publishes_nothing(
+        self, async_connection: AsyncConnection, repo: SqlTaskRepository, list_id: int
+    ) -> None:
+        await create_list_task(async_connection, task_list_id=list_id)
+
+        await repo.release_list_tasks(list_id, USER_ID)
+
+        assert await count(async_connection, _COUNT_OUTBOX, {}) == 0
+
+
+@pytest.mark.integration
 class TestFindOpenTasksOnList:
     """A list's open tasks, in the user's manual order."""
 
@@ -1180,3 +1370,57 @@ class TestConcurrentMembershipWrites:
         assert await _committed_open_order(async_engine, list_id, racing_owner) == [
             (b, 1)
         ]
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestReleaseListTasksHoldsItsTasks:
+    """Every task on the list stays locked until the delete commits, so no
+    other write can change one the delete has already decided about."""
+
+    async def test_a_kept_task_cannot_be_locked_by_another_transaction(
+        self,
+        async_engine: AsyncEngine,
+        racing_owner: str,
+    ) -> None:
+        async with async_engine.connect() as conn:
+            list_id = await _list_id(conn, "Racing", user_id=racing_owner)
+            journals = SqlJournalRepository(conn)
+            creating_id = await create_journal(journals, user_id=racing_owner)
+            due_id = await create_journal(journals, days_offset=7, user_id=racing_owner)
+            kept = await create_list_task(
+                conn,
+                task_list_id=list_id,
+                creating_journal_id=creating_id,
+                due_journal_id=due_id,
+                user_id=racing_owner,
+            )
+            await conn.commit()
+
+        try:
+            async with async_engine.connect() as one, async_engine.connect() as two:
+                # Held open, uncommitted, while the second connection asks.
+                released = await SqlTaskRepository(one).release_list_tasks(
+                    list_id, racing_owner
+                )
+                assert released.kept_task_ids == (kept,)
+
+                with pytest.raises(DBAPIError) as refused:
+                    await two.execute(
+                        text("SELECT 1 FROM tasks WHERE id = :id FOR UPDATE NOWAIT"),
+                        {"id": kept},
+                    )
+                await two.rollback()
+                await one.rollback()
+                assert getattr(refused.value.orig, "sqlstate", None) == "55P03"
+        finally:
+            async with async_engine.connect() as cleanup:
+                await cleanup.execute(
+                    text("DELETE FROM tasks WHERE user_id = :owner"),
+                    {"owner": racing_owner},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM journals WHERE user_id = :owner"),
+                    {"owner": racing_owner},
+                )
+                await cleanup.commit()

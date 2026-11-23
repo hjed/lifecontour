@@ -190,8 +190,8 @@ export class TestDataManager {
   // (ITER18-002 refuses it with a 409), so leaving tasks behind would leak
   // every journal a task fixture created.
   private createdTaskIds: string[] = [];
-  // Archived rather than deleted at cleanup: lists cannot be deleted yet, and
-  // an archived list never appears among the active ones other tests read.
+  // Deleted at cleanup, after the tasks this manager created and before the
+  // journals, so the tasks a list delete keeps are cleared with those journals.
   private createdTaskListIds: string[] = [];
   private createdGearItemIds: string[] = [];
   private createdTemplateIds: string[] = [];
@@ -1692,7 +1692,7 @@ export class TestDataManager {
     };
   }
 
-  /** Create a task list through the API, tracked so cleanup archives it. */
+  /** Create a task list through the API, tracked so cleanup deletes it. */
   async createTaskList(name: string): Promise<TestTaskList> {
     const response = await this.page.request.post('/api/task-lists', {
       headers: { 'Content-Type': 'application/vnd.api+json' },
@@ -1819,17 +1819,32 @@ export class TestDataManager {
   }
 
   /**
-   * Archive every list this manager created. Their tasks were deleted first,
-   * because an archived list's tasks are read-only and so cannot be deleted.
+   * Delete every list this manager created. Deleting a list deletes its tasks
+   * too, except those holding both journals, which stay as journal-only tasks
+   * and are cleared with the journals below. A list the test archived refuses
+   * the delete (an archived list is read-only), so it is unarchived and the
+   * delete retried; a concurrent-change refusal is simply retried.
    */
-  private async archiveTaskLists(): Promise<void> {
+  private async deleteTaskLists(): Promise<void> {
     for (const listId of this.createdTaskListIds) {
-      const response = await this.page.request.post(
-        `/api/task-lists/${listId}/archive`
+      let response = await this.page.request.delete(
+        `/api/task-lists/${listId}`
       );
+      if (response.status() === 409) {
+        const body = (await response.json()) as {
+          errors?: { code?: string }[];
+        };
+        // TASK_LIST_CHANGED is a retryable race; only an archived list needs
+        // unarchiving before the retry.
+        if (body.errors?.[0]?.code === 'TASK_LIST_ARCHIVED') {
+          await this.page.request.post(`/api/task-lists/${listId}/unarchive`);
+        }
+        response = await this.page.request.delete(`/api/task-lists/${listId}`);
+      }
+      // 404 is a list the test already removed itself.
       if (!response.ok() && response.status() !== 404) {
         console.debug(
-          `⚠️ [Data Manager] Failed to archive task list ${listId}: ${response.status()}`
+          `⚠️ [Data Manager] Failed to delete task list ${listId}: ${response.status()}`
         );
       }
     }
@@ -2355,7 +2370,7 @@ export class TestDataManager {
     // tasks in place would leak this test's journals into every test after it,
     // and into the pickers and listings they assert on.
     await this.cleanupSpecificItems(this.createdTaskIds, '/api/tasks', 'task');
-    await this.archiveTaskLists();
+    await this.deleteTaskLists();
 
     // Task-aware, because the pass above only knows about tasks this manager
     // created through the API. A task the *test* created through the UI is

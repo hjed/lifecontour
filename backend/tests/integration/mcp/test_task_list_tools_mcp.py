@@ -2,7 +2,8 @@
 
 Covers ``create_task_list``, ``get_task_list``, ``list_task_lists``,
 ``update_task_list``, ``move_task_list``, ``archive_task_list``,
-``unarchive_task_list``, ``get_task_list_history`` and ``list_task_list_tasks``.
+``unarchive_task_list``, ``delete_task_list``, ``get_task_list_history`` and
+``list_task_list_tasks``.
 
 The rules are proven against the services in
 ``tests/integration/tasks/test_task_list_service_integration.py``. These tests
@@ -20,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from tests.integration.mcp.http_helpers import (
     extract_mcp_tool_error,
     extract_typed_tool_result,
@@ -32,11 +34,13 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     backdate_closed_at,
     count,
+    create_journal,
     create_list_task,
     delete_task_list_row,
     seed_task_list,
     seed_task_list_history,
     stored_positions,
+    task_exists,
     task_list_events,
 )
 
@@ -433,6 +437,112 @@ class TestArchiveTaskListTools:
         assert "not found" not in response.text.lower()
 
 
+class TestDeleteTaskListTool:
+    """``delete_task_list``: one list id; answers which tasks went and which stayed."""
+
+    async def test_deletes_the_list_and_names_the_deleted_and_kept_tasks(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing")
+        assert seeded.id is not None
+        journals = SqlJournalRepository(clean_database)
+        creating_id = await create_journal(journals, title="Arose")
+        due_id = await create_journal(journals, title="Due", days_offset=7)
+        open_task = await create_list_task(clean_database, task_list_id=seeded.id)
+        done_task = await create_list_task(
+            clean_database, task_list_id=seeded.id, position=1, status=TaskStatus.DONE
+        )
+        kept = await create_list_task(
+            clean_database,
+            task_list_id=seeded.id,
+            position=2,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "delete_task_list", task_list_id=seeded.id)
+            gone = await _refused(client, "get_task_list", task_list_id=seeded.id)
+
+        assert result == {
+            "deleted": True,
+            "task_list_id": seeded.id,
+            "deleted_task_ids": [open_task, done_task],
+            "kept_task_ids": [kept],
+        }
+        assert gone["error"] == "Not found"
+        assert not await task_exists(clean_database, open_task)
+        assert await task_exists(clean_database, kept)
+        (event,) = await task_list_events(clean_database)
+        assert event.event_type == "TaskListDeleted"
+        assert (event.payload["source"], event.payload["changed_by"]) == (
+            "mcp",
+            "mcp",
+        )
+
+    async def test_deleting_it_again_is_not_found(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            await _call(client, "delete_task_list", task_list_id=seeded.id)
+            again = await _refused(client, "delete_task_list", task_list_id=seeded.id)
+
+        assert again["error"] == "Not found"
+
+    async def test_an_archived_list_is_refused_naming_unarchive(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+        assert seeded.id is not None
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(client, "delete_task_list", task_list_id=seeded.id)
+
+        assert refused["error"] == "Task error"
+        assert "unarchive" in refused["message"].lower()
+        assert await count(clean_database, _COUNT_LISTS, {"user_id": USER_ID}) == 1
+        assert await task_list_events(clean_database) == []
+
+    async def test_another_users_list_is_indistinguishable_from_a_missing_one(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert foreign.id is not None
+        their_task = await create_list_task(
+            clean_database, task_list_id=foreign.id, user_id=OTHER_USER_ID
+        )
+        before = await _row(clean_database, foreign.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client, "delete_task_list", task_list_id=foreign.id
+            )
+            missing = await _refused(client, "delete_task_list", task_list_id=999_999)
+
+        assert refused["error"] == missing["error"] == "Not found"
+        assert refused["message"].replace(str(foreign.id), "X") == missing[
+            "message"
+        ].replace("999999", "X")
+        assert "Theirs" not in str(refused)
+        assert await _row(clean_database, foreign.id) == before
+        assert await task_exists(clean_database, their_task)
+        assert await task_list_events(clean_database) == []
+
+    async def test_an_out_of_range_id_is_refused(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "delete_task_list", {"task_list_id": 0})
+
+        assert '"isError":true' in response.text
+        assert "greater than or equal to 1" in response.text
+        assert "not found" not in response.text.lower()
+
+
 class TestListTaskListsTool:
     @pytest.mark.parametrize(
         ("archived", "expected"),
@@ -633,6 +743,9 @@ class TestIntegerArgumentsAreNotCoerced:
             ("update_task_list", {"task_list_id": True, "name": "Renamed"}),
             ("archive_task_list", {"task_list_id": True}),
             ("unarchive_task_list", {"task_list_id": "1"}),
+            ("delete_task_list", {"task_list_id": True}),
+            ("delete_task_list", {"task_list_id": "1"}),
+            ("delete_task_list", {"task_list_id": 1.0}),
             ("get_task_list_history", {"task_list_id": True}),
             ("get_task_list_history", {"task_list_id": "1"}),
             ("get_task_list_history", {"task_list_id": 1.0}),

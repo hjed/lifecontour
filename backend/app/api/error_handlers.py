@@ -44,6 +44,7 @@ from core_shared.models.tasks import (
     TaskDueJournalNotFutureError,
     TaskJournalIsAnchorError,
     TaskListArchivedError,
+    TaskListBusyError,
     TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListTaskClosedError,
@@ -175,6 +176,8 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         TaskListNotFoundError: "TASK_LIST_NOT_FOUND",
         TaskListArchivedError: "TASK_LIST_ARCHIVED",
         TaskListChangedConcurrentlyError: "TASK_LIST_CHANGED",
+        # A list delete that met another writer: the same conflict and remedy.
+        TaskListBusyError: "TASK_LIST_CHANGED",
         TaskAnchorJournalNotFoundError: "TASK_ANCHOR_JOURNAL_NOT_FOUND",
         TaskDueJournalNotFutureError: "TASK_DUE_JOURNAL_NOT_FUTURE",
         TaskDueDateInPastError: "TASK_DUE_DATE_IN_PAST",

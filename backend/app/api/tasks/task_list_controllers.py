@@ -385,6 +385,44 @@ async def archive_task_list(
     )
 
 
+@router.delete("/task-lists/{list_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_task_list(
+    list_id: DatabaseIdPath,
+    task_list_service: FromDishka[TaskListService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> None:
+    """Delete one of your lists permanently, and its tasks with it.
+
+    **For mistakes.** Archiving is the ordinary way to retire a list; this is
+    the destructive one, and the surface should confirm it first.
+
+    Every task on the list goes with it — open or completed — except a task
+    holding both a creating and a due journal: that one stays as a journal-only
+    task, off any list, and reads as lapsed if its journal has passed. The
+    list's history stays readable by you at
+    `GET /api/task-lists/{list_id}/history`, ending in a deletion entry.
+
+    An archived list is read-only, so it must be unarchived before it can be
+    deleted. Answers 204 with no body: there is no resource left to return.
+
+    Raises:
+        400: An out-of-range id.
+        404: No such list, or it is not yours — indistinguishably.
+        409: `TASK_LIST_ARCHIVED` — the list is archived; unarchive it first.
+            `TASK_LIST_CHANGED` — another request was changing the list at the
+            same moment; read it again and retry.
+    """
+    await task_list_service.delete_task_list(
+        user_id=user.id,
+        task_list_id=list_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+
+
 @router.post("/task-lists/{list_id}/unarchive")
 @inject
 async def unarchive_task_list(
