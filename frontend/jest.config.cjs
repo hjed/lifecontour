@@ -52,7 +52,9 @@ const customJestConfig = {
 // otherwise their imports throw "Cannot use import statement outside a module".
 // pnpm nests real packages under node_modules/.pnpm/<name>@<ver>/..., so the
 // allow-list is matched against the .pnpm segment. Extend the list if a new
-// package surfaces that error.
+// package surfaces that error, or "Must use import to load ES Module" (a CJS
+// dependency require()-ing an ESM-only package, e.g. @tailwindcss/node →
+// magic-string; Jest only supports require(esm) under --experimental-vm-modules).
 const esmPackages = [
   'react-markdown',
   'remark-.*',
@@ -84,6 +86,7 @@ const esmPackages = [
   'inline-style-parser',
   'web-namespaces',
   'stringify-entities',
+  'magic-string',
 ];
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
