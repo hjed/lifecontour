@@ -2353,8 +2353,8 @@ and archived cases, and the lock order has concurrency tests over real connectio
 **Delivered:** a task is put on a list, or moved from one list to another, joining the bottom.
 - `TaskService.move_to_list` / `move_to_list_with_trail`: a plain read of the task chooses the lists;
   both are locked in ascending id — the task's own list `FOR SHARE`, the target `FOR NO KEY UPDATE`
-  (the bottom is computed under it) — then the task row (`FOR NO KEY UPDATE`), which refuses with 409
-  `TASK_LIST_CHANGED` if the task changed lists meanwhile, then `add_to_list`. A journal-only task keeps
+  (the bottom is computed under it) — then a plain re-read and the task row (`FOR NO KEY UPDATE`), each
+  refusing with 409 `TASK_LIST_CHANGED` if the task changed lists meanwhile, then `add_to_list`. A journal-only task keeps
   its journals and stops lapsing (it is overdue on the list instead); status, flag, icon and contacts
   are kept, and a task in any status may move. Moving to the task's own list is a no-op (its list
   only share-locked, then the task row; no write, no event), still refused on an archived list. Refusals, in order: task 404, target
@@ -2393,7 +2393,8 @@ the source; one event; the no-op keeps its position; archived target, another us
 over real connections a move during an archive, an archive during a move, two moves onto one list,
 a status edit during a move, a reorder of the source during a move and a move during one, a second
 move of the same task (refused with `TASK_LIST_CHANGED`), two crossing moves with a reorder between
-them (three connections, no deadlock), and a contact link racing a move onto a list then archived —
+them (three connections, no deadlock), a stale move against an edit of a task that had just reached
+its target (refused, the edit lands), and a contact link racing a move onto a list then archived —
 refused),
 the completeness inventory (two `WritePath`s, `find_by_id_for_share` classified as a read, the
 exclusion and its pin removed), the archived-list suites on all three surfaces,
@@ -2422,7 +2423,12 @@ lock-order fix), `pnpm quality:check`, jest (3,424), the Playwright spec and pre
   in ascending id, then locks the task and re-checks its list, refusing with 409
   `TASK_LIST_CHANGED` if it moved meanwhile — so a second, overlapping move of the same task is
   refused rather than applied. `TestCrossingMovesAndAReorder` reproduces the deadlock against the
-  task-first order.
+  task-first order. The review's second round found the read could be stale by the time the lists
+  were held: a task another move had just put on the target could be held by an edit asking for the
+  target `FOR SHARE` while the move waited for the task. A plain re-read under the list locks now
+  refuses before waiting (`TestAStaleMoveAndAnEdit`): nothing can put the task on the target while
+  the move holds it, so a task still on its list is held only by writers waiting for a list the move
+  holds shared.
 - **One event type for membership**, reused by Phase 27 with `new = None`.
 - **An action sub-resource and a dedicated tool**, as the retarget is; a move repositions the task.
 

@@ -368,8 +368,10 @@ the *creating* journal where it arose and the *due* journal where it matters.
   type name begins `TaskList`. `TaskService.move_to_list` publishes it; a move to the task's own list
   is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: both lists
   in ascending id — the task's own list `FOR SHARE`, the target `FOR NO KEY UPDATE` (the bottom is
-  computed under it) — chosen from a plain read of the task, then the task row (`FOR NO KEY UPDATE`),
-  which re-checks the list and refuses with `TASK_LIST_CHANGED` if the task moved meanwhile. Lists
+  computed under it) — chosen from a plain read of the task; then a plain re-read, refusing with
+  `TASK_LIST_CHANGED` before waiting for the task if it already moved (nothing can put it on the
+  held target, so a task still on its list is held only by writers waiting for a list the move
+  holds shared); then the task row (`FOR NO KEY UPDATE`), checked again. Lists
   before the task, as a reorder takes them: a move holding its task while waiting for its target
   could close a cycle with a crossing move and a reorder of either list. Because a task can change lists, the link writes (`link_contact`, `unlink_contact`,
   `attach_intermediate_journal`, `detach_intermediate_journal`) read their task `FOR SHARE` before

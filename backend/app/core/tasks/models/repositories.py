@@ -71,9 +71,12 @@ class TaskRepository(ABC):
     - Creates on a list take it ``FOR NO KEY UPDATE`` holding no task lock.
     - A move takes a list exclusively, so it locks its lists **before** its
       task, as a reorder does: both in ascending id (the task's own list
-      ``FOR SHARE``, the target ``FOR NO KEY UPDATE``), then the task row,
-      then :meth:`add_to_list`. Holding the task first would let two crossing
-      moves and a reorder of either list wait on each other in a cycle. Any
+      ``FOR SHARE``, the target ``FOR NO KEY UPDATE``), a plain re-read
+      confirming the task has not reached the target meanwhile, then the task
+      row, then :meth:`add_to_list`. Holding the task first would let two
+      crossing moves and a reorder of either list wait on each other in a
+      cycle; waiting for a task already on the target would deadlock against an
+      edit of it, which holds the task and asks for that list. Any
       writer that takes a list exclusively must not hold a task lock while it
       waits for that list.
 

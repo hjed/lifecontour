@@ -15,8 +15,9 @@ refusal order against mocks; these prove what the database is left holding:
   and a move onto the same list wait for each other, two moves onto one list
   take consecutive positions, a move and a status edit of one task queue, and
   a move and a reorder of its list meet on the task row without deadlocking,
-  and two crossing moves with a reorder of one list between them do not
-  deadlock either.
+  two crossing moves with a reorder of one list between them do not
+  deadlock either, and nor does a move whose read went stale before it locked
+  the list the task had meanwhile reached, against an edit of that task.
 """
 
 import asyncio
@@ -44,6 +45,7 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
+from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
@@ -752,3 +754,101 @@ class TestCrossingMovesAndAReorder:
                 c.target_id,
                 2,
             )
+
+
+class _PausedAfterReading(SqlTaskRepository):
+    """A task repository that pauses after its first plain read until let go.
+
+    That read is where a move chooses its lists; pausing there lets another
+    move commit first, so the lists it then locks are chosen from a stale read.
+    """
+
+    reached: asyncio.Event
+    release: asyncio.Event
+
+    async def find_by_id(self, task_id: int, user_id: str) -> Any:
+        found = await super().find_by_id(task_id, user_id)
+        if not self.reached.is_set():
+            self.reached.set()
+            await self.release.wait()
+        return found
+
+
+class TestAStaleMoveAndAnEdit:
+    @pytest.mark.asyncio
+    async def test_the_stale_move_is_refused_and_the_edit_lands(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """The task reached the stale move's target before it locked it.
+
+        1. The stale move reads the task on the source, and pauses.
+        2. Another move takes the task to the target and commits.
+        3. An edit locks the task, and pauses before holding its list.
+        4. The stale move locks source and target; the task is on the target.
+        5. The edit asks for the target ``FOR SHARE``.
+
+        Waiting for the task at 4 would close a cycle with 5. The re-read under
+        the list locks sees the task has moved, and refuses without waiting.
+        """
+        async with committed_lists(async_engine) as c:
+
+            class Stale(_PausedAfterReading):
+                reached = asyncio.Event()
+                release = asyncio.Event()
+
+            class EditPaused(_GatedLists):
+                reached = asyncio.Event()
+                release = asyncio.Event()
+
+            async def stale_move(connection: AsyncConnection) -> None:
+                async with unit_of_work(connection):
+                    await service_on(
+                        connection, SqlUserSettingsRepository(connection), repo=Stale
+                    ).move_to_list(
+                        user_id=c.owner,
+                        task_id=c.task_id,
+                        task_list_id=c.target_id,
+                        transaction=connection,
+                    )
+
+            async def editing(connection: AsyncConnection) -> None:
+                async with unit_of_work(connection):
+                    await service_on(
+                        connection,
+                        SqlUserSettingsRepository(connection),
+                        task_list_repo=EditPaused,
+                    ).set_status(
+                        user_id=c.owner,
+                        task_id=c.task_id,
+                        status=TaskStatus.DONE,
+                        transaction=connection,
+                    )
+
+            async with async_engine.connect() as one, async_engine.connect() as two:
+                stale_pid = await backend_pid(one)
+                await backend_pid(two)
+                started: list[asyncio.Task[None]] = []
+                try:
+                    started.append(asyncio.create_task(stale_move(one)))
+                    await bounded(Stale.reached.wait())
+                    async with async_engine.begin() as other:
+                        await _moving(c.owner, c.task_id, c.target_id, [])(other)
+                    started.append(asyncio.create_task(editing(two)))
+                    await bounded(EditPaused.reached.wait())
+                    Stale.release.set()
+                    await _waiting_or_done(async_engine, stale_pid, started[0])
+                    EditPaused.release.set()
+
+                    outcomes = await bounded(
+                        asyncio.gather(*started, return_exceptions=True)
+                    )
+                finally:
+                    Stale.release.set()
+                    EditPaused.release.set()
+                    await settle(*started)
+
+            assert isinstance(outcomes[0], TaskListChangedConcurrentlyError)
+            assert outcomes[1] is None
+            async with async_engine.connect() as check:
+                assert await stored_status(check, c.task_id) == "done"
+                assert await stored_membership(check, c.task_id) == (c.target_id, 0)
