@@ -640,6 +640,7 @@ def service_on(
     user_settings_repository: SqlUserSettingsRepository,
     repo: type[SqlTaskRepository] = SqlTaskRepository,
     journal_repo: type[SqlJournalRepository] = SqlJournalRepository,
+    task_list_repo: type[SqlTaskListRepository] = SqlTaskListRepository,
 ) -> TaskService:
     """A ``TaskService`` over real adapters on ``connection``.
 
@@ -649,10 +650,11 @@ def service_on(
     test substitute a repository subclass that observes or signals from inside
     the call — the journal one because the retarget's *journal* locks are now
     what it takes first, so that is where a lock-ordering test has to listen.
+    ``task_list_repo`` likewise, for a move, which takes its lists first.
     """
     return TaskService(
         task_repo=repo(connection),
-        task_list_repo=SqlTaskListRepository(connection),
+        task_list_repo=task_list_repo(connection),
         journal_repo=journal_repo(connection),
         contact_repo=SqlContactRepository(connection),
         date_resolver=JournalDateResolver(user_settings_repo=user_settings_repository),

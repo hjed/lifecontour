@@ -852,13 +852,17 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
     one of its tasks; `test_task_service_reorder_integration.py` reproduces that interleaving.
   - Creates on a list take it `FOR NO KEY UPDATE`, which conflicts with the share lock, so they
     queue against a reorder; they hold no task lock first.
-  - **A move** (`TaskService.move_to_list`, Phase 26) locks its task, then both lists in ascending
-    id — its own list `FOR SHARE`, the target `FOR NO KEY UPDATE` — before `add_to_list` re-takes
-    the target's lock. The only list it takes exclusively is one the task is not yet on, so no
-    reorder of that list holds or waits for the task; a reorder of the source list waits on the task
-    and then refuses with `TASK_LIST_CHANGED`. A same-list move is a no-op under the share lock. A
-    writer that locks a task and then asks for *its own* list exclusively would break this, and a
-    list delete (Phase 29) locks the tasks first.
+  - **A move** (`TaskService.move_to_list`, Phase 26) takes a list exclusively, so it locks its
+    lists **before** its task, as a reorder does: both lists in ascending id — its own list
+    `FOR SHARE`, the target `FOR NO KEY UPDATE` — chosen from a plain read, then the task row, which
+    re-checks the list (`TASK_LIST_CHANGED` if the task moved meanwhile), then `add_to_list`. Taking
+    the task first deadlocked: two crossing moves each holding their task, and a reorder of one list
+    holding it `FOR SHARE` while waiting on the other move's task, closed a cycle
+    (`TestCrossingMovesAndAReorder` reproduces it). A reorder of the source list during a move waits
+    on the task and then refuses with `TASK_LIST_CHANGED`; a same-list move is a no-op under the
+    share lock. **No writer may hold a task lock while it waits for a list exclusively** — a list
+    delete (Phase 29) must take its list before its tasks, or lock the tasks first and never wait
+    on the list while a reorder can hold it.
 
   A task write locks only its own task, so a reorder's named task or neighbour can still close
   while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError` (409,

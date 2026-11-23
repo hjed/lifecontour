@@ -2351,12 +2351,13 @@ and archived cases, and the lock order has concurrency tests over real connectio
 - [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 **Delivered:** a task is put on a list, or moved from one list to another, joining the bottom.
-- `TaskService.move_to_list` / `move_to_list_with_trail`: the task row locked first
-  (`FOR NO KEY UPDATE`), then both lists in ascending id — the task's own list `FOR SHARE`, the target
-  `FOR NO KEY UPDATE` (the bottom is computed under it) — then `add_to_list`. A journal-only task keeps
+- `TaskService.move_to_list` / `move_to_list_with_trail`: a plain read of the task chooses the lists;
+  both are locked in ascending id — the task's own list `FOR SHARE`, the target `FOR NO KEY UPDATE`
+  (the bottom is computed under it) — then the task row (`FOR NO KEY UPDATE`), which refuses with 409
+  `TASK_LIST_CHANGED` if the task changed lists meanwhile, then `add_to_list`. A journal-only task keeps
   its journals and stops lapsing (it is overdue on the list instead); status, flag, icon and contacts
-  are kept, and a task in any status may move. Moving to the task's own list is a no-op (the task
-  row still locked, its list only share-locked; no write, no event), still refused on an archived list. Refusals, in order: task 404, target
+  are kept, and a task in any status may move. Moving to the task's own list is a no-op (its list
+  only share-locked, then the task row; no write, no event), still refused on an archived list. Refusals, in order: task 404, target
   list 404 (`TASK_LIST_NOT_FOUND`, another user's list included), the task's own archived list 409,
   an archived target 409.
 - `TaskListMembershipChanged` (a **task** event, though its name begins `TaskList`) with
@@ -2390,7 +2391,10 @@ alone). Integration `tasks/test_task_service_move_to_list_integration.py` (a lap
 joins below a closed task, stops lapsing and keeps everything; list → list keeps its date and leaves
 the source; one event; the no-op keeps its position; archived target, another user's list or task;
 over real connections a move during an archive, an archive during a move, two moves onto one list,
-a status edit during a move, a reorder of the source during a move and a move during one, and a contact link racing a move onto a list then archived — refused),
+a status edit during a move, a reorder of the source during a move and a move during one, a second
+move of the same task (refused with `TASK_LIST_CHANGED`), two crossing moves with a reorder between
+them (three connections, no deadlock), and a contact link racing a move onto a list then archived —
+refused),
 the completeness inventory (two `WritePath`s, `find_by_id_for_share` classified as a read, the
 exclusion and its pin removed), the archived-list suites on all three surfaces,
 `api/test_task_move_endpoints.py` (200s, the no-op, eight malformed bodies, 404/409 codes, a second
@@ -2399,9 +2403,10 @@ user's task and list), the 401 table, `mcp/test_task_tools_mcp.py::TestMoveTaskT
 `test_task_history_projection_e2e.py` (a join then a move projected with provenance and owner; the
 lifecycle drives the new type). `task_state` now includes list and position. E2E
 `task-activity-history.spec.ts` "a journal-only task added to a list and moved to another reads as
-history lines" (Firefox and Mobile Chrome, repeated 3×). Gates run locally: ruff and mypy, backend
-unit suite (5,996), the full backend integration suite in four chunks (5,055 passed, 7 pre-existing
-skips), `pnpm quality:check`, jest (3,381), the Playwright spec and pre-commit.
+history lines" (Firefox and Mobile Chrome, repeated 3×). Gates run locally after rebasing onto
+Phase 25: ruff and mypy, backend unit suite (6,111), the full backend integration suite in chunks
+(5,183 passed, 7 pre-existing skips; the task, move and archived-list suites re-run after the
+lock-order fix), `pnpm quality:check`, jest (3,424), the Playwright spec and pre-commit.
 
 **Decisions (recorded during implementation):**
 - **Close the stale-list race on the link writes now** (user decision, plan question Q1 → a). The
@@ -2410,21 +2415,31 @@ skips), `pnpm quality:check`, jest (3,381), the Playwright spec and pre-commit.
   task share-locked first, a journal merge (journals `FOR UPDATE`, then the task rows it re-anchors)
   could deadlock against an attach. Contact links need no such change — a contact merge never locks
   task rows.
+- **Lists before the task** (raised by the PR's automated review). The move first locked the task,
+  then its lists; with lists A < B, a move A → B (holding its task and A `FOR SHARE`, waiting for B),
+  a move B → A (holding its task, waiting for A) and a reorder of B (holding B `FOR SHARE`, waiting
+  for the second task) closed a cycle. The move now chooses its lists from a plain read, locks them
+  in ascending id, then locks the task and re-checks its list, refusing with 409
+  `TASK_LIST_CHANGED` if it moved meanwhile — so a second, overlapping move of the same task is
+  refused rather than applied. `TestCrossingMovesAndAReorder` reproduces the deadlock against the
+  task-first order.
 - **One event type for membership**, reused by Phase 27 with `new = None`.
 - **An action sub-resource and a dedicated tool**, as the retarget is; a move repositions the task.
 
 **Notes for later phases:**
 - *Phase 27:* publish `TaskListMembershipChanged(previous, None)`; the history wording and the
   invalidation entry are already in place. Delete `remove_from_list` from `NAMED_EXCLUSIONS` and its
-  pin.
+  pin. If the removal takes its list exclusively, lock it **before** the task, as the move does.
+- *Phase 29 (delete a list):* no writer may hold a task lock while waiting for a list exclusively;
+  take the list first, as the move does.
 - *Phase 25 (reorder), merged first:* its reorders hold the list `FOR SHARE`, which a move's share
   lock on its source never waits on, so the two meet only on the task row. Overlap tests cover both
   orders: a reorder naming the moving task waits and refuses with `TASK_LIST_CHANGED`, and a move
   during a reorder of its list waits and lands. A same-list move is a no-op, as Phase 25 asked.
 - *ITER21-002 Phase 16 (move UI):* use `POST /api/tasks/{id}/move`; `TestDataManager.moveTaskToList`
   exists for e2e.
-- The Phase 14 lock note ("lists first, then the task") is superseded for services: every task write
-  locks the task first.
+- The Phase 14 lock note ("lists first, then the task") still holds for any write that takes a list
+  exclusively (the move); task-field writes lock the task first and their list only `FOR SHARE`.
 
 #### Phase 27: Remove a task from its list
 

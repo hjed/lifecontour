@@ -512,7 +512,9 @@ async def move_task_to_list(
 
     Moving a task to the list it is already on changes nothing. A task on an
     archived list cannot leave it, and an archived list takes no task, until
-    it is unarchived. An unknown list, or another user's, is not found.
+    it is unarchived. An unknown list, or another user's, is not found. If the
+    task moved to another list while this call waited, it is refused: read the
+    task again and retry.
     """
     user_id = await get_current_user_id()
 

@@ -14,9 +14,12 @@ refusal order against mocks; these prove what the database is left holding:
 - the locks do what the order promises, over two real connections: an archive
   and a move onto the same list wait for each other, two moves onto one list
   take consecutive positions, a move and a status edit of one task queue, and
-  a move and a reorder of its list meet on the task row without deadlocking.
+  a move and a reorder of its list meet on the task row without deadlocking,
+  and two crossing moves with a reorder of one list between them do not
+  deadlock either.
 """
 
+import asyncio
 import datetime
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -45,7 +48,14 @@ from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
-from tests.integration.concurrency_helpers import overlap
+from app.infrastructure.unit_of_work import unit_of_work
+from tests.integration.concurrency_helpers import (
+    backend_pid,
+    bounded,
+    overlap,
+    settle,
+    wait_until_blocked_on_a_lock,
+)
 from tests.integration.tasks.task_seeding import (
     ARCHIVED_AT,
     OTHER_USER_ID,
@@ -554,6 +564,44 @@ class TestTheLocksHold:
             assert other_list == c.source_id
 
     @pytest.mark.asyncio
+    async def test_a_second_move_of_the_same_task_is_refused_once_it_has_moved(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """The second chose its lists from where the task was; it now is not.
+
+        It holds those lists and may not lock another out of order, so it
+        refuses (409, read again and retry) instead of moving the task on.
+        """
+        async with committed_lists(async_engine) as c:
+            async with async_engine.begin() as setup:
+                elsewhere_id = await _list_id(setup, "Garden", user_id=c.owner)
+            changed: list[BaseException] = []
+
+            async def moving_elsewhere(connection: AsyncConnection) -> None:
+                service = service_on(connection, SqlUserSettingsRepository(connection))
+                try:
+                    await service.move_to_list(
+                        user_id=c.owner,
+                        task_id=c.task_id,
+                        task_list_id=elsewhere_id,
+                        transaction=connection,
+                    )
+                except TaskListChangedConcurrentlyError as error:
+                    changed.append(error)
+
+            await overlap(
+                async_engine,
+                _moving(c.owner, c.task_id, c.target_id, []),
+                moving_elsewhere,
+            )
+
+            assert len(changed) == 1
+            assert await _committed_membership(async_engine, c.task_id) == (
+                c.target_id,
+                0,
+            )
+
+    @pytest.mark.asyncio
     async def test_a_link_racing_a_move_onto_a_list_then_archived_is_refused(
         self, async_engine: AsyncEngine
     ) -> None:
@@ -585,3 +633,122 @@ class TestTheLocksHold:
                     await cleanup.execute(
                         text("DELETE FROM contacts WHERE id = :id"), {"id": contact_id}
                     )
+
+
+class _GatedLists(SqlTaskListRepository):
+    """A list repository that pauses at the first list lock until let go.
+
+    The pause is where a move has chosen its lists and is about to lock them:
+    under a task-first order it already holds its task there, which is the
+    state the crossing-moves cycle needs.
+    """
+
+    reached: asyncio.Event
+    release: asyncio.Event
+
+    async def _pause(self) -> None:
+        if not self.reached.is_set():
+            self.reached.set()
+            await self.release.wait()
+
+    async def find_by_id_for_share(self, task_list_id: int, user_id: str) -> Any:
+        await self._pause()
+        return await super().find_by_id_for_share(task_list_id, user_id)
+
+    async def find_by_id_for_update(self, task_list_id: int, user_id: str) -> Any:
+        await self._pause()
+        return await super().find_by_id_for_update(task_list_id, user_id)
+
+
+async def _waiting_or_done(
+    async_engine: AsyncEngine, pid: int, running: asyncio.Task[None]
+) -> None:
+    """Return once ``running`` has finished or its backend waits on a lock."""
+    waiting = asyncio.ensure_future(wait_until_blocked_on_a_lock(async_engine, pid))
+    try:
+        await bounded(
+            asyncio.wait({waiting, running}, return_when=asyncio.FIRST_COMPLETED)
+        )
+    finally:
+        await settle(waiting)
+
+
+class TestCrossingMovesAndAReorder:
+    @pytest.mark.asyncio
+    async def test_they_queue_rather_than_deadlock(
+        self, async_engine: AsyncEngine
+    ) -> None:
+        """Lists A < B; one move A → B, one B → A, and a reorder of B.
+
+        Under a task-first order: the B → A move holds its task; the reorder
+        holds B ``FOR SHARE`` and waits for that task; the A → B move holds its
+        task and A ``FOR SHARE`` and waits for B; then the B → A move asks for
+        A and the cycle closes — PostgreSQL aborts one. Lists first, no move
+        holds a task while it waits for a list, so all three land.
+        """
+        async with committed_lists(async_engine) as c:
+            async with async_engine.begin() as setup:
+                crossing_id = await create_list_task(
+                    setup, task_list_id=c.target_id, user_id=c.owner
+                )
+                await create_list_task(
+                    setup, task_list_id=c.target_id, position=1, user_id=c.owner
+                )
+
+            class Gated(_GatedLists):
+                reached = asyncio.Event()
+                release = asyncio.Event()
+
+            async def crossing(connection: AsyncConnection) -> None:
+                async with unit_of_work(connection):
+                    await service_on(
+                        connection,
+                        SqlUserSettingsRepository(connection),
+                        task_list_repo=Gated,
+                    ).move_to_list(
+                        user_id=c.owner,
+                        task_id=crossing_id,
+                        task_list_id=c.source_id,
+                        transaction=connection,
+                    )
+
+            async def reordering(connection: AsyncConnection) -> None:
+                async with unit_of_work(connection):
+                    await _reordering(c.owner, crossing_id)(connection)
+
+            async def moving(connection: AsyncConnection) -> None:
+                async with unit_of_work(connection):
+                    await _moving(c.owner, c.task_id, c.target_id, [])(connection)
+
+            async with (
+                async_engine.connect() as one,
+                async_engine.connect() as two,
+                async_engine.connect() as three,
+            ):
+                pids = [await backend_pid(each) for each in (one, two, three)]
+                started: list[asyncio.Task[None]] = []
+                try:
+                    started.append(asyncio.create_task(crossing(one)))
+                    await bounded(Gated.reached.wait())
+                    started.append(asyncio.create_task(reordering(two)))
+                    await _waiting_or_done(async_engine, pids[1], started[1])
+                    started.append(asyncio.create_task(moving(three)))
+                    await _waiting_or_done(async_engine, pids[2], started[2])
+                    Gated.release.set()
+
+                    outcomes = await bounded(
+                        asyncio.gather(*started, return_exceptions=True)
+                    )
+                finally:
+                    Gated.release.set()
+                    await settle(*started)
+
+            assert outcomes == [None, None, None]
+            assert await _committed_membership(async_engine, crossing_id) == (
+                c.source_id,
+                2,
+            )
+            assert await _committed_membership(async_engine, c.task_id) == (
+                c.target_id,
+                2,
+            )
