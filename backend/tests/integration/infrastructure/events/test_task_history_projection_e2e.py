@@ -389,6 +389,69 @@ class TestTaskLifecycleProjection:
         assert (set_row.source, set_row.changed_by) == (Provenance.MCP, "mcp")
         cleared = next(e for e in entries if e.new_value is None)
         assert (cleared.source, cleared.changed_by) == (Provenance.UI, "ui")
+
+    async def test_a_join_and_a_move_between_lists_are_projected_and_owned(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A journal-only task added to a list, then moved to another.
+
+        Each move is one ``task_list_id`` row naming the lists either side, by
+        id; position is never recorded, because reordering is not history.
+        """
+        service = _task_service(async_connection)
+        creating_journal_id, due_journal_id = await _anchors(async_connection)
+        first = await seed_task_list(async_connection, "Packing")
+        second = await seed_task_list(async_connection, "Hardware")
+        assert first.id is not None and second.id is not None
+
+        task = await service.create_task(
+            user_id=USER_ID,
+            creating_journal_id=creating_journal_id,
+            due_journal_id=due_journal_id,
+            text=TASK_TEXT,
+            transaction=async_connection,
+        )
+        assert task.id is not None
+
+        await service.move_to_list(
+            user_id=USER_ID,
+            task_id=task.id,
+            task_list_id=first.id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+        await service.move_to_list(
+            user_id=USER_ID,
+            task_id=task.id,
+            task_list_id=second.id,
+            transaction=async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-moves"
+        )
+
+        entries = await _task_history(async_connection, task.id)
+        assert _values(entries) == {
+            ("__created__", None, TASK_TEXT),
+            ("task_list_id", None, str(first.id)),
+            ("task_list_id", str(first.id), str(second.id)),
+        }
+        joined = next(
+            e for e in entries if e.field_name == "task_list_id" and e.old_value is None
+        )
+        assert (joined.source, joined.changed_by) == (Provenance.UI, "ui")
+        moved = next(
+            e for e in entries if e.field_name == "task_list_id" and e.old_value
+        )
+        assert (moved.source, moved.changed_by) == (Provenance.MCP, "mcp")
         assert all(e.user_id == USER_ID for e in entries)
 
     @pytest.mark.asyncio
@@ -594,6 +657,17 @@ class TestTaskProjectionIsIdempotent:
             source=Provenance.UI,
             changed_by="ui",
         )
+        # A move onto a list, which a journal-only task may make.
+        lifecycle_list = await seed_task_list(async_connection, "Lifecycle")
+        assert lifecycle_list.id is not None
+        await service.move_to_list(
+            user_id=USER_ID,
+            task_id=task.id,
+            task_list_id=lifecycle_list.id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
         await service.delete_task(
             user_id=USER_ID,
             task_id=task.id,
@@ -623,9 +697,9 @@ class TestTaskProjectionIsIdempotent:
         first_pass = await _task_history(async_connection, task.id)
         # created + the contact it named, the status move, the contact unlink,
         # the anchor move and its reopen, the retained link, the manual attach
-        # and its detach, the merge moving the due anchor again, and the delete
-        # marker.
-        assert len(first_pass) == 11
+        # and its detach, the merge moving the due anchor again, the move onto a
+        # list, and the delete marker.
+        assert len(first_pass) == 12
 
         await replay_stream_through_projection(
             stream_client, test_stream_name, async_connection, redis_client

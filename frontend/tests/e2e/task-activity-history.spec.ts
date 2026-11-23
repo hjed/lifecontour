@@ -210,6 +210,58 @@ test.describe('Task activity history', () => {
     });
   });
 
+  test('a journal-only task added to a list and moved to another reads as history lines', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const data = new TestDataManager(page);
+    testCleanup(async () => data.cleanup());
+
+    const [creating, due] = await data.createTaskAnchorJournals('Moves');
+    const task = await data.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: due.id,
+      text: 'Wax the skis',
+    });
+    const first = await data.createTaskList('Moves first list');
+    const second = await data.createTaskList('Moves second list');
+
+    await data.moveTaskToList(task.id, first.id);
+    await data.moveTaskToList(task.id, second.id);
+
+    const historyPath = `/api/tasks/${task.id}/history`;
+    await waitForHistoryEntry(
+      page.request,
+      historyPath,
+      attrs =>
+        attrs.field_name === 'task_list_id' && attrs.new_value === second.id
+    );
+
+    await page.goto(`/journals/${creating.id}`);
+    const row = page.getByTestId(`journal-task-${task.id}`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const trigger = row.getByRole('button', {
+      name: 'Show history for “Wax the skis”',
+    });
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await trigger.click();
+    // Expanded, the same button is named for hiding the history.
+    await expect(
+      row.getByRole('button', { name: 'Hide history for “Wax the skis”' })
+    ).toHaveAttribute('aria-expanded', 'true');
+
+    const feed = row.getByTestId('activity-feed');
+    await expect(feed).toBeVisible();
+    await expect(
+      feed.getByText('Added to a list', { exact: true })
+    ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
+    await expect(
+      feed.getByText('Moved to another list', { exact: true })
+    ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
+  });
+
   test('a due date set on a list task reads as a history line', async ({
     authenticatedPage,
     testCleanup,

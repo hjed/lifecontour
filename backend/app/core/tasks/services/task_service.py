@@ -65,6 +65,7 @@ from app.core.tasks.models.events import (
     TaskJournalLinked,
     TaskJournalLinkOrigin,
     TaskJournalUnlinked,
+    TaskListMembershipChanged,
     TaskUpdated,
     contact_field_name,
 )
@@ -75,7 +76,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from core_shared.models.journals import Journal
-    from core_shared.models.tasks import TaskIcon
+    from core_shared.models.tasks import TaskIcon, TaskList
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from app.core.contacts.models.repositories import ContactRepository
@@ -891,9 +892,10 @@ class TaskService:
         or because :meth:`retarget_due_journal` retained a previous due journal —
         the model's one automatic link.
 
-        **The journal must be the acting user's**, which is enforced by the same
-        owner-scoped read the anchors go through, so a journal belonging to
-        somebody else is indistinguishable from one that never existed.
+        **The journal must be the acting user's**, which is enforced by the
+        owner-scoped locking read (``find_and_lock_by_ids_for_user``), so a
+        journal belonging to somebody else is indistinguishable from one that
+        never existed.
 
         **An anchor is not an intermediate link.** A journal that is already the
         task's creating or due journal is refused: it is already linked, in a
@@ -919,19 +921,15 @@ class TaskService:
         none is written, so a done or cancelled task takes a link exactly as an
         open one does.
 
-        **The task is read without a lock**, unlike :meth:`set_status` and
-        :meth:`retarget_due_journal`. Those decide a *rule* from the status they
-        read and write that decision back, which an interleaving can corrupt. The
-        only state that can move underneath this method is a concurrent retarget
-        making this journal the due anchor after the check — and the resulting
-        shape, a due anchor that is also an intermediate link, is one
-        :meth:`retarget_due_journal` produces on its own and Phase 7 explicitly
-        declined to clean up ("nothing is ever unlinked, including a link that
-        has become redundant"). A lock would narrow a window onto an outcome that
-        is legitimate either side of it. It would also have to be ordered against
-        journal merge the way :meth:`retarget_due_journal` now is — journal locks
-        first, ascending, then the task row — which is real machinery to buy
-        nothing observable.
+        **The task is held ``FOR SHARE``, after the journal ``FOR KEY SHARE``.**
+        Not to protect a status rule — no status is read — but because the task
+        can change lists: the share lock waits for an in-flight move, so the
+        list checked for archiving is the one the task is on now. The journal is
+        locked first, ascending with a retarget and a journal merge, so this
+        queues behind a merge at the journal rather than holding the task the
+        merge is about to re-anchor. A concurrent retarget making this journal
+        the due anchor after the check still yields a due anchor that is also
+        an intermediate link, a shape the retarget produces on its own.
 
         Args:
             user_id: The acting user; the task and the journal must be theirs
@@ -957,8 +955,13 @@ class TaskService:
                 creating or due journal.
             TaskListArchivedError: When the task is on an archived list.
         """
+        # The journal before the task, as a retarget takes them: a journal merge
+        # locks journals and then the task rows it re-anchors, so holding the
+        # task first and the journal second would invert that order.
+        journal = await self._lock_link_journal(user_id, journal_id)
         task = await self._require_writable_task(task_id, user_id)
-        await self._require_owned_journal(user_id, journal_id)
+        if journal is None:
+            raise JournalNotFoundError(journal_id)
         _refuse_anchor_role(task, task_id, journal_id)
 
         try:
@@ -1081,6 +1084,10 @@ class TaskService:
                 due journal **and** there is no intermediate link to remove.
             TaskListArchivedError: When the task is on an archived list.
         """
+        # Journal, then task, for the reason ``attach_intermediate_journal``
+        # gives. The journal need not be found: a link to it is removed either
+        # way, and one that is not the user's has no link of theirs to remove.
+        await self._lock_link_journal(user_id, journal_id)
         task = await self._require_writable_task(task_id, user_id)
 
         removed = await self.task_repo.remove_intermediate_journal(
@@ -1523,6 +1530,119 @@ class TaskService:
         return saved
 
     @transactional
+    async def move_to_list(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        task_list_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> Task:
+        """Put one of the user's tasks at the bottom of one of their lists.
+
+        One write for both of the specification's moves (*Moving tasks*): a
+        list task moving to another list, and a journal-only task joining one,
+        which stops it lapsing — lapse is derived on read, and a list task
+        never lapses. Only the list and position change; the task keeps its
+        journals, due date, status, flag, icon and contacts. A task in any
+        status may move: a closed one lands below the open ones by position and
+        shows in the target's completed tasks.
+
+        **Moving a task to the list it is already on is a no-op**: nothing is
+        written and nothing published, as a resent value writes nothing
+        elsewhere. It is still refused on an archived list, as every no-op is.
+        Reordering within a list is a separate write.
+
+        **Lock order: the task row, then both lists in ascending id** — the
+        task's own list ``FOR SHARE``, as every task write holds its list, and
+        the target ``FOR NO KEY UPDATE`` from the start, because the bottom is
+        computed under that lock and upgrading a share lock later would deadlock
+        two moves onto one list. Two moves crossing between the same pair of
+        lists take them in the same order, so neither waits on the other in a
+        cycle. ``add_to_list`` re-takes the target's lock, which it already
+        holds.
+
+        Publishes one :class:`TaskListMembershipChanged` carrying the
+        ``task_list_id`` pair; position is never announced.
+
+        Raises:
+            TaskNotFoundError: The task does not exist or is not the user's.
+            TaskListNotFoundError: The target list does not exist or is not the
+                user's — the two are indistinguishable by design.
+            TaskListArchivedError: The task's own list is archived (named
+                first: nothing about the target can make the move succeed), or
+                else the target is.
+        """
+        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+        previous_task_list_id = task.task_list_id
+
+        if previous_task_list_id == task_list_id:
+            await self._hold_list_writable(task_list_id, task_id, user_id)
+            return task
+
+        await self._lock_lists_for_move(
+            previous_task_list_id, task_list_id, task_id, user_id
+        )
+        moved = await self.task_repo.add_to_list(task_id, task_list_id, user_id)
+
+        await self.event_publisher.publish(
+            TaskListMembershipChanged(
+                task_id=task_id,
+                user_id=user_id,
+                previous_task_list_id=previous_task_list_id,
+                task_list_id=task_list_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return moved
+
+    async def _lock_lists_for_move(
+        self,
+        source_list_id: int | None,
+        target_list_id: int,
+        task_id: int,
+        user_id: str,
+    ) -> None:
+        """Lock a move's lists in ascending id, then refuse what may not move.
+
+        The source (absent for a journal-only task) is held ``FOR SHARE`` and the
+        target ``FOR NO KEY UPDATE``; see :meth:`move_to_list` for why. Both are
+        read before either is judged, so the refusal order does not depend on
+        which id is lower.
+        """
+        held: dict[int, TaskList | None] = {}
+        list_ids = {target_list_id}
+        if source_list_id is not None:
+            list_ids.add(source_list_id)
+        for list_id in sorted(list_ids):
+            if list_id == target_list_id:
+                held[list_id] = await self.task_list_repo.find_by_id_for_update(
+                    list_id, user_id
+                )
+            else:
+                held[list_id] = await self.task_list_repo.find_by_id_for_share(
+                    list_id, user_id
+                )
+
+        target = held[target_list_id]
+        if target is None:
+            raise TaskListNotFoundError(target_list_id)
+        if source_list_id is not None:
+            source = held[source_list_id]
+            if source is None:
+                # Unreachable while the list's foreign key restricts deletes, as
+                # in ``_hold_list_writable``.
+                raise TaskNotFoundError(task_id)
+            source.ensure_writable()
+        target.ensure_writable()
+
+    @transactional
     async def create_task_with_trail(
         self,
         *,
@@ -1657,6 +1777,31 @@ class TaskService:
             changed_by=changed_by,
         )
         return retargeted, await self._trail_within_unit_of_work(retargeted, user_id)
+
+    @transactional
+    async def move_to_list_with_trail(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        task_list_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> tuple[Task, list[int]]:
+        """:meth:`move_to_list`, and the trail read in the same unit of work.
+
+        ``source`` and ``changed_by`` are forwarded, never defaulted here.
+        """
+        moved = await self.move_to_list(
+            user_id=user_id,
+            task_id=task_id,
+            task_list_id=task_list_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+        return moved, await self._trail_within_unit_of_work(moved, user_id)
 
     async def _trail_within_unit_of_work(self, task: Task, user_id: str) -> list[int]:
         """The task's trail, read inside the caller's still-open unit of work.
@@ -1927,9 +2072,8 @@ class TaskService:
     async def _require_task(self, task_id: int, user_id: str) -> Task:
         """Read one of the user's tasks, or raise the promised 404.
 
-        The plain read, not the locking one — see
-        :meth:`attach_intermediate_journal` for why the link methods do not need
-        a lock where the status and retarget methods do.
+        The plain read, for the reorders: they lock the list before any task,
+        and the repository re-checks the task under that lock.
         """
         task = await self.task_repo.find_by_id(task_id, user_id)
         if task is None:
@@ -1937,8 +2081,19 @@ class TaskService:
         return task
 
     async def _require_writable_task(self, task_id: int, user_id: str) -> Task:
-        """:meth:`_require_task`, then :meth:`_hold_list_writable` on its list."""
-        task = await self._require_task(task_id, user_id)
+        """Hold one of the user's tasks ``FOR SHARE``, then its list writable.
+
+        For the link writes, which change rows beside the task rather than the
+        task itself. The share lock is what lets them trust ``task_list_id``: a
+        move holds the task ``FOR NO KEY UPDATE``, so a link waits for it and
+        then reads the list the task is on now — a plain read would hold the
+        list the task was leaving, and a link could land on a task whose new
+        list was archived in the same unit of work. Two link writes on one task
+        share the lock. Task, then list, as every write.
+        """
+        task = await self.task_repo.find_by_id_for_share(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
         await self._hold_list_writable(task.task_list_id, task_id, user_id)
         return task
 
@@ -1964,7 +2119,9 @@ class TaskService:
         its open tasks — and that is safe only because their list lock is this
         same ``FOR SHARE``, which never waits on this one. A writer that locks a
         list *exclusively* and then its tasks — deleting a list — would
-        deadlock against this, and must lock the tasks first.
+        deadlock against this, and must lock the tasks first. A move holds two
+        lists, and takes them in ascending id after the task, exclusively only
+        the target it is not yet on — see :meth:`move_to_list`.
 
         **One write does not use this: creating a task on a list.** A create
         has no task row to lock first, and its insert needs ``FOR NO KEY
@@ -2007,22 +2164,20 @@ class TaskService:
             raise TaskNotFoundError(task_id)
         task_list.ensure_writable()
 
-    async def _require_owned_journal(self, user_id: str, journal_id: int) -> Journal:
-        """Load a journal the acting user owns, on the anchors' terms.
+    async def _lock_link_journal(self, user_id: str, journal_id: int) -> Journal | None:
+        """The user's journal, held ``FOR KEY SHARE``, or ``None``.
 
-        Goes through :meth:`_journals_by_id`, so the property that ownership is
-        enforced *by the query* — and therefore that another user's journal is
-        indistinguishable from an absent one — has one place to hold rather than
-        three. The error is the journal domain's, not
-        ``TaskAnchorJournalNotFoundError``: an intermediate journal is not an
-        anchor, and that error's message ("a task must be anchored to journals
-        that exist and belong to you") would be describing a rule this call is
-        not about.
+        For the intermediate-link writes, which also share-lock the task. A
+        journal merge locks its journals ``FOR UPDATE`` and then updates the
+        task rows it re-anchors, so a link write takes the journal first, as
+        :meth:`retarget_due_journal` does: whichever arrives second queues at
+        the journal rather than holding the task the other one needs. Owner
+        scoping is in the query, so another user's journal reads as absent.
         """
-        found = await self._journals_by_id(user_id, [journal_id])
-        if journal_id not in found:
-            raise JournalNotFoundError(journal_id)
-        return found[journal_id]
+        locked = await self.journal_repo.find_and_lock_by_ids_for_user(
+            user_id, [journal_id]
+        )
+        return locked[0] if locked else None
 
     async def _link_contacts(
         self,

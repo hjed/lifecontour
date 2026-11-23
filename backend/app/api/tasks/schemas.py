@@ -30,7 +30,7 @@ a field silently dropped is a field a client believes was stored.
 
 from datetime import date as date_type
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from core_shared.models.tasks import (
     JournalTaskGroups,
@@ -51,6 +51,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
     field_validator,
     model_validator,
 )
@@ -79,6 +80,9 @@ TASK_RETARGET_RESOURCE_TYPE: Literal["task-retarget"] = "task-retarget"
 # An operation too: a reorder rewrites other tasks' positions and records
 # nothing, so it is not an edit of the task's attributes.
 TASK_REORDER_RESOURCE_TYPE: Literal["task-reorders"] = "task-reorders"
+# Moving a task onto or between lists: an operation, as the retarget is, named
+# like ``task-list-moves``.
+TASK_MOVE_RESOURCE_TYPE: Literal["task-moves"] = "task-moves"
 JOURNAL_RESOURCE_TYPE: Literal["journals"] = "journals"
 
 
@@ -510,6 +514,48 @@ class TaskRetargetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: TaskRetargetData = Field(..., description="The retarget to perform")
+
+
+class TaskMoveAttributes(BaseModel):
+    """The list a task should be on: the one thing a move names.
+
+    ``task_list_id`` is a ``StrictInt``: a string or a boolean is a client bug,
+    not a list id, and lax parsing would turn ``true`` into list ``1``. It is
+    required and never ``null`` — leaving a list is a different operation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_list_id: Annotated[StrictInt, Field(ge=1, le=INT32_MAX)] = Field(
+        ...,
+        description=(
+            "One of your lists, not archived. The task joins its bottom; moving "
+            "a task to the list it is already on changes nothing. Must be a JSON "
+            "integer."
+        ),
+    )
+
+
+class TaskMoveData(BaseModel):
+    """Data for moving a task: an operation type, with no ``id`` member."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["task-moves"] = Field(
+        default=TASK_MOVE_RESOURCE_TYPE, description=RESOURCE_TYPE_DESC
+    )
+    attributes: TaskMoveAttributes = Field(..., description="Where the task goes")
+
+
+class TaskMoveRequest(BaseModel):
+    """Request model for moving a task onto or between lists.
+
+    Extras are forbidden at every level, as on the retarget.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: TaskMoveData = Field(..., description="The move to perform")
 
 
 class TaskContactLinkData(BaseModel):

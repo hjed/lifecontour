@@ -132,3 +132,8 @@ class TestTheTaskGuidanceDescribesListTasks:
         instructions = create_mcp_server().instructions or ""
 
         assert "set or clear a list task's due date" in instructions
+
+    def test_names_the_tool_that_moves_a_task_onto_or_between_lists(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "move_task_to_list" in instructions

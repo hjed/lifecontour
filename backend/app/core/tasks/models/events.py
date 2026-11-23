@@ -6,7 +6,8 @@ journals use, and those events project into field history exactly as contact and
 journal events do", each carrying provenance and the actor.
 
 This module holds creation, every change to the task's own fields — text, status
-and contact membership — due-journal retargeting, intermediate journal links,
+and contact membership — due-journal retargeting, list membership, intermediate
+journal links,
 the re-point a journal merge performs, and hard deletion. That is the full event
 set the specification names plus the ones it did not anticipate: writes on task
 rows performed from **another domain**. There are two, and they are announced
@@ -404,6 +405,57 @@ class TaskDueJournalRetargeted(DomainEvent):
                 "task_id": task_id,
                 "user_id": user_id,
                 "changed_fields": changed_fields,
+                "source": source.value,
+                "changed_by": changed_by,
+            },
+            transaction=transaction,
+        )
+
+
+@dataclass(frozen=True)
+class TaskListMembershipChanged(DomainEvent):
+    """Event raised when a task joins, leaves or moves between task lists.
+
+    **One type for every membership change.** A journal-only task joining a
+    list announces ``(None, list)``, a move between lists ``(old, new)`` and a
+    removal ``(old, None)``: the same fact — ``task_list_id`` moved — so the
+    history projection reads it as any other field change, through the handler
+    :class:`TaskUpdated` uses.
+
+    **The aggregate is the task, not either list.** The history this projects is
+    the task's; a list's own history records its name, icon and archive state,
+    never which tasks it holds.
+
+    **Position is never carried.** A move lands the task at the bottom of its
+    new list, but reordering is not history, so where it landed is not part of
+    the announcement.
+
+    **``changed_fields`` is built here**, as :class:`TaskDueJournalRetargeted`
+    builds its own, so the pair cannot be handed over the wrong way round.
+    """
+
+    def __init__(
+        self,
+        task_id: int,
+        user_id: str,
+        previous_task_list_id: int | None,
+        task_list_id: int | None,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+        transaction: AsyncConnection | None = None,
+    ):
+        now = datetime.now(tz=UTC)
+        super().__init__(
+            event_id=f"task_list_membership_changed_{task_id}_{now.isoformat()}",
+            occurred_at=now,
+            aggregate_id=task_id,
+            event_type="TaskListMembershipChanged",
+            event_data={
+                "task_id": task_id,
+                "user_id": user_id,
+                "changed_fields": {
+                    "task_list_id": (previous_task_list_id, task_list_id)
+                },
                 "source": source.value,
                 "changed_by": changed_by,
             },

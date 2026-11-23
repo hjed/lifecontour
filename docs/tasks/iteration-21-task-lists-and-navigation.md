@@ -2330,17 +2330,101 @@ Gates run locally:
   (the response itself is the write shape, without journal refs or overdue). On a 409
   `TASK_LIST_CHANGED`, re-read and retry.
 
-#### Phase 26: Move a task onto or between lists
+#### Phase 26: Move a task onto or between lists ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 21.
-**Estimated diff:** ~150 production → **~1,500 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~150 production → **~1,500 tracked** · one capability on REST and MCP together ·
+**Actual:** ~440 production → **~2,850 tracked** (about 2,830 insertions, 130 deletions excluding
+this document: about 440 production lines across 12 files, of which the service is about 190 and
+docstrings most of the rest; about 2,360 test lines across 30 files; 35 architecture docs).
+Production ran ×2.9 on the estimate: closing the stale-list race on the link writes (user decision,
+below) priced in a new port read, a journal-first lock for attach and detach, and their existing
+tests' doubles. Tests sat at ×5.4 production, because each surface got its own rejection, isolation
+and archived cases, and the lock order has concurrency tests over real connections.
 
 **Acceptance Criteria:**
 
-- [ ] List → list; journal-only → list (stops lapsing).
-- [ ] New list-membership event with its history projection.
-- [ ] `add_to_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] List → list; journal-only → list (stops lapsing).
+- [x] New list-membership event with its history projection.
+- [x] `add_to_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a task is put on a list, or moved from one list to another, joining the bottom.
+- `TaskService.move_to_list` / `move_to_list_with_trail`: the task row locked first
+  (`FOR NO KEY UPDATE`), then both lists in ascending id — the task's own list `FOR SHARE`, the target
+  `FOR NO KEY UPDATE` (the bottom is computed under it) — then `add_to_list`. A journal-only task keeps
+  its journals and stops lapsing (it is overdue on the list instead); status, flag, icon and contacts
+  are kept, and a task in any status may move. Moving to the task's own list is a no-op (the task
+  row still locked, its list only share-locked; no write, no event), still refused on an archived list. Refusals, in order: task 404, target
+  list 404 (`TASK_LIST_NOT_FOUND`, another user's list included), the task's own archived list 409,
+  an archived target 409.
+- `TaskListMembershipChanged` (a **task** event, though its name begins `TaskList`) with
+  `changed_fields={"task_list_id": (old | None, new | None)}`, built by the event. Projected by
+  `_project_task_updated`, subscribed by the history consumer, and in `TASK_SPAN_EVENTS` (a dated task
+  joining a list leaves its due day's summary). Position is never carried.
+- REST `POST /api/tasks/{task_id}/move`, body type `task-moves`, attribute `task_list_id`
+  (`StrictInt`, 1..`INT32_MAX`, `null` refused); 200 with the task and its trail, UI provenance.
+- MCP `move_task_to_list(task_id, task_list_id)`: `IDEMPOTENT_WRITE`, `JsonIntOnly` ids, MCP
+  provenance; the server's task guidance names it.
+- **Link writes hold the task `FOR SHARE`** (`TaskRepository.find_by_id_for_share`, used by
+  `_require_writable_task`): `link_contact`, `unlink_contact`, `attach_intermediate_journal` and
+  `detach_intermediate_journal` wait for an in-flight move and then check the list the task is on
+  now. Attach and detach lock their journal `FOR KEY SHARE` first
+  (`find_and_lock_by_ids_for_user`), so they keep a journal merge's journal-then-task order rather
+  than introducing a deadlock with it; a task 404 still outranks a journal 404.
+- History wording in `taskEntryDescription`: *Added to a list*, *Moved to another list*, *Removed
+  from its list* (ready for Phase 27), named with the task on a contact's feed.
+- `api-design.md` (endpoint row, history vocabulary, MCP list), `domain-architecture.md` (the event,
+  the move's lock order, the link writes' locks, the summary table) and `database-design.md` (the
+  superseded lock rule, membership events) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_service_move_to_list.py` (join and move with their
+events, lock order both directions, the no-op's share lock, every refusal and the refusal order, the
+trail wrapper), `test_task_service_archived_list.py` (the move in every guard case; the link writes'
+task share lock before the list), `test_task_events.py`, `history/test_history_service.py`,
+`test_history_projection_consumer.py`, the daily-summary invalidation service and consumer,
+`api/test_task_move_schemas.py`, `mcp/domains/test_task_tools_schema.py` and `mcp/test_server.py`;
+jest `history-display.test.ts` (three wordings, named on a contact's feed, a `task_list` row left
+alone). Integration `tasks/test_task_service_move_to_list_integration.py` (a lapsed journal-only task
+joins below a closed task, stops lapsing and keeps everything; list → list keeps its date and leaves
+the source; one event; the no-op keeps its position; archived target, another user's list or task;
+over real connections a move during an archive, an archive during a move, two moves onto one list,
+a status edit during a move, a reorder of the source during a move and a move during one, and a contact link racing a move onto a list then archived — refused),
+the completeness inventory (two `WritePath`s, `find_by_id_for_share` classified as a read, the
+exclusion and its pin removed), the archived-list suites on all three surfaces,
+`api/test_task_move_endpoints.py` (200s, the no-op, eight malformed bodies, 404/409 codes, a second
+user's task and list), the 401 table, `mcp/test_task_tools_mcp.py::TestMoveTaskToList` /
+`TestMoveTaskToListRefusals` (`get_task` reads not lapsed, coerced ids refused), and
+`test_task_history_projection_e2e.py` (a join then a move projected with provenance and owner; the
+lifecycle drives the new type). `task_state` now includes list and position. E2E
+`task-activity-history.spec.ts` "a journal-only task added to a list and moved to another reads as
+history lines" (Firefox and Mobile Chrome, repeated 3×). Gates run locally: ruff and mypy, backend
+unit suite (5,996), the full backend integration suite in four chunks (5,055 passed, 7 pre-existing
+skips), `pnpm quality:check`, jest (3,381), the Playwright spec and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **Close the stale-list race on the link writes now** (user decision, plan question Q1 → a). The
+  trade-off: a link now waits behind an in-flight edit of the same task.
+- **Attach and detach lock their journal before the task.** Found while implementing Q1: with the
+  task share-locked first, a journal merge (journals `FOR UPDATE`, then the task rows it re-anchors)
+  could deadlock against an attach. Contact links need no such change — a contact merge never locks
+  task rows.
+- **One event type for membership**, reused by Phase 27 with `new = None`.
+- **An action sub-resource and a dedicated tool**, as the retarget is; a move repositions the task.
+
+**Notes for later phases:**
+- *Phase 27:* publish `TaskListMembershipChanged(previous, None)`; the history wording and the
+  invalidation entry are already in place. Delete `remove_from_list` from `NAMED_EXCLUSIONS` and its
+  pin.
+- *Phase 25 (reorder), merged first:* its reorders hold the list `FOR SHARE`, which a move's share
+  lock on its source never waits on, so the two meet only on the task row. Overlap tests cover both
+  orders: a reorder naming the moving task waits and refuses with `TASK_LIST_CHANGED`, and a move
+  during a reorder of its list waits and lands. A same-list move is a no-op, as Phase 25 asked.
+- *ITER21-002 Phase 16 (move UI):* use `POST /api/tasks/{id}/move`; `TestDataManager.moveTaskToList`
+  exists for e2e.
+- The Phase 14 lock note ("lists first, then the task") is superseded for services: every task write
+  locks the task first.
 
 #### Phase 27: Remove a task from its list
 

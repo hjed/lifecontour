@@ -136,6 +136,9 @@ def _fact(event: TaskEventRow) -> str:
             # A journal delete announces one fact per list task however many of
             # its links to the journal went, for the merge's reason.
             "TaskJournalLinksRemoved": "journal-links-removed",
+            # Joining, leaving and moving between lists are one fact: the
+            # task's list changed.
+            "TaskListMembershipChanged": "list-membership-changed",
             "TaskDeleted": "deleted",
         }[event.event_type]
 
@@ -303,6 +306,30 @@ async def _act_create_on_a_list_with_contacts(
 ) -> None:
     contact_id = await create_contact(fixtures.connection)
     await _act_create_on_a_list(fixtures, seeded, contact_ids=[contact_id])
+
+
+async def _seed_list_task(fixtures: _Fixtures) -> Seeded:
+    task_list = await seed_task_list(fixtures.connection, "Groceries")
+    assert task_list.id is not None
+    created = await fixtures.service.create_list_task(
+        user_id=USER_ID,
+        task_list_id=task_list.id,
+        text="buy the milk",
+        transaction=fixtures.connection,
+    )
+    assert created.id is not None
+    return Seeded(task_id=created.id)
+
+
+async def _act_move_to_a_new_list(fixtures: _Fixtures, seeded: Seeded) -> None:
+    task_list = await seed_task_list(fixtures.connection, "Hardware")
+    assert task_list.id is not None
+    await fixtures.service.move_to_list(
+        user_id=USER_ID,
+        task_id=seeded.task_id,
+        task_list_id=task_list.id,
+        transaction=fixtures.connection,
+    )
 
 
 async def _act_update_text(fixtures: _Fixtures, seeded: Seeded) -> None:
@@ -669,6 +696,20 @@ WRITE_PATHS: list[WritePath] = [
         expects=["updated:contact-changed"],
     ),
     WritePath(
+        name="add a journal-only task to a list",
+        ports=frozenset({"add_to_list"}),
+        seed=_seed_bare_task,
+        act=_act_move_to_a_new_list,
+        expects=["list-membership-changed"],
+    ),
+    WritePath(
+        name="move a task to another list",
+        ports=frozenset({"add_to_list"}),
+        seed=_seed_list_task,
+        act=_act_move_to_a_new_list,
+        expects=["list-membership-changed"],
+    ),
+    WritePath(
         name="delete",
         ports=frozenset({"delete"}),
         seed=_seed_bare_task,
@@ -711,6 +752,9 @@ PORT_READ_METHODS = frozenset(
     {
         "find_by_id",
         "find_by_id_for_update",
+        # The link writes' share-locked read of their task: holds the row
+        # against a move, writes nothing.
+        "find_by_id_for_share",
         "list_intermediate_journal_ids",
         "list_contact_ids",
         "find_tasks_for_journal",
@@ -755,9 +799,10 @@ PORT_READ_METHODS = frozenset(
 #
 # It holds the list-membership writes now (a user decision): the two reorders
 # for good (their callers, ``TaskService.reorder_task`` and
-# ``reorder_list_tasks``, publish nothing), and joining and leaving a list until
-# the phase that gives each a service path and its event — each of those phases
-# must delete its entry:
+# ``reorder_list_tasks``, publish nothing), and leaving a list until the phase
+# that gives it a service path and its event — that phase must delete its
+# entry. Joining a list left it when moving a task onto a list gained its
+# service and event:
 NAMED_EXCLUSIONS: dict[str, str] = {
     # Never announced, by specification: "reordering does not" emit an event or
     # appear in task history. This entry is permanent.
@@ -768,7 +813,6 @@ NAMED_EXCLUSIONS: dict[str, str] = {
     # Repository primitives with no service caller yet, so no write can happen
     # unannounced. The list-membership event lands with the service that calls
     # them; that phase removes the entry and adds a WritePath above.
-    "add_to_list": "no caller until the list-membership event (ITER21-001 Phase 26)",
     "remove_from_list": "no caller until removal from a list (ITER21-001 Phase 27)",
 }
 
@@ -1049,15 +1093,14 @@ class TestEveryPortWriteIsAccountedFor:
         It held one entry for several phases: the merge re-point, the write the
         journal domain performs on task rows, until it published. It now holds
         the list-membership writes: the two reorders for good (the spec gives them no
-        event), and joining and leaving a list only until the phases that give
-        them a caller and an event, each of which deletes its entry here. A test
+        event), and leaving a list only until the phase that gives it a caller
+        and an event, which deletes its entry here; joining a list has left. A test
         allowing "a few" exclusions would let the next one be added as easily as
         these were, so the set is pinned.
         """
         assert set(NAMED_EXCLUSIONS) == {
             "move_within_list",
             "arrange_open_tasks",
-            "add_to_list",
             "remove_from_list",
         }
 

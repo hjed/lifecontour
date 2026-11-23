@@ -135,7 +135,7 @@ def mock_task_repo() -> AsyncMock:
     rename a failure instead of a silent pass.
     """
     repo = AsyncMock(spec=TaskRepository)
-    repo.find_by_id.return_value = make_task()
+    repo.find_by_id_for_share.return_value = make_task()
     repo.add_intermediate_journal.return_value = True
     repo.remove_intermediate_journal.return_value = True
     return repo
@@ -156,7 +156,7 @@ def mock_journal_repo() -> AsyncMock:
     survive the port being renamed underneath it.
     """
     repo = AsyncMock(spec=JournalRepository)
-    repo.find_by_ids_for_user.return_value = [make_journal()]
+    repo.find_and_lock_by_ids_for_user.return_value = [make_journal()]
     return repo
 
 
@@ -301,7 +301,7 @@ class TestAttachingAnIntermediateJournal:
         The answer is the *journal domain's* not-found error rather than a
         task-shaped one, so it names the journal and the id the caller got wrong.
         """
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(JournalNotFoundError) as exc_info:
             await attach(service, mock_transaction, journal_id=UNKNOWN_JOURNAL_ID)
@@ -323,13 +323,13 @@ class TestAttachingAnIntermediateJournal:
         somebody else's journal simply absent from the result rather than
         something the service has to compare and reject afterwards.
         """
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(JournalNotFoundError) as exc_info:
             await attach(service, mock_transaction)
 
         assert str(exc_info.value) == str(JournalNotFoundError(JOURNAL_ID))
-        mock_journal_repo.find_by_ids_for_user.assert_awaited_once_with(
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
             USER_ID, [JOURNAL_ID]
         )
 
@@ -342,7 +342,7 @@ class TestAttachingAnIntermediateJournal:
         mock_transaction: AsyncMock,
     ) -> None:
         """It is already linked, in a role an intermediate link cannot express."""
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(CREATING_JOURNAL_ID)
         ]
 
@@ -363,7 +363,7 @@ class TestAttachingAnIntermediateJournal:
         mock_journal_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(DUE_JOURNAL_ID)
         ]
 
@@ -387,7 +387,7 @@ class TestAttachingAnIntermediateJournal:
         anchor moves for nobody; a message that only refused would leave a caller
         guessing which.
         """
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(DUE_JOURNAL_ID)
         ]
 
@@ -396,7 +396,7 @@ class TestAttachingAnIntermediateJournal:
 
         assert "retarget" in due_info.value.message.lower()
 
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(CREATING_JOURNAL_ID)
         ]
 
@@ -419,7 +419,7 @@ class TestAttachingAnIntermediateJournal:
         anchor is named, because it is the one that can never be moved and
         therefore the more useful half to tell the caller about.
         """
-        mock_task_repo.find_by_id.return_value = make_task(
+        mock_task_repo.find_by_id_for_share.return_value = make_task(
             creating_journal_id=JOURNAL_ID, due_journal_id=JOURNAL_ID
         )
 
@@ -450,26 +450,21 @@ class TestAttachingAnIntermediateJournal:
         mock_task_repo.save.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_the_read_does_not_lock_the_task_row(
+    async def test_the_task_is_share_locked_not_update_locked(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """The plain read is used, and the locking one is not — deliberately.
+        """``FOR SHARE``, not the update lock ``set_status`` takes.
 
-        ``set_status`` and ``retarget_due_journal`` lock because they decide a
-        *rule* from the state they read and write that decision back. The rule
-        here is different: the only state that can move underneath it is a
-        concurrent retarget making this journal the due anchor, and the resulting
-        shape — a due anchor that is also an intermediate link — is one
-        ``retarget_due_journal`` produces on its own and Phase 7 explicitly
-        declined to clean up. A lock would narrow a window onto an outcome that
-        is legitimate either side of it.
+        No status rule is decided here, so the task is not held against other
+        readers; the share lock exists so an in-flight move finishes before the
+        task's list is checked for archiving.
         """
         await attach(service, mock_transaction)
 
-        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, USER_ID)
+        mock_task_repo.find_by_id_for_share.assert_awaited_once_with(TASK_ID, USER_ID)
         mock_task_repo.find_by_id_for_update.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -535,17 +530,20 @@ class TestDetachingAnIntermediateJournal:
         ``task_intermediate_journals.journal_id`` cascades, so a deleted
         journal's links are already gone — the specification's *"deleting a
         journal that is only an intermediate link is permitted"* — and demanding
-        the journal here would fail exactly the tidy-up call. Asserted on
-        ``mock_calls``: the journal port is not touched at all.
+        the journal here would fail exactly the tidy-up call. The journal is
+        only *locked* — ahead of the task, in a journal merge's order — and its
+        absence decides nothing.
         """
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         assert (
             await detach(service, mock_transaction, journal_id=UNKNOWN_JOURNAL_ID)
             is True
         )
 
-        assert mock_journal_repo.mock_calls == []
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, [UNKNOWN_JOURNAL_ID]
+        )
 
     @pytest.mark.asyncio
     async def test_the_creating_journal_cannot_be_detached(
@@ -790,7 +788,7 @@ class TestAttachingAnnouncesTheLink:
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError):
             await attach(service, mock_transaction)
@@ -805,7 +803,7 @@ class TestAttachingAnnouncesTheLink:
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(JournalNotFoundError):
             await attach(service, mock_transaction, journal_id=UNKNOWN_JOURNAL_ID)
@@ -820,7 +818,7 @@ class TestAttachingAnnouncesTheLink:
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_journal_repo.find_by_ids_for_user.return_value = [
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = [
             make_journal(DUE_JOURNAL_ID)
         ]
 
@@ -918,7 +916,7 @@ class TestDetachingAnnouncesTheRemoval:
         accident, since nothing about it looks like a refusal.
         """
         mock_task_repo.remove_intermediate_journal.return_value = False
-        mock_task_repo.find_by_id.return_value = make_task()
+        mock_task_repo.find_by_id_for_share.return_value = make_task()
 
         await detach(service, mock_transaction)
 
@@ -979,7 +977,7 @@ class TestDetachingAnnouncesTheRemoval:
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError):
             await detach(service, mock_transaction)
@@ -1044,7 +1042,7 @@ class TestUnreachableTasks:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await attach(service, mock_transaction)
@@ -1059,13 +1057,15 @@ class TestUnreachableTasks:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await attach(service, mock_transaction, user_id=OTHER_USER_ID)
 
         assert str(exc_info.value) == str(TaskNotFoundError(TASK_ID))
-        mock_task_repo.find_by_id.assert_awaited_once_with(TASK_ID, OTHER_USER_ID)
+        mock_task_repo.find_by_id_for_share.assert_awaited_once_with(
+            TASK_ID, OTHER_USER_ID
+        )
 
     @pytest.mark.asyncio
     async def test_detach_from_another_users_task_is_indistinguishable(
@@ -1074,7 +1074,7 @@ class TestUnreachableTasks:
         mock_task_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        mock_task_repo.find_by_id.return_value = None
+        mock_task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError) as exc_info:
             await detach(service, mock_transaction, user_id=OTHER_USER_ID)
@@ -1083,26 +1083,25 @@ class TestUnreachableTasks:
         mock_task_repo.remove_intermediate_journal.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_an_unreachable_task_is_answered_before_the_journal_is_read(
+    async def test_an_unreachable_task_outranks_an_unknown_journal(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
         mock_journal_repo: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """The task gate comes first, so a foreign task hides everything behind it.
+        """A 404 on the task beats a 404 on the journal.
 
-        Both reads are scoped to the acting user, so neither ordering can leak
-        another user's data. The tie is broken by which resource the caller named
-        as the subject: a 404 on the task beats a 404 on the journal.
+        The journal is locked first — a journal merge's order — but its absence
+        is judged only after the task's. Both reads are scoped to the acting
+        user, so neither ordering can leak another user's data; the tie is
+        broken by which resource the caller named as the subject.
         """
-        mock_task_repo.find_by_id.return_value = None
-        mock_journal_repo.find_by_ids_for_user.return_value = []
+        mock_task_repo.find_by_id_for_share.return_value = None
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
 
         with pytest.raises(TaskNotFoundError):
             await attach(service, mock_transaction, journal_id=UNKNOWN_JOURNAL_ID)
-
-        assert mock_journal_repo.mock_calls == []
 
 
 @pytest.mark.unit

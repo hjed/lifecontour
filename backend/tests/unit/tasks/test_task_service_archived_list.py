@@ -56,6 +56,9 @@ from tests.unit.tasks.task_doubles import (
 pytestmark = pytest.mark.unit
 
 ARCHIVED_AT = datetime.datetime(2026, 11, 1, 9, 0, tzinfo=datetime.UTC)
+# Where a move sends the task: an active list of the user's, so the refusal is
+# the task's own archived list rather than the target.
+OTHER_TASK_LIST_ID = TASK_LIST_ID + 1
 # Far enough ahead that the retarget's future-dated rule holds on any clock.
 FUTURE = datetime.datetime(2099, 1, 1, 9, 0, tzinfo=datetime.UTC)
 
@@ -114,6 +117,8 @@ def task_repo(task: Task) -> AsyncMock:
 
     repo.find_by_id.return_value = task
     repo.find_by_id_for_update.return_value = task
+    # The link writes hold the task with the share lock.
+    repo.find_by_id_for_share.return_value = task
     repo.save.side_effect = save
     repo.delete.return_value = task.task_list_id
     repo.add_contacts.return_value = [CONTACT_ID]
@@ -128,6 +133,10 @@ def task_list_repo() -> AsyncMock:
     """A list repository whose list is archived unless a test says otherwise."""
     repo = AsyncMock(spec=TaskListRepository)
     repo.find_by_id_for_share.return_value = make_task_list(archived=True)
+    # A move's target, locked for update; active, so the task's own list refuses.
+    repo.find_by_id_for_update.return_value = make_task_list(
+        archived=False, task_list_id=OTHER_TASK_LIST_ID
+    )
     # The retarget's early refusal reads the list plainly, before any lock.
     repo.find_by_id.return_value = make_task_list(archived=True)
     return repo
@@ -143,10 +152,15 @@ def set_list(task_list_repo: AsyncMock, task_list: TaskList | None) -> None:
 def journal_repo() -> AsyncMock:
     """Journals for the retarget (locked) and the attach (plain read)."""
     repo = AsyncMock()
-    repo.find_and_lock_by_ids_for_user.return_value = [
-        make_journal(DUE_JOURNAL_ID, FUTURE),
-        make_journal(NEW_DUE_JOURNAL_ID, FUTURE),
-    ]
+    journals = {
+        journal_id: make_journal(journal_id, FUTURE)
+        for journal_id in (DUE_JOURNAL_ID, NEW_DUE_JOURNAL_ID, INTERMEDIATE_JOURNAL_ID)
+    }
+
+    async def lock(_user_id: str, journal_ids: list[int]) -> list[Journal]:
+        return [journals[i] for i in sorted(journal_ids) if i in journals]
+
+    repo.find_and_lock_by_ids_for_user.side_effect = lock
     repo.find_by_ids_for_user.return_value = [
         make_journal(INTERMEDIATE_JOURNAL_ID, FUTURE)
     ]
@@ -220,6 +234,15 @@ async def _retarget(service: TaskService, tx: AsyncMock) -> object:
     )
 
 
+async def _move_to_list(service: TaskService, tx: AsyncMock) -> object:
+    return await service.move_to_list(
+        user_id=USER_ID,
+        task_id=TASK_ID,
+        task_list_id=OTHER_TASK_LIST_ID,
+        transaction=tx,
+    )
+
+
 async def _link_contact(service: TaskService, tx: AsyncMock) -> object:
     return await service.link_contact(
         user_id=USER_ID, task_id=TASK_ID, contact_id=CONTACT_ID, transaction=tx
@@ -256,6 +279,7 @@ WRITES: list[tuple[str, Write]] = [
     ("flag_and_icon", _flag_and_icon),
     ("delete", _delete),
     ("retarget", _retarget),
+    ("move_to_list", _move_to_list),
     ("link_contact", _link_contact),
     ("unlink_contact", _unlink_contact),
     ("attach_intermediate_journal", _attach),
@@ -271,6 +295,7 @@ LOCKED_WRITES = [(n, w) for n, w in WRITES if n != "retarget"]
 # asserted on its own because it is the one write that runs before the guard.
 _ROW_WRITES = (
     "save",
+    "add_to_list",
     "add_contacts",
     "remove_contact",
     "add_intermediate_journal",
@@ -354,6 +379,110 @@ class TestAnArchivedListRefusesEveryTaskWrite:
         task_repo.find_by_id.assert_not_awaited()
         task_repo.find_by_id_for_update.assert_not_awaited()
         task_list_repo.find_by_id_for_share.assert_awaited_once_with(123, USER_ID)
+
+
+LINK_WRITES = [
+    ("link_contact", _link_contact),
+    ("unlink_contact", _unlink_contact),
+    ("attach_intermediate_journal", _attach),
+    ("detach_intermediate_journal", _detach),
+]
+
+
+class TestTheLinkWritesShareLockTheTask:
+    """A link write holds the task ``FOR SHARE`` before trusting its list.
+
+    The task can change lists, so a plain read could see the list it is
+    leaving while a move commits it onto a list that is then archived. The
+    share lock waits for an in-flight move, so the list read after it is the
+    task's current one; two link writes on one task share it.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "write",
+        [w for _, w in LINK_WRITES],
+        ids=[n for n, _ in LINK_WRITES],
+    )
+    async def test_the_task_is_read_with_the_share_lock_then_its_list(
+        self,
+        write: Write,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task_list_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        order: list[str] = []
+        task = anchored_list_task()
+
+        async def share_task(*_: object) -> Task:
+            order.append("task")
+            return task
+
+        async def share_list(*_: object) -> TaskList:
+            order.append("list")
+            return make_task_list(archived=False)
+
+        task_repo.find_by_id_for_share.side_effect = share_task
+        task_list_repo.find_by_id_for_share.side_effect = share_list
+
+        await write(service, mock_transaction)
+
+        task_repo.find_by_id_for_share.assert_awaited_once_with(TASK_ID, USER_ID)
+        task_repo.find_by_id.assert_not_awaited()
+        task_repo.find_by_id_for_update.assert_not_awaited()
+        assert order == ["task", "list"]
+
+
+class TestTheJournalLinkWritesLockTheJournalFirst:
+    """Journal, then task, then list — a journal merge's order.
+
+    A merge locks its journals ``FOR UPDATE`` and then updates the task rows it
+    re-anchors. A link write that held the task first and asked for the journal
+    second would deadlock against it, so attach and detach lock the journal
+    ``FOR KEY SHARE`` before the task.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "write",
+        [_attach, _detach],
+        ids=["attach_intermediate_journal", "detach_intermediate_journal"],
+    )
+    async def test_the_journal_is_locked_before_the_task(
+        self,
+        write: Write,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task_list_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        order: list[str] = []
+        task = anchored_list_task()
+
+        async def lock_journals(_user_id: str, ids: list[int]) -> list[Journal]:
+            order.append("journal")
+            return [make_journal(i, FUTURE) for i in ids]
+
+        async def share_task(*_: object) -> Task:
+            order.append("task")
+            return task
+
+        async def share_list(*_: object) -> TaskList:
+            order.append("list")
+            return make_task_list(archived=False)
+
+        journal_repo.find_and_lock_by_ids_for_user.side_effect = lock_journals
+        task_repo.find_by_id_for_share.side_effect = share_task
+        task_list_repo.find_by_id_for_share.side_effect = share_list
+
+        await write(service, mock_transaction)
+
+        journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, [INTERMEDIATE_JOURNAL_ID]
+        )
+        assert order == ["journal", "task", "list"]
 
 
 class TestTheRetargetKeepsTheLockOrder:
@@ -511,8 +640,16 @@ class TestWhatIsCheckedFirst:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "write",
-        [_set_status, _retarget, _link_contact, _unlink_contact, _attach, _detach],
-        ids=["set_status", "retarget", "link", "unlink", "attach", "detach"],
+        [
+            _set_status,
+            _retarget,
+            _move_to_list,
+            _link_contact,
+            _unlink_contact,
+            _attach,
+            _detach,
+        ],
+        ids=["set_status", "retarget", "move", "link", "unlink", "attach", "detach"],
     )
     async def test_a_missing_task_is_still_not_found(
         self,
@@ -524,6 +661,7 @@ class TestWhatIsCheckedFirst:
     ) -> None:
         task_repo.find_by_id.return_value = None
         task_repo.find_by_id_for_update.return_value = None
+        task_repo.find_by_id_for_share.return_value = None
 
         with pytest.raises(TaskNotFoundError):
             await write(service, mock_transaction)

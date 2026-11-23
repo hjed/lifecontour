@@ -625,6 +625,69 @@ class TestATaskChangeFollowsItsDueJournal:
         assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
 
     @pytest.mark.asyncio
+    async def test_a_dated_task_joining_a_list_makes_its_due_day_stale(
+        self,
+        service: DailySummaryInvalidationService,
+        task_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """It drops out of its due journal's summary, which leaves lists out.
+
+        The membership event names no journal, so the task is read — and a
+        journal-only task keeps its due journal when it joins a list.
+        """
+        task_repo.find_by_id.return_value = Task(
+            id=5,
+            user_id=USER_ID,
+            text="book the venue",
+            creating_journal_id=JOURNAL_ID,
+            due_journal_id=JOURNAL_ID,
+            task_list_id=9,
+            position=0,
+        )
+        journal_repo.find_by_id.return_value = _journal(
+            start=_instant(20), end=_instant(20, 10)
+        )
+
+        await service.invalidate_for_event(
+            "TaskListMembershipChanged",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "changed_fields": {"task_list_id": [None, 9]},
+            },
+        )
+
+        assert _invalidated(summary_repo) == {
+            (USER_ID, datetime.date(2026, 4, 20), datetime.date(2026, 4, 20))
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_undated_list_task_moving_lists_makes_nothing_stale(
+        self,
+        service: DailySummaryInvalidationService,
+        task_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        task_repo.find_by_id.return_value = Task(
+            id=5, user_id=USER_ID, text="pack the tent", task_list_id=10, position=3
+        )
+
+        await service.invalidate_for_event(
+            "TaskListMembershipChanged",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "changed_fields": {"task_list_id": [9, 10]},
+            },
+        )
+
+        journal_repo.find_by_id.assert_not_awaited()
+        summary_repo.invalidate_for_range.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_a_task_due_beyond_the_week_makes_nothing_stale(
         self,
         service: DailySummaryInvalidationService,

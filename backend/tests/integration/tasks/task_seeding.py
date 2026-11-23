@@ -516,6 +516,19 @@ async def stored_due_date(conn: AsyncConnection, task_id: int) -> date | None:
     return due_date
 
 
+async def stored_membership(
+    conn: AsyncConnection, task_id: int
+) -> tuple[int | None, int | None]:
+    """The ``task_list_id`` and ``position`` columns as the database holds them."""
+    row = (
+        await conn.execute(
+            text("SELECT task_list_id, position FROM tasks WHERE id = :task_id"),
+            {"task_id": task_id},
+        )
+    ).one()
+    return row.task_list_id, row.position
+
+
 async def mark_task(
     conn: AsyncConnection, task_id: int, *, flagged: bool, icon: str | None
 ) -> None:
@@ -812,6 +825,8 @@ class ArchivedListTask:
     unlinked_journal_id: int
     contact_id: int
     unlinked_contact_id: int
+    # An active list of the same owner's, for a move off the archived one.
+    active_list_id: int
 
 
 async def seed_archived_list_task(
@@ -832,6 +847,8 @@ async def seed_archived_list_task(
     unlinked_contact_id = await create_contact(conn, first_name="Tom")
     task_list = await seed_task_list(conn, "Old trip", archived_at=ARCHIVED_AT)
     assert task_list.id is not None
+    active_list = await seed_task_list(conn, "Next trip")
+    assert active_list.id is not None
     task_id = await create_list_task(
         conn,
         task_list_id=task_list.id,
@@ -848,6 +865,7 @@ async def seed_archived_list_task(
         unlinked_journal_id=unlinked_journal_id,
         contact_id=contact_id,
         unlinked_contact_id=unlinked_contact_id,
+        active_list_id=active_list.id,
     )
 
 
@@ -855,8 +873,8 @@ async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
     """Everything a task write could change, read straight from the tables.
 
     Existence, status, text, both anchors, both kinds of link, the flag and
-    icon, and the due date — so one equality says a refused write left the task
-    exactly as it was.
+    icon, the due date, and the list and position — so one equality says a
+    refused write left the task exactly as it was.
     """
     if not await task_exists(conn, task_id):
         return (False,)
@@ -869,6 +887,7 @@ async def task_state(conn: AsyncConnection, task_id: int) -> tuple[object, ...]:
         await linked_contact_ids(conn, task_id),
         await stored_marks(conn, task_id),
         await stored_due_date(conn, task_id),
+        await stored_membership(conn, task_id),
     )
 
 

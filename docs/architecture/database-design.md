@@ -842,17 +842,23 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
   What keeps that from deadlocking is the **mode** of the list lock:
   - Every task write takes its list `FOR SHARE` (`TaskService._hold_list_writable`, ITER21-001
     Phase 18): text, status, flag, icon and retarget **after** locking their task; the contact and
-    journal link writes after a plain read, before a `FOR KEY SHARE` on the task that a reorder's
-    `FOR NO KEY UPDATE` does not conflict with.
+    journal link writes after holding the task `FOR SHARE` (attach and detach take their journal
+    `FOR KEY SHARE` before that, in a journal merge's order), which a reorder's `FOR NO KEY UPDATE`
+    on the same task queues behind.
   - The reorders (`move_within_list`, `arrange_open_tasks`) take the list `FOR SHARE` too, then
     every open task on it (`FOR NO KEY UPDATE ... ORDER BY id`). Share locks never wait on each
     other, so a reorder and a task write meet only on task rows and no cycle can form. Until Phase
     25 the reorder took the list `FOR NO KEY UPDATE`, which deadlocked against a task write holding
     one of its tasks; `test_task_service_reorder_integration.py` reproduces that interleaving.
-  - Joins, removals and creates on a list take it `FOR NO KEY UPDATE`, which conflicts with the
-    share lock, so they queue against a reorder; none of them holds a task lock first. A writer that
-    locks a task and then asks for its list *exclusively* would break this — a same-list "move"
-    (Phase 26) must be refused or a no-op, and a list delete (Phase 29) locks the tasks first.
+  - Creates on a list take it `FOR NO KEY UPDATE`, which conflicts with the share lock, so they
+    queue against a reorder; they hold no task lock first.
+  - **A move** (`TaskService.move_to_list`, Phase 26) locks its task, then both lists in ascending
+    id — its own list `FOR SHARE`, the target `FOR NO KEY UPDATE` — before `add_to_list` re-takes
+    the target's lock. The only list it takes exclusively is one the task is not yet on, so no
+    reorder of that list holds or waits for the task; a reorder of the source list waits on the task
+    and then refuses with `TASK_LIST_CHANGED`. A same-list move is a no-op under the share lock. A
+    writer that locks a task and then asks for *its own* list exclusively would break this, and a
+    list delete (Phase 29) locks the tasks first.
 
   A task write locks only its own task, so a reorder's named task or neighbour can still close
   while the reorder waits: it then refuses with `TaskListChangedConcurrentlyError` (409,
@@ -870,11 +876,10 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
   `ix_tasks_task_list_id_closed_at` (`(task_list_id, closed_at DESC, id DESC) WHERE closed_at IS NOT
   NULL`) serves the page. Existing closed tasks were backfilled from `updated_at`. It is not on the
   `Task` entity. Seed rows that set a closed status by hand must set `closed_at` too.
-- **No event yet for joining or leaving.** The repository never publishes; the services that call
-  `add_to_list` (Phase 26) and `remove_from_list` (Phase 27) publish the list-membership event, and
-  until then both are named exclusions in `test_task_event_completeness_integration.py`.
-  `move_within_list` and `arrange_open_tasks` are excluded permanently — the spec gives reordering
-  no event.
+- **Membership events.** The repository never publishes. `TaskService.move_to_list` calls
+  `add_to_list` and publishes `TaskListMembershipChanged`; `remove_from_list` has no caller yet and
+  stays a named exclusion in `test_task_event_completeness_integration.py` until removal ships.
+  `move_within_list` and `arrange_open_tasks` are excluded permanently — the spec gives reordering no event.
 
 ### Photo Integration (Iteration 4)
 ```sql

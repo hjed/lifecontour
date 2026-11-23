@@ -84,6 +84,7 @@ from app.api.tasks.schemas import (
     TaskContactLinkRequest,
     TaskCreateRequest,
     TaskIntermediateJournalLinkRequest,
+    TaskMoveRequest,
     TaskReadResponse,
     TaskReorderRequest,
     TaskResource,
@@ -635,6 +636,50 @@ async def reorder_task(
     return TaskCollectionResponse(
         data=[_to_resource(task, trail, base_url) for task, trail in reordered]
     )
+
+
+@router.post("/tasks/{task_id}/move")
+@inject
+async def move_task_to_list(
+    task_id: DatabaseIdPath,
+    move_request: TaskMoveRequest,
+    request: Request,
+    task_service: FromDishka[TaskService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskResponse:
+    """Move a task onto one of your lists, or from one list to another.
+
+    The task joins the **bottom** of the list. A journal-only task added to a
+    list keeps its journals and due journal and **stops lapsing**: past its date
+    it reads as overdue on the list instead. A list task moved to another list
+    keeps its due date or due journal. Status, flag, icon and contacts are kept
+    either way, and a task in any status may move.
+
+    An action sub-resource, as the retarget is: a move repositions the task, so
+    it is not a field on ``PATCH``. Moving a task to the list it is already on
+    is a no-op — nothing changes and no history is written; reorder within a
+    list instead. The response is the task with its intermediate journals.
+
+    Raises:
+        400: A body of another type, an unknown attribute, or a ``task_list_id``
+             that is not a JSON integer within an ``INTEGER`` column's range
+             (``null`` included: leaving a list is not a move).
+        404: ``TASK_NOT_FOUND`` when the task does not exist or is not yours;
+             ``TASK_LIST_NOT_FOUND`` when the list does not exist or is not
+             yours. Each pair is one answer by design.
+        409: ``TASK_LIST_ARCHIVED`` when the task's current list is archived
+             (named first), or else when the target list is. Nothing is written.
+    """
+    moved, trail = await task_service.move_to_list_with_trail(
+        user_id=user.id,
+        task_id=task_id,
+        task_list_id=move_request.data.attributes.task_list_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    return TaskResponse(data=_to_resource(moved, trail, get_request_base_url(request)))
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

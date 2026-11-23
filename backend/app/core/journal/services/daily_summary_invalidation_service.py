@@ -108,6 +108,9 @@ TASK_SPAN_EVENTS = frozenset(
         "TaskUpdated",
         "TaskDueJournalRetargeted",
         "TaskJournalLinksRepointed",
+        # A dated task joining a list leaves its due day's summary, which leaves
+        # list tasks out; the event names no journal, so the task is read.
+        "TaskListMembershipChanged",
     }
 )
 

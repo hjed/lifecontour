@@ -838,6 +838,10 @@ class TestAJournalThatVanishesMidWrite:
     promised a 404, so the violation is mapped back rather than escaping as the
     500 a raw ``IntegrityError`` becomes.
 
+    The journal is now read ``FOR KEY SHARE``, which holds it against another
+    transaction's delete; the delete here runs on the same connection, which a
+    lock cannot exclude, so the mapping is still what answers it.
+
     Unlike the batched contact insert this needs **no savepoint**: one journal is
     named per call, so nothing has to run against the aborted transaction to work
     out which id went missing.
@@ -861,10 +865,12 @@ class TestAJournalThatVanishesMidWrite:
 
             deleted = False
 
-            async def find_by_ids_for_user(
+            async def find_and_lock_by_ids_for_user(
                 self, user_id: str, journal_ids: list[int]
             ) -> list[Journal]:
-                found = await super().find_by_ids_for_user(user_id, journal_ids)
+                found = await super().find_and_lock_by_ids_for_user(
+                    user_id, journal_ids
+                )
                 if not self.deleted:
                     self.deleted = True
                     await delete_journal(async_connection, mentioned)

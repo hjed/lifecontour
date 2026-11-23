@@ -93,6 +93,12 @@ class TestWhatThisConsumerListensFor:
     ) -> None:
         assert consumer._matches_event_type(event_type) is False
 
+    def test_a_task_list_membership_change_is_subscribed(
+        self, consumer: SummaryInvalidationConsumer
+    ) -> None:
+        """A dated task joining a list leaves its due day's summary."""
+        assert consumer._matches_event_type("TaskListMembershipChanged") is True
+
     def test_contact_deleted_is_subscribed(
         self, consumer: SummaryInvalidationConsumer
     ) -> None:

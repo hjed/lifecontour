@@ -61,18 +61,19 @@ class TaskRepository(ABC):
 
     - Every task write takes its list ``FOR SHARE`` (``TaskService``'s
       ``_hold_list_writable``): text, status, flag and retarget after locking
-      their own task; the link writes after a plain read, before their
-      ``FOR KEY SHARE`` on the task, which a reorder's lock does not conflict
-      with.
+      their own task; the link writes after :meth:`find_by_id_for_share` on
+      their task, which a reorder's lock queues behind.
     - A reorder (:meth:`move_within_list`, :meth:`arrange_open_tasks`) takes the
       list ``FOR SHARE`` too, then every open task on it. Share locks never wait
       on each other, so a reorder and a task write meet only on task rows and
       cannot form a cycle. (An exclusive list lock here did deadlock against
-      them; ITER21-001 Phase 25 changed it.)
-    - Joins, removals and creates on a list take it ``FOR NO KEY UPDATE``. That
-      conflicts with the share lock, so they queue against a reorder — and none
-      of them holds a task lock before it, which is what keeps that pairing
-      safe. A later writer that locks a task and then asks for its list
+      them.)
+    - Creates on a list take it ``FOR NO KEY UPDATE`` holding no task lock.
+    - A move locks its task, then both lists in ascending id: the task's own
+      list ``FOR SHARE`` and the target ``FOR NO KEY UPDATE``, then calls
+      :meth:`add_to_list`. The one list it takes exclusively is one the task is
+      not yet on, so no reorder of that list holds or waits for the task. A
+      later writer that locks a task and then asks for *the task's own* list
       exclusively would break this, and must not.
 
     Re-locking a row the same transaction holds is free. A journal merge
@@ -135,6 +136,22 @@ class TaskRepository(ABC):
         Args:
             task_id: The task id to look up
             user_id: The acting user; a task owned by anyone else is not found
+
+        Returns:
+            The task, or ``None`` when it does not exist or is not the user's.
+        """
+
+    @abstractmethod
+    async def find_by_id_for_share(self, task_id: int, user_id: str) -> Task | None:
+        """Find one of the user's tasks, holding it against a concurrent move.
+
+        Same result as :meth:`find_by_id`, with the row held ``FOR SHARE`` until
+        the calling transaction ends. For a write *beside* the task — a contact
+        or journal link — that trusts the task's ``task_list_id`` to decide
+        whether the task is writable: the share lock conflicts with
+        :meth:`find_by_id_for_update`, which a move takes, so the write waits
+        for an in-flight move and then reads the list the task is on now. Two
+        link writes on one task share it.
 
         Returns:
             The task, or ``None`` when it does not exist or is not the user's.

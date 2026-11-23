@@ -45,6 +45,7 @@ from app.core.tasks.models.events import (
     TaskJournalLinksRemoved,
     TaskJournalLinksRepointed,
     TaskJournalUnlinked,
+    TaskListMembershipChanged,
     TaskUpdated,
     journal_field_name,
 )
@@ -147,6 +148,33 @@ def make_retargeted(
         previous_due_journal_id=DUE_JOURNAL_ID,
         due_journal_id=NEW_DUE_JOURNAL_ID,
         previous_status=previous_status,
+        source=source,
+        changed_by=changed_by,
+        transaction=transaction,
+    )
+
+
+OTHER_TASK_LIST_ID = TASK_LIST_ID + 1
+
+
+def make_membership_changed(
+    *,
+    previous_task_list_id: int | None = TASK_LIST_ID,
+    task_list_id: int | None = OTHER_TASK_LIST_ID,
+    source: Provenance = Provenance.SYSTEM,
+    changed_by: str = "system",
+    transaction: AsyncMock | None = None,
+) -> TaskListMembershipChanged:
+    """A ``TaskListMembershipChanged`` over the shared task constants.
+
+    The default is a list task moving from ``TASK_LIST_ID`` to the next list; a
+    journal-only task joining one passes ``previous_task_list_id=None``.
+    """
+    return TaskListMembershipChanged(
+        task_id=TASK_ID,
+        user_id=USER_ID,
+        previous_task_list_id=previous_task_list_id,
+        task_list_id=task_list_id,
         source=source,
         changed_by=changed_by,
         transaction=transaction,
@@ -1510,6 +1538,83 @@ class TestTaskDeleted:
         assert event.transaction is transaction
 
 
+class TestTaskListMembershipChanged:
+    """What a move onto, or between, task lists publishes.
+
+    **One type for every membership change.** Joining a list, moving between
+    lists and (later) leaving one are the same fact — ``task_list_id`` moved —
+    so they share one event whose ``changed_fields`` carries the pair, and the
+    history projection reads it as any other field change. Position is never in
+    the payload: reordering is not history.
+    """
+
+    def test_identifies_itself_as_a_membership_event(self) -> None:
+        event = make_membership_changed()
+
+        assert event.event_type == "TaskListMembershipChanged"
+        assert event.event_id == (
+            f"task_list_membership_changed_{TASK_ID}_{event.occurred_at.isoformat()}"
+        )
+
+    def test_aggregate_id_is_the_integer_task_id(self) -> None:
+        """The task, not either list: the history this projects is the task's."""
+        event = make_membership_changed()
+
+        assert event.aggregate_id == TASK_ID
+        assert isinstance(event.aggregate_id, int)
+
+    def test_a_move_carries_exactly_the_documented_keys(self) -> None:
+        event = make_membership_changed()
+
+        assert event.event_data == {
+            "task_id": TASK_ID,
+            "user_id": USER_ID,
+            "changed_fields": {"task_list_id": (TASK_LIST_ID, OTHER_TASK_LIST_ID)},
+            "source": Provenance.SYSTEM.value,
+            "changed_by": "system",
+        }
+
+    def test_a_journal_only_task_joining_a_list_moves_from_none(self) -> None:
+        change = make_membership_changed(previous_task_list_id=None).event_data[
+            "changed_fields"
+        ]["task_list_id"]
+
+        assert len(change) == 2
+        assert change[0] is None
+        assert change[1] == OTHER_TASK_LIST_ID
+
+    def test_leaving_a_list_moves_to_none(self) -> None:
+        """The shape the removal path publishes with the same type."""
+        change = make_membership_changed(task_list_id=None).event_data[
+            "changed_fields"
+        ]["task_list_id"]
+
+        assert change[0] == TASK_LIST_ID
+        assert change[1] is None
+
+    def test_provenance_and_actor_are_carried(self) -> None:
+        event = make_membership_changed(source=Provenance.MCP, changed_by="mcp")
+
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+
+    def test_carries_the_transaction_it_was_given(self) -> None:
+        transaction = AsyncMock()
+
+        event = make_membership_changed(transaction=transaction)
+
+        assert event.transaction is transaction
+
+    def test_the_pair_reaches_the_projection_as_an_indexable_two_list(self) -> None:
+        event = make_membership_changed(previous_task_list_id=None)
+
+        change = json.loads(json.dumps(event.event_data))["changed_fields"][
+            "task_list_id"
+        ]
+
+        assert change == [None, OTHER_TASK_LIST_ID]
+
+
 class TestEventIdentity:
     """``event_id`` is what dedup keys on, so collisions are the risk."""
 
@@ -1530,9 +1635,10 @@ class TestEventIdentity:
             make_repointed().event_id,
             make_removed().event_id,
             make_deleted().event_id,
+            make_membership_changed().event_id,
         }
 
-        assert len(ids) == 8
+        assert len(ids) == 9
 
     def test_an_id_is_separated_from_its_neighbours_by_its_own_timestamp(self) -> None:
         """Two events of one type on one task are told apart by ``occurred_at``.
