@@ -104,11 +104,13 @@ describe('statusActions', () => {
   });
 
   /**
-   * A cancelled task has exactly one exit and it is not a status call.
+   * A cancelled journal-only task has exactly one exit and it is not a status
+   * call.
    *
-   * The service refuses `cancelled → done` and `cancelled → not done` alike —
-   * "cancelled is left only by retargeting" — so either button could do nothing
-   * but draw a 409. Resurrection arrives with the retarget dialog.
+   * The service refuses `cancelled → done` and `cancelled → not done` alike for
+   * it — "cancelled is left only by retargeting" — so either button could do
+   * nothing but draw a 409. Resurrection arrives with the retarget dialog. (A
+   * list task is reopened by its status; this table is not list-aware yet.)
    */
   it('offers a cancelled task no status action at all', () => {
     expect(statusActions(TaskStatus.CANCELLED)).toEqual([]);

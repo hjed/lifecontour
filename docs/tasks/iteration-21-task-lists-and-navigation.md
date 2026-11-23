@@ -2141,14 +2141,93 @@ there is no acknowledgement, and the status is kept.
 - [ ] Lifts Phase 20's not-due-in-a-journal retarget refusal: an undated or due-date list task can be given a due journal; `TaskListTaskNotDueInJournalError` and `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are removed, and a journal delete racing the change still ends cleanly (see Phase 20's notes).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
-#### Phase 24: Direct reopen of list tasks
+#### Phase 24: Direct reopen of list tasks ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 19.
-**Estimated diff:** ~60 production → **~500 tracked**
+**Estimated diff:** ~60 production → **~500 tracked** · **Actual:** ~100 production → **~775 tracked**
+(about 730 insertions and 60 deletions, excluding this document). Production is mostly docstrings:
+the behaviour change is the predicate's `on_list` keyword with `if on_list: return True`, and one
+`on_list=` argument in the service. The rest is about 620 test lines across 5 files and
+20 lines of architecture docs.
 
 **Acceptance Criteria:**
 
-- [ ] Done or cancelled → not done without retarget, on the existing endpoints and tool.
+- [x] Done or cancelled → not done without retarget, on the existing endpoints and tool.
+
+**Delivered:** a task on a list may move between any two statuses through `PATCH /api/tasks/{id}`
+and the `set_task_status` MCP tool. Journal-only tasks keep both refusals out of cancelled and
+retarget-to-revive.
+- **Rule.** `is_status_transition_allowed(current, target, *, on_list)` in
+  `core_shared.models.tasks.task_status`. `on_list` is a required keyword, so no caller gets the
+  journal-only answer by default. `on_list=True` allows every pair.
+- **Service.** `TaskService.update_task` (and so `set_status`/`set_status_with_trail`) answers
+  `on_list` from the `FOR UPDATE` row: `task.task_list_id is not None`. The archived-list refusal
+  still comes first, so an archived list's task stays read-only.
+- **Row effects.** No new code, all proved on real rows:
+  - `save()` clears `closed_at` on the reopen;
+  - `position` is kept, so the task returns to its own place among the open tasks;
+  - the `TaskUpdated` event carries the `status` pair.
+- **Error.** `TaskStatusTransitionError` is unchanged. It can now only arise for a journal-only
+  task, so its "retarget" advice stays right.
+- **Docs.**
+  - Docstrings that called retargeting "the only way" out of cancelled now say journal-only: the
+    PATCH and retarget routes, the `status` and `acknowledge_reopen` field descriptions, both MCP
+    tools, the service, and the frontend comments in `lib/api/tasks.ts` and `lib/task-display.ts`
+    (comments only; no frontend behaviour changed).
+  - `api-design.md` and `frontend-design.md` are updated.
+
+**Tests:**
+- Unit:
+  - `test_task_status_transitions.py`: the list matrix (all nine pairs open). The journal-only
+    cases gained only the `on_list=False` keyword; no assertion changed.
+  - `test_task_service_set_status.py` `TestListTaskReopen` (5):
+    - cancelled → not done, cancelled → done and done → not done saved and published;
+    - a both-anchored list task reopens;
+    - no journal is read or linked.
+- Integration:
+  - `tasks/test_task_service_list_reopen_integration.py` (8):
+    - `closed_at` cleared and position kept for done and cancelled;
+    - the reopened task sits between its open neighbours;
+    - the outbox pair;
+    - a past due journal reopens `overdue=True`, `lapsed=False`;
+    - cancelled → done stays closed;
+    - another user's task → not found, unchanged;
+    - an archived list → `TaskListArchivedError`, nothing written.
+  - `api/test_task_list_reopen_endpoints.py` (5): three 200s, a journal-only 409 naming retarget,
+    another user's task answering the same 404 code as a missing one.
+  - `mcp/test_task_list_reopen_mcp.py` (5): the same matrix through `set_task_status`.
+  - Each new service, REST and MCP case that reopens out of cancelled was seen red with the service
+    forced back to `on_list=False`.
+- No E2E: no UI (see the note for Phase 30).
+
+Gates run locally:
+- ruff format/check and mypy (backend 1,356 files, core_shared 175);
+- the backend unit suite (6,016 passed) and core_shared (908);
+- the full backend integration suite in foreground chunks (about 5,010 passed, the 7 existing skips);
+- pre-commit on the changed files.
+
+**Decisions (recorded during implementation):**
+- **Cancelled → done is open on a list** (user decision in plan review, *"allow"*). So nothing is
+  refused for a list task, and the error needed no list-specific message.
+- **The split lives in the pure rule**, not as a branch in the service. The matrix stays the one
+  answer to "may X become Y", for the service and for any UI that greys out an action.
+- **`task_list_id` is read from the locked row.** Membership writes lock the task too, so the list
+  the rule asks about cannot change underneath it.
+
+**Notes for later phases:**
+- *Phase 23 (merged first):* a retarget of a done or cancelled list task is refused with
+  `TASK_LIST_TASK_CLOSED`, so this phase's status change is the only way to reopen one, as the spec
+  says (*"reopened by changing its status, not its date"*).
+- *Phase 30:* `statusActions` in `frontend/src/lib/task-display.ts` still offers nothing for a
+  cancelled task (pinned by `task-display.test.ts`), so a cancelled list task on a journal page has
+  no reopen. Make the offer list-aware: ask the same question as the backend rule, with
+  `task_list_id` from the read.
+- *Phases 26 and 27:* `add_to_list` / `remove_from_list` lock the list and then the task, while
+  `update_task` locks the task and then shares the list. Follow Phase 25's corrected lock order when
+  wiring them, or a membership write overlapping a status change can deadlock.
+- *ITER21-002 (list page Completed group):* reopen is `PATCH /api/tasks/{id}` with
+  `status: not_done`; the task comes back at its old position.
 
 #### Phase 25: Reorder tasks in a list ✅ DONE
 

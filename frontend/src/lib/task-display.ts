@@ -118,11 +118,13 @@ const CANCEL: TaskStatusAction = {
  * What a row offers for a task in this status.
  *
  * **A cancelled task offers nothing here**, and that is the rule this table
- * exists to state. The service gives cancelled exactly one exit — retargeting
- * onto a new future journal, which revalidates the future-dated rule and always
- * lands on *not done* — and refuses `cancelled → done` and `cancelled → not
- * done` alike. A button for either could do nothing but draw a 409, so the
- * resurrect affordance belongs to the retarget dialog rather than here.
+ * exists to state for a journal-only task. The service gives a cancelled
+ * journal-only task exactly one exit — retargeting onto a new future journal,
+ * which revalidates the future-dated rule and always lands on *not done* — and
+ * refuses `cancelled → done` and `cancelled → not done` alike. A button for
+ * either could do nothing but draw a 409, so the resurrect affordance belongs to
+ * the retarget dialog rather than here. A task on a list is never refused and
+ * is reopened directly; offering that here is a later phase.
  *
  * A **lapsed** task is still not done, so it keeps the full not-done offer:
  * lapsing is a marker on a live commitment, never a disabled state.

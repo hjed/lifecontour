@@ -41,6 +41,7 @@ from tests.unit.tasks.task_doubles import (
     OTHER_USER_ID,
     TASK_ID,
     USER_ID,
+    make_list_task,
     make_task,
     published_events,
 )
@@ -543,3 +544,88 @@ class TestTheStatusChangeIsAnnounced:
         (event,) = published_events(mock_event_publisher)
         assert event.event_data["source"] == Provenance.SYSTEM.value
         assert event.event_data["changed_by"] == "system"
+
+
+@pytest.mark.unit
+class TestListTaskReopen:
+    """A task on a list is reopened by its status, never by a retarget.
+
+    The specification makes this direct for list tasks: a done or cancelled
+    list task is set back to not done with a plain status change. Cancelled →
+    done is open too (user decision in the Phase 24 plan review). The
+    journal-only refusals above are untouched.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("current", "target"),
+        [
+            (TaskStatus.CANCELLED, TaskStatus.NOT_DONE),
+            (TaskStatus.CANCELLED, TaskStatus.DONE),
+            (TaskStatus.DONE, TaskStatus.NOT_DONE),
+        ],
+    )
+    async def test_is_saved_and_published(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        current: TaskStatus,
+        target: TaskStatus,
+    ) -> None:
+        """The change is written, returned and carried on the task-updated event."""
+        mock_task_repo.find_by_id_for_update.return_value = make_list_task(current)
+
+        result = await set_status(service, mock_transaction, target)
+
+        saved = mock_task_repo.save.await_args.args[0]
+        assert saved.status == target
+        assert result.status == target
+        (event,) = published_events(mock_event_publisher)
+        assert event.event_data["changed_fields"] == {
+            "status": (current.value, target.value)
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_list_task_with_both_journals_reopens_directly(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """Being on the list decides it, not which anchors the task happens to hold.
+
+        A list task with both journals looks like a journal-only task in every
+        anchor column; only its ``task_list_id`` says it follows list rules.
+        """
+        mock_task_repo.find_by_id_for_update.return_value = make_list_task(
+            TaskStatus.CANCELLED,
+            creating_journal_id=CREATING_JOURNAL_ID,
+            due_journal_id=DUE_JOURNAL_ID,
+        )
+
+        result = await set_status(service, mock_transaction, TaskStatus.NOT_DONE)
+
+        assert result.status == TaskStatus.NOT_DONE
+        saved = mock_task_repo.save.await_args.args[0]
+        assert saved.due_journal_id == DUE_JOURNAL_ID
+        assert saved.creating_journal_id == CREATING_JOURNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_reopening_reads_no_journal(
+        self,
+        service: TaskService,
+        mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        """No retarget is hiding inside: no journal is read, nothing is linked."""
+        mock_task_repo.find_by_id_for_update.return_value = make_list_task(
+            TaskStatus.CANCELLED, due_journal_id=DUE_JOURNAL_ID
+        )
+
+        await set_status(service, mock_transaction, TaskStatus.NOT_DONE)
+
+        assert mock_journal_repo.mock_calls == []
+        mock_task_repo.add_intermediate_journal.assert_not_awaited()

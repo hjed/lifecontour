@@ -23,8 +23,9 @@ class TaskStatus(StrEnum):
     Values:
         NOT_DONE: The default on creation; the commitment is outstanding.
         DONE: The commitment was met. Reversible back to NOT_DONE.
-        CANCELLED: The commitment is no longer relevant. A soft terminal state,
-            reopened only by retargeting the task onto a new future journal.
+        CANCELLED: The commitment is no longer relevant. A soft terminal state:
+            a journal-only task is reopened only by retargeting it onto a new
+            future journal, while a task on a list is reopened directly.
     """
 
     NOT_DONE = "not_done"
@@ -36,10 +37,11 @@ class TaskStatus(StrEnum):
         return self.value
 
 
-# The closed cells of the matrix, stated as the exceptions they are: every other
-# pair is allowed. Both edges leaving CANCELLED are shut, because the
-# specification gives cancelled exactly one exit — retargeting the task onto a
-# new future journal, which always lands on NOT_DONE and is a different
+# The closed cells of the journal-only matrix, stated as the exceptions they
+# are: every other pair is allowed, and a task on a list has no closed cell.
+# Both edges leaving CANCELLED are shut, because the specification gives a
+# journal-only cancelled task exactly one exit — retargeting it onto a new
+# future journal, which always lands on NOT_DONE and is a different
 # operation with its own rules. A status call that could leave cancelled would
 # be a second exit that skips those rules, and CANCELLED → DONE would in
 # addition assert that a commitment was met after it was declared irrelevant.
@@ -54,14 +56,33 @@ _REFUSED_TRANSITIONS: frozenset[tuple[TaskStatus, TaskStatus]] = frozenset(
 )
 
 
-def is_status_transition_allowed(current: TaskStatus, target: TaskStatus) -> bool:
+def is_status_transition_allowed(
+    current: TaskStatus, target: TaskStatus, *, on_list: bool
+) -> bool:
     """Whether a task in ``current`` may be moved to ``target``.
+
+    **The answer depends on where the task lives**, which is why ``on_list`` is
+    required rather than defaulted: a caller that forgot to ask would silently
+    get the journal-only answer for a list task, or the reverse.
+
+    - A **journal-only** task may not leave *cancelled* by a status change. Its
+      one way back is retargeting onto a new future journal, which revalidates
+      the future-dated rule that a status change would skip.
+    - A task **on a list** may move between any two statuses. It never lapses
+      and has no due journal it must be revived onto, so the specification
+      makes reopening it direct: a done or cancelled list task is set back to
+      not done without retargeting. Cancelled → done is open too, so a list
+      task's status is never refused.
 
     Args:
         current: The status the task has now
         target: The status the caller is asking for
+        on_list: Whether the task is on a list (``task_list_id`` is set)
 
     Returns:
-        True unless the transition is one of the two that leave CANCELLED.
+        True unless the task is journal-only and the transition is one of the
+        two that leave CANCELLED.
     """
+    if on_list:
+        return True
     return (current, target) not in _REFUSED_TRANSITIONS
