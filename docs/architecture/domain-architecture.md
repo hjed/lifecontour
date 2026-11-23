@@ -337,11 +337,11 @@ the *creating* journal where it arose and the *due* journal where it matters.
   left to scope its history by. The payloads are plain dictionaries rather than models in
   `core_shared/models/outbox_events.py`: that dispatch map is for **inbound integration-sync**
   payloads, and no core domain event appears in it.
-  **A task's text, status, flag, icon and contact changes share one event** — `TaskUpdated`,
+  **A task's text, status, flag, icon, due date and contact changes share one event** — `TaskUpdated`,
   carrying `changed_fields` in the `{field: (old, new)}` shape `JournalUpdated` and `ContactUpdated`
   use — rather than one type per field, because a single `PATCH` may move several of them and that
   is one write in one unit of work (the flag as `flagged: (bool, bool)`, the icon as
-  `icon: (key | None, key | None)`, the field names being the history labels the web app words); `HistoryService._rows_from_changed_fields` fans the dict out into
+  `icon: (key | None, key | None)`, a list task's due date as `due_date: (iso_day | None, iso_day | None)`, the field names being the history labels the web app words); `HistoryService._rows_from_changed_fields` fans the dict out into
   one `field_history` row per field, so a reader still gets a distinct line each.
   **Contact membership is a field of the task, so it uses that same vocabulary.** Linking a contact
   publishes `changed_fields = {"contact:{id}": (None, id)}` and unlinking publishes the pair the

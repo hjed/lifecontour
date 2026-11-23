@@ -22,6 +22,7 @@ for any caller, so it is absent here and the transport rejects it as an unknown
 argument.
 """
 
+import datetime
 from typing import Annotated
 
 from core_shared.models.history import Provenance
@@ -510,17 +511,45 @@ async def update_task(
         JsonBool,
         Field(description="Remove the task's icon. Cannot be combined with icon."),
     ] = False,
+    due_date: Annotated[
+        JsonIsoDate | None,
+        Field(
+            description=(
+                "Only for a task on a list: its new due day, as YYYY-MM-DD. "
+                "Must be today or later in the user's timezone. Refused for a "
+                "task due in a journal. Omit to keep it."
+            )
+        ),
+    ] = None,
+    clear_due_date: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Remove a list task's due date, leaving it undated. Cannot be "
+                "combined with due_date."
+            )
+        ),
+    ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
 ) -> TaskMCP:
     """
-    Change a task's own fields: reword it, flag or unflag it, or set, change or
-    remove its icon — in any status.
+    Change a task's own fields, in any status: reword it, flag or unflag it,
+    set, change or remove its icon, or set, change or clear a list task's due
+    date.
 
     Only the arguments you supply are changed, and everything you supply in
     one call is one change. Name at least one; values the task already has
     change nothing. To remove the icon pass clear_icon=true rather than a null
-    icon, since an omitted icon means "keep it".
+    icon, and to remove the due date pass clear_due_date=true, since an omitted
+    argument means "keep it".
+
+    A due date belongs to a task on a list. Changing it is a plain edit: no
+    confirmation, and the status is kept — a done or cancelled task is
+    re-dated, not reopened (use set_task_status for that). A date you set must
+    be today or later in the user's timezone; an overdue task's own date can be
+    resent unchanged. A task with no list, or one due in a journal, cannot be
+    given a due date; clearing one it does not have changes nothing.
 
     Every task takes a flag and an icon — journal-only tasks included, and
     tasks that are done, cancelled, or whose due journal has already passed.
@@ -540,10 +569,22 @@ async def update_task(
         raise TaskValidationError(
             "icon", "Pass either an icon or clear_icon=true, not both"
         )
-    if text is None and flagged is None and icon is None and not clear_icon:
+    if clear_due_date and due_date is not None:
+        raise TaskValidationError(
+            "due_date", "Pass either a due_date or clear_due_date=true, not both"
+        )
+    if (
+        text is None
+        and flagged is None
+        and icon is None
+        and not clear_icon
+        and due_date is None
+        and not clear_due_date
+    ):
         raise TaskValidationError(
             "update",
-            "Name a change: new text, flagged, a new icon, or clear_icon=true",
+            "Name a change: new text, flagged, a new icon, clear_icon=true, a "
+            "due_date or clear_due_date=true",
         )
 
     user_id = await get_current_user_id()
@@ -552,6 +593,11 @@ async def update_task(
         icon_change = None
     elif icon is not None:
         icon_change = icon
+    due_date_change: datetime.date | None | Unset = UNSET
+    if clear_due_date:
+        due_date_change = None
+    elif due_date is not None:
+        due_date_change = due_date
 
     updated, trail = await task_service.update_task_with_trail(
         user_id=user_id,
@@ -559,6 +605,7 @@ async def update_task(
         text=text,
         flagged=flagged,
         icon=icon_change,
+        due_date=due_date_change,
         transaction=db_connection,
         source=Provenance.MCP,
         changed_by="mcp",

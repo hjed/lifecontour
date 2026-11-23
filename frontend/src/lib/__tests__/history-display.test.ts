@@ -329,3 +329,40 @@ describe('a task’s flag and icon rows', () => {
     ).toBeNull();
   });
 });
+
+describe('a list task’s due date rows', () => {
+  // The backend stores the ISO day (`YYYY-MM-DD`), null meaning "undated".
+  it.each([
+    [null, '2026-12-03', 'Due date set to 3 Dec 2026'],
+    [
+      '2026-12-03',
+      '2026-12-05',
+      'Due date changed from 3 Dec 2026 to 5 Dec 2026',
+    ],
+    ['2026-12-03', null, 'Due date cleared'],
+  ])('a due date %s → %s reads as “%s”', (oldValue, newValue, expected) => {
+    expect(
+      taskEntryDescription(taskRow('due_date', oldValue, newValue), 'task')
+    ).toBe(expected);
+  });
+
+  it('reads the day as a calendar day, not an instant', () => {
+    // Parsed as UTC midnight, 1 Jan would format as 31 Dec in any zone behind
+    // UTC; the day the user chose must read as that day everywhere.
+    expect(
+      taskEntryDescription(taskRow('due_date', null, '2027-01-01'), 'task')
+    ).toBe('Due date set to 1 Jan 2027');
+  });
+
+  it('names the task when the row reaches a contact’s feed', () => {
+    expect(
+      taskEntryDescription(
+        {
+          ...taskRow('due_date', '2026-12-03', null),
+          entity_label: 'Pack the stove',
+        },
+        'contact'
+      )
+    ).toBe('Due date cleared: “Pack the stove”');
+  });
+});

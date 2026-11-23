@@ -523,12 +523,47 @@ class TestUpdateTaskToolParameters:
 
         assert required == {"task_id"}
 
-    def test_the_parameters_are_text_flag_and_icon(
+    def test_the_parameters_are_text_flag_icon_and_due_date(
         self, update_task_schema: dict[str, Any]
     ) -> None:
         properties = update_task_schema["input_schema"]["properties"]
 
-        assert set(properties) == {"task_id", "text", "flagged", "icon", "clear_icon"}
+        assert set(properties) == {
+            "task_id",
+            "text",
+            "flagged",
+            "icon",
+            "clear_icon",
+            "due_date",
+            "clear_due_date",
+        }
+
+    def test_the_due_date_is_a_calendar_date_string_or_null(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        """A day, never an instant: "today" is judged in the user's timezone."""
+        due_date = update_task_schema["input_schema"]["properties"]["due_date"]
+
+        assert {"type": "string", "format": "date"} in due_date["anyOf"]
+        assert _types(due_date) == {"string", "null"}
+
+    def test_the_due_date_states_its_rule_and_where_it_applies(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        description = update_task_schema["input_schema"]["properties"]["due_date"][
+            "description"
+        ].lower()
+
+        assert "today or later" in description
+        assert "list" in description
+
+    def test_clearing_the_due_date_is_its_own_boolean(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        clear = update_task_schema["input_schema"]["properties"]["clear_due_date"]
+
+        assert clear["type"] == "boolean"
+        assert clear["default"] is False
 
     def test_the_icon_is_the_fixed_set_or_null(
         self, update_task_schema: dict[str, Any]
@@ -645,6 +680,15 @@ class TestUpdateTaskDocumentsItself:
     ) -> None:
         """A model that sends ``icon: null`` would otherwise expect it cleared."""
         assert "clear_icon" in update_task_schema["description"]
+
+    def test_the_description_says_how_to_change_and_clear_a_due_date(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        """A date change is a plain edit, so a model must find it here."""
+        description = update_task_schema["description"]
+
+        assert "due date" in description.lower()
+        assert "clear_due_date" in description
 
     def test_the_text_parameter_says_it_replaces_rather_than_appends(
         self, update_task_schema: dict[str, Any]

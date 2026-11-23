@@ -689,7 +689,7 @@ class HistoryService:
     def _project_task_updated(
         self, event: OutboxEvent, data: dict[str, Any]
     ) -> list[FieldHistoryEntry]:
-        """One row per changed field: the text, the status, and each contact.
+        """One row per changed field: text, status, flag, icon, due date, each contact.
 
         Four kinds of change reach this one event type, and none needs a branch
         here — a contact **merge** joining the reword, the status move and the

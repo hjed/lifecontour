@@ -46,6 +46,7 @@ therefore declares the **fact** it announces, derived from the payload by
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date
 
 import pytest
 from core_shared.models.history import Provenance
@@ -323,6 +324,24 @@ async def _act_flag_and_icon(fixtures: _Fixtures, seeded: Seeded) -> None:
     )
 
 
+async def _seed_undated_list_task(fixtures: _Fixtures) -> Seeded:
+    """A task on a list with no date and no journal: one a due date can reach."""
+    task_list = await seed_task_list(fixtures.connection)
+    assert task_list.id is not None
+    return Seeded(
+        task_id=await create_list_task(fixtures.connection, task_list_id=task_list.id)
+    )
+
+
+async def _act_set_due_date(fixtures: _Fixtures, seeded: Seeded) -> None:
+    await fixtures.service.update_task(
+        user_id=USER_ID,
+        task_id=seeded.task_id,
+        due_date=date(2099, 12, 31),
+        transaction=fixtures.connection,
+    )
+
+
 async def _act_set_status(fixtures: _Fixtures, seeded: Seeded) -> None:
     await fixtures.service.set_status(
         user_id=USER_ID,
@@ -589,6 +608,13 @@ WRITE_PATHS: list[WritePath] = [
         act=_act_flag_and_icon,
         # One event carrying both, as a reword and a completion share one.
         expects=["updated:flagged+icon"],
+    ),
+    WritePath(
+        name="due date",
+        ports=frozenset({"save"}),
+        seed=_seed_undated_list_task,
+        act=_act_set_due_date,
+        expects=["updated:due_date"],
     ),
     WritePath(
         name="status change",

@@ -523,10 +523,12 @@ class TaskService:
         status: TaskStatus | None = None,
         flagged: bool | None = None,
         icon: TaskIcon | None | Unset = UNSET,
+        due_date: datetime.date | None | Unset = UNSET,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        now: datetime.datetime | None = None,
     ) -> Task:
-        """Change one of the user's tasks: its text, status, flag or icon.
+        """Change one of the user's tasks: its text, status, flag, icon or due date.
 
         **One method owns every field** because a ``PATCH`` may carry several,
         and JSON:API says a request is one change. Applying them as two calls would
@@ -534,7 +536,8 @@ class TaskService:
         that reworded and completed a task in one request could have half of it
         applied. Here it is one read, one decision and one write.
 
-        **No journal is involved**, for any field. The due journal is not read,
+        **No journal is involved**, for any field — the due date included, which
+        is a day of the task's own. The due journal is not read,
         which is what keeps a *lapsed* task both completable and editable: the
         future-dated rule is a write-time rule about *setting* a due journal, and
         re-applying it here would make exactly the tasks a user most needs to
@@ -542,8 +545,10 @@ class TaskService:
 
         A call that changes nothing is a no-op: nothing is written, so
         ``updated_at`` does not move, **no event is published** and no change is
-        recorded that did not happen. That covers the status, text, flag or icon a
-        task already has (clearing an icon it does not have included), and — for
+        recorded that did not happen. That covers the status, text, flag, icon or
+        due date a task already has (clearing an icon or a date it does not have
+        included — so clearing the date of a task that can hold none is a quiet
+        no-op, not a refusal), and — for
         a caller that is not a JSON:API surface — naming nothing.
 
         **One write publishes one** ``TaskUpdated``, carrying ``changed_fields``
@@ -569,8 +574,22 @@ class TaskService:
                 ``UNSET`` (the default) to leave it alone — the one argument
                 where ``None`` is a value rather than "not named", because an
                 icon is optional on the task.
+            due_date: A list task's new due day, ``None`` to **clear** it, or
+                ``UNSET`` (the default) to leave it alone — ``None`` is a value
+                here for the icon's reason. Changing it is a plain edit: no
+                acknowledgement, and the status is kept whatever it is, so a
+                done or cancelled task is re-dated, not reopened. A date that
+                is *set* must be today or later in the user's timezone; an
+                unchanged one is not re-judged, so an overdue task can be
+                resent its own date, and a clear never reads the clock. The
+                entity refuses a date on a journal-only task (invariant 5) and
+                on a task due in a journal (invariant 4) — replacing a due
+                journal with a date is ITER21-001 Phase 23's.
             source: Where the change came from, recorded on the event
             changed_by: The actor, as the other domains write it
+            now: The instant "today" is judged at, defaulting to the real
+                clock. **Never bind this from client input**, for the reason
+                :meth:`create_list_task` gives.
 
         Returns:
             The changed task — or the unchanged one, when nothing differed.
@@ -592,6 +611,10 @@ class TaskService:
                 when it would leave *cancelled*, which only retargeting does.
             TaskListArchivedError: When the task is on an archived list —
                 setting a value it already has included.
+            TaskValidationError: When a due date is set on a task that is not
+                on a list, or that is due in a journal (``field="due_date"``).
+            TaskDueDateInPastError: When a due date being set is before today
+                in the user's timezone.
         """
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
@@ -638,6 +661,20 @@ class TaskService:
             changed_fields["icon"] = (
                 None if task.icon is None else task.icon.value,
                 None if icon is None else icon.value,
+            )
+
+        # Last, so ``replace`` has applied every other field's rule first, and a
+        # date is judged against the clock only once the entity has accepted it
+        # — a date that could never be set is wrong whatever day it is.
+        if not isinstance(due_date, Unset) and due_date != task.due_date:
+            updated = replace(updated, due_date=due_date)
+            if due_date is not None:
+                await self._require_due_date_allowed(user_id, due_date, now)
+            # ISO strings, as ``TaskCreated`` carries the date: the payload is
+            # JSON, and the history row stores the day the web app formats.
+            changed_fields["due_date"] = (
+                None if task.due_date is None else task.due_date.isoformat(),
+                None if due_date is None else due_date.isoformat(),
             )
 
         if updated is task:
@@ -1532,8 +1569,10 @@ class TaskService:
         status: TaskStatus | None = None,
         flagged: bool | None = None,
         icon: TaskIcon | None | Unset = UNSET,
+        due_date: datetime.date | None | Unset = UNSET,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
+        now: datetime.datetime | None = None,
     ) -> tuple[Task, list[int]]:
         """:meth:`update_task`, and the journals the task has passed through.
 
@@ -1550,8 +1589,10 @@ class TaskService:
             status=status,
             flagged=flagged,
             icon=icon,
+            due_date=due_date,
             source=source,
             changed_by=changed_by,
+            now=now,
         )
         return updated, await self._trail_within_unit_of_work(updated, user_id)
 
