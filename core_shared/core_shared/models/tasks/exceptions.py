@@ -150,6 +150,41 @@ class TaskListBusyError(TaskListChangedConcurrentlyError):
         self.task_list_id = task_list_id
 
 
+class TaskListRemovalNeedsJournalsError(TaskDomainError):
+    """Exception raised when a task without both journals is taken off its list.
+
+    Specification, *Moving tasks*: "A task can be removed from its list only if
+    it has both a creating and a due journal. It becomes a journal-only task …
+    A task without both anchors cannot be removed — only moved, cancelled or
+    deleted." A journal-only task needs both anchors (invariant 2), so a list
+    task missing either has nowhere to live once it leaves; a task due on a
+    plain date has no due journal and is refused the same way.
+
+    **409**: the request is well formed, and what it conflicts with is the
+    task's state.
+    """
+
+    def __init__(self, task_id: int, *, missing_creating: bool, missing_due: bool):
+        missing = " and ".join(
+            name
+            for name, absent in (
+                ("creating journal", missing_creating),
+                ("due journal", missing_due),
+            )
+            if absent
+        )
+        super().__init__(
+            f"Task {task_id} has no {missing}, so it cannot leave its list: a "
+            f"task off every list needs both the journal it arose in and the "
+            f"journal it is due in. You can move it to another list, cancel it "
+            f"or delete it instead.",
+            409,
+        )
+        self.task_id = task_id
+        self.missing_creating = missing_creating
+        self.missing_due = missing_due
+
+
 class TaskStatusTransitionError(TaskDomainError):
     """Exception raised when a status change is refused by the lifecycle rules.
 

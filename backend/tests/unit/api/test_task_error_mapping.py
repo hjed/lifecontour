@@ -20,6 +20,7 @@ from core_shared.models.tasks import (
     TaskListArchivedError,
     TaskListBusyError,
     TaskListChangedConcurrentlyError,
+    TaskListRemovalNeedsJournalsError,
     TaskListTaskClosedError,
     TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
@@ -73,6 +74,21 @@ class TestTaskErrorMapping:
         assert error.code == "TASK_LIST_TASK_NOT_DUE_IN_JOURNAL"
         assert error.status == "409"
         assert "not due in a journal" in (error.detail or "")
+
+    def test_a_removal_without_both_journals_maps_to_its_own_conflict(
+        self,
+    ) -> None:
+        """A 409 of its own, so a surface can offer the ways out it names."""
+        response = create_domain_error_response(
+            TaskListRemovalNeedsJournalsError(
+                7, missing_creating=False, missing_due=True
+            )
+        )
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_REMOVAL_NEEDS_JOURNALS"
+        assert error.status == "409"
+        assert "no due journal" in (error.detail or "")
 
     def test_due_journal_not_future_maps_to_its_own_code(self) -> None:
         """A past due journal is a 400 — a rejected request, not a missing one."""

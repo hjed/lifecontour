@@ -137,3 +137,8 @@ class TestTheTaskGuidanceDescribesListTasks:
         instructions = create_mcp_server().instructions or ""
 
         assert "move_task_to_list" in instructions
+
+    def test_names_the_tool_that_takes_a_task_off_its_list(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "remove_task_from_list" in instructions

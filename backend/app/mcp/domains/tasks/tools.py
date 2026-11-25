@@ -535,6 +535,53 @@ async def move_task_to_list(
 
 
 @tool(annotations=IDEMPOTENT_WRITE)
+@mcp_unified_error_handler("remove_task_from_list", "task")
+async def remove_task_from_list(
+    task_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=INT32_MAX,
+            description="The id of the task to take off its list.",
+        ),
+        JsonIntOnly,
+    ],
+    db_connection: AsyncConnection = mcp_depends(get_async_connection),
+    task_service: TaskService = mcp_depends(get_task_service),
+    task_read_service: TaskReadService = mcp_depends(get_task_read_service),
+) -> TaskReadMCP:
+    """
+    Take a task off its list, making it a journal-only task.
+
+    Only a task holding both a creating journal and a due journal can leave its
+    list, because a task off every list lives between those two journals. A
+    task without both cannot be removed: move it to another list, cancel it or
+    delete it instead. The task keeps its journals, status, flag, icon and
+    contacts.
+
+    The answer is the task as get_task reads it, and says whether it is now
+    **lapsed**: off its list it follows the journal-only rule again, so a task
+    whose due journal has already passed, or was cancelled, is lapsed the moment
+    it leaves. Tell the user when that happens.
+
+    Removing a task that is on no list changes nothing. A task on an archived
+    list cannot leave it until the list is unarchived. If the task left its
+    list while this call waited, it is refused: read the task again and retry.
+    """
+    user_id = await get_current_user_id()
+
+    await task_service.remove_from_list(
+        user_id=user_id,
+        task_id=task_id,
+        transaction=db_connection,
+        source=Provenance.MCP,
+        changed_by="mcp",
+    )
+    model = await task_read_service.read_model(user_id, task_id)
+    return task_read_mcp(model)
+
+
+@tool(annotations=IDEMPOTENT_WRITE)
 @mcp_unified_error_handler("update_task", "task")
 async def update_task(
     task_id: Annotated[
@@ -1121,6 +1168,7 @@ def register_task_tools(mcp: FastMCP[None]) -> None:
     mcp.add_tool(set_task_status)
     mcp.add_tool(retarget_task)
     mcp.add_tool(move_task_to_list)
+    mcp.add_tool(remove_task_from_list)
     mcp.add_tool(update_task)
     mcp.add_tool(delete_task)
     mcp.add_tool(link_task_to_contact)

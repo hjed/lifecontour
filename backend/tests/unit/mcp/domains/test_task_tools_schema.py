@@ -1666,3 +1666,58 @@ class TestMoveTaskToListDocumentsItself:
         assert "lapsing" in description
         assert "journals" in description
         assert "archived" in description
+
+
+@pytest.fixture
+async def remove_task_from_list_schema() -> dict[str, Any]:
+    """The ``remove_task_from_list`` tool as an MCP client actually sees it."""
+    return await _tool_schema("remove_task_from_list")
+
+
+class TestRemoveTaskFromListToolParameters:
+    """What an AI client may send to take a task off its list."""
+
+    def test_only_the_task_is_named(
+        self, remove_task_from_list_schema: dict[str, Any]
+    ) -> None:
+        """No list: a task is on at most one, so the task says which."""
+        input_schema = remove_task_from_list_schema["input_schema"]
+
+        assert set(input_schema["properties"]) == {"task_id"}
+        assert set(input_schema["required"]) == {"task_id"}
+
+    def test_the_id_is_a_bounded_integer(
+        self, remove_task_from_list_schema: dict[str, Any]
+    ) -> None:
+        schema = remove_task_from_list_schema["input_schema"]["properties"]["task_id"]
+
+        assert schema["type"] == "integer"
+        assert schema["minimum"] == 1
+        assert schema["maximum"] == 2_147_483_647
+
+    async def test_it_is_an_idempotent_non_destructive_write(self) -> None:
+        """Removing a task already off every list changes nothing."""
+        mcp: FastMCP[None] = FastMCP(name="Test")
+        register_task_tools(mcp)
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+        annotations = tools["remove_task_from_list"].annotations
+
+        assert annotations is not None
+        assert annotations.read_only_hint is False
+        assert annotations.destructive_hint is False
+        assert annotations.idempotent_hint is True
+
+
+class TestRemoveTaskFromListDocumentsItself:
+    def test_the_description_names_the_rule_and_the_lapse(
+        self, remove_task_from_list_schema: dict[str, Any]
+    ) -> None:
+        description = " ".join(
+            remove_task_from_list_schema["description"].lower().split()
+        )
+
+        assert "both a creating journal and a due journal" in description
+        assert "lapsed" in description
+        assert "move it to another list, cancel it or delete it" in description
+        assert "archived" in description

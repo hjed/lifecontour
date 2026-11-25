@@ -243,6 +243,12 @@ async def _move_to_list(service: TaskService, tx: AsyncMock) -> object:
     )
 
 
+async def _remove_from_list(service: TaskService, tx: AsyncMock) -> object:
+    return await service.remove_from_list(
+        user_id=USER_ID, task_id=TASK_ID, transaction=tx
+    )
+
+
 async def _link_contact(service: TaskService, tx: AsyncMock) -> object:
     return await service.link_contact(
         user_id=USER_ID, task_id=TASK_ID, contact_id=CONTACT_ID, transaction=tx
@@ -280,6 +286,7 @@ WRITES: list[tuple[str, Write]] = [
     ("delete", _delete),
     ("retarget", _retarget),
     ("move_to_list", _move_to_list),
+    ("remove_from_list", _remove_from_list),
     ("link_contact", _link_contact),
     ("unlink_contact", _unlink_contact),
     ("attach_intermediate_journal", _attach),
@@ -290,12 +297,17 @@ WRITE_CALLS = [write for _, write in WRITES]
 # Every write but the retarget, whose refusal comes from a plain read taken
 # before its task lock; it is pinned on its own below.
 LOCKED_WRITES = [(n, w) for n, w in WRITES if n != "retarget"]
+# Every write but the removal, which reads its task again when its list has
+# gone and answers for what the list delete left; pinned in
+# test_task_service_remove_from_list.py.
+GONE_LIST_WRITES = [(n, w) for n, w in WRITES if n != "remove_from_list"]
 
 # Every repository method that changes a row other than the delete, which is
 # asserted on its own because it is the one write that runs before the guard.
 _ROW_WRITES = (
     "save",
     "add_to_list",
+    "remove_from_list",
     "add_contacts",
     "remove_contact",
     "add_intermediate_journal",
@@ -644,12 +656,22 @@ class TestWhatIsCheckedFirst:
             _set_status,
             _retarget,
             _move_to_list,
+            _remove_from_list,
             _link_contact,
             _unlink_contact,
             _attach,
             _detach,
         ],
-        ids=["set_status", "retarget", "move", "link", "unlink", "attach", "detach"],
+        ids=[
+            "set_status",
+            "retarget",
+            "move",
+            "remove",
+            "link",
+            "unlink",
+            "attach",
+            "detach",
+        ],
     )
     async def test_a_missing_task_is_still_not_found(
         self,
@@ -669,7 +691,11 @@ class TestWhatIsCheckedFirst:
         task_list_repo.find_by_id_for_share.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("write", WRITE_CALLS, ids=WRITE_IDS)
+    @pytest.mark.parametrize(
+        "write",
+        [w for _, w in GONE_LIST_WRITES],
+        ids=[n for n, _ in GONE_LIST_WRITES],
+    )
     async def test_a_list_that_cannot_be_read_answers_not_found(
         self,
         write: Write,

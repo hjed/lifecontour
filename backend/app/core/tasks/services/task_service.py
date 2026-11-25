@@ -41,6 +41,7 @@ from core_shared.models.tasks import (
     TaskJournalIsAnchorError,
     TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
+    TaskListRemovalNeedsJournalsError,
     TaskListTaskClosedError,
     TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
@@ -1704,6 +1705,111 @@ class TaskService:
                 raise TaskNotFoundError(task_id)
             source.ensure_writable()
         target.ensure_writable()
+
+    @transactional
+    async def remove_from_list(
+        self,
+        *,
+        user_id: str,
+        task_id: int,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> Task:
+        """Take one of the user's tasks off its list, making it journal-only.
+
+        The specification's *Moving tasks*: only a task holding **both** a
+        creating and a due journal may leave — a journal-only task needs both
+        (invariant 2) — and "a task without both anchors cannot be removed —
+        only moved, cancelled or deleted". The task keeps its journals, status,
+        flag, icon and contacts; its position goes, and with no list it lapses
+        by the journal-only rule from now on (immediately, if its due journal
+        has passed or been cancelled). Whether it did is a read: lapse is
+        derived, never stored, so the surfaces answer with the read model.
+
+        **Removing a task that is on no list is a no-op**: nothing is locked,
+        written or published, as a move to the task's own list writes nothing.
+        A removal that finds, under its lock, that a concurrent removal already
+        took the task off answers the same no-op rather than a conflict, so a
+        retried request gets one answer however it races the first. So does
+        a removal whose list was deleted while it waited for the list's lock:
+        the delete kept the task, journal-only, because it holds both journals.
+
+        **Lock order: the list ``FOR SHARE``, then the task row** — the order a
+        reorder takes, chosen from a plain read of the task. A removal computes
+        no position, so it never needs its list exclusively, and because it
+        never holds a task while waiting for a list it cannot close a cycle
+        with a move (a list exclusively, then its task) and a journal delete or
+        merge (journal, then tasks in id order). Share locks never wait on each
+        other, so two removals from one list, or a removal and a task edit,
+        meet only on task rows. The archive takes the list
+        ``FOR NO KEY UPDATE``, so it waits for this, and this for it.
+
+        The read can be stale by the time the list is held, so the locked row
+        is re-checked: a task that moved to another list meanwhile is refused
+        with ``TaskListChangedConcurrentlyError``
+        (read it again and retry), and the journals are judged on that locked
+        row, so a journal delete that detached the due journal meanwhile is
+        seen.
+
+        Publishes one :class:`TaskListMembershipChanged` from the list to
+        ``None``.
+
+        Raises:
+            TaskNotFoundError: The task does not exist or is not the user's.
+            TaskListArchivedError: The task's list is archived — named before
+                the journals, since nothing about the task can make a write to
+                a frozen list succeed.
+            TaskListChangedConcurrentlyError: The task moved to another list
+                between the read and the lock, or its list was deleted and the
+                task has joined another list since.
+            TaskListRemovalNeedsJournalsError: The task lacks a creating or a
+                due journal.
+        """
+        peeked = await self._require_task(task_id, user_id)
+        task_list_id = peeked.task_list_id
+        if task_list_id is None:
+            return peeked
+
+        try:
+            await self._hold_list_writable(task_list_id, task_id, user_id)
+        except TaskNotFoundError:
+            # The list was deleted after the read. A list delete keeps a task
+            # holding both journals as journal-only and deletes any other, so
+            # answer for what it left: the no-op, or not found.
+            current = await self._require_task(task_id, user_id)
+            if current.task_list_id is None:
+                return current
+            raise TaskListChangedConcurrentlyError(task_id) from None
+        task = await self.task_repo.find_by_id_for_update(task_id, user_id)
+        if task is None:
+            raise TaskNotFoundError(task_id)
+        if task.task_list_id is None:
+            # Another removal of this task won while this one waited: answer as
+            # a removal sent afterwards would — the same no-op.
+            return task
+        if task.task_list_id != task_list_id:
+            raise TaskListChangedConcurrentlyError(task_id)
+        if task.creating_journal_id is None or task.due_journal_id is None:
+            raise TaskListRemovalNeedsJournalsError(
+                task_id,
+                missing_creating=task.creating_journal_id is None,
+                missing_due=task.due_journal_id is None,
+            )
+
+        removed = await self.task_repo.remove_from_list(task_id, user_id)
+        await self.event_publisher.publish(
+            TaskListMembershipChanged(
+                task_id=task_id,
+                user_id=user_id,
+                previous_task_list_id=task_list_id,
+                task_list_id=None,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return removed
 
     @transactional
     async def create_task_with_trail(

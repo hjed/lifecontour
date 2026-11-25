@@ -121,9 +121,10 @@ _CLOSED_AT_ON_UPDATE = """CASE
 # reference another owner's list, and such a row must never be read, counted or
 # moved on this owner's behalf.
 
-# The first lock of every membership write (see the port's lock order). ``FOR
-# NO KEY UPDATE``, as list renames take: joins and moves on one list queue on
-# it, while a foreign-key check against the list (``KEY SHARE``) is not blocked.
+# The first lock of a membership write that places a task — a join or a move,
+# which compute the bottom under it (see the port's lock order). ``FOR NO KEY
+# UPDATE``, as list renames take: joins and moves on one list queue on it,
+# while a foreign-key check against the list (``KEY SHARE``) is not blocked.
 _LOCK_LIST = text(
     """
     SELECT 1 FROM task_lists
@@ -132,8 +133,8 @@ _LOCK_LIST = text(
     """
 )
 
-# A reorder's list lock. ``FOR SHARE``, not the membership writes
-# ``FOR NO KEY UPDATE``: every task write takes this same share lock on its
+# A reorder's and a removal's list lock. ``FOR SHARE``, not the placing
+# writes' ``FOR NO KEY UPDATE``: every task write takes this same share lock on its
 # list *after* locking its own task row, so an exclusive lock here, followed by
 # the reorder's task locks, would deadlock against it. Share still conflicts
 # with the exclusive lock creates, joins and archives take — none of which
@@ -924,11 +925,14 @@ class SqlTaskRepository(TaskRepository):
     async def remove_from_list(self, task_id: int, user_id: str) -> Task:
         """Take one of the user's tasks off its list.
 
-        The ``UPDATE`` names the list it locked, so a task that moved to another
-        list in between is not taken off that one under the wrong lock.
+        The list is held ``FOR SHARE``: a removal computes no position, and an
+        exclusive lock would be an upgrade of the share lock its caller already
+        holds — two removals from one list would deadlock on it. The ``UPDATE``
+        names the list it locked, so a task that moved to another list in
+        between is not taken off that one under the wrong lock.
         """
         task_list_id = await self._require_list_membership(task_id, user_id)
-        await self._lock_list(task_list_id, user_id)
+        await self._share_list(task_list_id, user_id)
         result = await self.conn.execute(
             _REMOVE_FROM_LIST,
             {"task_id": task_id, "user_id": user_id, "task_list_id": task_list_id},
@@ -982,7 +986,7 @@ class SqlTaskRepository(TaskRepository):
         return {int(row.task_list_id): int(row.open_count) for row in result}
 
     async def _share_list(self, task_list_id: int, user_id: str) -> None:
-        """Share-lock one of the user's lists — a reorder's first lock."""
+        """Share-lock one of the user's lists — a reorder's or a removal's first lock."""
         result = await self.conn.execute(
             _SHARE_LIST, {"task_list_id": task_list_id, "user_id": user_id}
         )
@@ -990,7 +994,7 @@ class SqlTaskRepository(TaskRepository):
             raise TaskListNotFoundError(task_list_id)
 
     async def _lock_list(self, task_list_id: int, user_id: str) -> None:
-        """Lock one of the user's lists — the first lock of a membership write."""
+        """Lock one of the user's lists — the first lock of a join or a move."""
         result = await self.conn.execute(
             _LOCK_LIST, {"task_list_id": task_list_id, "user_id": user_id}
         )

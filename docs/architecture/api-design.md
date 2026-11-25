@@ -512,11 +512,11 @@ lock is held, either task has closed or left the list. A plain edit locks only
 its own task, so this can happen however carefully the caller checked first; the
 client re-reads the list and retries. It is mapped ahead of the first endpoint
 that can raise it — `POST /api/tasks/{task_id}/reorder` and the
-`reorder_list_tasks` MCP tool since ITER21-001 Phase 25, removal from a list
-later. `DELETE /api/task-lists/{list_id}` and `delete_task_list` answer it too
-(`TaskListBusyError`, ITER21-001 Phase 29) when another request holds the list
-at the moment the delete removes it — the delete takes the list without
-waiting, because waiting there could deadlock; see *Tasks on a list* in
+`reorder_list_tasks` MCP tool since ITER21-001 Phase 25, the move and the
+removal since Phases 26 and 27. `DELETE /api/task-lists/{list_id}` and
+`delete_task_list` answer it too (`TaskListBusyError`, ITER21-001 Phase 29) when
+another request holds the list at the moment the delete removes it — the delete
+takes the list without waiting, because waiting there could deadlock; see *Tasks on a list* in
 [`database-design.md`](./database-design.md).
 
 `TaskAnchorJournalNotFoundError` names **which journal anchor was refused**:
@@ -904,6 +904,7 @@ a capped span of days. Neither can be widened into a task browser.
 | `POST /api/tasks/{task_id}/retarget` | Move a task onto a new due journal, keeping the old one as an intermediate link. Body type `task-retarget`, attributes: `due_journal_id`, optional `acknowledge_reopen` | 200; 400 a due journal that is not future-dated, an unknown attribute, another resource type, or an out-of-range id; 404 task or new due journal unknown/not-owned; 409 a *done* task reopened without acknowledgement; 409 `TASK_LIST_TASK_CLOSED` for a done or cancelled task on a list (a list task's date change never reopens it, whatever the acknowledgement); 409 `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` for a task on a list with no due journal to leave (undated, due on a date, or detached by a journal delete the retarget waited on); 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `POST /api/tasks/{task_id}/reorder` | Move an open task on a list to the top, or directly after another open task on it — the list page's drag and keyboard move (ITER21-001 Phase 25). Body type `task-reorders`, attributes: `after_task_id` (**required**, nullable: `null` is the top). Answers the list's open tasks in their new order as a `tasks` collection. Records nothing: no event, no history, no `updated_at` | 200; 400 `TASK_VALIDATION_ERROR` with `meta.field` — `task_id` for a task on no list or a closed one, `after_task_id` for the task itself or an anchor that is closed or on another list — or a malformed body or out-of-range id; 404 task or anchor unknown/not-owned, indistinguishably; 409 `TASK_LIST_ARCHIVED` (a no-op included); 409 `TASK_LIST_CHANGED` when a task closed or left the list while the move waited |
 | `POST /api/tasks/{task_id}/move` | Put a task on one of your lists, or move it to another: it joins the **bottom**. A journal-only task keeps its journals and stops lapsing (past its date it is overdue on the list); status, flag, icon and contacts are kept. Moving to the list it is already on is a no-op. Body type `task-moves`, attribute `task_list_id` (a JSON integer; `null` refused) | 200 with the task and its intermediate journals; 400 another resource type, an unknown attribute, or a `task_list_id` that is not a JSON integer in range; 404 `TASK_NOT_FOUND` task unknown/not-owned; 404 `TASK_LIST_NOT_FOUND` list unknown/not-owned; 409 `TASK_LIST_ARCHIVED` for the task's own archived list (checked first), else an archived target; 409 `TASK_LIST_CHANGED` when the task moved to another list while the move waited (read it again and retry) |
+| `POST /api/tasks/{task_id}/remove-from-list` | Take a task off its list, making it journal-only (ITER21-001 Phase 27). No body. Only a task holding **both** a creating and a due journal may leave; it keeps its journals, status, flag, icon and contacts. Answers with the task **read model** — the `GET /api/tasks/{task_id}` shape — so `lapsed` and `lapse_reason` say whether it is lapsed now (a passed or cancelled due journal lapses it the moment it leaves). A task on no list is a no-op | 200 with the read model; 400 an out-of-range id; 404 `TASK_NOT_FOUND` task unknown/not-owned; 409 `TASK_LIST_ARCHIVED` (checked first); 409 `TASK_LIST_CHANGED` when the task left its list while the removal waited (read it again and retry); 409 `TASK_LIST_REMOVAL_NEEDS_JOURNALS` for a task missing a creating or a due journal — undated, due on a date, or holding one journal (move, cancel or delete it instead) |
 | `DELETE /api/tasks/{task_id}` | Delete a task and its link rows permanently. The exception — cancelling is the ordinary action | 204 (no body); 404 task unknown/not-owned, including a repeat delete; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
 | `GET /api/tasks/{task_id}/history` | The task's field-level change history, paginated and most recent first, each entry carrying its provenance and actor. A flag change is field `flagged` with `"False"`/`"True"` values; an icon change is field `icon` with fixed-set keys, `null` being "no icon" (set `null → key`, cleared `key → null`); a due-date change is field `due_date` with `YYYY-MM-DD` days, `null` being undated. A list-membership change is field `task_list_id` with list ids (`null → id` added to a list, `id → id` moved, `id → null` removed); position is never recorded, because reordering is not history. Query params: `page` (default 1), `limit` (default 20, max 100) | 200 (a task with nothing projected yet answers `data: []`, **including a task created moments ago**); 400 an out-of-range id or a `limit` above 100; 404 task unknown/not-owned |
 | `POST /api/tasks/{task_id}/relationships/contacts` | Link a contact. Body: a resource identifier, `{"data": {"type": "contacts", "id": "5"}}` | 204; 400 unknown field, a relationship attribute, another resource type, or a non-integer id; 404 task unknown/not-owned or contact unknown; 409 `TASK_LIST_ARCHIVED` for a task on an archived list |
@@ -1258,7 +1259,7 @@ Conventions this surface pins down:
   `task_intermediate_journals` cascades from the journal side, and the
   specification permits deleting a journal that is only an intermediate link.
 - The matching MCP tools are `create_task`, `set_task_status`, `retarget_task`,
-  `move_task_to_list`,
+  `move_task_to_list`, `remove_task_from_list`,
   `update_task`, `delete_task`, `link_task_to_contact`,
   `unlink_task_from_contact`, `attach_intermediate_journal_to_task`,
   `detach_intermediate_journal_from_task`, `get_task`, `list_journal_tasks`,

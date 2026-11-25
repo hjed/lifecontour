@@ -689,6 +689,57 @@ async def move_task_to_list(
     return TaskResponse(data=_to_resource(moved, trail, get_request_base_url(request)))
 
 
+@router.post("/tasks/{task_id}/remove-from-list")
+@inject
+async def remove_task_from_list(
+    task_id: DatabaseIdPath,
+    request: Request,
+    task_service: FromDishka[TaskService],
+    task_read_service: FromDishka[TaskReadService],
+    connection: FromDishka[AsyncConnection],
+    user: FromDishka[SessionUser],  # Require authentication
+) -> TaskReadResponse:
+    """Take a task off its list, making it a journal-only task. No body.
+
+    Only a task holding **both** a creating journal and a due journal may
+    leave: a journal-only task lives between the two. A task without both
+    cannot be removed — move it to another list, cancel it or delete it
+    instead. The task keeps its journals, status, flag, icon and contacts.
+
+    **The answer says whether the task is now lapsed.** Off its list it
+    follows the journal-only rule again, so a task whose due journal has
+    passed (or been cancelled) is lapsed the moment it leaves. The response is
+    the task read model ``GET /api/tasks/{task_id}`` answers, with ``lapsed``
+    and ``lapse_reason``, read once the removal has committed.
+
+    Removing a task that is on no list is a no-op — nothing changes and no
+    history is written. An action sub-resource, as ``/move`` is: leaving a list
+    is not a move, so ``/move`` refuses a null list.
+
+    Raises:
+        400: A path id that is not an integer, or one outside the range an
+             ``INTEGER`` column can hold.
+        404: ``TASK_NOT_FOUND`` when the task does not exist or is not yours;
+             the two are the same answer by design.
+        409: ``TASK_LIST_ARCHIVED`` when its list is archived (checked first);
+             ``TASK_LIST_CHANGED`` when the task left its list while the
+             removal waited — read it again and retry;
+             ``TASK_LIST_REMOVAL_NEEDS_JOURNALS`` when it lacks a creating or a
+             due journal. Nothing is written.
+    """
+    await task_service.remove_from_list(
+        user_id=user.id,
+        task_id=task_id,
+        transaction=connection,
+        source=Provenance.UI,
+        changed_by="ui",
+    )
+    model = await task_read_service.read_model(user.id, task_id)
+    return TaskReadResponse(
+        data=to_task_read_resource(model, get_request_base_url(request))
+    )
+
+
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def delete_task(

@@ -864,7 +864,17 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
     holding it `FOR SHARE` while waiting on the other move's task, closed a cycle
     (`TestCrossingMovesAndAReorder` reproduces it). A reorder of the source list during a move waits
     on the task and then refuses with `TASK_LIST_CHANGED`; a same-list move is a no-op under the
-    share lock. **No writer may hold a task lock while it waits for a list exclusively** — a list
+    share lock.
+  - **A removal** (`TaskService.remove_from_list`, Phase 27) takes its list `FOR SHARE`, chosen
+    from a plain read, then the task row, re-checked; `SqlTaskRepository.remove_from_list` share-locks
+    the list again (free). It places nothing, so it never needs the list exclusively — an exclusive
+    lock there would upgrade the service's share lock, and two removals from one list would deadlock
+    (`test_two_removals_from_one_list_both_land`). List first because a task-first removal closes a
+    cycle with a move onto its list and a journal delete holding the move's task. A second removal
+    of the same task that waited on it answers the same no-op a later one would, and so does one
+    whose list a delete removed while it waited: it reads the task again, which the delete kept
+    journal-only (404 if the delete removed it).
+  - **No writer may hold a task lock while it waits for a list exclusively** — a list
     delete takes its list before its tasks and never waits for it exclusively (below).
   - A list delete (Phase 29) first takes a transaction-scoped advisory lock on the list id, so two
     deletes of one list serialise rather than refuse each other. It then takes the list
@@ -895,9 +905,10 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
   `ix_tasks_task_list_id_closed_at` (`(task_list_id, closed_at DESC, id DESC) WHERE closed_at IS NOT
   NULL`) serves the page. Existing closed tasks were backfilled from `updated_at`. It is not on the
   `Task` entity. Seed rows that set a closed status by hand must set `closed_at` too.
-- **Membership events.** The repository never publishes. `TaskService.move_to_list` calls
-  `add_to_list` and publishes `TaskListMembershipChanged`; `remove_from_list` has no caller yet and
-  stays a named exclusion in `test_task_event_completeness_integration.py` until removal ships.
+- **Membership events.** The repository never publishes. Its two membership writes that change a
+  task's list each have one service caller that publishes `TaskListMembershipChanged`: `add_to_list`
+  under `TaskService.move_to_list`, and `remove_from_list` under `TaskService.remove_from_list`.
+  Both have a `WritePath` in `test_task_event_completeness_integration.py`.
   `move_within_list` and `arrange_open_tasks` are excluded permanently — the spec gives reordering no event.
 
 ### Photo Integration (Iteration 4)

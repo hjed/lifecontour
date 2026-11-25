@@ -1738,6 +1738,23 @@ export class TestDataManager {
   }
 
   /**
+   * Take a task off its list through the API, making it journal-only. Only a
+   * task holding both a creating and a due journal may leave. No control does
+   * this until the task's remove UI exists.
+   */
+  async removeTaskFromList(taskId: string): Promise<void> {
+    const response = await this.page.request.post(
+      `/api/tasks/${taskId}/remove-from-list`
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to remove task from its list: ${response.status()} ${await response.text()}`
+      );
+    }
+    console.debug(`📝 [Data Manager] Removed task ${taskId} from its list`);
+  }
+
+  /**
    * Create a task on a list through the API: it has no creating journal, is
    * undated, due on `dueDate` or due in `dueJournalId`, and joins the bottom
    * of the list. Tracked with the other tasks, so cleanup deletes it
