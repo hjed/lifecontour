@@ -10,7 +10,11 @@
 
 import { render, screen, within } from '@testing-library/react';
 import { JournalTasksSection } from '../JournalTasksSection';
-import { createMockJournalTask } from '../test-helpers';
+import {
+  createMockJournalTask,
+  createMockListTask,
+  createMockTaskJournalRef,
+} from '../test-helpers';
 import { TaskLinkRole } from '@/types/tasks';
 import type { JournalTaskResource, JournalTasksResponse } from '@/types/tasks';
 import { useJournalTasks } from '@/lib/api/tasks';
@@ -193,6 +197,37 @@ describe('JournalTasksSection', () => {
       expect(rows).toHaveLength(1);
       expect(screen.getByText('The real one')).toBeInTheDocument();
     });
+  });
+
+  /**
+   * "On a journal page, a list task past its date shows the overdue marker …
+   * never the lapsed marker." The row words it; this is that the section
+   * renders it under the group the task is due in.
+   */
+  it('marks an overdue list task overdue, not lapsed, under Due', () => {
+    mockListing(
+      [
+        createMockListTask({
+          id: '1',
+          text: 'Book the venue',
+          due_journal_id: 1,
+          due_journal: createMockTaskJournalRef({ date: '2026-11-13' }),
+          link_roles: [TaskLinkRole.DUE],
+          overdue: true,
+        }),
+      ],
+      { due: [1] }
+    );
+
+    render(<JournalTasksSection journalId='1' />);
+
+    const due = screen.getByRole('region', { name: DUE_HEADING });
+    expect(within(due).getByTestId('journal-task-overdue')).toHaveTextContent(
+      'Overdue · 13 Nov'
+    );
+    expect(
+      within(due).queryByTestId('journal-task-lapsed')
+    ).not.toBeInTheDocument();
   });
 
   describe('accessible grouping', () => {

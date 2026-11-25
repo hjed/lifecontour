@@ -678,6 +678,7 @@ interface OptimisticTaskPatch {
   text?: string;
   lapsed?: boolean;
   lapse_reason?: LapseReason | null;
+  overdue?: boolean;
 }
 
 /** A task resource as it sits in any cached payload, whatever else it carries. */
@@ -715,10 +716,13 @@ function optimisticPatch({
     // ahead of it", so a task that has just left *not done* cannot be lapsed
     // and its marker goes at once. The reverse is not knowable here — it needs
     // the day boundary in the user's timezone — so returning a task to not done
-    // leaves the marker to the refetch that follows.
+    // leaves the marker to the refetch that follows. A list task's overdue
+    // marker is derived the same way ("past its date and still not done"), so
+    // it follows the same rule.
     if (status !== TaskStatus.NOT_DONE) {
       patch.lapsed = false;
       patch.lapse_reason = null;
+      patch.overdue = false;
     }
   }
 
@@ -776,7 +780,13 @@ function findCachedTask(
 }
 
 /** The attributes an optimistic patch can overwrite, and so must restore. */
-const PATCHABLE_FIELDS = ['status', 'text', 'lapsed', 'lapse_reason'] as const;
+const PATCHABLE_FIELDS = [
+  'status',
+  'text',
+  'lapsed',
+  'lapse_reason',
+  'overdue',
+] as const;
 
 /** One cache entry, and what the patched task read as inside *that* entry. */
 type TaskAttributeSnapshot = readonly [readonly unknown[], OptimisticTaskPatch];

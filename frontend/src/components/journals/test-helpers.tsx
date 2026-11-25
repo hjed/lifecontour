@@ -192,12 +192,15 @@ export function createMockJournalTask(
       creating_journal_id: 1,
       due_journal_id: 1,
       intermediate_journal_ids: [],
+      task_list_id: null,
+      due_date: null,
       creating_journal: createMockTaskJournalRef(),
       due_journal: createMockTaskJournalRef(),
       intermediate_journals: [],
       contacts: [],
       lapsed: false,
       lapse_reason: null,
+      overdue: false,
       link_roles: [TaskLinkRole.DUE],
       ...attributes,
     },
@@ -209,12 +212,13 @@ export function createMockJournalTask(
  *
  * Defaults to a list task in no journal at all — no creating journal and no
  * due journal — so each test names the one journal it reaches the listing
- * through. A list task never lapses, so `lapsed` stays false.
+ * through. It is on list 7. A list task never lapses, so `lapsed` stays false.
  */
 export function createMockListTask(
   partial?: Partial<JournalTaskAttributes> & { id?: string }
 ): JournalTaskResource {
   return createMockJournalTask({
+    task_list_id: 7,
     creating_journal_id: null,
     due_journal_id: null,
     creating_journal: null,
