@@ -9,7 +9,8 @@ list task's due date as a plain edit. What only a real database can show:
 - "today" judged on the timezone stored in ``user_settings``, with UTC as the
   fallback when the user has none;
 - the read model's ``overdue`` following the new date;
-- a refusal leaving the row and the outbox untouched.
+- a refusal leaving the row and the outbox untouched;
+- a date replacing a due journal, which is kept as an intermediate journal.
 
 The REST and MCP surfaces have their own suites.
 """
@@ -22,7 +23,6 @@ import pytest
 from core_shared.models.tasks import (
     TaskDueDateInPastError,
     TaskStatus,
-    TaskValidationError,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -38,6 +38,7 @@ from tests.integration.tasks.task_seeding import (
     USER_ID,
     create_journal,
     create_list_task,
+    intermediate_journal_ids,
     seed_task_list_id,
     task_events,
 )
@@ -210,22 +211,35 @@ class TestTodayIsTheUsers:
 
 
 class TestTheInvariantsHold:
-    async def test_a_task_due_in_a_journal_keeps_its_journal(
+    async def test_a_task_due_in_a_journal_has_it_replaced_by_the_date(
         self,
         service: TaskService,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
     ) -> None:
-        """Replacing a due journal with a date is ITER21-001 Phase 23's."""
+        """Invariant 4, by replacement: the journal left becomes intermediate."""
         journal_id = await create_journal(journal_repository, days_offset=7)
         list_id = await seed_task_list_id(async_connection)
         task_id = await create_list_task(
             async_connection, task_list_id=list_id, due_journal_id=journal_id
         )
 
-        with pytest.raises(TaskValidationError) as raised:
-            await _redate(service, async_connection, task_id, LATER)
+        await _redate(service, async_connection, task_id, LATER)
 
-        assert raised.value.field == "due_date"
-        assert (await _stored(async_connection, task_id)).due_date is None
-        assert await task_events(async_connection, task_id=task_id) == []
+        row = (
+            await async_connection.execute(
+                text("SELECT due_date, due_journal_id FROM tasks WHERE id = :id"),
+                {"id": task_id},
+            )
+        ).one()
+        assert (row.due_date, row.due_journal_id) == (LATER, None)
+        assert await intermediate_journal_ids(async_connection, task_id) == [journal_id]
+        events = await task_events(async_connection, task_id=task_id)
+        assert [event.event_type for event in events] == [
+            "TaskJournalLinked",
+            "TaskUpdated",
+        ]
+        assert events[1].payload["changed_fields"] == {
+            "due_journal_id": [journal_id, None],
+            "due_date": [None, "2026-09-01"],
+        }

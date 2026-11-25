@@ -523,7 +523,7 @@ class TestUpdateTaskToolParameters:
 
         assert required == {"task_id"}
 
-    def test_the_parameters_are_text_flag_icon_and_due_date(
+    def test_the_parameters_are_text_flag_icon_and_the_two_dates(
         self, update_task_schema: dict[str, Any]
     ) -> None:
         properties = update_task_schema["input_schema"]["properties"]
@@ -536,7 +536,48 @@ class TestUpdateTaskToolParameters:
             "clear_icon",
             "due_date",
             "clear_due_date",
+            "due_journal_id",
+            "clear_due_journal",
+            "acknowledge_reopen",
         }
+
+    def test_the_due_journal_is_a_bounded_integer_or_null(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        due_journal = update_task_schema["input_schema"]["properties"]["due_journal_id"]
+
+        assert _types(due_journal) == {"integer", "null"}
+        (integer,) = [o for o in due_journal["anyOf"] if o.get("type") == "integer"]
+        assert (integer["minimum"], integer["maximum"]) == (1, 2_147_483_647)
+
+    def test_the_due_journal_states_both_task_kinds_rules(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        description = update_task_schema["input_schema"]["properties"][
+            "due_journal_id"
+        ]["description"].lower()
+
+        assert "future" in description
+        assert "intermediate" in description
+        assert "keeps its status" in description
+        assert "not done" in description
+
+    @pytest.mark.parametrize("name", ["clear_due_journal", "acknowledge_reopen"])
+    def test_the_clear_and_the_acknowledgement_are_booleans_off_by_default(
+        self, update_task_schema: dict[str, Any], name: str
+    ) -> None:
+        flag = update_task_schema["input_schema"]["properties"][name]
+
+        assert flag["type"] == "boolean"
+        assert flag["default"] is False
+
+    def test_the_description_names_the_clashes(
+        self, update_task_schema: dict[str, Any]
+    ) -> None:
+        description = update_task_schema["description"].lower()
+
+        assert "due journal" in description
+        assert "both a due_date and a due_journal_id" in description
 
     def test_the_due_date_is_a_calendar_date_string_or_null(
         self, update_task_schema: dict[str, Any]
@@ -596,18 +637,21 @@ class TestUpdateTaskToolParameters:
         assert "task_service" not in properties
         assert "db_connection" not in properties
 
-    def test_no_journal_parameter_is_offered(
+    def test_no_intermediate_or_creating_journal_parameter_is_offered(
         self, update_task_schema: dict[str, Any]
     ) -> None:
-        """ "Updating a task never requires a journal" — specification, verbatim.
+        """Only the due journal is a field; the other journals are not.
 
-        A journal parameter here would invite a model to supply one, and the
-        only thing the service could do with it is create an intermediate link
-        the user never asked for. Intermediate links are explicit only.
+        Intermediate links are explicit, through their own tools, and the
+        creating journal is set once and never changes — a parameter for
+        either would invite a model to supply one.
         """
         properties = update_task_schema["input_schema"]["properties"]
 
-        assert not [name for name in properties if "journal" in name]
+        assert [name for name in properties if "journal" in name] == [
+            "due_journal_id",
+            "clear_due_journal",
+        ]
 
     def test_no_status_parameter_is_offered(
         self, update_task_schema: dict[str, Any]

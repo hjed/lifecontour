@@ -165,6 +165,31 @@ class TestSetChangeAndClear:
             "due_date": [None, "2099-12-31"],
         }
 
+    async def test_a_task_due_in_a_journal_has_it_replaced_by_the_date(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Invariant 4, by replacement: the journal left becomes intermediate."""
+        journal_id = await create_journal(journal_repository, days_offset=7)
+        list_id = await seed_task_list_id(async_connection)
+        task_id = await create_list_task(
+            async_connection, task_list_id=list_id, due_journal_id=journal_id
+        )
+
+        response = await _patch(authenticated_client, task_id, due_date="2099-12-31")
+
+        assert response.status_code == 200
+        attributes = response.json()["data"]["attributes"]
+        assert (attributes["due_date"], attributes["due_journal_id"]) == (
+            "2099-12-31",
+            None,
+        )
+        assert attributes["intermediate_journal_ids"] == [journal_id]
+        row = await _stored(async_connection, task_id)
+        assert (row.due_date, row.due_journal_id) == (FUTURE, None)
+
 
 class TestRefusals:
     async def test_a_past_date_is_refused_naming_both_days(
@@ -201,29 +226,6 @@ class TestRefusals:
         assert error["code"] == "TASK_VALIDATION_ERROR"
         assert error["meta"]["field"] == "due_date"
         assert (await _stored(async_connection, task_id)).due_date is None
-        assert await task_events(async_connection, task_id=task_id) == []
-
-    async def test_a_task_due_in_a_journal_takes_no_due_date(
-        self,
-        authenticated_client: AsyncClient,
-        async_connection: AsyncConnection,
-        journal_repository: SqlJournalRepository,
-    ) -> None:
-        """Invariant 4. Replacing the journal with a date is Phase 23's."""
-        journal_id = await create_journal(journal_repository, days_offset=7)
-        list_id = await seed_task_list_id(async_connection)
-        task_id = await create_list_task(
-            async_connection, task_list_id=list_id, due_journal_id=journal_id
-        )
-
-        response = await _patch(authenticated_client, task_id, due_date="2099-12-31")
-
-        assert response.status_code == 400
-        error = _error(response)
-        assert error["code"] == "TASK_VALIDATION_ERROR"
-        assert error["meta"]["field"] == "due_date"
-        row = await _stored(async_connection, task_id)
-        assert (row.due_date, row.due_journal_id) == (None, journal_id)
         assert await task_events(async_connection, task_id=task_id) == []
 
     @pytest.mark.parametrize(

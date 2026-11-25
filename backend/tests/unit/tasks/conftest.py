@@ -30,8 +30,18 @@ def mock_task_repo() -> AsyncMock:
     async def save(task: Task) -> Task:
         return task
 
+    async def peek(_task_id: int, _user_id: str) -> Task | None:
+        # The unlocked read a due-journal change takes before its journal locks.
+        # It reports whatever the locking read is set to, so a case configures
+        # the task in one place; one that needs the two to disagree replaces
+        # this side effect.
+        found = repo.find_by_id_for_update.return_value
+        return found if isinstance(found, Task) else None
+
     repo.save.side_effect = save
     repo.find_by_id_for_update.return_value = make_task()
+    repo.find_by_id.side_effect = peek
+    repo.add_intermediate_journal.return_value = True
     # The list a deleted task was on: none, for the journal-only task above.
     repo.delete.return_value = None
     return repo

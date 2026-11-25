@@ -33,11 +33,11 @@ from typing import Any
 import pytest
 from core_shared.models.tasks import (
     TaskAnchorJournalNotFoundError,
+    TaskDomainError,
     TaskDueDateInPastError,
     TaskDueJournalNotFutureError,
     TaskListArchivedError,
     TaskListNotFoundError,
-    TaskListTaskNotDueInJournalError,
     TaskStatus,
 )
 from sqlalchemy import text
@@ -64,6 +64,7 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
     create_list_task,
+    intermediate_journal_ids,
     link_intermediate_journal,
     linked_contact_ids,
     seed_task_list_id,
@@ -706,7 +707,7 @@ class TestAJournalDeleteRacingTheCreate:
 def _retarget_onto(
     owner: str, task_id: int, journal_id: int, outcome: list[BaseException]
 ) -> Callable[[AsyncConnection], Any]:
-    """Retarget the task, recording a refusal rather than raising it."""
+    """Retarget the task, recording any domain refusal rather than raising it."""
 
     async def run(connection: AsyncConnection) -> None:
         service = service_on(connection, SqlUserSettingsRepository(connection))
@@ -717,7 +718,7 @@ def _retarget_onto(
                 due_journal_id=journal_id,
                 transaction=connection,
             )
-        except TaskListTaskNotDueInJournalError as error:
+        except TaskDomainError as error:
             outcome.append(error)
 
     return run
@@ -726,14 +727,15 @@ def _retarget_onto(
 @pytest.mark.slow
 class TestAJournalDeleteRacingARetarget:
     @pytest.mark.asyncio
-    async def test_a_retarget_during_the_delete_waits_and_is_refused_cleanly(
+    async def test_a_retarget_during_the_delete_waits_and_lands_on_the_new_journal(
         self, async_engine: AsyncEngine
     ) -> None:
         """The delete detaches the task while the retarget waits on its journal.
 
         The retarget peeked the journal before the delete committed, so it
-        reads the task again under its lock, finds it undated, and refuses it
-        rather than failing on the anchor it no longer has.
+        reads the task again under its lock and finds it undated. A list task
+        can be given a due journal, so it simply gains the new one — with
+        nothing left to retain, since the journal it was leaving is gone.
         """
         async with _committed_list_and_journal(async_engine) as (
             owner,
@@ -761,8 +763,7 @@ class TestAJournalDeleteRacingARetarget:
                 _retarget_onto(owner, task_id, later_id, refused),
             )
 
-            assert len(refused) == 1
-            assert isinstance(refused[0], TaskListTaskNotDueInJournalError)
+            assert refused == []
             async with async_engine.connect() as check:
                 row = (
                     await check.execute(
@@ -770,8 +771,13 @@ class TestAJournalDeleteRacingARetarget:
                         {"id": task_id},
                     )
                 ).one()
-                assert row.due_journal_id is None
-                assert [
-                    event.event_type
-                    for event in await task_events(check, task_id=task_id)
-                ] == ["TaskJournalLinksRemoved"]
+                assert row.due_journal_id == later_id
+                assert await intermediate_journal_ids(check, task_id) == []
+                events = await task_events(check, task_id=task_id)
+                assert [event.event_type for event in events] == [
+                    "TaskJournalLinksRemoved",
+                    "TaskUpdated",
+                ]
+                assert events[1].payload["changed_fields"] == {
+                    "due_journal_id": [None, later_id]
+                }

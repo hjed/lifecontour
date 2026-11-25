@@ -136,6 +136,8 @@ def make_task_list_repo() -> AsyncMock:
     repo = AsyncMock(spec=TaskListRepository)
     packing = TaskList(id=TASK_LIST_ID, user_id=USER_ID, name="Packing", position=0)
     repo.find_by_id_for_share.return_value = packing
+    # The plain read a write that peeks refuses an archived list from.
+    repo.find_by_id.return_value = packing
     repo.find_by_ids.return_value = {TASK_LIST_ID: packing}
     return repo
 

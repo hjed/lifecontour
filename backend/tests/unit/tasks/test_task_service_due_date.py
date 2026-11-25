@@ -16,7 +16,8 @@ What is under test:
   ``(old, new)`` pair as ISO strings, with the status untouched in every status;
 - "today" is the user's, read once; a clear or an unchanged date reads no clock;
 - a resent past date on an overdue task is a no-op, not a refusal;
-- the entity's invariants refuse a journal-only task and one due in a journal;
+- the entity refuses a date on a journal-only task, and a date set on a task
+  due in a journal replaces the journal, which becomes intermediate;
 - the date travels with text, flag and icon as one write and one event.
 
 Repositories are mocked; the SQL is covered by the integration suites.
@@ -321,23 +322,43 @@ class TestTheInvariants:
         assert_nothing_written(mock_task_repo, mock_event_publisher)
 
     @pytest.mark.asyncio
-    async def test_a_task_due_in_a_journal_takes_no_due_date(
+    async def test_a_task_due_in_a_journal_has_its_journal_replaced_by_the_due_date(
         self,
         service: TaskService,
         mock_task_repo: AsyncMock,
+        mock_journal_repo: AsyncMock,
         mock_event_publisher: AsyncMock,
         mock_transaction: AsyncMock,
     ) -> None:
-        """Invariant 4. Replacing the journal with a date is Phase 23's."""
-        mock_task_repo.find_by_id_for_update.return_value = make_list_task(
-            due_journal_id=DUE_JOURNAL_ID
+        """Invariant 4, kept by replacement: the journal left becomes intermediate.
+
+        The specification: "Whenever a due journal is replaced or cleared — by
+        another journal, a due date, or nothing — the previous due journal
+        becomes an intermediate journal."
+        """
+        stored = make_list_task(due_journal_id=DUE_JOURNAL_ID)
+        mock_task_repo.find_by_id_for_update.return_value = stored
+        mock_task_repo.add_intermediate_journal.return_value = True
+        mock_journal_repo.find_and_lock_by_ids_for_user.return_value = []
+
+        result = await set_due_date(service, mock_transaction, LATER)
+
+        assert (result.due_date, result.due_journal_id) == (LATER, None)
+        mock_journal_repo.find_and_lock_by_ids_for_user.assert_awaited_once_with(
+            USER_ID, [DUE_JOURNAL_ID]
         )
-
-        with pytest.raises(TaskValidationError) as raised:
-            await set_due_date(service, mock_transaction, LATER)
-
-        assert raised.value.field == "due_date"
-        assert_nothing_written(mock_task_repo, mock_event_publisher)
+        mock_task_repo.add_intermediate_journal.assert_awaited_once_with(
+            TASK_ID, DUE_JOURNAL_ID, USER_ID
+        )
+        events = published_events(mock_event_publisher)
+        assert [event.event_type for event in events] == [
+            "TaskJournalLinked",
+            "TaskUpdated",
+        ]
+        assert events[1].event_data["changed_fields"] == {
+            "due_journal_id": (DUE_JOURNAL_ID, None),
+            "due_date": (None, "2026-09-01"),
+        }
 
     @pytest.mark.asyncio
     async def test_the_invariant_is_checked_before_the_clock(

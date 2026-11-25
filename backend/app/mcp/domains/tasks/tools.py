@@ -430,9 +430,10 @@ async def retarget_task(
         Field(
             description=(
                 "Confirms that reopening a task which is already done is "
-                "intended. Without it, retargeting a done task is refused. "
-                "Ignored for a task that is not done or is cancelled, neither "
-                "of which needs confirming. Must be a JSON boolean — 1, "
+                "intended. Without it, retargeting a done task that is not on "
+                "a list is refused. Ignored for a task that is not done or is "
+                "cancelled, neither of which needs confirming, and for a task "
+                "on a list, which keeps its status. Must be a JSON boolean — 1, "
                 '"true" and "yes" are refused rather than treated as a '
                 "confirmation."
             )
@@ -444,17 +445,18 @@ async def retarget_task(
     """
     Move a task to a different due journal, keeping the one it is leaving.
 
-    This is how a deadline is extended, and it is the only way a cancelled
-    journal-only task is reopened — it is what set_task_status tells you to do
-    when it refuses to leave cancelled. A task on a list needs no retarget to
-    reopen: set_task_status with not_done does it. The previous due journal is kept automatically as an
-    intermediate journal, so the trail of a repeatedly-deferred task stays
-    visible on the journals it passed through.
+    This is how a deadline is extended, and it is how a cancelled journal-only
+    task is reopened — it is what set_task_status tells you to do when it
+    refuses to leave cancelled. A task on a list needs no retarget to reopen:
+    set_task_status with not_done does it. The previous due journal is kept
+    automatically as an intermediate journal, so the trail of a
+    repeatedly-deferred task stays visible on the journals it passed through.
+    update_task with due_journal_id does the same.
 
-    Retargeting always leaves the task **not done**. For a task that is already
-    done that means reopening it, which is rarely what moving a date was meant
-    to do, so it is refused unless acknowledge_reopen is true; the refusal says
-    so. A cancelled task needs no such confirmation.
+    Retargeting a task that is not on a list always leaves it **not done**. For
+    a task that is already done that means reopening it, which is rarely what
+    moving a date was meant to do, so it is refused unless acknowledge_reopen
+    is true; the refusal says so. A cancelled task needs no such confirmation.
 
     Asking for the journal the task is already due in changes nothing at all.
     The journal the task is *leaving* is never checked, so a task whose due
@@ -463,11 +465,10 @@ async def retarget_task(
     A task on an archived list is read-only, as the list is: this is refused,
     even when it would change nothing, until the list is unarchived.
 
-    A task on a list that is done or cancelled is refused too, acknowledgement
-    or not: changing a list task's date never reopens it. A not-done task on a
-    list is moved as usual and stays not done. A task on a list that is not
-    due in a journal (undated, or due on a date) is refused: it has no due
-    journal to move from.
+    A task on a list keeps its status, whatever it is: changing a list task's
+    date never reopens or closes it, so a done or cancelled one moves and stays
+    closed, with no acknowledgement. One that is undated, or due on a date, is
+    given the journal (the date is replaced).
     """
     user_id = await get_current_user_id()
 
@@ -633,13 +634,48 @@ async def update_task(
             )
         ),
     ] = False,
+    due_journal_id: Annotated[
+        Annotated[int, Field(ge=1, le=INT32_MAX), JsonIntOnly] | None,
+        Field(
+            description=(
+                "The journal the task should now be due in. Must be an existing "
+                "journal of yours dated in the future (today is not the "
+                "future). The journal it leaves is kept as an intermediate "
+                "journal. A task on a list keeps its status, and a due date it "
+                "has is replaced. A task not on a list becomes not done, as "
+                "retarget_task does: a done one only with acknowledge_reopen. "
+                "Omit to keep it."
+            ),
+        ),
+    ] = None,
+    clear_due_journal: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Remove a list task's due journal, leaving it undated; the "
+                "journal is kept as an intermediate journal. Refused for a task "
+                "not on a list, which must stay due in a journal. Cannot be "
+                "combined with due_journal_id."
+            )
+        ),
+    ] = False,
+    acknowledge_reopen: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Confirms that moving a done task that is not on a list to a "
+                "new due_journal_id reopens it. Without it that move is "
+                "refused. Ignored otherwise: a task on a list keeps its status."
+            )
+        ),
+    ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_service: TaskService = mcp_depends(get_task_service),
 ) -> TaskMCP:
     """
     Change a task's own fields, in any status: reword it, flag or unflag it,
-    set, change or remove its icon, or set, change or clear a list task's due
-    date.
+    set, change or remove its icon, set, change or clear a list task's due
+    date, or move any task's due journal.
 
     Only the arguments you supply are changed, and everything you supply in
     one call is one change. Name at least one; values the task already has
@@ -651,8 +687,19 @@ async def update_task(
     confirmation, and the status is kept — a done or cancelled task is
     re-dated, not reopened (use set_task_status for that). A date you set must
     be today or later in the user's timezone; an overdue task's own date can be
-    resent unchanged. A task with no list, or one due in a journal, cannot be
-    given a due date; clearing one it does not have changes nothing.
+    resent unchanged. Setting one on a task due in a journal replaces the
+    journal, which is kept as an intermediate journal. A task with no list
+    cannot be given a due date; clearing one it does not have changes nothing.
+
+    A due journal works the same way on a task on a list: set it, change it or
+    clear it (clear_due_journal=true) as a plain edit — the status is kept, a
+    due date is replaced, and the journal it leaves is kept as an intermediate
+    journal. The journal you set must be dated in the future. On a task that
+    is not on a list, a new due journal is a retarget, exactly as retarget_task
+    does it: the task becomes not done, a done one only with
+    acknowledge_reopen=true, and its due journal cannot be cleared. Sending
+    both a due_date and a due_journal_id is refused: a task has one or the
+    other.
 
     Every task takes a flag and an icon — journal-only tasks included, and
     tasks that are done, cancelled, or whose due journal has already passed.
@@ -660,8 +707,9 @@ async def update_task(
     there are no priority levels. Text is editable at any time and in any
     status too: nothing about a task's state makes its wording unfixable.
 
-    The status is not changed here: use set_task_status. No journal is involved
-    and none is linked — use the journal link tools for that.
+    The status is not changed here, except by a journal-only task's retarget:
+    use set_task_status. Apart from the journal a due-journal change leaves,
+    no journal is linked — use the journal link tools for that.
 
     A task on an archived list is read-only, as the list is: this is refused,
     even when it would change nothing, until the list is unarchived.
@@ -676,6 +724,11 @@ async def update_task(
         raise TaskValidationError(
             "due_date", "Pass either a due_date or clear_due_date=true, not both"
         )
+    if clear_due_journal and due_journal_id is not None:
+        raise TaskValidationError(
+            "due_journal_id",
+            "Pass either a due_journal_id or clear_due_journal=true, not both",
+        )
     if (
         text is None
         and flagged is None
@@ -683,11 +736,14 @@ async def update_task(
         and not clear_icon
         and due_date is None
         and not clear_due_date
+        and due_journal_id is None
+        and not clear_due_journal
     ):
         raise TaskValidationError(
             "update",
             "Name a change: new text, flagged, a new icon, clear_icon=true, a "
-            "due_date or clear_due_date=true",
+            "due_date, clear_due_date=true, a due_journal_id or "
+            "clear_due_journal=true",
         )
 
     user_id = await get_current_user_id()
@@ -701,6 +757,11 @@ async def update_task(
         due_date_change = None
     elif due_date is not None:
         due_date_change = due_date
+    due_journal_change: int | None | Unset = UNSET
+    if clear_due_journal:
+        due_journal_change = None
+    elif due_journal_id is not None:
+        due_journal_change = due_journal_id
 
     updated, trail = await task_service.update_task_with_trail(
         user_id=user_id,
@@ -709,6 +770,8 @@ async def update_task(
         flagged=flagged,
         icon=icon_change,
         due_date=due_date_change,
+        due_journal_id=due_journal_change,
+        acknowledge_reopen=acknowledge_reopen,
         transaction=db_connection,
         source=Provenance.MCP,
         changed_by="mcp",

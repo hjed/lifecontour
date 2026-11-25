@@ -392,11 +392,16 @@ the *creating* journal where it arose and the *due* journal where it matters.
   nothing, so it never takes its list exclusively, and since it never holds a task while waiting for
   a list it cannot close a cycle with a move and a journal delete (`TestARemovalAMoveAndAJournalDelete`
   deadlocks under a task-first order). Lapse is derived, so the surfaces answer with the read model.
-  **A retarget publishes two events, and is the only task write that publishes more than one.**
-  `TaskDueJournalRetargeted` carries the due-journal pair and the reopen (only when the retarget
-  actually moved the status, since retargeting always lands a task *not done*); the **automatic
-  intermediate link** it retains — the previous due journal — is a `TaskJournalLinked` of its own,
-  the same type a manual attach publishes. The order is **the link first, then the anchor move**,
+  **A write that retains a due journal publishes two events, and is the only kind that publishes
+  more than one.** A journal-only task's retarget — by `retarget_due_journal` or by `update_task`
+  naming its new due journal — publishes `TaskDueJournalRetargeted`, carrying the due-journal pair
+  and the reopen (only when it actually moved the status, since it always lands the task *not
+  done*), plus a `TaskUpdated` only for a text, flag or icon change in the same call. A **list
+  task's** due-journal change — set, changed, cleared, or replaced by a due date, by either
+  method — is a plain edit: one `TaskUpdated` carrying the `due_journal_id` pair and, when one date
+  replaced the other, the `due_date` pair; its status is never touched. Either way the **automatic
+  intermediate link** retained — the journal left — is a `TaskJournalLinked` of its own, the same
+  type a manual attach publishes, with `origin=RETARGET` for every automatic retain. The order is **the link first, then the anchor move**,
   which holds by construction because each event is published directly behind the write it
   announces rather than beside the other's publish call.
   **Both link events are published only when a row actually moved.** `add_intermediate_journal` is

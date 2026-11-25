@@ -342,6 +342,65 @@ class TestTaskLifecycleProjection:
         assert all(e.user_id == USER_ID for e in entries)
 
     @pytest.mark.asyncio
+    async def test_a_due_journal_set_then_cleared_is_projected_and_owned(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+    ) -> None:
+        """A list task's due journal as a plain edit: set, then cleared.
+
+        The clear retains the journal it left, so the trail holds that link too;
+        every row carries the provenance of the edit that made it.
+        """
+        service = _task_service(async_connection)
+        journal_id = await create_journal(
+            SqlJournalRepository(async_connection), title="Next week", days_offset=7
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=task_list.id)
+
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task_id,
+            transaction=async_connection,
+            due_journal_id=journal_id,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        await service.update_task(
+            user_id=USER_ID,
+            task_id=task_id,
+            transaction=async_connection,
+            due_journal_id=None,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-task-due-journal"
+        )
+
+        entries = await _task_history(async_connection, task_id)
+        assert _values(entries) == {
+            ("due_journal_id", None, str(journal_id)),
+            ("due_journal_id", str(journal_id), None),
+            (f"journal:{journal_id}", None, str(journal_id)),
+        }
+        set_row = next(
+            e
+            for e in entries
+            if e.field_name == "due_journal_id" and e.new_value is not None
+        )
+        assert (set_row.source, set_row.changed_by) == (Provenance.MCP, "mcp")
+        for entry in entries:
+            if entry is not set_row:
+                assert (entry.source, entry.changed_by) == (Provenance.UI, "ui")
+            assert entry.user_id == USER_ID
+
+    @pytest.mark.asyncio
     async def test_a_due_date_set_then_cleared_is_projected_and_owned(
         self,
         test_stream_name: str,

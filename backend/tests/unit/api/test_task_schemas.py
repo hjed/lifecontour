@@ -426,24 +426,85 @@ class TestTheUpdateRequestCarriesADueDate:
             TaskUpdateRequest.model_validate(_update_body(due_date=value))
 
 
-class TestTheUpdateRequestChangesNothingElse:
-    """Text, status, flag and icon are the whole of it; everything else is refused.
+class TestTheUpdateRequestCarriesADueJournal:
+    """A task's due journal, which the update carries for every task.
 
-    The due journal (Phase 8) and contact links (Phase 11) are edited through
-    their own surfaces; accepting either here now would ship a half-implemented
-    field that silently did nothing.
+    ``null`` is a value, as for the date: ``"due_journal_id": null`` clears
+    it, an absent one leaves it alone. The id is a strict, column-bounded
+    integer, as on the retarget.
     """
 
+    def test_a_journal_alone_is_a_change(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(due_journal_id=42)
+        ).data.attributes
+
+        assert attributes.due_journal_id_change() == 42
+        assert attributes.due_date_change() is UNSET
+
+    def test_a_null_journal_alone_is_a_change_that_clears_it(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(due_journal_id=None)
+        ).data.attributes
+
+        assert attributes.due_journal_id_change() is None
+
+    def test_an_absent_journal_is_left_alone(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(flagged=True)
+        ).data.attributes
+
+        assert attributes.due_journal_id_change() is UNSET
+        assert attributes.acknowledge_reopen is False
+
+    def test_the_acknowledgement_travels_with_the_journal(self) -> None:
+        attributes = TaskUpdateRequest.model_validate(
+            _update_body(due_journal_id=42, acknowledge_reopen=True)
+        ).data.attributes
+
+        assert attributes.acknowledge_reopen is True
+
+    def test_the_acknowledgement_alone_names_no_change(self) -> None:
+        """It confirms a change; it is not one."""
+        with pytest.raises(ValidationError) as raised:
+            TaskUpdateRequest.model_validate(_update_body(acknowledge_reopen=True))
+
+        assert "due_journal_id" in str(raised.value)
+
     @pytest.mark.parametrize(
-        "field", ["due_journal_id", "creating_journal_id", "contact_ids"]
+        "value",
+        ["42", 4.2, 0, -1, INT32_MAX + 1, True],
+        ids=["string", "float", "zero", "negative", "beyond-int32", "boolean"],
     )
+    def test_anything_but_a_positive_column_sized_integer_is_refused(
+        self, value: object
+    ) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(_update_body(due_journal_id=value))
+
+    @pytest.mark.parametrize("value", [1, "true", "yes", None])
+    def test_the_acknowledgement_must_be_a_json_boolean(self, value: object) -> None:
+        with pytest.raises(ValidationError):
+            TaskUpdateRequest.model_validate(
+                _update_body(due_journal_id=42, acknowledge_reopen=value)
+            )
+
+
+class TestTheUpdateRequestChangesNothingElse:
+    """The task's own fields are the whole of it; everything else is refused.
+
+    The creating journal is set once and never changes, and contact links are
+    edited through their own surface; accepting either here would ship a field
+    that silently did nothing.
+    """
+
+    @pytest.mark.parametrize("field", ["creating_journal_id", "contact_ids"])
     def test_no_other_attribute_exists(self, field: str) -> None:
         assert field not in TaskUpdateAttributes.model_fields
 
     @pytest.mark.parametrize(
         ("field", "value"),
         [
-            ("due_journal_id", 9),
             ("creating_journal_id", 9),
             ("now", "2020-01-01T00:00:00+00:00"),
             ("nonsense", "x"),

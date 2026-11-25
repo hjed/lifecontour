@@ -4500,14 +4500,14 @@ class TestCreateTaskOnAListDueInAJournal:
 
 @pytest.mark.integration
 class TestRetargetingAClosedListTask:
-    """``retarget_task`` refuses a done or cancelled task on a list.
+    """``retarget_task`` moves a done or cancelled list task and keeps its status.
 
-    Temporary, until a list task's due journal can be changed under list rules,
-    which never reopen it.
+    A list task's due journal is a plain date, so no acknowledgement is needed
+    and none reopens it.
     """
 
     @pytest.mark.parametrize("status", [TaskStatus.DONE, TaskStatus.CANCELLED])
-    async def test_is_refused_naming_why_and_left_as_it_was(
+    async def test_moves_and_stays_closed(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
@@ -4524,31 +4524,29 @@ class TestRetargetingAClosedListTask:
         )
 
         async with authenticated_lifespan_client() as client:
-            payload = await _refused(
-                client,
-                "retarget_task",
-                task_id=task_id,
-                due_journal_id=later_id,
-                acknowledge_reopen=True,
+            payload = await _retarget_task(
+                client, task_id=task_id, due_journal_id=later_id
             )
 
-        assert payload["error"] == "Task error"
-        assert "never reopens it" in payload["message"]
+        assert (payload["status"], payload["due_journal_id"]) == (
+            status.value,
+            later_id,
+        )
+        assert payload["intermediate_journal_ids"] == [due_id]
         row = (
             await clean_database.execute(
                 sa_text("SELECT status, due_journal_id FROM tasks WHERE id = :id"),
                 {"id": task_id},
             )
         ).one()
-        assert (row.status, row.due_journal_id) == (status.value, due_id)
-        assert await task_events(clean_database, task_id=task_id) == []
+        assert (row.status, row.due_journal_id) == (status.value, later_id)
 
 
 @pytest.mark.integration
 class TestRetargetingAListTaskNotDueInAJournal:
-    """``retarget_task`` refuses a list task with no due journal to leave."""
+    """``retarget_task`` gives a list task with no due journal the one named."""
 
-    async def test_is_refused_naming_why_and_left_as_it_was(
+    async def test_gains_the_journal(
         self,
         authenticated_lifespan_client,
         clean_database: AsyncConnection,
@@ -4561,20 +4559,15 @@ class TestRetargetingAListTaskNotDueInAJournal:
         task_id = await create_list_task(clean_database, task_list_id=list_id)
 
         async with authenticated_lifespan_client() as client:
-            payload = await _refused(
-                client, "retarget_task", task_id=task_id, due_journal_id=later_id
+            payload = await _retarget_task(
+                client, task_id=task_id, due_journal_id=later_id
             )
 
-        assert payload["error"] == "Task error"
-        assert "not due in a journal" in payload["message"]
-        row = (
-            await clean_database.execute(
-                sa_text("SELECT due_journal_id FROM tasks WHERE id = :id"),
-                {"id": task_id},
-            )
-        ).one()
-        assert row.due_journal_id is None
-        assert await task_events(clean_database, task_id=task_id) == []
+        assert (payload["due_journal_id"], payload["status"]) == (
+            later_id,
+            "not_done",
+        )
+        assert payload["intermediate_journal_ids"] == []
 
 
 @pytest.mark.integration

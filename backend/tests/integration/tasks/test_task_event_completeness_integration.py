@@ -5,12 +5,13 @@ created, text updated, status changed, due journal retargeted, journal
 linked/unlinked, contact linked/unlinked, deleted. This file is what stops that
 being a claim made once and left to rot.
 
-**The rule, as the journal-link phase restated it:** *every task write path
-publishes at least one event, and a retarget publishes exactly two — the journal
-it retains, then the anchor move, in that order.* The "at least one" is not a
-licence for two elsewhere: **no other write path may publish more than one**, and
-that half is what stops the retarget's exception spreading, so it is asserted
-per path rather than in aggregate.
+**The rule, as the journal-link phase restated it and the due-journal phase
+widened it:** *every task write path publishes at least one event, and a write
+that leaves a due journal — a retarget, or a plain edit replacing or clearing
+it — publishes exactly two when it retains that journal: the link, then its own
+event, in that order.* The "at least one" is not a licence for two elsewhere:
+**no other write path may publish more than one**, and that half is what stops
+the exception spreading, so it is asserted per path rather than in aggregate.
 
 **Written against the write paths, not against** ``TaskService``\\ **'s method
 list**, which is the requirement the iteration document is explicit about and the
@@ -394,6 +395,18 @@ async def _act_set_due_date(fixtures: _Fixtures, seeded: Seeded) -> None:
     )
 
 
+async def _act_change_the_due_journal(fixtures: _Fixtures, seeded: Seeded) -> None:
+    later_id = await create_journal(
+        fixtures.journals, title="Where it matters now", days_offset=21
+    )
+    await fixtures.service.update_task(
+        user_id=USER_ID,
+        task_id=seeded.task_id,
+        due_journal_id=later_id,
+        transaction=fixtures.connection,
+    )
+
+
 async def _act_set_status(fixtures: _Fixtures, seeded: Seeded) -> None:
     await fixtures.service.set_status(
         user_id=USER_ID,
@@ -550,8 +563,9 @@ async def _act_merge_the_due_journal_away(fixtures: _Fixtures, seeded: Seeded) -
 async def _seed_list_task_due_in_a_journal(fixtures: _Fixtures) -> Seeded:
     """A task on a list, due in a journal of its own that is about to be deleted.
 
-    Seeded as a row: no product path creates a list task with a due journal yet.
-    ``journal_id`` is the journal the action deletes.
+    Seeded as a row, so the arrangement publishes nothing of its own.
+    ``journal_id`` is the journal the delete removes, and the one a due-journal
+    change leaves.
     """
     doomed_id = await create_journal(
         fixtures.journals, title="The journal being deleted", days_offset=5
@@ -707,6 +721,37 @@ WRITE_PATHS: list[WritePath] = [
         expects=["updated:due_date"],
     ),
     WritePath(
+        name="due date replacing a due journal",
+        ports=frozenset({"save", "add_intermediate_journal"}),
+        seed=_seed_list_task_due_in_a_journal,
+        act=_act_set_due_date,
+        # The journal left is retained first, then one edit names both anchors.
+        expects=["journal-linked", "updated:due_date+due_journal_id"],
+    ),
+    WritePath(
+        name="due journal change on a list task",
+        ports=frozenset({"save", "add_intermediate_journal"}),
+        seed=_seed_list_task_due_in_a_journal,
+        act=_act_change_the_due_journal,
+        expects=["journal-linked", "updated:due_journal_id"],
+    ),
+    WritePath(
+        name="due journal change on a journal-only task",
+        ports=frozenset({"save", "add_intermediate_journal"}),
+        seed=_seed_bare_task,
+        act=_act_change_the_due_journal,
+        # A retarget by another door, announced as one.
+        expects=["journal-linked", "retargeted"],
+    ),
+    WritePath(
+        name="retarget of a list task",
+        ports=frozenset({"save", "add_intermediate_journal"}),
+        seed=_seed_list_task_due_in_a_journal,
+        act=_act_retarget,
+        # The list rules: a plain edit, not a reopen.
+        expects=["journal-linked", "updated:due_journal_id"],
+    ),
+    WritePath(
         name="status change",
         ports=frozenset({"save"}),
         seed=_seed_bare_task,
@@ -718,7 +763,7 @@ WRITE_PATHS: list[WritePath] = [
         ports=frozenset({"save", "add_intermediate_journal"}),
         seed=_seed_bare_task,
         act=_act_retarget,
-        # The exception, and the only one: the link it retains, then the move.
+        # The link it retains, then the move.
         expects=["journal-linked", "retargeted"],
     ),
     WritePath(
@@ -830,6 +875,19 @@ WRITE_PATHS: list[WritePath] = [
         expects=["list-membership-changed"],
     ),
 ]
+
+
+# The writes that leave a due journal and retain it: the only ones allowed two
+# events, the link and then their own.
+RETAINING_PATHS = frozenset(
+    {
+        "retarget",
+        "due date replacing a due journal",
+        "due journal change on a list task",
+        "due journal change on a journal-only task",
+        "retarget of a list task",
+    }
+)
 
 
 # Reads are listed rather than inferred from the name, so a method called
@@ -991,7 +1049,7 @@ class TestEveryWritePathPublishes:
 
         An equality rather than a subset check: "at least one event" would pass
         for a path that published five, and the half of the rule worth asserting
-        is that no path but the retarget publishes more than one per write.
+        is that only a write retaining a journal publishes more than one.
         """
         assert await _run(path, fixtures, async_connection) == path.expects
 
@@ -1014,37 +1072,43 @@ class TestEveryWritePathPublishes:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "path",
-        [path for path in WRITE_PATHS if path.name != "retarget"],
+        [path for path in WRITE_PATHS if path.name not in RETAINING_PATHS],
         ids=lambda path: path.name,
     )
-    async def test_only_a_retarget_publishes_more_than_one_event(
+    async def test_only_a_write_that_retains_a_journal_publishes_two_events(
         self,
         fixtures: _Fixtures,
         async_connection: AsyncConnection,
         path: WritePath,
     ) -> None:
-        """The exception is one path wide, and this is what keeps it that way.
+        """The exception is the retained link, and this is what keeps it that way.
 
-        The rule reads *"every task write path publishes at least one event, and
-        a retarget publishes exactly two"*, and the second clause is not a
-        licence for two elsewhere. Asserted against what each path **actually
-        published** rather than against its declared ``expects``, because a
-        change that made a second path publish twice would ordinarily arrive with
-        its expectation updated to match — and would sail past a test that only
-        read the list.
+        A write that leaves a due journal — a retarget, or a plain edit that
+        replaces or clears one — publishes the link it retains and then its
+        own event. Nothing else may publish more than one. Asserted against
+        what each path **actually published** rather than against its declared
+        ``expects``, because a change that made a second path publish twice
+        would ordinarily arrive with its expectation updated to match — and
+        would sail past a test that only read the list.
         """
         published = await _run(path, fixtures, async_connection)
 
         assert len(published) == 1, (
-            f"{path.name} published {published}; only a retarget may publish more "
-            "than one event for one write"
+            f"{path.name} published {published}; only a write that retains a "
+            "journal may publish more than one event"
         )
 
     @pytest.mark.asyncio
-    async def test_a_retarget_publishes_the_link_then_the_move(
+    @pytest.mark.parametrize(
+        "path",
+        [path for path in WRITE_PATHS if path.name in RETAINING_PATHS],
+        ids=lambda path: path.name,
+    )
+    async def test_a_write_that_retains_a_journal_publishes_the_link_first(
         self,
         fixtures: _Fixtures,
         async_connection: AsyncConnection,
+        path: WritePath,
     ) -> None:
         """The exception itself, including its order.
 
@@ -1052,12 +1116,10 @@ class TestEveryWritePathPublishes:
         event is published directly behind the write it announces. A consumer
         reading the pair renders the trail in the order it happened.
         """
-        path = next(path for path in WRITE_PATHS if path.name == "retarget")
+        published = await _run(path, fixtures, async_connection)
 
-        assert await _run(path, fixtures, async_connection) == [
-            "journal-linked",
-            "retargeted",
-        ]
+        assert len(published) == 2
+        assert published[0] == "journal-linked"
 
 
 @pytest.mark.integration

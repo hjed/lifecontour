@@ -478,6 +478,12 @@ class TaskJournalLinkOrigin(StrEnum):
     the link's *cause*, and naming it here lets a consumer separate the two
     without being told the wrong thing about the actor.
 
+    ``RETARGET`` covers every automatic retain, not only the retarget call: a
+    list task whose due journal is replaced or cleared by a plain edit — by
+    another journal, a due date or nothing — retains the journal it left for
+    the same reason, and a second value would only make every consumer learn a
+    synonym.
+
     Lives beside the events rather than in ``core_shared.models.tasks``: it is
     payload vocabulary, not part of the task model, and nothing outside this
     backend reads it.

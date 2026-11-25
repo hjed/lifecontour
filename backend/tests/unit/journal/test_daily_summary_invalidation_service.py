@@ -866,6 +866,60 @@ class TestARetargetInvalidatesBothDays:
         }
 
     @pytest.mark.asyncio
+    async def test_a_list_tasks_plain_due_journal_change_marks_both_days(
+        self,
+        service: DailySummaryInvalidationService,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+    ) -> None:
+        """A list task's due journal moves by ``TaskUpdated``, not by a retarget."""
+        was = _journal(start=_instant(20), end=_instant(20, 10))
+        now = _journal(start=_instant(27), end=_instant(27, 10))
+        journal_repo.find_by_id.side_effect = lambda journal_id: (
+            was if journal_id == 1 else now
+        )
+
+        await service.invalidate_for_event(
+            "TaskUpdated",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "changed_fields": {"due_journal_id": [1, 2]},
+            },
+        )
+
+        assert _invalidated(summary_repo) == {
+            (USER_ID, datetime.date(2026, 4, 20), datetime.date(2026, 4, 20)),
+            (USER_ID, TODAY, TODAY),
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pair", [[None, 2], [2, None]], ids=["set", "cleared"])
+    async def test_a_set_or_cleared_due_journal_marks_the_one_journal_it_names(
+        self,
+        service: DailySummaryInvalidationService,
+        journal_repo: AsyncMock,
+        summary_repo: AsyncMock,
+        pair: list[int | None],
+    ) -> None:
+        """The ``None`` side names no journal, and is skipped rather than read."""
+        journal_repo.find_by_id.return_value = _journal(
+            start=_instant(27), end=_instant(27, 10)
+        )
+
+        await service.invalidate_for_event(
+            "TaskUpdated",
+            {
+                "task_id": 5,
+                "user_id": USER_ID,
+                "changed_fields": {"due_journal_id": pair},
+            },
+        )
+
+        journal_repo.find_by_id.assert_awaited_once_with(2)
+        assert _invalidated(summary_repo) == {(USER_ID, TODAY, TODAY)}
+
+    @pytest.mark.asyncio
     async def test_a_merge_that_moved_the_due_anchor_marks_what_it_can(
         self,
         service: DailySummaryInvalidationService,

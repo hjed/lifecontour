@@ -42,8 +42,6 @@ from core_shared.models.tasks import (
     TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListRemovalNeedsJournalsError,
-    TaskListTaskClosedError,
-    TaskListTaskNotDueInJournalError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
     TaskStatus,
@@ -183,6 +181,89 @@ def _check_arrangement(task_ids: Sequence[int], anchors: dict[str, int | None]) 
             raise TaskValidationError(
                 field, f"task {anchors[field]} is in the block it would anchor"
             )
+
+
+def _names_a_date_anchor(
+    due_date: datetime.date | None | Unset, due_journal_id: int | None | Unset
+) -> bool:
+    """Whether an update may leave or join a due journal.
+
+    Naming a due journal does, and so does setting a due date, which replaces
+    any journal the task is due in. Clearing a due date cannot, and nor can
+    any other field, so those updates keep the one read they always took.
+    """
+    return not isinstance(due_journal_id, Unset) or (
+        not isinstance(due_date, Unset) and due_date is not None
+    )
+
+
+def _refuse_both_date_anchors(
+    due_date: datetime.date | None | Unset, due_journal_id: int | None | Unset
+) -> None:
+    """Refuse a body that sets a due date and a due journal at once.
+
+    Invariant 4 allows one or the other, so the body has no answer whatever
+    the task holds; it is refused before anything is read. The field and the
+    message are the entity's, so the refusal reads the same as one made there.
+    """
+    if (
+        not isinstance(due_date, Unset)
+        and due_date is not None
+        and not isinstance(due_journal_id, Unset)
+        and due_journal_id is not None
+    ):
+        raise TaskValidationError(
+            "due_date", "A task cannot have both a due date and a due journal"
+        )
+
+
+def _refuse_journal_only_clashes(
+    task: Task, due_journal_id: int | None | Unset, status: TaskStatus | None
+) -> None:
+    """Refuse a journal-only task's due-journal change that has no one answer.
+
+    Its due journal moves by retarget, which lands it not done, so a body
+    that also asks for *done* or *cancelled* asks for two things at once. And
+    a journal-only task is anchored to its due journal, so it cannot be
+    cleared — only moved. A list task has neither rule: its status is its
+    own, and it may have no journal at all.
+    """
+    if task.task_list_id is not None or isinstance(due_journal_id, Unset):
+        return
+    if due_journal_id is None:
+        raise TaskValidationError(
+            "due_journal_id",
+            "A task that is not on a list must have a due journal; "
+            "it can be moved to another journal, not cleared",
+        )
+    if status is not None and status is not TaskStatus.NOT_DONE:
+        raise TaskValidationError(
+            "status",
+            "Moving a task that is not on a list to another due journal leaves "
+            f"it not done, so it cannot also be marked {status.value}",
+        )
+
+
+def _date_journals(
+    task: Task,
+    due_date: datetime.date | None | Unset,
+    due_journal_id: int | None | Unset,
+) -> tuple[int | None, int | None]:
+    """The journals an update leaves and joins, as far as ``task`` shows.
+
+    The one left is the task's due journal when the update replaces it — by
+    another journal, by nothing, or (on a list) by a due date. The one joined
+    is the journal named. Either may be ``None``; both being ``None`` means no
+    journal is touched and none needs locking.
+    """
+    joining = due_journal_id if isinstance(due_journal_id, int) else None
+    replaces_journal = not isinstance(due_journal_id, Unset) or (
+        task.task_list_id is not None
+        and not isinstance(due_date, Unset)
+        and due_date is not None
+    )
+    leaving = task.due_journal_id if replaces_journal else None
+    return leaving, joining
 
 
 class TaskService:
@@ -527,11 +608,13 @@ class TaskService:
         flagged: bool | None = None,
         icon: TaskIcon | None | Unset = UNSET,
         due_date: datetime.date | None | Unset = UNSET,
+        due_journal_id: int | None | Unset = UNSET,
+        acknowledge_reopen: bool = False,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         now: datetime.datetime | None = None,
     ) -> Task:
-        """Change one of the user's tasks: its text, status, flag, icon or due date.
+        """Change one of the user's tasks: its text, status, flag, icon or dates.
 
         **One method owns every field** because a ``PATCH`` may carry several,
         and JSON:API says a request is one change. Applying them as two calls would
@@ -539,12 +622,44 @@ class TaskService:
         that reworded and completed a task in one request could have half of it
         applied. Here it is one read, one decision and one write.
 
-        **No journal is involved**, for any field — the due date included, which
-        is a day of the task's own. The due journal is not read,
-        which is what keeps a *lapsed* task both completable and editable: the
-        future-dated rule is a write-time rule about *setting* a due journal, and
-        re-applying it here would make exactly the tasks a user most needs to
-        tidy up the ones they cannot.
+        **No journal is involved unless a date anchor moves.** Text, status,
+        flag, icon and a cleared due date read no journal, which is what keeps a
+        *lapsed* task both completable and editable: the future-dated rule is a
+        write-time rule about *setting* a due journal, and re-applying it to an
+        unrelated edit would make exactly the tasks a user most needs to tidy up
+        the ones they cannot.
+
+        **A due journal is a field here too**, for every task:
+
+        - on a **list task** it is a plain date, like the due date: set,
+          changed or cleared, with the status kept and no acknowledgement.
+          Setting either anchor clears the other (invariant 4), and the journal
+          left — replaced by another, by a due date, or by nothing — is
+          retained as an intermediate journal;
+        - on a **journal-only task** it is a retarget, under exactly
+          :meth:`retarget_due_journal`'s rules: the task lands *not done*, a
+          done one only when acknowledged — ``acknowledge_reopen``, or a
+          ``status`` of *not done* in the same call, which asks for the reopen
+          in so many words — and it cannot be cleared.
+
+        **A call with two answers is refused before anything is written**: a
+        due date and a due journal together, and — on a journal-only task — a
+        new due journal beside a status other than *not done*, or a clear.
+
+        **The journals are locked before the task row** when a due journal is
+        left or joined, in ascending id order, for the reason
+        :meth:`retarget_due_journal` gives: a journal merge and a journal delete
+        take the same rows in that order. Learning which journal is being left
+        needs a plain read of the task first, taken only when a due journal is
+        named or a due date set; every other call keeps the single locking read.
+        Every rule that writes is decided from the locked read. **Two residual
+        windows**, as on the retarget, both needing a third concurrent writer
+        between the peek and the task lock: a journal the peek did not show —
+        the one being left, or one a resend turned into a change — takes its
+        ``FOR KEY SHARE`` after the task row; and a journal-only task's clash
+        (a clear, or a closed status beside a new journal) is refused from the
+        peek, before any lock, so a task moved onto a list in that gap is
+        refused under the rules it had a moment earlier.
 
         A call that changes nothing is a no-op: nothing is written, so
         ``updated_at`` does not move, **no event is published** and no change is
@@ -558,7 +673,11 @@ class TaskService:
         for whichever fields moved. Not one event per field: a ``PATCH`` may
         reword a task and complete it, and that is a single unit of work, so
         splitting it into two announcements would report two changes where one
-        happened. The pairs are what the method already decided — the old value
+        happened. **A write that retains a journal publishes the link first**,
+        a ``TaskJournalLinked`` with ``origin=RETARGET`` behind the link's own
+        write, and only when a link row was written. A journal-only task's
+        retarget publishes what :meth:`retarget_due_journal` does, then a
+        ``TaskUpdated`` only for any text, flag or icon change beside it. The pairs are what the method already decided — the old value
         comes from the locking read, which is the only place it still exists
         once the row is saved — so the payload names a change the service made
         rather than a field the caller mentioned.
@@ -585,9 +704,15 @@ class TaskService:
                 is *set* must be today or later in the user's timezone; an
                 unchanged one is not re-judged, so an overdue task can be
                 resent its own date, and a clear never reads the clock. The
-                entity refuses a date on a journal-only task (invariant 5) and
-                on a task due in a journal (invariant 4) — replacing a due
-                journal with a date is ITER21-001 Phase 23's.
+                entity refuses a date on a journal-only task (invariant 5). On a
+                task due in a journal, the date replaces the journal.
+            due_journal_id: The task's new due journal, ``None`` to **clear**
+                it (a list task only), or ``UNSET`` (the default) to leave it
+                alone. A journal being set must be the user's and dated after
+                today in their timezone.
+            acknowledge_reopen: The caller's confirmation that moving a *done*
+                journal-only task's due journal reopens it. Ignored otherwise:
+                a list task never reopens on a date change.
             source: Where the change came from, recorded on the event
             changed_by: The actor, as the other domains write it
             now: The instant "today" is judged at, defaulting to the real
@@ -617,16 +742,67 @@ class TaskService:
             TaskListArchivedError: When the task is on an archived list —
                 setting a value it already has included.
             TaskValidationError: When a due date is set on a task that is not
-                on a list, or that is due in a journal (``field="due_date"``).
+                on a list, or together with a due journal (``field="due_date"``);
+                when a journal-only task's due journal is cleared
+                (``field="due_journal_id"``), or moved beside a status other
+                than *not done* (``field="status"``).
             TaskDueDateInPastError: When a due date being set is before today
                 in the user's timezone.
+            TaskAnchorJournalNotFoundError: When the due journal being set does
+                not exist or is not the acting user's.
+            TaskDueJournalNotFutureError: When the due journal being set is not
+                dated after today in the user's timezone.
+            TaskReopenNotAcknowledgedError: When a *done* journal-only task's
+                due journal is moved without the acknowledgement.
         """
+        _refuse_both_date_anchors(due_date, due_journal_id)
+
+        journals: dict[int, Journal] = {}
+        if _names_a_date_anchor(due_date, due_journal_id):
+            # A due journal being left or joined is locked ahead of the task
+            # row, which needs a look at the task first: the journal it is
+            # leaving is not knowable any other way. This read decides which
+            # journals to lock and what to refuse before locking them; the
+            # value the caller sent is kept, and whether it changes anything is
+            # decided again from the locked read.
+            peeked = await self.task_repo.find_by_id(task_id, user_id)
+            if peeked is None:
+                raise TaskNotFoundError(task_id)
+            # Before the no-op answer, as on a retarget: an archived list's
+            # task is not writable, even to the journal it already has.
+            await self._refuse_if_list_archived(peeked.task_list_id, task_id, user_id)
+            # A resend, as far as the peek shows, needs no journal lock.
+            peeked_change = (
+                UNSET if peeked.due_journal_id == due_journal_id else due_journal_id
+            )
+            _refuse_journal_only_clashes(peeked, peeked_change, status)
+            leaving, joining = _date_journals(peeked, due_date, peeked_change)
+            if leaving is not None or joining is not None:
+                journals = await self._lock_date_journals(user_id, leaving, joining)
+
         task = await self.task_repo.find_by_id_for_update(task_id, user_id)
         if task is None:
             raise TaskNotFoundError(task_id)
         # Before the no-op comparison: an archived list's task is not writable,
         # which includes being "written" to the value it already has.
         await self._hold_list_writable(task.task_list_id, task_id, user_id)
+
+        if task.due_journal_id == due_journal_id:
+            due_journal_id = UNSET
+        elif isinstance(due_journal_id, int) and due_journal_id not in journals:
+            # The peek saw a resend, but a concurrent write moved the due
+            # journal before the lock: the journal asked for is now a change,
+            # so it is locked here — after the task row, the residual window
+            # the docstring states — rather than the request being dropped.
+            journals |= await self._lock_date_journals(user_id, None, due_journal_id)
+        # Again from the locked row: a task moved onto or off a list while this
+        # waited gets the rules of the state it is actually in.
+        _refuse_journal_only_clashes(task, due_journal_id, status)
+        # A journal-only task's due journal moves by retarget, which lands it
+        # not done: the status is the retarget's, not the body's.
+        retargeting = task.task_list_id is None and not isinstance(
+            due_journal_id, Unset
+        )
 
         updated = task
         # Built as the decisions are made rather than by diffing the two tasks
@@ -643,7 +819,7 @@ class TaskService:
             updated = replace(updated, text=text)
             changed_fields["text"] = (task.text, text)
 
-        if status is not None and status != task.status:
+        if not retargeting and status is not None and status != task.status:
             # From the locked row: a list membership write locks the task too,
             # so the list the rule is asked about cannot change underneath it.
             # A task on a list is reopened directly; only a journal-only task
@@ -673,40 +849,58 @@ class TaskService:
                 None if icon is None else icon.value,
             )
 
+        if retargeting:
+            assert isinstance(due_journal_id, int)  # a clear was refused above
+            return await self._retarget_journal_only(
+                user_id=user_id,
+                task=task,
+                updated=updated,
+                other_changes=changed_fields,
+                due_journal_id=due_journal_id,
+                journals=journals,
+                acknowledge_reopen=(
+                    acknowledge_reopen or status is TaskStatus.NOT_DONE
+                ),
+                now=now,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+
         # Last, so ``replace`` has applied every other field's rule first, and a
         # date is judged against the clock only once the entity has accepted it
         # — a date that could never be set is wrong whatever day it is.
-        if not isinstance(due_date, Unset) and due_date != task.due_date:
-            updated = replace(updated, due_date=due_date)
-            if due_date is not None:
-                await self._require_due_date_allowed(user_id, due_date, now)
-            # ISO strings, as ``TaskCreated`` carries the date: the payload is
-            # JSON, and the history row stores the day the web app formats.
-            changed_fields["due_date"] = (
-                None if task.due_date is None else task.due_date.isoformat(),
-                None if due_date is None else due_date.isoformat(),
+        if task.task_list_id is None:
+            # A journal-only task: its due journal was handled above, and the
+            # entity refuses it a due date (invariant 5).
+            if not isinstance(due_date, Unset) and due_date != task.due_date:
+                updated = replace(updated, due_date=due_date)
+            left_journal_id = None
+        else:
+            updated, left_journal_id = await self._apply_list_due_anchor(
+                user_id=user_id,
+                task=task,
+                updated=updated,
+                changed_fields=changed_fields,
+                due_date=due_date,
+                due_journal_id=due_journal_id,
+                journals=journals,
+                now=now,
             )
 
         if updated is task:
             return task
 
-        saved = await self.task_repo.save(updated)
-
-        # After the save, so the event announces a change that finished. The
-        # ids come from the arguments rather than off the saved row: unlike a
-        # create, both were known before the write, and ``Task.id`` is optional
-        # on the entity because an unsaved one has none.
-        await self.event_publisher.publish(
-            TaskUpdated(
-                task_id=task_id,
-                user_id=user_id,
-                changed_fields=changed_fields,
-                source=source,
-                changed_by=changed_by,
-                transaction=transaction,
-            )
+        return await self._write_update(
+            task_id=task_id,
+            user_id=user_id,
+            updated=updated,
+            changed_fields=changed_fields,
+            left_journal_id=left_journal_id,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
         )
-        return saved
 
     @transactional
     async def link_contact(
@@ -1270,14 +1464,23 @@ class TaskService:
     ) -> Task:
         """Move one of the user's tasks onto a new due journal.
 
-        This is how a deadline is extended, and it is the **only** way a
-        cancelled journal-only task is reopened: retargeting always leaves the
-        task *not done*. It is also the operation
+        This is how a deadline is extended, and how a cancelled journal-only
+        task is reopened: retargeting a journal-only task always leaves it
+        *not done*. :meth:`update_task` reaches the same
+        rules when it is given a journal-only task's new due journal. It is also the operation
         :class:`~core_shared.models.tasks.TaskStatusTransitionError` names when
         it refuses to let a status call leave *cancelled*. A task on a list
         needs no retarget to reopen — :meth:`set_status` does it directly.
 
-        Two things happen together, in one unit of work:
+        **A task on a list follows the list rules instead**, decided from the
+        locked read: its due journal is a plain date, so the status is kept
+        whatever it is and the acknowledgement is ignored; one that is undated
+        or due on a date is given the journal (the date cleared, invariant 4);
+        and the change is announced as the plain edit it is — the link, then a
+        ``TaskUpdated`` — as :meth:`update_task` announces it.
+
+        For a journal-only task, two things happen together, in one unit of
+        work:
 
         - the new journal becomes the due journal, and the task becomes *not
           done* whatever it was before;
@@ -1305,16 +1508,19 @@ class TaskService:
         does not move, **no event is published** and no acknowledgement is
         needed. This mirrors :meth:`set_status`'s same-status no-op.
 
-        **This publishes two events, one behind each write**, and it is the only
-        task operation that publishes more than one:
+        **This publishes two events, one behind each write**, as every write
+        that retains a journal does:
 
         - a :class:`~app.core.tasks.models.events.TaskJournalLinked` for the
           retained journal — the same type a manual attach publishes, marked
           ``origin=RETARGET`` — and **only when a link row was actually
           written**, since the add is idempotent and a task returning to a
           journal it has already left finds it still attached;
-        - a ``TaskDueJournalRetargeted`` after the save, carrying the due-journal
-          pair and — for a task that was *done* or *cancelled* — the reopen, so
+        - for a journal-only task, a ``TaskDueJournalRetargeted`` after the save
+          (a task on a list publishes the plain edit's ``TaskUpdated`` instead,
+          carrying the due-journal pair and, when it had one, the date it lost),
+          carrying the due-journal pair and — for a task that was *done* or
+          *cancelled* — the reopen, so
           the status change reaches the event stream rather than only the task
           row.
 
@@ -1344,7 +1550,7 @@ class TaskService:
            names the two journals and answers the same-journal no-op, the one
            path that reads no journal and takes no lock of any kind;
         2. the **ordered locking read** of both journals, through
-           :meth:`_lock_retarget_journals`, taking exactly the ``FOR KEY SHARE``
+           :meth:`_lock_date_journals`, taking exactly the ``FOR KEY SHARE``
            the writes below would take anyway — earlier, and low id to high;
         3. the **locking read of the task**, from which every rule below is
            decided. The peek decides nothing else: it is a snapshot from before
@@ -1392,8 +1598,9 @@ class TaskService:
             changed_by: The actor, as the other domains write it
 
         Returns:
-            The task on its new due journal and not done — or unchanged, when it
-            was already due in that journal.
+            The task on its new due journal — not done, unless it is on a list
+            and kept its status — or unchanged, when it was already due in that
+            journal.
 
         Raises:
             TaskNotFoundError: When the task does not exist or is not the acting
@@ -1402,14 +1609,8 @@ class TaskService:
                 exist or is not the acting user's.
             TaskDueJournalNotFutureError: When the new due journal's date is not
                 after today in the user's timezone.
-            TaskReopenNotAcknowledgedError: When the task is *done* and the
-                caller has not acknowledged that retargeting reopens it.
-            TaskListTaskClosedError: When the task is on a list and done or
-                cancelled: a list task's date change never reopens it.
-                Reopening it first with :meth:`set_status` is the way out.
-            TaskListTaskNotDueInJournalError: When the task is on a list and
-                has no due journal to leave — undated, due on a date, or
-                detached by a journal delete this retarget waited on.
+            TaskReopenNotAcknowledgedError: When a journal-only task is *done*
+                and the caller has not acknowledged that retargeting reopens it.
             TaskListArchivedError: When the task is on an archived list —
                 retargeting onto the journal it is already due in included.
         """
@@ -1429,12 +1630,9 @@ class TaskService:
         if peeked.due_journal_id == due_journal_id:
             return peeked
 
-        # Retargeting applies the journal-only rules. A list task that has a due
-        # journal reaches it too; one that is undated or due on a date has no
-        # journal to leave, and is refused before any lock is taken.
-        if peeked.due_journal_id is None:
-            raise TaskListTaskNotDueInJournalError(task_id)
-        journals = await self._lock_retarget_journals(
+        # A list task with no due journal has none to leave, so only the one
+        # joined is locked.
+        journals = await self._lock_date_journals(
             user_id, peeked.due_journal_id, due_journal_id
         )
 
@@ -1446,101 +1644,50 @@ class TaskService:
         # Journals, then the task, then its list: the list it is on *now*, held
         # until the unit of work ends.
         await self._hold_list_writable(task.task_list_id, task_id, user_id)
-
-        # The journal actually being left, which is the one linked and announced
-        # below. It comes from here rather than from the peek even though they
-        # almost always agree — see the docstring's third read.
-        previous_due_journal_id = task.due_journal_id
-        # A journal delete that committed while this waited on the journal's
-        # lock has detached the task: refused as the peek's check would have.
-        if previous_due_journal_id is None:
-            raise TaskListTaskNotDueInJournalError(task_id)
-        if previous_due_journal_id == due_journal_id:
+        if task.due_journal_id == due_journal_id:
             return task
-        # A retarget leaves the task not done, and a list task's date change
-        # never changes its status, so a closed list task is refused rather
-        # than reopened — whatever the acknowledgement says. Decided from the
-        # locked read, and before the journal checks, since no journal would
-        # make it succeed. Temporary: lifted when a list task's due journal can
-        # be changed under list rules.
-        if task.task_list_id is not None and task.status is not TaskStatus.NOT_DONE:
-            raise TaskListTaskClosedError(task_id, task.status)
 
-        if due_journal_id not in journals:
-            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
-        await self._require_future_dated(
-            user_id, due_journal_id, journals[due_journal_id], now
-        )
-
-        # Last, and deliberately: the acknowledgement is a confirmation rather
-        # than a validation, so a caller who confirms should not then be told
-        # that the journal they picked was in the past.
-        if task.status == TaskStatus.DONE and not acknowledge_reopen:
-            raise TaskReopenNotAcknowledgedError(task_id)
-
-        # The answer is kept rather than discarded: the link is idempotent, and
-        # whether a row was actually written is the difference between announcing
-        # a new link and announcing one that was already there.
-        auto_link_created = await self.task_repo.add_intermediate_journal(
-            task_id, previous_due_journal_id, user_id
-        )
-        # Published here rather than beside the retarget event below, so each
-        # event sits behind the write it announces. That is what makes the pair
-        # reach a consumer link-first without depending on two adjacent publish
-        # calls staying in order.
-        #
-        # ``source`` is the caller's, not ``SYSTEM``: a retarget is something the
-        # **user** did, and this link is a consequence of their action rather
-        # than a background job. Filing it under the system would have one action
-        # produce two events disagreeing about who performed it. What is derived
-        # is the link's *cause*, and ``origin`` carries that.
-        if auto_link_created:
-            await self.event_publisher.publish(
-                TaskJournalLinked(
-                    task_id=task_id,
-                    user_id=user_id,
-                    journal_id=previous_due_journal_id,
-                    origin=TaskJournalLinkOrigin.RETARGET,
-                    source=source,
-                    changed_by=changed_by,
-                    transaction=transaction,
-                )
-            )
-        # Through ``_save`` rather than straight to the repository, for the race
-        # its docstring describes. The window this path had is now shut — the
-        # journal is held ``FOR KEY SHARE`` from the locking read above, and a
-        # ``DELETE`` conflicts with that — but the mapping stays: it is the same
-        # method the journal-only create writes through, where no journal lock
-        # is taken, and a guard that only holds on one of its callers is worth
-        # none of them relying on.
-        saved = await self._save(
-            replace(
-                task,
+        if task.task_list_id is not None:
+            # A list task's due journal is a plain date: the status is kept,
+            # whatever the acknowledgement says, and the change is announced
+            # as the plain edit it is. A journal delete that committed while
+            # this waited may have detached the task; it then simply gains the
+            # new journal, with nothing to retain.
+            changed_fields: dict[str, Any] = {}
+            updated, left_journal_id = await self._apply_list_due_anchor(
+                user_id=user_id,
+                task=task,
+                updated=task,
+                changed_fields=changed_fields,
+                due_date=UNSET,
                 due_journal_id=due_journal_id,
-                status=TaskStatus.NOT_DONE,
+                journals=journals,
+                now=now,
             )
-        )
-
-        # After the save, so the event announces a change that finished. Not for
-        # atomicity — the outbox row rides this same connection, so a failing
-        # ``_save`` would abort an event published before it just as surely — but
-        # so the order in the code matches the order of the facts, as it does in
-        # ``create_task`` and ``update_task``. The status the task *was* in comes
-        # from the locking read, which is the only place it still exists once the
-        # row is saved.
-        await self.event_publisher.publish(
-            TaskDueJournalRetargeted(
+            return await self._write_update(
                 task_id=task_id,
                 user_id=user_id,
-                previous_due_journal_id=previous_due_journal_id,
-                due_journal_id=due_journal_id,
-                previous_status=task.status,
+                updated=updated,
+                changed_fields=changed_fields,
+                left_journal_id=left_journal_id,
                 source=source,
                 changed_by=changed_by,
                 transaction=transaction,
             )
+
+        return await self._retarget_journal_only(
+            user_id=user_id,
+            task=task,
+            updated=task,
+            other_changes={},
+            due_journal_id=due_journal_id,
+            journals=journals,
+            acknowledge_reopen=acknowledge_reopen,
+            now=now,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
         )
-        return saved
 
     @transactional
     async def move_to_list(
@@ -1859,6 +2006,8 @@ class TaskService:
         flagged: bool | None = None,
         icon: TaskIcon | None | Unset = UNSET,
         due_date: datetime.date | None | Unset = UNSET,
+        due_journal_id: int | None | Unset = UNSET,
+        acknowledge_reopen: bool = False,
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
         now: datetime.datetime | None = None,
@@ -1879,6 +2028,8 @@ class TaskService:
             flagged=flagged,
             icon=icon,
             due_date=due_date,
+            due_journal_id=due_journal_id,
+            acknowledge_reopen=acknowledge_reopen,
             source=source,
             changed_by=changed_by,
             now=now,
@@ -2451,7 +2602,7 @@ class TaskService:
         """Hold the user's journal ``FOR KEY SHARE``, or ``None`` if it is not theirs.
 
         The lock a task's foreign key on it takes, taken before any other lock
-        the write needs — the order :meth:`_lock_retarget_journals` and a journal
+        the write needs — the order :meth:`_lock_date_journals` and a journal
         delete's detach take the journal in. Owner-scoped, so a journal that
         belongs to somebody else is absent and was never locked. The caller
         decides when a missing one is refused, so the refusal order does not
@@ -2464,14 +2615,15 @@ class TaskService:
             (journal for journal in found if journal.id == due_journal_id), None
         )
 
-    async def _lock_retarget_journals(
-        self, user_id: str, previous_due_journal_id: int, due_journal_id: int
+    async def _lock_date_journals(
+        self, user_id: str, leaving: int | None, joining: int | None
     ) -> dict[int, Journal]:
-        """Hold both of a retarget's journals, in the order a merge holds them.
+        """Hold a due-journal change's journals, in the order a merge holds them.
 
-        The two journals a retarget writes against are the one it is leaving —
-        the intermediate link's foreign key — and the one it is moving to — the
-        anchor update's. Both foreign keys take ``FOR KEY SHARE`` when their
+        The two journals a due-journal change writes against are the one it is
+        leaving — the intermediate link's foreign key — and the one it is moving
+        to — the anchor update's. Either may be absent: a list task may have no
+        journal to leave, and a clear or a due date joins none. Both foreign keys take ``FOR KEY SHARE`` when their
         statement runs; this takes the identical locks first, and in ascending id
         order, which is what stops the retarget and a journal merge acquiring the
         same pair of rows in opposite orders. See
@@ -2492,10 +2644,245 @@ class TaskService:
         return {
             journal.id: journal
             for journal in await self.journal_repo.find_and_lock_by_ids_for_user(
-                user_id, sorted({previous_due_journal_id, due_journal_id})
+                user_id,
+                sorted({each for each in (leaving, joining) if each is not None}),
             )
             if journal.id is not None
         }
+
+    async def _apply_list_due_anchor(
+        self,
+        *,
+        user_id: str,
+        task: Task,
+        updated: Task,
+        changed_fields: dict[str, Any],
+        due_date: datetime.date | None | Unset,
+        due_journal_id: int | None | Unset,
+        journals: dict[int, Journal],
+        now: datetime.datetime | None,
+    ) -> tuple[Task, int | None]:
+        """Apply a list task's date change, and name the journal it leaves.
+
+        A list task's due date and due journal are one plain field in two
+        shapes (invariant 4): setting either clears the other, so both land in
+        **one** ``replace`` and the entity never sees the task holding both.
+        The status is not read: changing a date never reopens a list task.
+
+        A date or journal being **set** is judged — the journal must be one of
+        ``journals`` (locked, and so the user's) and future-dated, the date today
+        or later. One the task already has is not re-judged, so a lapsed or
+        overdue task stays editable, and a clear reads no clock.
+
+        Returns the task with the change applied, and the due journal it left —
+        retained by the caller as an intermediate journal — or ``None`` when it
+        left none.
+        """
+        new_journal = (
+            task.due_journal_id if isinstance(due_journal_id, Unset) else due_journal_id
+        )
+        new_date = task.due_date if isinstance(due_date, Unset) else due_date
+        # The replacement: whichever anchor is being *set* clears the other.
+        if new_journal is not None and new_journal != task.due_journal_id:
+            new_date = None
+        if new_date is not None and new_date != task.due_date:
+            new_journal = None
+        if (new_journal, new_date) == (task.due_journal_id, task.due_date):
+            return updated, None
+
+        updated = replace(updated, due_journal_id=new_journal, due_date=new_date)
+        if new_journal != task.due_journal_id:
+            changed_fields["due_journal_id"] = (task.due_journal_id, new_journal)
+            if new_journal is not None:
+                if new_journal not in journals:
+                    raise TaskAnchorJournalNotFoundError("due", new_journal)
+                await self._require_future_dated(
+                    user_id, new_journal, journals[new_journal], now
+                )
+        if new_date != task.due_date:
+            # ISO strings, as ``TaskCreated`` carries the date: the payload is
+            # JSON, and the history row stores the day the web app formats.
+            changed_fields["due_date"] = (
+                None if task.due_date is None else task.due_date.isoformat(),
+                None if new_date is None else new_date.isoformat(),
+            )
+            if new_date is not None:
+                await self._require_due_date_allowed(user_id, new_date, now)
+
+        left = task.due_journal_id if new_journal != task.due_journal_id else None
+        return updated, left
+
+    async def _retain_left_journal(
+        self,
+        *,
+        task_id: int,
+        user_id: str,
+        journal_id: int,
+        source: Provenance,
+        changed_by: str,
+        transaction: AsyncConnection,
+    ) -> None:
+        """Keep a due journal being left as an intermediate journal, and say so.
+
+        The specification's one automatic link: "Whenever a due journal is
+        replaced or cleared — by another journal, a due date, or nothing — the
+        previous due journal becomes an intermediate journal."
+
+        The add is idempotent, and its answer is kept: a task returning to a
+        journal it has already left finds it still attached, and announcing a
+        link that was already there would put "linked" into its history twice.
+
+        ``source`` is the caller's, not ``SYSTEM``: the change is something the
+        **user** did, and this link is a consequence of it rather than a
+        background job. What is derived is the link's *cause*, and ``origin``
+        carries that. Published here, directly behind the write it announces,
+        so a consumer reads the link before the anchor move that follows it.
+        """
+        if await self.task_repo.add_intermediate_journal(task_id, journal_id, user_id):
+            await self.event_publisher.publish(
+                TaskJournalLinked(
+                    task_id=task_id,
+                    user_id=user_id,
+                    journal_id=journal_id,
+                    origin=TaskJournalLinkOrigin.RETARGET,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+
+    async def _write_update(
+        self,
+        *,
+        task_id: int,
+        user_id: str,
+        updated: Task,
+        changed_fields: dict[str, Any],
+        left_journal_id: int | None,
+        source: Provenance,
+        changed_by: str,
+        transaction: AsyncConnection,
+    ) -> Task:
+        """Write a plain edit: the journal it left, then the task, then one event.
+
+        Through ``_save``, so a due journal deleted under the write maps to the
+        404 its caller was promised rather than a raw ``IntegrityError``.
+        """
+        if left_journal_id is not None:
+            await self._retain_left_journal(
+                task_id=task_id,
+                user_id=user_id,
+                journal_id=left_journal_id,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        saved = await self._save(updated)
+
+        # After the save, so the event announces a change that finished. The
+        # ids come from the arguments rather than off the saved row: unlike a
+        # create, both were known before the write, and ``Task.id`` is optional
+        # on the entity because an unsaved one has none.
+        await self.event_publisher.publish(
+            TaskUpdated(
+                task_id=task_id,
+                user_id=user_id,
+                changed_fields=changed_fields,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        return saved
+
+    async def _retarget_journal_only(
+        self,
+        *,
+        user_id: str,
+        task: Task,
+        updated: Task,
+        other_changes: dict[str, Any],
+        due_journal_id: int,
+        journals: dict[int, Journal],
+        acknowledge_reopen: bool,
+        now: datetime.datetime | None,
+        source: Provenance,
+        changed_by: str,
+        transaction: AsyncConnection,
+    ) -> Task:
+        """Move a journal-only task to a new due journal, under retarget's rules.
+
+        Shared by :meth:`retarget_due_journal` and :meth:`update_task`, so the
+        rules exist once whichever surface asked:
+
+        - the new journal must be one of ``journals`` — locked, and so the
+          user's — and future-dated (invariant 4, judged at set time);
+        - the task lands *not done*; a *done* one only with
+          ``acknowledge_reopen``, checked last because it is a confirmation
+          rather than a validation;
+        - the journal left is retained as an intermediate journal.
+
+        ``updated`` carries any text, flag or icon change made in the same
+        call, and ``other_changes`` their pairs: they are announced by a
+        ``TaskUpdated`` of their own after the retarget's event, and only when
+        there are any. The status is never among them — the retarget's event
+        carries the reopen — so history records one status change, not two.
+        """
+        task_id = task.id
+        assert task_id is not None  # a persisted task, from the locked read
+        previous_due_journal_id = task.due_journal_id
+        # A journal-only task is anchored to its due journal (invariant 2).
+        assert previous_due_journal_id is not None
+
+        if due_journal_id not in journals:
+            raise TaskAnchorJournalNotFoundError("due", due_journal_id)
+        await self._require_future_dated(
+            user_id, due_journal_id, journals[due_journal_id], now
+        )
+        if task.status == TaskStatus.DONE and not acknowledge_reopen:
+            raise TaskReopenNotAcknowledgedError(task_id)
+
+        await self._retain_left_journal(
+            task_id=task_id,
+            user_id=user_id,
+            journal_id=previous_due_journal_id,
+            source=source,
+            changed_by=changed_by,
+            transaction=transaction,
+        )
+        # Through ``_save`` rather than straight to the repository, for the race
+        # its docstring describes: the journal is held ``FOR KEY SHARE`` from the
+        # locking read, so the window is shut, but the mapping is the guard every
+        # anchor writer shares.
+        saved = await self._save(
+            replace(updated, due_journal_id=due_journal_id, status=TaskStatus.NOT_DONE)
+        )
+        # The status the task *was* in comes from the locking read, which is the
+        # only place it still exists once the row is saved.
+        await self.event_publisher.publish(
+            TaskDueJournalRetargeted(
+                task_id=task_id,
+                user_id=user_id,
+                previous_due_journal_id=previous_due_journal_id,
+                due_journal_id=due_journal_id,
+                previous_status=task.status,
+                source=source,
+                changed_by=changed_by,
+                transaction=transaction,
+            )
+        )
+        if other_changes:
+            await self.event_publisher.publish(
+                TaskUpdated(
+                    task_id=task_id,
+                    user_id=user_id,
+                    changed_fields=other_changes,
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+        return saved
 
     async def _require_future_dated(
         self,

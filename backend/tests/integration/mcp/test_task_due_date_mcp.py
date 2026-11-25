@@ -120,6 +120,27 @@ class TestSetChangeAndClear:
         assert await stored_status(clean_database, task_id) == "done"
         assert await stored_due_date(clean_database, task_id) == FUTURE
 
+    async def test_a_task_due_in_a_journal_has_it_replaced_by_the_date(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Invariant 4, by replacement: the journal left becomes intermediate."""
+        journal_id = await create_journal(journal_repository, days_offset=7)
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(
+            clean_database, task_list_id=list_id, due_journal_id=journal_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _update_task(client, task_id=task_id, due_date="2099-12-31")
+
+        assert "error" not in payload
+        assert (payload["due_date"], payload["due_journal_id"]) == ("2099-12-31", None)
+        assert payload["intermediate_journal_ids"] == [journal_id]
+        assert await stored_due_date(clean_database, task_id) == FUTURE
+
 
 class TestRefusals:
     async def test_a_past_date_names_the_rule_and_today(
@@ -186,27 +207,6 @@ class TestRefusals:
 
         assert refused["error"] == "Task error"
         assert "list" in refused["message"]
-        assert await task_state(clean_database, task_id) == before
-        assert await task_events(clean_database, task_id=task_id) == []
-
-    async def test_a_task_due_in_a_journal_takes_no_due_date(
-        self,
-        authenticated_lifespan_client: Any,
-        clean_database: AsyncConnection,
-        journal_repository: SqlJournalRepository,
-    ) -> None:
-        journal_id = await create_journal(journal_repository, days_offset=7)
-        list_id = await seed_task_list_id(clean_database)
-        task_id = await create_list_task(
-            clean_database, task_list_id=list_id, due_journal_id=journal_id
-        )
-        before = await task_state(clean_database, task_id)
-
-        async with authenticated_lifespan_client() as client:
-            refused = await _refused(client, task_id=task_id, due_date="2099-12-31")
-
-        assert refused["error"] == "Task error"
-        assert "due journal" in refused["message"]
         assert await task_state(clean_database, task_id) == before
         assert await task_events(clean_database, task_id=task_id) == []
 
