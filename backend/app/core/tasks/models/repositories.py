@@ -70,6 +70,10 @@ class TaskRepository(ABC):
       cannot form a cycle. (An exclusive list lock here did deadlock against
       them.)
     - Creates on a list take it ``FOR NO KEY UPDATE`` holding no task lock.
+    - A removal (:meth:`remove_from_list`) takes its list ``FOR SHARE`` and
+      then the task row, as a reorder does: it places nothing, so it never
+      needs the list exclusively, and it never holds a task while waiting for
+      a list.
     - A move takes a list exclusively, so it locks its lists **before** its
       task, as a reorder does: both in ascending id (the task's own list
       ``FOR SHARE``, the target ``FOR NO KEY UPDATE``), a plain re-read
@@ -689,7 +693,9 @@ class TaskRepository(ABC):
 
         Clears the list, the position and the due date in one statement — the
         table's CHECKs are row-level, and a due date may only sit on a list
-        task. Locks the task's list first (see the class's lock order).
+        task. Holds the task's list ``FOR SHARE`` (see the class's lock order):
+        a removal places nothing, and ``TaskService.remove_from_list`` already
+        holds that share lock and the task row, which makes both locks free.
 
         Only a task holding both a creating and a due journal may leave (spec
         *Moving tasks*); that is the caller's to check under lock, and the

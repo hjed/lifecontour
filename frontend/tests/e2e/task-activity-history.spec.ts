@@ -262,6 +262,60 @@ test.describe('Task activity history', () => {
     ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
   });
 
+  test('a task taken off its list reads as a history line', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const data = new TestDataManager(page);
+    testCleanup(async () => data.cleanup());
+
+    const [creating, due] = await data.createTaskAnchorJournals('Removal');
+    const task = await data.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: due.id,
+      text: 'Return the hire car',
+    });
+    const list = await data.createTaskList('Removal list');
+
+    await data.moveTaskToList(task.id, list.id);
+    await data.removeTaskFromList(task.id);
+
+    const historyPath = `/api/tasks/${task.id}/history`;
+    await waitForHistoryEntry(
+      page.request,
+      historyPath,
+      attrs =>
+        attrs.field_name === 'task_list_id' &&
+        attrs.old_value === list.id &&
+        attrs.new_value === null
+    );
+
+    await page.goto(`/journals/${creating.id}`);
+    const row = page.getByTestId(`journal-task-${task.id}`);
+    await expect(row).toBeVisible({ timeout: 15000 });
+
+    const trigger = row.getByRole('button', {
+      name: 'Show history for “Return the hire car”',
+    });
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await trigger.click();
+    await expect(
+      row.getByRole('button', {
+        name: 'Hide history for “Return the hire car”',
+      })
+    ).toHaveAttribute('aria-expanded', 'true');
+
+    const feed = row.getByTestId('activity-feed');
+    await expect(feed).toBeVisible();
+    await expect(
+      feed.getByText('Added to a list', { exact: true })
+    ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
+    await expect(
+      feed.getByText('Removed from its list', { exact: true })
+    ).toBeVisible({ timeout: PROJECTION_TIMEOUT });
+  });
+
   test('a due date set on a list task reads as a history line', async ({
     authenticatedPage,
     testCleanup,

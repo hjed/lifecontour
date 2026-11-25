@@ -78,6 +78,7 @@ def _calls(s: ArchivedListTask) -> list[tuple[str, dict[str, Any]]]:
         ("delete_task", {"task_id": s.task_id}),
         ("retarget_task", {"task_id": s.task_id, "due_journal_id": s.later_journal_id}),
         ("move_task_to_list", {"task_id": s.task_id, "task_list_id": s.active_list_id}),
+        ("remove_task_from_list", {"task_id": s.task_id}),
         (
             "link_task_to_contact",
             {"task_id": s.task_id, "contact_id": s.unlinked_contact_id},
@@ -113,6 +114,7 @@ TOOLS = [
     "delete_task",
     "retarget_task",
     "move_task_to_list",
+    "remove_task_from_list",
     "link_task_to_contact",
     "unlink_task_from_contact",
     "attach_intermediate_journal_to_task",

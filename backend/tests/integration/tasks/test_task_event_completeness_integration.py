@@ -337,6 +337,26 @@ async def _act_move_to_a_new_list(fixtures: _Fixtures, seeded: Seeded) -> None:
     )
 
 
+async def _seed_anchored_list_task(fixtures: _Fixtures) -> Seeded:
+    """A task on a list holding both journals: the one shape that may leave."""
+    task_list = await seed_task_list(fixtures.connection, "Groceries")
+    assert task_list.id is not None
+    creating_id, due_id = fixtures.anchors
+    task_id = await create_list_task(
+        fixtures.connection,
+        task_list_id=task_list.id,
+        creating_journal_id=creating_id,
+        due_journal_id=due_id,
+    )
+    return Seeded(task_id=task_id)
+
+
+async def _act_remove_from_its_list(fixtures: _Fixtures, seeded: Seeded) -> None:
+    await fixtures.service.remove_from_list(
+        user_id=USER_ID, task_id=seeded.task_id, transaction=fixtures.connection
+    )
+
+
 async def _act_update_text(fixtures: _Fixtures, seeded: Seeded) -> None:
     await fixtures.service.update_task(
         user_id=USER_ID,
@@ -746,6 +766,13 @@ WRITE_PATHS: list[WritePath] = [
         expects=["list-membership-changed"],
     ),
     WritePath(
+        name="remove a task from its list",
+        ports=frozenset({"remove_from_list"}),
+        seed=_seed_anchored_list_task,
+        act=_act_remove_from_its_list,
+        expects=["list-membership-changed"],
+    ),
+    WritePath(
         name="move a task to another list",
         ports=frozenset({"add_to_list"}),
         seed=_seed_list_task,
@@ -858,10 +885,8 @@ PORT_READ_METHODS = frozenset(
 #
 # It holds the list-membership writes now (a user decision): the two reorders
 # for good (their callers, ``TaskService.reorder_task`` and
-# ``reorder_list_tasks``, publish nothing), and leaving a list until the phase
-# that gives it a service path and its event — that phase must delete its
-# entry. Joining a list left it when moving a task onto a list gained its
-# service and event:
+# ``reorder_list_tasks``, publish nothing). Joining a list and leaving one left
+# it when their service paths gained their events (ITER21-001 Phases 26, 27):
 NAMED_EXCLUSIONS: dict[str, str] = {
     # Never announced, by specification: "reordering does not" emit an event or
     # appear in task history. This entry is permanent.
@@ -869,10 +894,6 @@ NAMED_EXCLUSIONS: dict[str, str] = {
     # The agent's block arrangement (ITER21-001 Phase 25): a reorder too, so
     # never announced either. Also permanent.
     "arrange_open_tasks": "reordering emits no event (spec: Contacts, events and history)",
-    # Repository primitives with no service caller yet, so no write can happen
-    # unannounced. The list-membership event lands with the service that calls
-    # them; that phase removes the entry and adds a WritePath above.
-    "remove_from_list": "no caller until removal from a list (ITER21-001 Phase 27)",
 }
 
 
@@ -1151,17 +1172,12 @@ class TestEveryPortWriteIsAccountedFor:
 
         It held one entry for several phases: the merge re-point, the write the
         journal domain performs on task rows, until it published. It now holds
-        the list-membership writes: the two reorders for good (the spec gives them no
-        event), and leaving a list only until the phase that gives it a caller
-        and an event, which deletes its entry here; joining a list has left. A test
+        only the two reorders, for good (the spec gives them no event); joining
+        and leaving a list left once their services published. A test
         allowing "a few" exclusions would let the next one be added as easily as
         these were, so the set is pinned.
         """
-        assert set(NAMED_EXCLUSIONS) == {
-            "move_within_list",
-            "arrange_open_tasks",
-            "remove_from_list",
-        }
+        assert set(NAMED_EXCLUSIONS) == {"move_within_list", "arrange_open_tasks"}
 
     @pytest.mark.asyncio
     async def test_a_merge_repoints_a_task_and_says_so(

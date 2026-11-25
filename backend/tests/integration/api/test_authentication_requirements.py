@@ -192,6 +192,15 @@ class TestAuthenticationRequirements:
         assert response.status_code == 401
         assert "Authentication required" in response.json()["errors"][0]["detail"]
 
+    def test_removing_a_task_from_its_list_requires_auth(
+        self, client: TestClient
+    ) -> None:
+        response = client.post(
+            "/api/tasks/1/remove-from-list", headers={"Host": "localhost"}
+        )
+        assert response.status_code == 401
+        assert "Authentication required" in response.json()["errors"][0]["detail"]
+
     def test_moving_a_task_onto_a_list_requires_auth(self, client: TestClient) -> None:
         """A valid body, so a 401 cannot be a 400 in disguise."""
         response = client.post(

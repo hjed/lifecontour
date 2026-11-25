@@ -373,8 +373,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   **List membership is one event, `TaskListMembershipChanged`**, for joining a list, moving between
   lists and leaving one: its `changed_fields` carries `task_list_id` as `(old, new)` (`None` on the
   absent side), and it is projected by `TaskUpdated`'s handler. The aggregate is the task, though the
-  type name begins `TaskList`. `TaskService.move_to_list` publishes it; a move to the task's own list
-  is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: both lists
+  type name begins `TaskList`. `TaskService.move_to_list` publishes it, and
+  `TaskService.remove_from_list` (Phase 27) publishes it with `None` as the new list; a move to the
+  task's own list, or a removal of a task on no list, is a no-op and publishes nothing. Position is never carried. **Lock order for a move**: both lists
   in ascending id — the task's own list `FOR SHARE`, the target `FOR NO KEY UPDATE` (the bottom is
   computed under it) — chosen from a plain read of the task; then a plain re-read, refusing with
   `TASK_LIST_CHANGED` before waiting for the task if it already moved (nothing can put it on the
@@ -384,7 +385,13 @@ the *creating* journal where it arose and the *due* journal where it matters.
   could close a cycle with a crossing move and a reorder of either list. Because a task can change lists, the link writes (`link_contact`, `unlink_contact`,
   `attach_intermediate_journal`, `detach_intermediate_journal`) read their task `FOR SHARE` before
   trusting `task_list_id`, so they wait for an in-flight move; attach and detach lock their journal
-  `FOR KEY SHARE` first, in a journal merge's journal-then-task order.
+  `FOR KEY SHARE` first, in a journal merge's journal-then-task order. **Lock order for a
+  removal**: its list `FOR SHARE`, chosen from a plain read, then the task row, re-checked
+  (`TASK_LIST_CHANGED` if it left the list meanwhile); the anchors are judged on that locked row,
+  and only a task holding both may leave (`TASK_LIST_REMOVAL_NEEDS_JOURNALS`, 409). A removal places
+  nothing, so it never takes its list exclusively, and since it never holds a task while waiting for
+  a list it cannot close a cycle with a move and a journal delete (`TestARemovalAMoveAndAJournalDelete`
+  deadlocks under a task-first order). Lapse is derived, so the surfaces answer with the read model.
   **A retarget publishes two events, and is the only task write that publishes more than one.**
   `TaskDueJournalRetargeted` carries the due-journal pair and the reopen (only when the retarget
   actually moved the status, since retargeting always lands a task *not done*); the **automatic

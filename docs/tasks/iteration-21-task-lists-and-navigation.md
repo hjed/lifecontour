@@ -130,7 +130,7 @@ Search is last because its rules name things the earlier steps create (templates
 - [ ] A done or cancelled list task can be set straight back to not done.
 - [ ] Tasks on a list can be reordered; a new task joins the bottom.
 - [ ] A list task can move to another list, joining the bottom; a journal-only task can be added to a list and stops lapsing.
-- [ ] A task can leave its list only when it has both anchors; the response says when that leaves it lapsed.
+- [x] A task can leave its list only when it has both anchors; the response says when that leaves it lapsed. *(Phase 27)*
 - [ ] Flag and icon can be set and cleared on any task, journal-only ones included; the icon must come from the fixed set.
 
 **Acceptance Criteria — journals, contacts, history:**
@@ -2529,16 +2529,107 @@ lock-order fix), `pnpm quality:check`, jest (3,424), the Playwright spec and pre
 - The Phase 14 lock note ("lists first, then the task") still holds for any write that takes a list
   exclusively (the move); task-field writes lock the task first and their list only `FOR SHARE`.
 
-#### Phase 27: Remove a task from its list
+#### Phase 27: Remove a task from its list ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 26.
-**Estimated diff:** ~110 production → **~1,000 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~110 production → **~1,000 tracked** · one capability on REST and MCP together ·
+**Actual:** ~250 production → **~2,390 tracked** (about 2,390 insertions, 40 deletions excluding
+this document: about 250 production lines across 9 files, about half of them docstrings; about
+2,120 test lines across 16 files; 25 architecture docs). Production ran ×2.3 on the estimate, as
+Phase 26 did, and for the same reason: the lock order. Tests ran ×8.5 on production, because the
+concurrency suite covers every writer that can meet a removal over real connections.
 
 **Acceptance Criteria:**
 
-- [ ] Only with both anchors; response says when it leaves the task lapsed.
-- [ ] `remove_from_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Only with both anchors; response says when it leaves the task lapsed.
+- [x] `remove_from_list`'s entry is removed from `NAMED_EXCLUSIONS` in `test_task_event_completeness_integration.py` and replaced by a `WritePath` asserting its event (Phase 14 left it excluded until a service calls it).
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** a task holding both journals can leave its list and become journal-only.
+- `TaskService.remove_from_list`: a plain read of the task chooses its list, which is locked
+  `FOR SHARE` (an archived list is refused). The task row is then locked `FOR NO KEY UPDATE` and
+  re-checked: a task that has left the list meanwhile is refused with 409 `TASK_LIST_CHANGED`. The
+  anchors are judged on that locked row, and a task missing either is refused with the new
+  `TaskListRemovalNeedsJournalsError`. That error answers 409 `TASK_LIST_REMOVAL_NEEDS_JOURNALS`,
+  names the missing journals and the way out (move, cancel or delete). Otherwise
+  `TaskRepository.remove_from_list` clears the list, position and due date, and the service
+  publishes `TaskListMembershipChanged(list → None)`. The task keeps its journals, status, flag,
+  icon and contacts. A task on no list is a no-op: nothing locked, written or published.
+  Refusal order: task 404, archived 409, changed 409, missing journals 409.
+- **The repository primitive share-locks the list** (it took `FOR NO KEY UPDATE`). Under the
+  service's share lock that was an upgrade, so two removals from one list deadlocked.
+- REST `POST /api/tasks/{task_id}/remove-from-list` (no body) and MCP
+  `remove_task_from_list(task_id)` (`IDEMPOTENT_WRITE`, `JsonIntOnly`). Both answer with the task
+  **read model** (`GET /api/tasks/{id}` / `get_task`), read after the commit, so `lapsed` and
+  `lapse_reason` say whether the task is lapsed now. UI and MCP provenance. The server's task
+  guidance names the tool.
+- History wording (*Removed from its list*) and summary invalidation were already in place from
+  Phase 26.
+- `api-design.md` (endpoint row, error code, MCP list), `domain-architecture.md` (the event, the
+  removal's lock order) and `database-design.md` (the lock-order bullet, membership events) updated.
+
+**Tests:** unit `tests/unit/tasks/test_task_service_remove_from_list.py` (the write and its one
+event; the lock order: read, list share, task, write; the list never taken exclusively; the
+journal-only no-op; every refusal, including a task changed, removed or deleted under the lock,
+journals judged on the locked row, archived before journals; the message names the ways out),
+`test_task_service_archived_list.py` (the removal across the archived-list write matrix),
+`api/test_task_error_mapping.py`, `mcp/domains/test_task_tools_schema.py` and `mcp/test_server.py`.
+
+Integration:
+- `tasks/test_task_service_remove_from_list_integration.py`:
+  - single-connection cases: what the task keeps; lapsed straight after for a passed due journal,
+    not lapsed for a future one or a done task; refusals for undated, date-only and one-journal
+    tasks; the no-op; archived; another user's task; one event.
+  - over real connections: two removals from one list (fails under the old exclusive lock); two
+    removals of the same task (the second a no-op); a removal and a status edit either way round; a removal during a move of its task (refused) and
+    a move during a removal (the move refused); a removal and a reorder either way round; a removal
+    and an archive either way round; a removal and a delete of its due journal either way round.
+  - `TestARemovalAMoveAndAJournalDelete`: three connections that deadlock under a task-first
+    order.
+- The completeness inventory: a `WritePath`, the exclusion and its pin removed.
+- `test_task_history_projection_e2e.py`: join, move and removal projected with provenance.
+- `api/test_task_remove_from_list_endpoints.py`, the 401 table and the archived-list endpoints.
+- `mcp/test_task_tools_mcp.py::TestRemoveTaskFromList` / `TestRemoveTaskFromListRefusals` and the
+  archived-list MCP matrix.
+
+E2E: `task-activity-history.spec.ts` "a task taken off its list reads as a history line" (Firefox
+and Mobile Chrome, repeated 3×), with `TestDataManager.removeTaskFromList`.
+
+Gates run locally:
+- ruff and mypy;
+- the backend unit suite (6,203);
+- the full backend integration suite in chunks (5,310 passed, 7 skips that were already there);
+- `pnpm quality:check`, jest (3,429) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **List first, share only.** The plan review found that a task-first removal can close a cycle
+  with a move onto its list and a journal delete holding the move's task. A removal places
+  nothing, so it never needs the list exclusively, and it never holds a task while waiting for a
+  list.
+- **Answer with the read model.** Lapse is derived from the due journal's date and cancellation,
+  which `TaskService` cannot see, so the surfaces read the task after the commit rather than
+  deriving the lapse rule a second time. This is the first write route to answer in the read shape.
+- **A task on no list is a no-op**, as a move to the task's own list is. Raised by the phase's
+  final review: a second removal of the same task that waited on the first answers that same
+  no-op, not `TASK_LIST_CHANGED`, so a retry gets one answer however it races.
+- **A move during a removal is refused** with `TASK_LIST_CHANGED`: the move chose its lists while
+  the task was still on its list, by Phase 26's design.
+
+**Notes for later phases:**
+- *ITER21-002 Phase 16 (move and remove UI):* call `POST /api/tasks/{id}/remove-from-list`. The
+  spec's "told before confirming" is that UI's job: the task's due journal date is on the read
+  model it already has. Read `lapsed` from the answer.
+- *ITER21-006 (recurrence):* removing a recurring task must clear its recurrence (spec *Moving
+  tasks*), and the user is told so before confirming.
+- *Pre-existing, out of scope:* `update_task` locks its task, then its list `FOR SHARE`. A move
+  onto that list that is holding a journal delete's task can therefore form the same three-way
+  cycle the removal avoids. PostgreSQL aborts one side, and the caller retries.
+- *Phase 29 (delete a list, merged first):* a removal and a list delete meet without deadlock
+  either way round. A delete that finds a removal holding one of its tasks waits, then skips it;
+  a removal that waited for a delete finds its list gone and reads the task again, answering the
+  no-op for a task the delete kept journal-only, 404 for one it deleted
+  (`test_a_removal_during_a_delete_of_its_list_answers_the_no_op`).
 
 #### Phase 28: Flag and icon on any task ✅ DONE
 

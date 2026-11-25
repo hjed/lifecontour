@@ -390,17 +390,18 @@ class TestTaskLifecycleProjection:
         cleared = next(e for e in entries if e.new_value is None)
         assert (cleared.source, cleared.changed_by) == (Provenance.UI, "ui")
 
-    async def test_a_join_and_a_move_between_lists_are_projected_and_owned(
+    async def test_a_join_a_move_and_a_removal_are_projected_and_owned(
         self,
         test_stream_name: str,
         async_connection: AsyncConnection,
         stream_client: StreamClient,
         redis_client: Redis,
     ) -> None:
-        """A journal-only task added to a list, then moved to another.
+        """A journal-only task added to a list, moved to another, then removed.
 
-        Each move is one ``task_list_id`` row naming the lists either side, by
-        id; position is never recorded, because reordering is not history.
+        Each is one ``task_list_id`` row naming the lists either side, by id
+        (``None`` for no list); position is never recorded, because reordering
+        is not history.
         """
         service = _task_service(async_connection)
         creating_journal_id, due_journal_id = await _anchors(async_connection)
@@ -433,6 +434,13 @@ class TestTaskLifecycleProjection:
             source=Provenance.MCP,
             changed_by="mcp",
         )
+        await service.remove_from_list(
+            user_id=USER_ID,
+            task_id=task.id,
+            transaction=async_connection,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
 
         await relay_and_project(
             stream_client, test_stream_name, async_connection, "test-task-moves"
@@ -443,13 +451,20 @@ class TestTaskLifecycleProjection:
             ("__created__", None, TASK_TEXT),
             ("task_list_id", None, str(first.id)),
             ("task_list_id", str(first.id), str(second.id)),
+            ("task_list_id", str(second.id), None),
         }
+        removed = next(
+            e for e in entries if e.field_name == "task_list_id" and e.new_value is None
+        )
+        assert (removed.source, removed.changed_by) == (Provenance.UI, "ui")
         joined = next(
             e for e in entries if e.field_name == "task_list_id" and e.old_value is None
         )
         assert (joined.source, joined.changed_by) == (Provenance.UI, "ui")
         moved = next(
-            e for e in entries if e.field_name == "task_list_id" and e.old_value
+            e
+            for e in entries
+            if e.field_name == "task_list_id" and e.old_value and e.new_value
         )
         assert (moved.source, moved.changed_by) == (Provenance.MCP, "mcp")
         assert all(e.user_id == USER_ID for e in entries)

@@ -4978,3 +4978,200 @@ class TestMoveTaskToListRefusals:
         assert '"isError":true' in response.text
         assert "must be a JSON integer" in response.text
         assert await _membership(clean_database, task_id) == (list_id, 0)
+
+
+async def _remove_task_from_list(client: Any, **arguments: Any) -> dict[str, Any]:
+    response = await _raw_call(client, "remove_task_from_list", arguments)
+    assert response.status_code == 200
+    return extract_mcp_json_payload(response.text)
+
+
+async def _anchored_list_task(
+    conn: AsyncConnection,
+    journal_repository: SqlJournalRepository,
+    *,
+    due_offset: int,
+    user_id: str = USER_ID,
+) -> tuple[int, int, int]:
+    """A task on a list holding both journals; ``(list, task, due journal)``."""
+    creating_id = await create_journal(
+        journal_repository, title="Planning", days_offset=-10, user_id=user_id
+    )
+    due_id = await create_journal(
+        journal_repository, title="Due", days_offset=due_offset, user_id=user_id
+    )
+    list_id = await seed_task_list_id(conn, user_id=user_id)
+    task_id = await create_list_task(
+        conn,
+        task_list_id=list_id,
+        creating_journal_id=creating_id,
+        due_journal_id=due_id,
+        user_id=user_id,
+    )
+    return list_id, task_id, due_id
+
+
+async def _journal_anchors(
+    journal_repository: SqlJournalRepository,
+) -> tuple[int, int]:
+    """A past creating journal and a future due journal of the user's."""
+    creating_id = await create_journal(
+        journal_repository, title="Planning", days_offset=-10
+    )
+    due_id = await create_journal(journal_repository, title="Due", days_offset=4)
+    return creating_id, due_id
+
+
+@pytest.mark.integration
+class TestRemoveTaskFromList:
+    """The removal over ``tools/call``: the answers an HTTP client gets."""
+
+    async def test_a_task_past_its_due_journal_is_answered_as_lapsed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id, task_id, due_id = await _anchored_list_task(
+            clean_database, journal_repository, due_offset=-3
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _remove_task_from_list(client, task_id=task_id)
+
+        assert "error" not in payload
+        assert payload["id"] == task_id
+        assert payload["task_list_id"] is None
+        assert payload["task_list"] is None
+        assert payload["due_journal_id"] == due_id
+        assert payload["lapsed"] is True
+        assert payload["lapse_reason"] == "date_passed"
+        assert await _membership(clean_database, task_id) == (None, None)
+        [event] = await task_events(clean_database, task_id=task_id)
+        assert event.event_type == "TaskListMembershipChanged"
+        assert event.payload["changed_fields"] == {"task_list_id": [list_id, None]}
+        assert event.payload["source"] == "mcp"
+        assert event.payload["changed_by"] == "mcp"
+
+    async def test_a_task_due_in_the_future_is_answered_as_not_lapsed(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        _, task_id, _ = await _anchored_list_task(
+            clean_database, journal_repository, due_offset=4
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _remove_task_from_list(client, task_id=task_id)
+
+        assert payload["lapsed"] is False
+        assert payload["task_list_id"] is None
+
+    async def test_a_journal_only_task_is_answered_unchanged(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        creating_id, due_id = await _journal_anchors(journal_repository)
+        task_id = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _remove_task_from_list(client, task_id=task_id)
+
+        assert payload["task_list_id"] is None
+        assert await task_events(clean_database, task_id=task_id) == []
+
+
+@pytest.mark.integration
+class TestRemoveTaskFromListRefusals:
+    async def test_an_undated_task_is_refused_naming_the_ways_out(
+        self, authenticated_lifespan_client, clean_database: AsyncConnection
+    ):
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(clean_database, task_list_id=list_id)
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(client, "remove_task_from_list", task_id=task_id)
+
+        assert payload["error"] == "Task error"
+        assert "creating journal and due journal" in payload["message"]
+        assert "move it to another list, cancel it or delete it" in payload["message"]
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+        assert await task_events(clean_database, task_id=task_id) == []
+
+    async def test_a_task_with_only_a_due_journal_is_refused(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        _, due_id = await _journal_anchors(journal_repository)
+        list_id = await seed_task_list_id(clean_database)
+        task_id = await create_list_task(
+            clean_database, task_list_id=list_id, due_journal_id=due_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(client, "remove_task_from_list", task_id=task_id)
+
+        assert "no creating journal" in payload["message"]
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+
+    async def test_an_archived_list_keeps_its_task(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        creating_id, due_id = await _journal_anchors(journal_repository)
+        list_id = await seed_task_list_id(clean_database, archived=True)
+        task_id = await create_list_task(
+            clean_database,
+            task_list_id=list_id,
+            creating_journal_id=creating_id,
+            due_journal_id=due_id,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _refused(client, "remove_task_from_list", task_id=task_id)
+
+        assert "archived" in payload["message"]
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+
+    async def test_another_users_task_is_the_same_answer_as_an_absent_one(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        list_id, task_id, _ = await _anchored_list_task(
+            clean_database, journal_repository, due_offset=4, user_id=OTHER_USER_ID
+        )
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(client, "remove_task_from_list", task_id=task_id)
+            absent = await _refused(client, "remove_task_from_list", task_id=999_999)
+
+        assert foreign["error"] == absent["error"] == "Not found"
+        assert await _membership(clean_database, task_id) == (list_id, 0)
+        assert await task_events(clean_database, task_id=task_id) == []
+
+    @pytest.mark.parametrize("task_id", ["1", True, 1.0], ids=repr)
+    async def test_a_non_integer_id_is_refused_rather_than_coerced(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        task_id: Any,
+    ):
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(
+                client, "remove_task_from_list", {"task_id": task_id}
+            )
+
+        assert '"isError":true' in response.text
+        assert "must be a JSON integer" in response.text
