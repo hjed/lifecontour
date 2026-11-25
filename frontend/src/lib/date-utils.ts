@@ -321,6 +321,20 @@ export function formatIsoShortWeekdayDate(date: string): string {
   return format(parseISO(date), 'EEE d MMM', { locale: enAU });
 }
 
+/**
+ * Format an ISO **calendar date** (`YYYY-MM-DD`) as `d MMM` — no weekday, no
+ * year.
+ *
+ * The form the journal task row's overdue marker names its date in —
+ * *"Overdue · 13 Nov"*. Parsed as a local calendar date for the same reason as
+ * {@link formatIsoDate}: the date was resolved server-side in the user's zone.
+ *
+ * @example formatIsoDayMonth('2026-11-13') // "13 Nov"
+ */
+export function formatIsoDayMonth(date: string): string {
+  return format(parseISO(date), 'd MMM', { locale: enAU });
+}
+
 /** `YYYY-MM-DD` and nothing else — not an instant, not a partial date. */
 const ISO_CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
 

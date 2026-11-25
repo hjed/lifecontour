@@ -12,8 +12,9 @@
  * function is what lets a test assert that without rendering anything.
  */
 
+import { formatIsoDayMonth } from '@/lib/date-utils';
 import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
-import type { TaskAttributes } from '@/types/tasks';
+import type { TaskAttributes, TaskReadAttributes } from '@/types/tasks';
 
 /** The two parts of a lapse marker: what it reads, and what it explains. */
 export interface LapseMarker {
@@ -54,6 +55,25 @@ export function lapseWording(
   return reason
     ? (LAPSE_MARKERS[reason] ?? UNSPECIFIED_LAPSE)
     : UNSPECIFIED_LAPSE;
+}
+
+/**
+ * Word a list task's overdue marker, naming the date that passed.
+ *
+ * The list's counterpart of {@link lapseWording}, and deliberately worded apart
+ * from it: a list task is overdue and never lapsed. The date is the task's due
+ * date or, when it is due in a journal instead, that journal's date — the day
+ * the commitment was for. Whether it is overdue at all is the server's answer
+ * (`overdue` on the read); this only words it.
+ */
+export function overdueWording(
+  task: Pick<TaskReadAttributes, 'due_date' | 'due_journal'>
+): LapseMarker {
+  const date = task.due_date ?? task.due_journal?.date ?? null;
+  return {
+    label: date ? `Overdue · ${formatIsoDayMonth(date)}` : 'Overdue',
+    description: 'Overdue: its date has passed and it is still not done.',
+  };
 }
 
 const STATUS_WORDS: Record<TaskStatus, string> = {
@@ -115,29 +135,71 @@ const CANCEL: TaskStatusAction = {
 };
 
 /**
- * What a row offers for a task in this status.
+ * What a row offers for a **journal-only** task in this status.
  *
  * **A cancelled task offers nothing here**, and that is the rule this table
- * exists to state for a journal-only task. The service gives a cancelled
- * journal-only task exactly one exit — retargeting onto a new future journal,
- * which revalidates the future-dated rule and always lands on *not done* — and
- * refuses `cancelled → done` and `cancelled → not done` alike. A button for
- * either could do nothing but draw a 409, so the resurrect affordance belongs to
- * the retarget dialog rather than here. A task on a list is never refused and
- * is reopened directly; offering that here is a later phase.
+ * exists to state. The service gives a cancelled journal-only task exactly one
+ * exit — retargeting onto a new future journal, which revalidates the
+ * future-dated rule and always lands on *not done* — and refuses
+ * `cancelled → done` and `cancelled → not done` alike. A button for either could
+ * do nothing but draw a 409, so the resurrect affordance belongs to the
+ * retarget dialog rather than here.
  *
  * A **lapsed** task is still not done, so it keeps the full not-done offer:
  * lapsing is a marker on a live commitment, never a disabled state.
  */
-const STATUS_ACTIONS: Record<TaskStatus, readonly TaskStatusAction[]> = {
+const JOURNAL_STATUS_ACTIONS: Record<TaskStatus, readonly TaskStatusAction[]> =
+  {
+    [TaskStatus.NOT_DONE]: [MARK_DONE, CANCEL],
+    [TaskStatus.DONE]: [RETURN_TO_NOT_DONE, CANCEL],
+    [TaskStatus.CANCELLED]: [],
+  };
+
+/**
+ * What a row offers for a task **on a list** in this status.
+ *
+ * The service refuses no status change on a list, so a done or cancelled list
+ * task is reopened directly — by its status, never by a new due journal — and
+ * a cancelled one can also be marked done outright.
+ */
+const LIST_STATUS_ACTIONS: Record<TaskStatus, readonly TaskStatusAction[]> = {
   [TaskStatus.NOT_DONE]: [MARK_DONE, CANCEL],
   [TaskStatus.DONE]: [RETURN_TO_NOT_DONE, CANCEL],
-  [TaskStatus.CANCELLED]: [],
+  [TaskStatus.CANCELLED]: [RETURN_TO_NOT_DONE, MARK_DONE],
 };
 
+/** Whether the task a question is about is on a list. */
+export interface ListMembership {
+  /**
+   * Required rather than defaulted, as the service's own transition rule
+   * takes it: no caller should get the journal-only answer by omission.
+   */
+  readonly onList: boolean;
+}
+
 /** The inline status actions a task in this status offers, in display order. */
-export function statusActions(status: TaskStatus): readonly TaskStatusAction[] {
-  return STATUS_ACTIONS[status] ?? [];
+export function statusActions(
+  status: TaskStatus,
+  { onList }: ListMembership
+): readonly TaskStatusAction[] {
+  const table = onList ? LIST_STATUS_ACTIONS : JOURNAL_STATUS_ACTIONS;
+  return table[status] ?? [];
+}
+
+/**
+ * The delete confirmation's explanation.
+ *
+ * It steers the user to cancelling instead, and says how a cancelled task
+ * comes back — which differs: a journal-only task by a new due journal, a list
+ * task by setting it back to not done, since the service refuses it the
+ * former.
+ */
+export function deleteTaskDescription({ onList }: ListMembership): string {
+  const permanent =
+    'Deleting is permanent and removes the task from every journal it is linked to.';
+  return onList
+    ? `${permanent} Cancel it instead and it stays on its list, and can be set back to not done later.`
+    : `${permanent} Cancel it instead and it stays part of the record, and can be reopened later by giving it a new due journal.`;
 }
 
 /**
@@ -254,14 +316,25 @@ export function retargetAction(
  * both anchors — the due journal it is leaving and the creating journal it
  * re-validates — so a task on a list missing either would be answered with a
  * server error rather than a refusal. Both, not just the due journal, for that
- * reason. A rule rather than an inline check for the same reason as the offer
- * tables beside it, and so the phase that lets a list task be given a due
- * journal changes it in one place.
+ * reason.
+ *
+ * A **done or cancelled task on a list** is refused a retarget outright: it is
+ * reopened by its status, not its date, so the row offers that instead (see
+ * {@link statusActions}). A rule rather than an inline check for the same
+ * reason as the offer tables beside it, so the phase that changes how a list
+ * task is given a due journal changes it in one place.
  */
 export function canRetarget(
-  task: Pick<TaskAttributes, 'creating_journal_id' | 'due_journal_id'>
+  task: Pick<
+    TaskAttributes,
+    'creating_journal_id' | 'due_journal_id' | 'task_list_id' | 'status'
+  >
 ): boolean {
-  return task.creating_journal_id !== null && task.due_journal_id !== null;
+  const anchored =
+    task.creating_journal_id !== null && task.due_journal_id !== null;
+  const closedOnList =
+    task.task_list_id !== null && task.status !== TaskStatus.NOT_DONE;
+  return anchored && !closedOnList;
 }
 
 /**

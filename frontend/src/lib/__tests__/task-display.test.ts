@@ -10,8 +10,10 @@
 
 import {
   canRetarget,
+  deleteTaskDescription,
   lapseWording,
   linkRemovable,
+  overdueWording,
   retargetAction,
   statusActions,
   statusChangeWording,
@@ -89,10 +91,12 @@ describe('lapseWording', () => {
   });
 });
 
-describe('statusActions', () => {
+describe('statusActions for a journal-only task', () => {
+  const JOURNAL_ONLY = { onList: false };
+
   /** The action keys a status offers, in the order it offers them. */
   function keysFor(status: TaskStatus): string[] {
-    return statusActions(status).map(action => action.key);
+    return statusActions(status, JOURNAL_ONLY).map(action => action.key);
   }
 
   it('offers a not-done task completion and cancellation', () => {
@@ -110,10 +114,10 @@ describe('statusActions', () => {
    * The service refuses `cancelled → done` and `cancelled → not done` alike for
    * it — "cancelled is left only by retargeting" — so either button could do
    * nothing but draw a 409. Resurrection arrives with the retarget dialog. (A
-   * list task is reopened by its status; this table is not list-aware yet.)
+   * list task is reopened by its status — see the list-aware cases below.)
    */
   it('offers a cancelled task no status action at all', () => {
-    expect(statusActions(TaskStatus.CANCELLED)).toEqual([]);
+    expect(statusActions(TaskStatus.CANCELLED, JOURNAL_ONLY)).toEqual([]);
   });
 
   /**
@@ -128,7 +132,9 @@ describe('statusActions', () => {
     ]);
 
     const offered = Object.values(TaskStatus).flatMap(status =>
-      statusActions(status).map(action => `${status}->${action.target}`)
+      statusActions(status, JOURNAL_ONLY).map(
+        action => `${status}->${action.target}`
+      )
     );
 
     expect(offered.filter(transition => refused.has(transition))).toEqual([]);
@@ -136,9 +142,9 @@ describe('statusActions', () => {
 
   it('never offers the status the task already has', () => {
     Object.values(TaskStatus).forEach(status => {
-      expect(statusActions(status).map(action => action.target)).not.toContain(
-        status
-      );
+      expect(
+        statusActions(status, JOURNAL_ONLY).map(action => action.target)
+      ).not.toContain(status);
     });
   });
 
@@ -148,9 +154,11 @@ describe('statusActions', () => {
    */
   it('contains each visible label within its accessible name', () => {
     Object.values(TaskStatus).forEach(status => {
-      statusActions(status).forEach(({ label, accessibleName }) => {
-        expect(accessibleName.toLowerCase()).toContain(label.toLowerCase());
-      });
+      statusActions(status, JOURNAL_ONLY).forEach(
+        ({ label, accessibleName }) => {
+          expect(accessibleName.toLowerCase()).toContain(label.toLowerCase());
+        }
+      );
     });
   });
 
@@ -161,10 +169,68 @@ describe('statusActions', () => {
    */
   it('names three acts across the whole table, no two alike', () => {
     const names = Object.values(TaskStatus).flatMap(status =>
-      statusActions(status).map(action => action.accessibleName)
+      statusActions(status, JOURNAL_ONLY).map(action => action.accessibleName)
     );
 
     expect(new Set(names).size).toBe(3);
+  });
+});
+
+/**
+ * A task on a list is never refused a status change: the service allows every
+ * move between the three statuses on a list, so a done or cancelled list task
+ * is reopened by its status rather than by a new due journal.
+ */
+describe('statusActions for a task on a list', () => {
+  const ON_LIST = { onList: true };
+
+  function keysFor(status: TaskStatus): string[] {
+    return statusActions(status, ON_LIST).map(action => action.key);
+  }
+
+  it('offers a not-done list task completion and cancellation', () => {
+    expect(keysFor(TaskStatus.NOT_DONE)).toEqual(['done', 'cancel']);
+  });
+
+  it('offers a done list task the way back and cancellation', () => {
+    expect(keysFor(TaskStatus.DONE)).toEqual(['not-done', 'cancel']);
+  });
+
+  it('offers a cancelled list task the way back and completion', () => {
+    expect(keysFor(TaskStatus.CANCELLED)).toEqual(['not-done', 'done']);
+  });
+
+  /**
+   * Every move between two different statuses, written out rather than derived
+   * so the table cannot drift from the service rule it mirrors.
+   */
+  it('offers every transition the service allows on a list, and no other', () => {
+    const offered = Object.values(TaskStatus)
+      .flatMap(status =>
+        statusActions(status, ON_LIST).map(
+          action => `${status}->${action.target}`
+        )
+      )
+      .sort();
+
+    expect(offered).toEqual(
+      [
+        `${TaskStatus.NOT_DONE}->${TaskStatus.DONE}`,
+        `${TaskStatus.NOT_DONE}->${TaskStatus.CANCELLED}`,
+        `${TaskStatus.DONE}->${TaskStatus.NOT_DONE}`,
+        `${TaskStatus.DONE}->${TaskStatus.CANCELLED}`,
+        `${TaskStatus.CANCELLED}->${TaskStatus.NOT_DONE}`,
+        `${TaskStatus.CANCELLED}->${TaskStatus.DONE}`,
+      ].sort()
+    );
+  });
+
+  it('contains each visible label within its accessible name', () => {
+    Object.values(TaskStatus).forEach(status => {
+      statusActions(status, ON_LIST).forEach(({ label, accessibleName }) => {
+        expect(accessibleName.toLowerCase()).toContain(label.toLowerCase());
+      });
+    });
   });
 });
 
@@ -301,11 +367,137 @@ describe('canRetarget', () => {
   ])(
     'creating journal %p and due journal %p → %p',
     (creating_journal_id, due_journal_id, expected) => {
-      expect(canRetarget({ creating_journal_id, due_journal_id })).toBe(
-        expected
-      );
+      expect(
+        canRetarget({
+          creating_journal_id,
+          due_journal_id,
+          task_list_id: null,
+          status: TaskStatus.NOT_DONE,
+        })
+      ).toBe(expected);
     }
   );
+
+  /**
+   * A journal-only task is retargeted out of every status — that is how a
+   * cancelled one comes back — so the closed-list rule must not reach it.
+   */
+  it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
+    'still offers a %s journal-only task the retarget',
+    status => {
+      expect(
+        canRetarget({
+          creating_journal_id: 1,
+          due_journal_id: 2,
+          task_list_id: null,
+          status,
+        })
+      ).toBe(true);
+    }
+  );
+
+  /**
+   * The service refuses to retarget a done or cancelled list task — it is
+   * reopened by its status, not its date — so the row must not offer it.
+   */
+  it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
+    'withholds the retarget from a %s list task, anchors or not',
+    status => {
+      expect(
+        canRetarget({
+          creating_journal_id: 1,
+          due_journal_id: 2,
+          task_list_id: 7,
+          status,
+        })
+      ).toBe(false);
+    }
+  );
+
+  it('offers a not-done list task with both anchors the retarget', () => {
+    expect(
+      canRetarget({
+        creating_journal_id: 1,
+        due_journal_id: 2,
+        task_list_id: 7,
+        status: TaskStatus.NOT_DONE,
+      })
+    ).toBe(true);
+  });
+});
+
+describe('overdueWording', () => {
+  const dueJournal = {
+    id: 3,
+    title: 'Offsite',
+    date: '2026-11-13',
+    cancelled: false,
+  };
+
+  it('names the due date when the task has one', () => {
+    expect(
+      overdueWording({ due_date: '2026-11-10', due_journal: null }).label
+    ).toBe('Overdue · 10 Nov');
+  });
+
+  it("names the due journal's date when the task is due in a journal", () => {
+    expect(
+      overdueWording({ due_date: null, due_journal: dueJournal }).label
+    ).toBe('Overdue · 13 Nov');
+  });
+
+  it('reads plain "Overdue" when there is no date to name', () => {
+    expect(overdueWording({ due_date: null, due_journal: null }).label).toBe(
+      'Overdue'
+    );
+  });
+
+  it('explains that the date passed and the task is still not done', () => {
+    const { description } = overdueWording({
+      due_date: '2026-11-10',
+      due_journal: null,
+    });
+
+    expect(description).toMatch(/overdue/i);
+    expect(description).toMatch(/passed/i);
+    expect(description).toMatch(/not done/i);
+  });
+
+  /**
+   * The specification keeps the two markers apart: a list task is overdue and
+   * never lapsed, so the words must not be confusable.
+   */
+  it('never words overdue as lapsed', () => {
+    const { label, description } = overdueWording({
+      due_date: null,
+      due_journal: dueJournal,
+    });
+
+    expect(label).not.toMatch(/lapsed/i);
+    expect(description).not.toMatch(/lapsed/i);
+  });
+});
+
+describe('deleteTaskDescription', () => {
+  it('tells a journal-only task that a new due journal reopens it', () => {
+    const text = deleteTaskDescription({ onList: false });
+
+    expect(text).toMatch(/permanent/i);
+    expect(text).toMatch(/new due journal/i);
+  });
+
+  /**
+   * A cancelled list task is reopened by its status, and the service refuses a
+   * new due journal for it, so the journal-only advice would be false here.
+   */
+  it('tells a list task it stays on its list and can be set back to not done', () => {
+    const text = deleteTaskDescription({ onList: true });
+
+    expect(text).toMatch(/permanent/i);
+    expect(text).toMatch(/stays on its list/i);
+    expect(text).toMatch(/not done/i);
+    expect(text).not.toMatch(/new due journal/i);
+  });
 });
 
 /**

@@ -46,6 +46,24 @@ async function openJournal(page: Page, journal: TestJournal): Promise<Locator> {
 }
 
 /**
+ * On a phone the page still fits — nothing widens it sideways — and nothing
+ * on it threw along the way.
+ */
+async function expectFitsPhoneWithoutErrors(
+  page: Page,
+  pageErrors: readonly Error[]
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth
+      )
+    )
+    .toBe(true);
+  expect(pageErrors).toEqual([]);
+}
+
+/**
  * Name a journal in the attach dialog's journal search.
  *
  * The same retry reasoning as {@link chooseDueJournal}, over a different
@@ -628,15 +646,7 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
       dueRow.getByTestId('journal-task-action-retarget')
     ).toBeVisible();
 
-    // On a phone the page still fits: nothing widens it sideways.
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth
-        )
-      )
-      .toBe(true);
-    expect(pageErrors).toEqual([]);
+    await expectFitsPhoneWithoutErrors(page, pageErrors);
   });
 });
 
@@ -710,15 +720,114 @@ test.describe('Journal Task Surface — a task on a list due here', () => {
       actions.getByRole('button', { name: 'Return to not done' })
     ).toBeVisible();
 
-    // On a phone the page still fits: nothing widens it sideways.
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth
-        )
-      )
-      .toBe(true);
-    expect(pageErrors).toEqual([]);
+    await expectFitsPhoneWithoutErrors(page, pageErrors);
+  });
+});
+
+/**
+ * A task on a list whose due journal has gone by.
+ *
+ * "On a journal page, a list task past its date shows the overdue marker and
+ * direct actions, never the lapsed marker", and "a done or cancelled list task
+ * can be set back to not done, without retargeting". The task is created due
+ * in a future journal and the journal then moved into the past — the lapse
+ * recipe above — because no write lets a task be made due in the past.
+ */
+test.describe('Journal Task Surface — an overdue task on a list', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('marks an overdue list task overdue, never lapsed, and reopens it directly after cancelling', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    const list = await dataManager.createTaskList(taskText('Event prep'));
+    const journal = await dataManager.createFutureJournal({
+      // Short on purpose: the journal header does not wrap one long word, and
+      // that is not what this test is about.
+      title: 'Venue visit',
+      daysAhead: 2,
+    });
+    const text = taskText('Book the venue');
+    const listTask = await dataManager.createListTask({
+      taskListId: list.id,
+      text,
+      dueJournalId: journal.id,
+    });
+    expect(listTask.dueJournalId).toBe(journal.id);
+
+    const moved = await dataManager.moveJournalToPast(journal.id, 3);
+    expect(moved.status()).toBe(200);
+    // The marker names the due journal's day, which the backend resolves in
+    // UTC for the e2e user — the same day `utcDayOffset` built it on.
+    const dueDay = new Date(utcDayOffset(-3)).getUTCDate();
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', error => pageErrors.push(error));
+
+    await openJournal(page, journal);
+
+    const row = page
+      .getByTestId('journal-tasks-group-due')
+      .getByTestId(`journal-task-${listTask.id}`);
+    await expect(row.getByTestId('journal-task-text')).toHaveText(text);
+    const overdue = row.getByTestId('journal-task-overdue');
+    await expect(overdue).toHaveText(
+      new RegExp(`^Overdue · ${dueDay} [A-Z][a-z]{2,3}$`)
+    );
+    await expect(row.getByTestId('journal-task-lapsed')).toHaveCount(0);
+
+    const actions = row.getByRole('group', { name: 'Task actions' });
+
+    /** The PATCH a status button sends, awaited so its result is known. */
+    const statusWrite = () =>
+      page.waitForResponse(
+        response =>
+          response.url().endsWith(`/api/tasks/${listTask.id}`) &&
+          response.request().method() === 'PATCH'
+      );
+
+    const cancelWrite = statusWrite();
+    await actions.getByRole('button', { name: 'Cancel task' }).click();
+    expect((await cancelWrite).ok()).toBe(true);
+    await expect(row.getByText('Cancelled', { exact: true })).toBeVisible();
+    await expect(overdue).toHaveCount(0);
+
+    // Reopened by its status, not by a new due journal: the server refuses a
+    // retarget of a closed list task, so none is offered.
+    const reopen = actions.getByRole('button', { name: 'Return to not done' });
+    await expect(reopen).toBeVisible();
+    await expect(
+      actions.getByRole('button', { name: 'Mark done' })
+    ).toBeVisible();
+    await expect(
+      actions.getByTestId('journal-task-action-retarget')
+    ).toHaveCount(0);
+    // A control this phase adds, held to the phone touch-target minimum.
+    const reopenBox = await reopen.boundingBox();
+    expect(reopenBox?.height).toBeGreaterThanOrEqual(44);
+    expect(reopenBox?.width).toBeGreaterThanOrEqual(44);
+
+    const reopenWrite = statusWrite();
+    await reopen.click();
+    expect((await reopenWrite).ok()).toBe(true);
+    await expect(row.getByText('Not done', { exact: true })).toBeVisible();
+
+    // The reload proves the reopen was written, and the server — the only
+    // judge of the day boundary — reports the reopened task overdue again.
+    await openJournal(page, journal);
+    await expect(row.getByText('Not done', { exact: true })).toBeVisible();
+    await expect(overdue).toHaveText(
+      new RegExp(`^Overdue · ${dueDay} [A-Z][a-z]{2,3}$`)
+    );
+    await expect(row.getByTestId('journal-task-lapsed')).toHaveCount(0);
+
+    await expectFitsPhoneWithoutErrors(page, pageErrors);
   });
 });
 

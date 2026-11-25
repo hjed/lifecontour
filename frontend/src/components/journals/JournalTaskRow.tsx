@@ -25,7 +25,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { nameParts } from '@/lib/contact-names';
 import { cn } from '@/lib/utils';
-import { lapseWording, statusWording } from '@/lib/task-display';
+import {
+  lapseWording,
+  overdueWording,
+  statusWording,
+} from '@/lib/task-display';
 import {
   TaskStatus,
   type JournalTaskResource,
@@ -55,17 +59,19 @@ interface JournalTaskRowProps {
  * A divergence from the wireframe, recorded rather than fudged: W22 keys the
  * bar to the due journal's type/calendar colour, and a task's journal
  * references carry no colour. Keyed to what the row actually knows — whether
- * the commitment is still live — until the read model carries more.
+ * the commitment is still live — until the read model carries more. A lapsed
+ * or overdue row is marked out the same way, since both are a live commitment
+ * whose date has gone by.
  */
-function accentClass(status: TaskStatus, lapsed: boolean): string {
-  if (lapsed) return 'bg-destructive';
+function accentClass(status: TaskStatus, flagged: boolean): string {
+  if (flagged) return 'bg-destructive';
   return status === TaskStatus.NOT_DONE
     ? 'bg-primary'
     : 'bg-muted-foreground/40';
 }
 
 export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
-  const { text, status, lapsed, lapse_reason, due_journal, contacts } =
+  const { text, status, lapsed, lapse_reason, overdue, due_journal, contacts } =
     task.attributes;
   // The actions are named the same on every row, so they are described by the
   // text of the commitment they act on rather than by a label of their own.
@@ -80,6 +86,13 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
   // stance the wireframe takes on cancelled journals (W18).
   const isTerminal = status !== TaskStatus.NOT_DONE;
   const lapse = lapsed ? lapseWording(lapse_reason) : null;
+  // A list task is overdue rather than lapsed. Only a not-done task can be, so
+  // a stale payload read before a completion's refetch cannot mark a settled
+  // task overdue.
+  const overdueMarker =
+    overdue && status === TaskStatus.NOT_DONE
+      ? overdueWording(task.attributes)
+      : null;
   // Naming the due journal on a row that *is* the due journal would only say
   // "due in this journal"; elsewhere it is the missing half of a lapse marker.
   // A task on a list may have no due journal at all, and then there is
@@ -98,7 +111,7 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
         aria-hidden='true'
         className={cn(
           'absolute inset-y-0 left-0 w-1',
-          accentClass(status, lapsed)
+          accentClass(status, lapsed || overdueMarker !== null)
         )}
       />
 
@@ -131,6 +144,15 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
                 title={lapse.description}
               >
                 {lapse.label}
+              </Badge>
+            )}
+            {overdueMarker && (
+              <Badge
+                data-testid='journal-task-overdue'
+                variant='destructive'
+                title={overdueMarker.description}
+              >
+                {overdueMarker.label}
               </Badge>
             )}
           </div>

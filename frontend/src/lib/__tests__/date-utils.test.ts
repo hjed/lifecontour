@@ -7,6 +7,7 @@ import {
   formatDateRange,
   formatIsoDate,
   formatIsoDateLong,
+  formatIsoDayMonth,
   formatIsoShortWeekdayDate,
   formatIsoWeekdayDate,
   isIsoCalendarDate,
@@ -161,6 +162,17 @@ describe('formatIsoWeekdayDate', () => {
 
   it('handles a leap day', () => {
     expect(formatIsoWeekdayDate('2024-02-29')).toBe('Thursday, 29 February');
+  });
+});
+
+describe('formatIsoDayMonth', () => {
+  it('writes day and abbreviated month, with no year or weekday', () => {
+    expect(formatIsoDayMonth('2026-11-13')).toBe('13 Nov');
+  });
+
+  it('does not shift a date that has already been resolved', () => {
+    expect(formatIsoDayMonth('2026-01-01')).toBe('1 Jan');
+    expect(formatIsoDayMonth('2026-12-31')).toBe('31 Dec');
   });
 });
 

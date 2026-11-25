@@ -138,6 +138,19 @@ const creatingJournal = {
   cancelled: false,
 };
 
+/** The attributes the read and write shapes of task 1 share. */
+const baseTaskAttributes: TaskResponse['data']['attributes'] = {
+  text: 'Print the permit',
+  status: TaskStatus.NOT_DONE,
+  creating_journal_id: 7,
+  due_journal_id: 42,
+  intermediate_journal_ids: [],
+  task_list_id: null,
+  due_date: null,
+  created_at: '2026-08-11T00:00:00Z',
+  updated_at: '2026-08-11T00:00:00Z',
+};
+
 /** The read shape `GET /api/tasks/{id}` answers with. */
 function taskReadResponse(
   overrides: Partial<TaskReadResponse['data']['attributes']> = {}
@@ -147,19 +160,14 @@ function taskReadResponse(
       type: 'tasks',
       id: '1',
       attributes: {
-        text: 'Print the permit',
-        status: TaskStatus.NOT_DONE,
-        creating_journal_id: 7,
-        due_journal_id: 42,
-        intermediate_journal_ids: [],
-        created_at: '2026-08-11T00:00:00Z',
-        updated_at: '2026-08-11T00:00:00Z',
+        ...baseTaskAttributes,
         creating_journal: creatingJournal,
         due_journal: dueJournal,
         intermediate_journals: [],
         contacts: [],
         lapsed: false,
         lapse_reason: null,
+        overdue: false,
         ...overrides,
       },
       links: { self: '/api/tasks/1' },
@@ -205,13 +213,7 @@ function taskWriteResponse(
       type: 'tasks',
       id: '1',
       attributes: {
-        text: 'Print the permit',
-        status: TaskStatus.NOT_DONE,
-        creating_journal_id: 7,
-        due_journal_id: 42,
-        intermediate_journal_ids: [],
-        created_at: '2026-08-11T00:00:00Z',
-        updated_at: '2026-08-11T00:00:00Z',
+        ...baseTaskAttributes,
         ...overrides,
       },
       links: { self: '/api/tasks/1' },
@@ -1409,6 +1411,19 @@ describe('Task API client', () => {
         ?.data.attributes.status;
     }
 
+    /** Mark task 1 done and have the server refuse it with a 500. */
+    async function failCompletion(): Promise<void> {
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+    }
+
     function seedCache(listing = journalTasksResponse()): void {
       queryClient.setQueryData(listKey, listing);
       queryClient.setQueryData(taskKeys.detail('1'), taskReadResponse());
@@ -1513,16 +1528,7 @@ describe('Task API client', () => {
 
     it('restores every cached namespace when the write fails', async () => {
       seedCache();
-      mockFetch.mockResolvedValueOnce(
-        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
-      );
-
-      const { result } = renderHook(() => useUpdateTask(), {
-        wrapper: createWrapper,
-      });
-      await expect(
-        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
-      ).rejects.toThrow();
+      await failCompletion();
 
       await waitFor(() => {
         expect(cachedListStatus('1')).toBe(TaskStatus.NOT_DONE);
@@ -1538,16 +1544,7 @@ describe('Task API client', () => {
         LapseReason.DUE_JOURNAL_CANCELLED;
       seedCache(lapsedListing);
 
-      mockFetch.mockResolvedValueOnce(
-        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
-      );
-
-      const { result } = renderHook(() => useUpdateTask(), {
-        wrapper: createWrapper,
-      });
-      await expect(
-        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
-      ).rejects.toThrow();
+      await failCompletion();
 
       await waitFor(() => {
         const task = queryClient
@@ -1557,6 +1554,91 @@ describe('Task API client', () => {
         expect(task?.attributes.lapse_reason).toBe(
           LapseReason.DUE_JOURNAL_CANCELLED
         );
+      });
+    });
+
+    /** The cached listing's first task, which every overdue case writes to. */
+    function cachedListTask() {
+      return queryClient
+        .getQueryData<JournalTasksResponse>(listKey)
+        ?.data.find(entry => entry.id === '1');
+    }
+
+    /** A listing whose first task is an overdue task on a list. */
+    function overdueListing(): JournalTasksResponse {
+      const listing = journalTasksResponse();
+      listing.data[0].attributes.task_list_id = 9;
+      listing.data[0].attributes.overdue = true;
+      return listing;
+    }
+
+    /**
+     * Overdue is derived like lapse — "past its date and still not done" — so
+     * a list task that has just left not done cannot be overdue, and its marker
+     * goes at once rather than after the refetch.
+     */
+    it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'clears the overdue marker at once when a list task becomes %s',
+      async status => {
+        seedCache(overdueListing());
+
+        const release = heldRequest(() =>
+          jsonResponse(taskWriteResponse({ status }))
+        );
+
+        const { result } = renderHook(() => useUpdateTask(), {
+          wrapper: createWrapper,
+        });
+        const settled = result.current.mutateAsync({ taskId: '1', status });
+
+        await waitFor(() => {
+          expect(cachedListTask()?.attributes.overdue).toBe(false);
+        });
+
+        release();
+        await settled;
+      }
+    );
+
+    /**
+     * The reverse needs the day boundary in the user's timezone, which only
+     * the server knows, so returning a task to not done leaves the marker to
+     * the refetch.
+     */
+    it('leaves the overdue marker to the refetch when a task returns to not done', async () => {
+      const listing = overdueListing();
+      listing.data[0].attributes.status = TaskStatus.CANCELLED;
+      listing.data[0].attributes.overdue = false;
+      seedCache(listing);
+
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ status: TaskStatus.NOT_DONE }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.NOT_DONE,
+      });
+
+      await waitFor(() => {
+        expect(cachedListTask()?.attributes.status).toBe(TaskStatus.NOT_DONE);
+      });
+      expect(cachedListTask()?.attributes.overdue).toBe(false);
+
+      release();
+      await settled;
+    });
+
+    it('restores the overdue marker a failed completion had cleared', async () => {
+      seedCache(overdueListing());
+
+      await failCompletion();
+
+      await waitFor(() => {
+        expect(cachedListTask()?.attributes.overdue).toBe(true);
       });
     });
 

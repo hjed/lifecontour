@@ -13,10 +13,12 @@
  *   should treat cancelling as the normal action and deletion as the
  *   exception". Delete is last, muted, icon-only, and behind a confirmation
  *   that says what cancelling would keep.
- * - **A cancelled task offers no status action.** The service gives cancelled
- *   exactly one exit — retargeting onto a new future journal — and refuses
- *   both status calls out of it, so a button here could only draw a 409. The
- *   offer table in `lib/task-display.ts` is where that rule lives.
+ * - **A cancelled journal-only task offers no status action.** The service
+ *   gives it exactly one exit — retargeting onto a new future journal — and
+ *   refuses both status calls out of it, so a button here could only draw a
+ *   409. A task **on a list** is never refused a status change, so a done or
+ *   cancelled one is reopened right here instead. The offer tables in
+ *   `lib/task-display.ts` are where both rules live.
  *
  * That exit is `RetargetTaskDialog`, mounted here between the status actions
  * and the delete. It is not part of the status offer table — retargeting is
@@ -25,8 +27,8 @@
  * resurrection the specification names, and on a done one it is a reopen the
  * dialog confirms first. It shares this group's in-flight guard, because it is
  * a write against the same task. It is withheld from a task on a list that
- * lacks either journal (`canRetarget`): the service still retargets only
- * journal-only tasks, so the request could only fail.
+ * lacks either journal, and from a done or cancelled list task, which is
+ * reopened by its status (`canRetarget`): the service would refuse either.
  *
  * The remove-a-mention affordance is mounted here too, between the retarget
  * and the delete, and only on a row whose link role `linkRemovable` permits.
@@ -67,6 +69,7 @@ import {
 } from '@/lib/api/tasks';
 import {
   canRetarget,
+  deleteTaskDescription,
   linkRemovable,
   statusActions,
   type TaskStatusAction,
@@ -121,7 +124,8 @@ export function JournalTaskActions({
   // survives. Two overlapping status calls decide against the same stale
   // reading, and the later one wins whatever the first was for.
   const writing = useTaskWriteInFlight(task.id);
-  const actions = statusActions(task.attributes.status);
+  const onList = task.attributes.task_list_id !== null;
+  const actions = statusActions(task.attributes.status, { onList });
 
   // The *group* carries the busy state, not the control that was pressed: the
   // optimistic patch flips the row to its new status before the request
@@ -132,7 +136,11 @@ export function JournalTaskActions({
       aria-label='Task actions'
       aria-describedby={describedById}
       aria-busy={writing}
-      className='flex flex-wrap items-center gap-1.5'
+      // Every control here is at least 44px square on a phone, where the
+      // row's compact buttons would otherwise be too small to tap reliably.
+      // Set on the group's direct children so the retarget and detach
+      // controls, which render their own buttons, are held to it too.
+      className='flex flex-wrap items-center gap-1.5 max-sm:*:min-h-11 max-sm:*:min-w-11'
     >
       {actions.map(action => {
         const Icon = ACTION_ICONS[action.key];
@@ -188,9 +196,7 @@ export function JournalTaskActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this task?</AlertDialogTitle>
             <AlertDialogDescription>
-              Deleting is permanent and removes the task from every journal it
-              is linked to. Cancel it instead and it stays part of the record,
-              and can be reopened later by giving it a new due journal.
+              {deleteTaskDescription({ onList })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

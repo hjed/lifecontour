@@ -2822,15 +2822,70 @@ pre-commit.
 - *ITER21-006 (recurrence):* a task kept by a list delete must stop recurring ("no longer
   recurring" in the spec); nothing exists to stop yet.
 
-#### Phase 30: Journal page: list tasks
+#### Phase 30: Journal page: list tasks ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 22, Phase 24.
-**Estimated diff:** ~130 production → **~700 tracked**
+**Estimated diff:** ~130 production → **~700 tracked** · **Actual:** ~180 production → **~960 tracked**
+(about 890 insertions and 70 deletions, including this document). Production is about half
+docstrings. The rest is about 580 test lines across 8 files (unit, RTL, E2E) and 40 lines of
+architecture docs. Frontend only: the backend already sent `task_list_id`, `due_date` and `overdue`.
 
 **Acceptance Criteria:**
 
-- [ ] Overdue marker and direct reopen for a list task on a journal page, never lapsed.
-- [ ] E2E in the journal-tasks spec.
+- [x] Overdue marker and direct reopen for a list task on a journal page, never lapsed.
+- [x] E2E in the journal-tasks spec.
+
+**Delivered:**
+- **Types.** `TaskAttributes` gains `task_list_id` and `due_date`; `TaskReadAttributes` gains
+  `overdue`. All required, mirroring the backend.
+- **Overdue marker.** `JournalTaskRow` shows a `destructive` badge `Overdue · 13 Nov`
+  (`overdueWording`, new `formatIsoDayMonth`), naming `due_date` or else the due journal's date,
+  with the description "Overdue: its date has passed and it is still not done." It is shown only
+  while the task is not done, and the accent bar turns `bg-destructive` as for a lapsed row. Whether
+  a task is overdue is the read's `overdue`, never re-derived in the browser.
+- **Direct reopen.** `statusActions(status, { onList })` (required option) gains a list table:
+  cancelled → *Not done*, *Done*; done → *Not done*, *Cancel*. Journal-only offers are unchanged.
+- **No refused offers.** `canRetarget` now also withholds the retarget from a done or cancelled
+  list task, which the server refuses with `TASK_LIST_TASK_CLOSED`. The delete confirmation's
+  advice is list-aware (`deleteTaskDescription`).
+- **Optimistic patch.** Leaving not done also clears `overdue`; `PATCHABLE_FIELDS` gains it so a
+  failed write restores it. Returning to not done leaves it to the refetch.
+- **Touch targets.** Every journal task action button is at least 44px square below `sm`
+  (`max-sm:*:min-h-11 max-sm:*:min-w-11` on the action group). Desktop is unchanged.
+
+**Tests:**
+- Unit: `task-display.test.ts` (list status matrix, every allowed transition and no other;
+  `canRetarget` closed-list cases; `overdueWording`; `deleteTaskDescription`), `date-utils.test.ts`,
+  `tasks.test.ts` (`overdue` cleared on done/cancel, kept on reopen, restored on failure).
+- RTL: `JournalTaskRow` (marker text, due-date fallback, description, never lapsed, hidden when
+  not overdue or settled), `JournalTaskActions` (cancelled/done list offers and their PATCHes, no
+  retarget on a closed list task, *Reschedule* kept on an open one, delete wording both ways),
+  `JournalTasksSection` (marker under *Due*).
+- E2E (`journal-tasks.spec.ts`, 390px, Firefox + Mobile Chrome, `--repeat-each 3`): a list task
+  due in a journal moved into the past reads *Overdue*, never lapsed; cancelling hides the marker;
+  *Return to not done* is offered (≥44px) with no retarget; the reopen persists and the marker
+  returns after a reload; no horizontal scroll, no page errors.
+- Journal-only unit and RTL tests keep every assertion; only their inputs gained the new required
+  arguments.
+- Re-run locally: the full journal-tasks, task-activity-history and home-dashboard specs on both
+  projects, the full Jest suite, `pnpm quality:check`, and the backend read-model and list-reopen
+  integration and REST tests (279 passed).
+
+**Decisions:**
+- Touch targets: raise every journal task action button to 44px on phones rather than only the
+  ones this phase adds (user decision), closing Phase 12's "found, not fixed".
+- Only the three fields this phase reads are typed. `flagged`, `icon` and `task_list` are left to
+  ITER21-002's types phase.
+
+**Notes — found, not fixed:**
+- The journal page header overflows a 390px viewport by about 2px when the title has a long
+  unbroken word: the delete-journal button is pushed past the edge. It predates this phase, so the
+  E2E uses a short title. A later phone-layout phase should let the title break.
+- The history disclosure trigger on each task row is still 28px tall on a phone.
+- `canRetarget` still requires a creating journal, so an open list task due in a journal but
+  created in none is offered no retarget, though the server would accept it. Left to Phase 23,
+  which replaces this rule with the list-task retarget rule.
 
 ---
 

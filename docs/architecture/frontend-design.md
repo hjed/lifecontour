@@ -356,6 +356,15 @@ where tasks are worked with; there is no `/tasks` route.
   is always `false` for a list task (the server's rule, not a client guard);
   the attach picker describes it by its status alone. Readers narrow on `null`
   rather than asserting, so a list task can never crash the page.
+- **A list task past its date is overdue, never lapsed.** The row shows a
+  `destructive` badge reading `Overdue · 13 Nov` (`overdueWording` in
+  `lib/task-display.ts`), naming `due_date` or else the due journal's date, and
+  the accent bar turns `bg-destructive` as it does for a lapsed row. Whether a
+  task is overdue is the read's `overdue` field and is never re-derived in the
+  browser: the multi-day and cancelled-journal rules need the user's timezone
+  and the journal's range, which the server already applied. The badge shows
+  only while the task is not done, so a stale payload cannot mark a settled
+  task overdue.
 - Accessibility: each group is a `<section aria-labelledby>` with an `h4` and a
   list, under the card's own `h3`, so a group is announced by name with its item
   count rather than as a flat run of text.
@@ -426,17 +435,21 @@ holds mutations and an offer table, while the row is a pure rendering of the
 listing's payload.
 
 - **What a row offers is a table, not a condition**, and it lives in
-  `lib/task-display.ts` beside the lapse wording: `statusActions(status)`
-  returns `done + cancel` for a not-done task, `not-done + cancel` for a done
-  one, and **nothing at all for a cancelled one**. That last entry is the rule
-  the table exists to state — the service gives a cancelled **journal-only**
+  `lib/task-display.ts` beside the lapse wording: `statusActions(status,
+  { onList })` returns `done + cancel` for a not-done task, `not-done + cancel`
+  for a done one, and, for a journal-only task, **nothing at all for a
+  cancelled one**. That last entry is the rule the journal-only table exists to
+  state — the service gives a cancelled **journal-only**
   task exactly one exit, retargeting onto a new future journal, and refuses
   `cancelled → done` and `cancelled → not done` alike, so either button could do
   nothing but draw a 409. A test guards the table against drifting from that
-  matrix. **A task on a list is never refused** (ITER21-001 Phase 24): the API
-  reopens a done or cancelled list task directly. The table does not know that
-  yet, so a cancelled list task shown on a journal page offers nothing; making
-  the offer list-aware is ITER21-001 Phase 30's. A **lapsed**
+  matrix. **A task on a list is never refused**: the API reopens a done or
+  cancelled list task directly, so the list table offers a cancelled one
+  `not-done + done`. `onList` is required, as it is in the service's own
+  transition rule, so no caller gets the journal-only answer by omission. The
+  delete confirmation's advice follows suit (`deleteTaskDescription`): a list
+  task "stays on its list, and can be set back to not done", where a
+  journal-only one is reopened by a new due journal. A **lapsed**
   task is still not done and keeps the full offer: lapsing is a marker on a live
   commitment, never a disabled state.
 - **Cancel is the ordinary action and delete is the exception**, which the
@@ -455,8 +468,8 @@ listing's payload.
   shapes** — the single-resource detail read and the array-shaped journal
   listing and upcoming window. Patching one and not the other would leave a
   namespace showing the status the user just changed.
-- **Leaving `not_done` clears `lapsed`/`lapse_reason`; returning to it does
-  not.** Lapse is derived from "still not done and the due journal is no longer
+- **Leaving `not_done` clears `lapsed`/`lapse_reason` and `overdue`;
+  returning to it does not.** Lapse is derived from "still not done and the due journal is no longer
   ahead of it", so a task that has just been ticked off cannot be lapsed and its
   marker must go at once — otherwise completing a lapsed task leaves it reading
   `Done · Lapsed` until the refetch. The reverse is not knowable client-side, as
@@ -518,7 +531,14 @@ lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.
   journals (`canRetarget` in `lib/task-display.ts`). The service still
   retargets journal-only tasks alone and narrows on both anchors, so on a task
   on a list missing either the request could only fail; the rule changes when a
-  list task can be given a due journal.
+  list task can be given a due journal. A **done or cancelled list task** is
+  offered no retarget either, anchors or not: the service refuses it
+  (`TASK_LIST_TASK_CLOSED`) because such a task is reopened by its status, which
+  its row offers instead.
+- **Journal task action buttons are at least 44px square on a phone**
+  (`max-sm:*:min-h-11 max-sm:*:min-w-11` on the action group, so the retarget
+  and detach controls, which render their own buttons, are held to it too).
+  Desktop keeps the compact `size='sm'` row.
 - **The reopen confirmation is the server's refusal, not a client-side
   prediction.** A done task's retarget is sent *without* the acknowledgement,
   refused with `TASK_REOPEN_NOT_ACKNOWLEDGED` — a 409 that writes nothing, and

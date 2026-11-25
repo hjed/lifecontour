@@ -13,9 +13,9 @@ import { JsonApiLinks, JsonApiMeta } from './api';
 /**
  * A task's status. Values must match the backend `TaskStatus` enum.
  *
- * Done is reversible through a `PATCH`. Cancelled is not: a cancelled task is
- * reopened by retargeting it onto a new future journal, which returns it to
- * `NOT_DONE`.
+ * Done is reversible through a `PATCH`. Cancelled is too for a task on a
+ * list; a cancelled journal-only task is reopened only by retargeting it onto
+ * a new future journal, which returns it to `NOT_DONE`.
  */
 export enum TaskStatus {
   NOT_DONE = 'not_done',
@@ -91,6 +91,13 @@ export interface TaskAttributes {
   due_journal_id: number | null;
   /** Journals it has passed through, oldest link first. Neither anchor appears. */
   intermediate_journal_ids: number[];
+  /** The list the task is on; `null` for a journal-only task. */
+  task_list_id: number | null;
+  /**
+   * An ISO calendar date (`YYYY-MM-DD`) a list task is due on, or `null`. A
+   * list task has at most one of this and a due journal.
+   */
+  due_date: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -111,6 +118,13 @@ export interface TaskReadAttributes extends TaskAttributes {
    */
   lapsed: boolean;
   lapse_reason?: LapseReason | null;
+  /**
+   * A list task past its date and still not done — the list's counterpart of
+   * `lapsed`, derived on every read by the same day rules (a multi-day due
+   * journal counts only after its last day). Always `false` on a journal-only
+   * task, which lapses instead.
+   */
+  overdue: boolean;
 }
 
 /**

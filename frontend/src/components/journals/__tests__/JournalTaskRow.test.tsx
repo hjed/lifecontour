@@ -173,6 +173,103 @@ describe('JournalTaskRow', () => {
     });
   });
 
+  /**
+   * "On a journal page, a list task past its date shows the overdue marker …
+   * never the lapsed marker." Whether it is overdue is the server's answer;
+   * the row only words it.
+   */
+  describe('overdue marker', () => {
+    /** A list task due in the journal being viewed, on 13 Nov. */
+    function overdueListTask(
+      partial: Parameters<typeof createMockListTask>[0] = {}
+    ) {
+      return createMockListTask({
+        due_journal_id: 1,
+        due_journal: createMockTaskJournalRef({ date: '2026-11-13' }),
+        link_roles: [TaskLinkRole.DUE],
+        overdue: true,
+        ...partial,
+      });
+    }
+
+    it("names the due journal's date on an overdue list task", () => {
+      renderRow(overdueListTask());
+
+      expect(screen.getByTestId('journal-task-overdue')).toHaveTextContent(
+        'Overdue · 13 Nov'
+      );
+    });
+
+    it('names the due date when the list task has one instead', () => {
+      renderRow(
+        overdueListTask({
+          due_journal_id: null,
+          due_journal: null,
+          due_date: '2026-11-10',
+          link_roles: [TaskLinkRole.CREATED],
+        })
+      );
+
+      expect(screen.getByTestId('journal-task-overdue')).toHaveTextContent(
+        'Overdue · 10 Nov'
+      );
+    });
+
+    it('carries the fuller explanation as a description', () => {
+      renderRow(overdueListTask());
+
+      expect(screen.getByTestId('journal-task-overdue')).toHaveAttribute(
+        'title',
+        expect.stringMatching(/still not done/i)
+      );
+    });
+
+    it('never shows the lapsed marker on an overdue list task', () => {
+      renderRow(overdueListTask());
+
+      expect(
+        screen.queryByTestId('journal-task-lapsed')
+      ).not.toBeInTheDocument();
+    });
+
+    it('is absent on a list task that is not overdue', () => {
+      renderRow(overdueListTask({ overdue: false }));
+
+      expect(
+        screen.queryByTestId('journal-task-overdue')
+      ).not.toBeInTheDocument();
+    });
+
+    /**
+     * A stale payload — the read before a completion's refetch — must not
+     * leave a settled task reading as overdue.
+     */
+    it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'is absent on a %s task even if the payload still says overdue',
+      status => {
+        renderRow(overdueListTask({ status }));
+
+        expect(
+          screen.queryByTestId('journal-task-overdue')
+        ).not.toBeInTheDocument();
+      }
+    );
+
+    it('leaves a lapsed journal-only task lapsed, not overdue', () => {
+      renderRow(
+        createMockJournalTask({
+          lapsed: true,
+          lapse_reason: LapseReason.DATE_PASSED,
+        })
+      );
+
+      expect(screen.getByTestId('journal-task-lapsed')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId('journal-task-overdue')
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe('linked contacts', () => {
     it('shows an avatar and the full name of each linked contact', () => {
       renderRow(

@@ -140,6 +140,19 @@ function requestBody(call = 0): unknown {
   return JSON.parse(init.body as string);
 }
 
+/** The row's status write: one PATCH of task 1 carrying only `status`. */
+async function expectStatusPatch(status: TaskStatus): Promise<void> {
+  await waitFor(() => {
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/tasks/1',
+      expect.objectContaining({ method: 'PATCH' })
+    );
+  });
+  expect(requestBody()).toEqual({
+    data: { type: 'tasks', id: '1', attributes: { status } },
+  });
+}
+
 function actionGroup(): HTMLElement {
   return screen.getByRole('group', { name: 'Task actions' });
 }
@@ -211,6 +224,107 @@ describe('JournalTaskActions', () => {
     });
   });
 
+  /**
+   * "A done or cancelled list task can be set back to not done, without
+   * retargeting." The service refuses no status change on a list, and refuses
+   * a retarget of a closed one, so the row offers the status and not the date.
+   */
+  describe('a task on a list', () => {
+    /** A list task anchored in journals, so only the list rule decides. */
+    function anchoredListTask(status: TaskStatus) {
+      return createMockListTask({
+        status,
+        creating_journal_id: 1,
+        creating_journal: createMockTaskJournalRef({ id: 1 }),
+        due_journal_id: 1,
+        due_journal: createMockTaskJournalRef({ id: 1 }),
+        link_roles: [TaskLinkRole.DUE],
+      });
+    }
+
+    it('offers a cancelled list task the way back and completion', () => {
+      renderActions(anchoredListTask(TaskStatus.CANCELLED));
+
+      expect(
+        screen.getByRole('button', { name: 'Return to not done' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Mark done' })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Cancel task' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('offers a done list task the way back and cancellation', () => {
+      renderActions(anchoredListTask(TaskStatus.DONE));
+
+      expect(
+        screen.getByRole('button', { name: 'Return to not done' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Cancel task' })
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['Return to not done', TaskStatus.NOT_DONE],
+      ['Mark done', TaskStatus.DONE],
+    ])(
+      '%s on a cancelled list task patches its status to %s',
+      async (name, to) => {
+        mockFetch.mockResolvedValueOnce(okResponse(to));
+        renderActions(anchoredListTask(TaskStatus.CANCELLED));
+
+        await userEvent.click(screen.getByRole('button', { name }));
+
+        await expectStatusPatch(to);
+      }
+    );
+
+    it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'offers a %s list task no retarget, though it has both journals',
+      status => {
+        renderActions(anchoredListTask(status));
+
+        expect(
+          screen.queryByTestId('journal-task-action-retarget')
+        ).not.toBeInTheDocument();
+      }
+    );
+
+    it('still offers a not-done list task with both journals a reschedule', () => {
+      renderActions(anchoredListTask(TaskStatus.NOT_DONE));
+
+      expect(
+        screen.getByTestId('journal-task-action-retarget')
+      ).toHaveAccessibleName(/reschedule/i);
+    });
+
+    it('tells a list task it stays on its list rather than naming a new due journal', async () => {
+      renderActions(anchoredListTask(TaskStatus.NOT_DONE));
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Delete task' })
+      );
+
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent(/stays on its list/i);
+      expect(dialog).not.toHaveTextContent(/new due journal/i);
+    });
+
+    it('keeps the new-due-journal advice for a journal-only task', async () => {
+      renderActions(createMockJournalTask());
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Delete task' })
+      );
+
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent(/new due journal/i);
+    });
+  });
+
   describe('happy paths', () => {
     it.each([
       ['Mark done', TaskStatus.NOT_DONE, TaskStatus.DONE],
@@ -222,15 +336,7 @@ describe('JournalTaskActions', () => {
 
       await userEvent.click(screen.getByRole('button', { name }));
 
-      await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith(
-          '/api/tasks/1',
-          expect.objectContaining({ method: 'PATCH' })
-        );
-      });
-      expect(requestBody()).toEqual({
-        data: { type: 'tasks', id: '1', attributes: { status: to } },
-      });
+      await expectStatusPatch(to);
     });
 
     it('shows the new status before the request is answered', async () => {
