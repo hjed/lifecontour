@@ -133,6 +133,11 @@ class TestTheTaskGuidanceDescribesListTasks:
 
         assert "set or clear a list task's due date" in instructions
 
+    def test_says_update_task_sets_changes_or_clears_a_due_journal(self) -> None:
+        instructions = create_mcp_server().instructions or ""
+
+        assert "set, change or clear a list task's due journal" in instructions
+
     def test_names_the_tool_that_moves_a_task_onto_or_between_lists(self) -> None:
         instructions = create_mcp_server().instructions or ""
 

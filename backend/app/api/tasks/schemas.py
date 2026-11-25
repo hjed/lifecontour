@@ -286,9 +286,8 @@ class ListTaskCreateRequest(JsonApiCreateRequest[ListTaskCreateData]):
 class TaskUpdateAttributes(BaseModel):
     """Attributes a client may send to update a task.
 
-    The text, the status, the flag, the icon and a list task's due date, and
-    **each is optional
-    individually**: JSON:API sends the attributes that changed, so a client
+    The text, the status, the flag, the icon, a list task's due date and a
+    task's due journal, and **each is optional individually**: JSON:API sends the attributes that changed, so a client
     rewording a task sends no status and one completing it sends no text.
     Sending several is a single change to a single resource, which is why the
     service applies them under one read and one write rather than as separate
@@ -304,12 +303,21 @@ class TaskUpdateAttributes(BaseModel):
     all — on a list, and not due in a journal — is the entity's rule, and
     "today or later" the service's, so both answer the same on every surface.
 
+    **The due journal follows the date**: ``"due_journal_id": null`` clears
+    it, an absent one keeps it (:meth:`due_journal_id_change`). On a list task
+    it is a plain date — the status is kept, and setting either date clears
+    the other. On a journal-only task it is a retarget: the task lands not
+    done, a done one only with ``acknowledge_reopen`` (or ``"status":
+    "not_done"`` beside it), and it cannot be cleared. A body with two answers
+    — a due date and a due journal, or a journal-only retarget beside another
+    status — is refused, by the service, so every surface answers the same.
+
     What is refused is a body naming *no change*. Down in the service that is
     simply nothing to do; out here it is a client that built a request wrong,
     and answering 200 would tell it the edit it thinks it made was applied.
 
-    The due journal (retarget) and contact links (Phase 11) are edited through
-    their own surfaces, and ``extra="forbid"`` is what keeps their absence a
+    Contact links are edited through their own surface, and the creating
+    journal never changes; ``extra="forbid"`` is what keeps their absence a
     contract rather than an omission — a field arriving early is refused rather
     than silently dropped.
     """
@@ -355,10 +363,36 @@ class TaskUpdateAttributes(BaseModel):
         description=(
             "A task on a list's due day, as YYYY-MM-DD, or null to clear it. "
             "Must be today or later in your timezone when set. A plain edit: "
-            "the status is kept, in any status. Setting one is refused for a "
-            "task that is not on a list or that is due in a journal; clearing "
-            "a date a task does not have changes nothing. Omit to leave it "
-            "unchanged."
+            "the status is kept, in any status. Setting one replaces a due "
+            "journal the task has, which is kept as an intermediate journal; "
+            "it is refused for a task that is not on a list, or alongside a "
+            "due_journal_id. Clearing a date a task does not have changes "
+            "nothing. Omit to leave it unchanged."
+        ),
+    )
+    # Strict, as the move's list id is: a string or a boolean is a client bug,
+    # and coercing one would move a deadline the client never named.
+    due_journal_id: Annotated[StrictInt, Field(ge=1, le=INT32_MAX)] | None = Field(
+        default=None,
+        description=(
+            "The future-dated journal the task should be due in, or null to "
+            "clear it. Must be an existing journal of yours, dated after today "
+            "in your timezone. The journal it leaves is kept as an "
+            "intermediate journal. On a task on a list this is a plain edit: "
+            "the status is kept, a due date is replaced, and it may be "
+            "cleared. On a task that is not on a list it is a retarget: the "
+            "task becomes not done (a done one only with acknowledge_reopen, "
+            "or with status not_done), any other status alongside is refused, "
+            "and it cannot be cleared. Omit to leave it unchanged."
+        ),
+    )
+    acknowledge_reopen: StrictBool = Field(
+        default=False,
+        description=(
+            "Confirms that moving a done task that is not on a list to a new "
+            "due_journal_id reopens it; without it that request is refused "
+            "with TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored otherwise. Must be a "
+            "JSON boolean."
         ),
     )
 
@@ -370,6 +404,12 @@ class TaskUpdateAttributes(BaseModel):
         """The due date as the service takes it: a day, ``None`` to clear, or UNSET."""
         return self.due_date if "due_date" in self.model_fields_set else UNSET
 
+    def due_journal_id_change(self) -> int | None | Unset:
+        """The due journal as the service takes it: an id, ``None`` to clear, or UNSET."""
+        return (
+            self.due_journal_id if "due_journal_id" in self.model_fields_set else UNSET
+        )
+
     @model_validator(mode="after")
     def _must_name_a_change(self) -> TaskUpdateAttributes:
         """Refuse an update that updates nothing.
@@ -380,9 +420,9 @@ class TaskUpdateAttributes(BaseModel):
         state. A body carrying nothing but nulls therefore names no change and
         is refused here like any other.
 
-        The icon and the due date are the exceptions the other way:
-        ``{"icon": null}`` and ``{"due_date": null}`` clear them, so each is a
-        change on its own — which is why they are tested by presence, not by
+        The icon and the two dates are the exceptions the other way:
+        ``{"icon": null}``, ``{"due_date": null}`` and ``{"due_journal_id":
+        null}`` clear them, so each is a change on its own — which is why they are tested by presence, not by
         ``is None``. The flag cannot be null at all.
         """
         if "flagged" in self.model_fields_set and self.flagged is None:
@@ -395,10 +435,11 @@ class TaskUpdateAttributes(BaseModel):
             and self.flagged is None
             and "icon" not in self.model_fields_set
             and "due_date" not in self.model_fields_set
+            and "due_journal_id" not in self.model_fields_set
         ):
             raise ValueError(
                 "An update must name at least one of 'text', 'status', "
-                "'flagged', 'icon' or 'due_date'."
+                "'flagged', 'icon', 'due_date' or 'due_journal_id'."
             )
         return self
 
@@ -436,11 +477,11 @@ class TaskUpdateRequest(JsonApiUpdateRequest[TaskUpdateData]):
 class TaskRetargetAttributes(BaseModel):
     """What a client may send to move a task onto a new due journal.
 
-    Two fields, and the reasoning for what is *not* here is the same reasoning
-    that keeps this off the status ``PATCH`` altogether. A retarget is not a
-    field assignment: it forces the status to *not done* and writes an
-    intermediate link, so a ``status`` alongside a ``due_journal_id`` would be a
-    second answer to a question the operation has already settled. There is no
+    Two fields. There is no ``status``: a journal-only task's retarget forces
+    it to *not done*, so a status alongside would be a second answer to a
+    question the operation has already settled. (The ``PATCH`` carries a due
+    journal too, and refuses that combination as a clash; a list task keeps
+    its status either way.) There is no
     ``creating_journal_id`` for the reason the create attributes have none —
     *"set once and never changes"* is enforced by there being nothing to send —
     and no date, because a task is due in a journal that already exists.
@@ -459,12 +500,13 @@ class TaskRetargetAttributes(BaseModel):
     acknowledge_reopen: StrictBool = Field(
         default=False,
         description=(
-            "Confirms that reopening a *done* task is intended. Retargeting "
-            "always leaves a task not done, so moving a completed task's due "
-            "journal reopens it; without this the request is refused with "
-            "TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored for any other status — "
-            "retargeting is how a cancelled journal-only task is reopened and "
-            "needs no confirmation (a list task is reopened by its status). "
+            "Confirms that reopening a *done* task that is not on a list is "
+            "intended. Retargeting leaves such a task not done, so moving a "
+            "completed one's due journal reopens it; without this the request "
+            "is refused with TASK_REOPEN_NOT_ACKNOWLEDGED. Ignored for any "
+            "other status — retargeting is how a cancelled journal-only task is "
+            "reopened and needs no confirmation — and for a task on a list, "
+            "which keeps its status. "
             'Must be a JSON boolean: 1, "true" and "yes" are '
             "refused rather than coerced."
         ),

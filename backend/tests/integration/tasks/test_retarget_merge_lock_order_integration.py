@@ -42,9 +42,12 @@ seconds rather than hanging the suite.
 """
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import pytest
 from core_shared.models.journals import Journal
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
@@ -57,6 +60,9 @@ from app.core.tasks.services.task_journal_merge_service import TaskJournalMergeS
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import (
     committed_task,
+    committed_task_list,
+    create_journal,
+    create_list_task,
     intermediate_journal_ids,
     service_on,
     stored_anchors,
@@ -328,3 +334,140 @@ class TestARetargetOverlappingAMergeOfItsDueJournal:
                 survivor_id=survivor_id,
                 target_id=target_id,
             )
+
+
+@asynccontextmanager
+async def _committed_list_task_due_in_a_journal(
+    async_engine: AsyncEngine,
+) -> AsyncIterator[tuple[str, int, int, int, int]]:
+    """A committed list task due in ``absorbed``, and two more journals.
+
+    Yields:
+        ``(owner, task_id, absorbed_id, survivor_id, target_id)``.
+    """
+    async with committed_task_list(async_engine) as (owner, list_id):
+        async with async_engine.begin() as setup:
+            repo = SqlJournalRepository(setup)
+            absorbed_id, survivor_id, target_id = [
+                await create_journal(
+                    repo,
+                    title=f"Journal at {offset}d",
+                    days_offset=offset,
+                    user_id=owner,
+                )
+                for offset in (7, 14, 21)
+            ]
+            task_id = await create_list_task(
+                setup, task_list_id=list_id, due_journal_id=absorbed_id, user_id=owner
+            )
+        try:
+            yield owner, task_id, absorbed_id, survivor_id, target_id
+        finally:
+            async with async_engine.begin() as cleanup:
+                # The journal writes' events are committed too, and carry no
+                # user id the list helper's sweep could find them by.
+                await cleanup.execute(
+                    text(
+                        "DELETE FROM outbox_events "
+                        "WHERE event_type LIKE 'Journal%' "
+                        "AND aggregate_id = ANY(:journal_ids)"
+                    ),
+                    {"journal_ids": [absorbed_id, survivor_id, target_id]},
+                )
+                await cleanup.execute(
+                    text("DELETE FROM tasks WHERE user_id = :owner"), {"owner": owner}
+                )
+                await cleanup.execute(
+                    text("DELETE FROM journals WHERE user_id = :owner"),
+                    {"owner": owner},
+                )
+
+
+@pytest.mark.integration
+class TestAListTasksDueJournalChangeOverlappingAMerge:
+    """A plain due-journal edit takes the retarget's lock order, so it queues too.
+
+    The list task is due in ``absorbed``; the merge absorbs it into
+    ``survivor`` while ``update_task`` moves the task onto ``target`` or clears
+    its due journal. Whichever runs first, the task ends due in ``target`` (or
+    in nothing) with ``survivor`` on its trail, and neither side is aborted.
+    """
+
+    @pytest.mark.parametrize("move", [True, False], ids=["replace", "clear"])
+    @pytest.mark.parametrize("merge_first", [False, True], ids=["edit", "merge"])
+    async def test_neither_ordering_deadlocks(
+        self,
+        async_engine: AsyncEngine,
+        user_settings_repository: SqlUserSettingsRepository,
+        move: bool,
+        merge_first: bool,
+    ) -> None:
+        async with _committed_list_task_due_in_a_journal(async_engine) as (
+            owner,
+            task_id,
+            absorbed_id,
+            survivor_id,
+            target_id,
+        ):
+            first_holds = asyncio.Event()
+            second_at_the_lock = asyncio.Event()
+
+            async with (
+                async_engine.connect() as edit_conn,
+                async_engine.connect() as merge_conn,
+            ):
+
+                async def _edit() -> None:
+                    signals = (
+                        {"before": second_at_the_lock}
+                        if merge_first
+                        else {"after": first_holds, "resume": second_at_the_lock}
+                    )
+                    await service_on(
+                        edit_conn,
+                        user_settings_repository,
+                        journal_repo=journal_repository_signalling_around_the_lock(
+                            **signals
+                        ),
+                    ).update_task(
+                        user_id=owner,
+                        task_id=task_id,
+                        due_journal_id=target_id if move else None,
+                        transaction=edit_conn,
+                    )
+
+                async def _merge() -> None:
+                    signals = (
+                        {"after": first_holds, "resume": second_at_the_lock}
+                        if merge_first
+                        else {"before": second_at_the_lock}
+                    )
+                    await merge_service_on(
+                        merge_conn,
+                        anchor_repo=anchor_repository_signalling_around_the_lock(
+                            **signals
+                        ),
+                    ).merge_journals(
+                        target_id=survivor_id,
+                        source_id=absorbed_id,
+                        transaction=merge_conn,
+                    )
+
+                first, second = (_merge, _edit) if merge_first else (_edit, _merge)
+                running_first = asyncio.create_task(first())
+                await asyncio.wait_for(first_holds.wait(), timeout=TIMEOUT)
+                running_second = asyncio.create_task(second())
+
+                await asyncio.wait_for(
+                    asyncio.gather(running_first, running_second), timeout=TIMEOUT
+                )
+
+            async with async_engine.connect() as check:
+                due = (
+                    await check.execute(
+                        text("SELECT due_journal_id FROM tasks WHERE id = :id"),
+                        {"id": task_id},
+                    )
+                ).scalar_one()
+                assert due == (target_id if move else None)
+                assert await intermediate_journal_ids(check, task_id) == [survivor_id]

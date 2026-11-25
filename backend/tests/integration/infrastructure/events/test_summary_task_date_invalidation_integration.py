@@ -50,7 +50,12 @@ from tests.integration.infrastructure.events.consumer_harness import (
     patched_consumer_engine,
     relay_outbox,
 )
-from tests.integration.tasks.task_seeding import create_journal, service_on
+from tests.integration.tasks.task_seeding import (
+    create_journal,
+    create_list_task,
+    seed_task_list_id,
+    service_on,
+)
 
 USER_ID = "user-task-invalidation"
 GROUP_NAME = "summary-invalidation"
@@ -317,6 +322,45 @@ class TestRetargetingATask:
         )
         await _relay_and_invalidate(
             stream_client, test_stream_name, async_connection, "test-retarget"
+        )
+
+        assert await _status_on(summary_repo, today) == SummaryStatus.PENDING
+
+    @pytest.mark.asyncio
+    async def test_a_list_tasks_due_journal_change_marks_its_days_stale(
+        self,
+        task_service: TaskService,
+        journal_repository: SqlJournalRepository,
+        summary_repo: SqlJournalDailySummaryRepository,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        test_stream_name: str,
+    ) -> None:
+        """The plain edit's ``TaskUpdated`` carries the pair a retarget carries."""
+        today = _today()
+        first_due = await create_journal(
+            journal_repository, days_offset=2, user_id=USER_ID
+        )
+        second_due = await create_journal(
+            journal_repository, days_offset=5, user_id=USER_ID
+        )
+        list_id = await seed_task_list_id(async_connection, user_id=USER_ID)
+        task_id = await create_list_task(
+            async_connection,
+            task_list_id=list_id,
+            due_journal_id=first_due,
+            user_id=USER_ID,
+        )
+        await _seed_generated_summary(summary_repo, today)
+
+        await task_service.update_task(
+            user_id=USER_ID,
+            task_id=task_id,
+            due_journal_id=second_due,
+            transaction=async_connection,
+        )
+        await _relay_and_invalidate(
+            stream_client, test_stream_name, async_connection, "test-list-change"
         )
 
         assert await _status_on(summary_repo, today) == SummaryStatus.PENDING

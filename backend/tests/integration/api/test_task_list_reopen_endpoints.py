@@ -100,16 +100,15 @@ class TestAListTaskIsReopenedByItsStatus:
         assert await stored_status(async_connection, task_id) == "cancelled"
 
 
-class TestTheClosedRetargetRefusalsWayOutWorks:
-    """``TASK_LIST_TASK_CLOSED`` tells a caller to reopen first, then retarget.
+class TestAClosedListTaskIsRetargetedWithoutReopening:
+    """A closed list task's due journal moves directly, and it stays closed.
 
-    True for both closed statuses now that a cancelled list task reopens by
-    its status: following the advice succeeds, and the date move keeps the
-    status the reopen gave it.
+    Reopening it first is no longer needed: changing a list task's date never
+    changes its status, so the retarget simply keeps the one it has.
     """
 
     @pytest.mark.parametrize("closed", [TaskStatus.CANCELLED, TaskStatus.DONE])
-    async def test_reopening_then_retargeting_succeeds(
+    async def test_the_retarget_keeps_its_status(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
@@ -124,33 +123,24 @@ class TestTheClosedRetargetRefusalsWayOutWorks:
             due_journal_id=due_id,
             status=closed,
         )
-        retarget_body = {
-            "data": {
-                "type": "task-retarget",
-                "attributes": {"due_journal_id": later_id},
-            }
-        }
 
-        refused = await authenticated_client.post(
-            f"/api/tasks/{task_id}/retarget", json=retarget_body
-        )
-        reopened = await authenticated_client.patch(
-            f"/api/tasks/{task_id}", json=_status_body(task_id, "not_done")
-        )
         retargeted = await authenticated_client.post(
-            f"/api/tasks/{task_id}/retarget", json=retarget_body
+            f"/api/tasks/{task_id}/retarget",
+            json={
+                "data": {
+                    "type": "task-retarget",
+                    "attributes": {"due_journal_id": later_id},
+                }
+            },
         )
 
-        (error,) = refused.json()["errors"]
-        assert error["code"] == "TASK_LIST_TASK_CLOSED"
-        assert "Set it back to not done first" in str(error["detail"])
-        assert reopened.status_code == 200
         assert retargeted.status_code == 200
         attributes = retargeted.json()["data"]["attributes"]
         assert (attributes["status"], attributes["due_journal_id"]) == (
-            "not_done",
+            closed.value,
             later_id,
         )
+        assert await stored_status(async_connection, task_id) == closed.value
 
 
 class TestAnotherUsersListTask:

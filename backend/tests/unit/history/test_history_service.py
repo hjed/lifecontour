@@ -1382,6 +1382,45 @@ class TestTaskUpdated:
         ]
         assert rows[0].user_id == "u1"
 
+    @pytest.mark.parametrize(
+        ("change", "old", "new"),
+        [
+            ([None, NEW_JOURNAL_ID], None, str(NEW_JOURNAL_ID)),
+            (
+                [OLD_JOURNAL_ID, NEW_JOURNAL_ID],
+                str(OLD_JOURNAL_ID),
+                str(NEW_JOURNAL_ID),
+            ),
+            ([OLD_JOURNAL_ID, None], str(OLD_JOURNAL_ID), None),
+        ],
+        ids=["set", "changed", "cleared"],
+    )
+    def test_a_plain_due_journal_change_lands_one_owned_row(
+        self,
+        service: HistoryService,
+        change: list[int | None],
+        old: str | None,
+        new: str | None,
+    ) -> None:
+        """A list task's due journal moves by ``TaskUpdated``; ``None`` is a side."""
+        event = _task_event(
+            "TaskUpdated",
+            {
+                "task_id": TASK_ID,
+                "user_id": "u1",
+                "changed_fields": {"due_journal_id": change},
+                "source": Provenance.MCP.value,
+                "changed_by": "mcp",
+            },
+        )
+
+        rows = service.project_event(event)
+
+        assert [_row_tuple(r) for r in rows] == [
+            ("task", TASK_ID, "due_journal_id", old, new)
+        ]
+        assert rows[0].user_id == "u1"
+
     def test_a_contact_link_lands_one_row_naming_the_contact(
         self, service: HistoryService
     ) -> None:

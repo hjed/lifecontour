@@ -364,9 +364,10 @@ class DailySummaryInvalidationService:
 
         A retarget names two journals and yields two answers — the day that lost
         the task and the day that gained it, which is the criterion in its own
-        words. Everything else names at most one, and ``TaskUpdated`` names
-        none: it carries only what changed, never an anchor it kept, so the task
-        is read for it.
+        words, and so does a list task's ``TaskUpdated`` that moved its due
+        journal, carrying the same pair. Everything else names at most one, and
+        any other ``TaskUpdated`` names none: it carries only what changed,
+        never an anchor it kept, so the task is read for it.
         """
         user_id = event_data.get("user_id")
         if not user_id:

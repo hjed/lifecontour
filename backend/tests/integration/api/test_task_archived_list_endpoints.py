@@ -26,6 +26,7 @@ from tests.integration.tasks.task_seeding import (
     create_list_task,
     seed_archived_list_task,
     seed_task_list,
+    stored_anchors,
     stored_status,
     task_state,
 )
@@ -163,6 +164,27 @@ class TestEveryWriteRouteAnswers409:
 
         _assert_archived(response)
         assert await task_state(async_connection, task_id) == before
+
+    @pytest.mark.parametrize("change", ["set", "clear", "resend"])
+    async def test_patching_the_due_journal(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        seeded: Seeded,
+        change: str,
+    ) -> None:
+        """Archived answers first, before the journal is judged or found unchanged."""
+        before = await _snapshot(async_connection, seeded)
+        _, due_id = await stored_anchors(async_connection, seeded.task_id)
+        sent = {"set": seeded.later_journal_id, "clear": None, "resend": due_id}[change]
+
+        response = await authenticated_client.patch(
+            f"/api/tasks/{seeded.task_id}",
+            json=_task_body(seeded.task_id, due_journal_id=sent),
+        )
+
+        _assert_archived(response)
+        assert await _snapshot(async_connection, seeded) == before
 
     async def test_retargeting(
         self,

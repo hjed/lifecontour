@@ -358,16 +358,22 @@ class TestCreatingDueInAJournal:
         assert _error(response)["code"] == "TASK_LIST_ARCHIVED"
 
 
-class TestRetargetingAListTaskNotDueInAJournal:
-    """A list task with no due journal has none to leave: retarget refuses it.
+def _retarget_body(due_journal_id: int, **attributes: object) -> dict[str, object]:
+    return {
+        "data": {
+            "type": "task-retarget",
+            "attributes": {"due_journal_id": due_journal_id, **attributes},
+        }
+    }
 
-    Temporary, until a list task's due journal can be set under list rules.
-    """
+
+class TestRetargetingAListTaskNotDueInAJournal:
+    """A list task with no due journal is given one; a due date is replaced."""
 
     @pytest.mark.parametrize(
         "attributes", [{}, {"due_date": "2099-12-31"}], ids=["undated", "due-date"]
     )
-    async def test_is_a_conflict_and_is_left_as_it_was(
+    async def test_gains_the_journal(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
@@ -378,44 +384,33 @@ class TestRetargetingAListTaskNotDueInAJournal:
         later_id = await create_journal(journal_repository, days_offset=9)
         created = await _create(authenticated_client, list_id, **attributes)
         task_id = int(created.json()["data"]["id"])
-        events_before = len(await task_events(async_connection, task_id=task_id))
 
         response = await authenticated_client.post(
-            f"/api/tasks/{task_id}/retarget",
-            json={
-                "data": {
-                    "type": "task-retarget",
-                    "attributes": {"due_journal_id": later_id},
-                }
-            },
+            f"/api/tasks/{task_id}/retarget", json=_retarget_body(later_id)
         )
 
-        assert response.status_code == 409
-        error = _error(response)
-        assert error["code"] == "TASK_LIST_TASK_NOT_DUE_IN_JOURNAL"
-        assert "not due in a journal" in error["detail"]
-        read = (await authenticated_client.get(f"/api/tasks/{task_id}")).json()
-        assert read["data"]["attributes"]["due_journal_id"] is None
-        assert len(await task_events(async_connection, task_id=task_id)) == (
-            events_before
+        assert response.status_code == 200
+        moved = response.json()["data"]["attributes"]
+        assert (moved["due_journal_id"], moved["due_date"], moved["status"]) == (
+            later_id,
+            None,
+            "not_done",
         )
+        assert moved["intermediate_journal_ids"] == []
 
 
 class TestRetargetingAClosedListTaskDueInAJournal:
-    """A list task this create makes due in a journal reaches the retarget route.
-
-    Retarget follows the journal-only rules, which would reopen a closed task;
-    a list task's date change never does, so a closed one is refused until list
-    tasks get a due-journal change of their own.
-    """
+    """A list task's due journal is a plain date: a closed one moves and stays closed."""
 
     @pytest.mark.parametrize("status", ["done", "cancelled"])
-    async def test_a_closed_one_is_a_conflict_and_is_left_as_it_was(
+    @pytest.mark.parametrize("acknowledge_reopen", [False, True])
+    async def test_moves_and_keeps_its_status(
         self,
         authenticated_client: AsyncClient,
         async_connection: AsyncConnection,
         journal_repository: SqlJournalRepository,
         status: str,
+        acknowledge_reopen: bool,
     ) -> None:
         list_id = await seed_task_list_id(async_connection)
         due_id = await create_journal(journal_repository, days_offset=5)
@@ -433,35 +428,19 @@ class TestRetargetingAClosedListTaskDueInAJournal:
             },
         )
         assert closed.status_code == 200
-        events_before = len(await task_events(async_connection, task_id=task_id))
 
         response = await authenticated_client.post(
             f"/api/tasks/{task_id}/retarget",
-            json={
-                "data": {
-                    "type": "task-retarget",
-                    "attributes": {
-                        "due_journal_id": later_id,
-                        "acknowledge_reopen": True,
-                    },
-                }
-            },
+            json=_retarget_body(later_id, acknowledge_reopen=acknowledge_reopen),
         )
 
-        assert response.status_code == 409
-        error = _error(response)
-        assert error["code"] == "TASK_LIST_TASK_CLOSED"
-        assert "never reopens it" in error["detail"]
-        assert "Set it back to not done first" in error["detail"]
-        read = (await authenticated_client.get(f"/api/tasks/{task_id}")).json()
-        attributes = read["data"]["attributes"]
-        assert (attributes["status"], attributes["due_journal_id"]) == (
-            status,
-            due_id,
-        )
-        assert len(await task_events(async_connection, task_id=task_id)) == (
-            events_before
-        )
+        assert response.status_code == 200
+        moved = response.json()["data"]["attributes"]
+        assert (moved["status"], moved["due_journal_id"]) == (status, later_id)
+        assert moved["intermediate_journal_ids"] == [due_id]
+        last = (await task_events(async_connection, task_id=task_id))[-1]
+        assert last.event_type == "TaskUpdated"
+        assert last.payload["changed_fields"] == {"due_journal_id": [due_id, later_id]}
 
 
 class TestAnotherUsersJournal:

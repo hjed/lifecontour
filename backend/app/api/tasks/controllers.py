@@ -28,11 +28,11 @@ means to a client.
 
 The **retarget** is the exception, and answers with the task. It is an action
 sub-resource — ``POST /tasks/{id}/retarget``, the shape
-``POST /journals/{id}/merge`` already uses — rather than a field on the status
-``PATCH``, because it is not a field assignment: it forces the status to *not
-done* and writes an intermediate link, so a body able to carry a ``status``
-beside a ``due_journal_id`` would have two answers and no rule for picking one.
-Its answer includes the task's **intermediate journals**, which is what lets a
+``POST /journals/{id}/merge`` already uses — and the ``PATCH`` carries a
+``due_journal_id`` too, under the same rules: on a journal-only task it forces
+the status to *not done* and writes an intermediate link, so a ``PATCH`` naming
+another ``status`` beside it has two answers and is refused rather than
+guessed at. Its answer includes the task's **intermediate journals**, which is what lets a
 caller see the journal it just left without a second request. Every route that
 returns a task fills the same attribute in — create and the ``PATCH`` as well as
 the retarget — so there is one resource type with one attribute set whichever
@@ -471,13 +471,13 @@ async def update_task(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TaskResponse:
-    """Change a task's text, status, flag, icon or due date — any of them, in one write.
+    """Change a task's text, status, flag, icon or dates — any of them, in one write.
 
-    A task is reached by its own id here rather than through a journal, because
-    neither change involves a journal at all: marking a task done or cancelled
-    creates no journal link, rewording one infers no link either, and the due
-    journal is not re-read on either path — so a *lapsed* task stays both
-    completable and editable from wherever the user found it. There is still no
+    A task is reached by its own id here rather than through a journal: marking
+    a task done or cancelled creates no journal link, rewording one infers no
+    link either, and the due journal is not re-read unless a date is being set
+    — so a *lapsed* task stays both completable and editable from wherever the
+    user found it. There is still no
     task **collection** — the specification is explicit that no screen lists
     every task — only this member route.
 
@@ -494,21 +494,40 @@ async def update_task(
     day sets or changes it, ``null`` clears it, and the status is kept — a
     plain edit, with no acknowledgement. A day that is set must be today or
     later in the user's timezone; resending the one it has changes nothing.
+    Setting one on a task due in a journal replaces the journal, which is kept
+    as an intermediate journal.
+
+    Every task takes a ``due_journal_id``, which must be one of the user's
+    journals dated after today; the journal it leaves is kept as an
+    intermediate journal. On a **list task** it is a plain edit like the date:
+    ``null`` clears it, a due date is replaced, and the status is kept. On a
+    **journal-only task** it is a retarget, as ``POST .../retarget`` is: the
+    task becomes not done — a done one only with ``acknowledge_reopen`` or
+    ``"status": "not_done"`` — and it cannot be cleared.
 
     Raises:
         400: An unknown status, blank text, an unknown attribute, a null or
              non-boolean flag, an icon outside the fixed set, a due date that
              is not a ``YYYY-MM-DD`` string, is before today
              (``TASK_DUE_DATE_IN_PAST``) or is set on a task not on a list or
-             due in a journal (``meta.field`` = ``due_date``), a body naming no
+             beside a ``due_journal_id`` (``meta.field`` = ``due_date``), a due
+             journal that is not future-dated (``TASK_DUE_JOURNAL_NOT_FUTURE``),
+             a journal-only task's due journal cleared (``meta.field`` =
+             ``due_journal_id``) or moved beside a status other than
+             ``not_done`` (``meta.field`` = ``status``), a non-integer journal
+             id or a non-boolean ``acknowledge_reopen``, a body naming no
              change at all, or a body id that disagrees with the path.
-        404: The task does not exist or is not yours; the two are the same
-             answer by design.
+        404: The task does not exist or is not yours, or the due journal does
+             not exist or is not yours (``TASK_ANCHOR_JOURNAL_NOT_FOUND``); in
+             each case the two are the same answer by design.
         409: The transition is refused. Only a journal-only task leaving
-             *cancelled* is: it is reopened by retargeting it onto a new future
+             *cancelled* is: it is reopened by moving it onto a new future
              journal, which returns it to not done, and the message says so. A
              task on a list is never refused — a done or cancelled list task is
-             reopened directly by sending ``"status": "not_done"`` here.
+             reopened directly by sending ``"status": "not_done"`` here. Or a
+             done journal-only task's due journal is moved without the
+             acknowledgement (``TASK_REOPEN_NOT_ACKNOWLEDGED``). Or the task's
+             list is archived (``TASK_LIST_ARCHIVED``).
     """
     # The only thing this controller decides. It is a transport concern — which
     # of two places names the resource — rather than a domain rule, so it has no
@@ -531,6 +550,8 @@ async def update_task(
         flagged=attributes.flagged,
         icon=attributes.icon_change(),
         due_date=attributes.due_date_change(),
+        due_journal_id=attributes.due_journal_id_change(),
+        acknowledge_reopen=attributes.acknowledge_reopen,
         transaction=connection,
         source=Provenance.UI,
         changed_by="ui",
@@ -552,17 +573,17 @@ async def retarget_task(
 ) -> TaskResponse:
     """Move a task onto a new due journal, keeping the one it is leaving.
 
-    This is how a deadline is extended, and it is the **only** way a cancelled
-    journal-only task is reopened: retargeting always leaves the task *not
-    done*. It is also what a refused status transition tells a caller to do. A
-    task on a list needs no retarget to reopen: ``PATCH /api/tasks/{id}`` with
-    ``"status": "not_done"`` does it directly.
+    This is how a deadline is extended, and how a cancelled journal-only task is
+    reopened: retargeting a journal-only task always leaves it *not done*. It
+    is also what a refused status transition tells a caller to do. A **task on
+    a list** keeps its status: its due journal is a plain date, so a done or
+    cancelled one moves and stays closed, with no acknowledgement, and an
+    undated or dated one is given the journal. ``PATCH /api/tasks/{id}`` with a
+    ``due_journal_id`` applies the same rules.
 
-    An action sub-resource rather than a field on ``PATCH /api/tasks/{id}``,
-    following ``POST /api/journals/{id}/merge``. A retarget is not a field
-    assignment — it forces the status and writes a link row — so a body able to
-    carry a ``status`` beside a ``due_journal_id`` would have two answers and no
-    rule for choosing between them.
+    An action sub-resource, following ``POST /api/journals/{id}/merge``, with
+    no ``status`` in its body: a journal-only task's retarget forces the status,
+    so a status beside it would be a second answer.
 
     The response carries the task **and its intermediate journals**, including
     the one it has just left, so the trail is visible without a second request.
@@ -580,14 +601,9 @@ async def retarget_task(
         409: The task is *done* and the reopen was not acknowledged. Its own
              code, ``TASK_REOPEN_NOT_ACKNOWLEDGED``, so a surface can offer
              "reopen it anyway" rather than showing a generic failure. Nothing
-             is written: not the status, not the anchor, not the link. Or the
-             task is on a list and done or cancelled
-             (``TASK_LIST_TASK_CLOSED``): a list task's date change never
-             reopens it, so no acknowledgement makes this succeed; set it
-             back to ``not_done`` with ``PATCH`` first, then retarget. Or the
-             task is on a list and not due in a journal
-             (``TASK_LIST_TASK_NOT_DUE_IN_JOURNAL``): it has no due journal to
-             leave.
+             is written: not the status, not the anchor, not the link. A task
+             on a list is never asked for it. Or the task's list is archived
+             (``TASK_LIST_ARCHIVED``).
     """
     attributes = retarget_request.data.attributes
     retargeted, trail = await task_service.retarget_due_journal_with_trail(

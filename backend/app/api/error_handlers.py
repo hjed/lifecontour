@@ -48,8 +48,6 @@ from core_shared.models.tasks import (
     TaskListChangedConcurrentlyError,
     TaskListNotFoundError,
     TaskListRemovalNeedsJournalsError,
-    TaskListTaskClosedError,
-    TaskListTaskNotDueInJournalError,
     TaskListValidationError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
@@ -191,8 +189,6 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         # which is correct for an unreachable error and useless to a reachable one.
         TaskReopenNotAcknowledgedError: "TASK_REOPEN_NOT_ACKNOWLEDGED",
         TaskJournalIsAnchorError: "TASK_JOURNAL_IS_ANCHOR",
-        TaskListTaskClosedError: "TASK_LIST_TASK_CLOSED",
-        TaskListTaskNotDueInJournalError: "TASK_LIST_TASK_NOT_DUE_IN_JOURNAL",
         # Calendar errors
         CalendarNotFoundError: "CALENDAR_NOT_FOUND",
         CalendarValidationError: "CALENDAR_VALIDATION_ERROR",

@@ -570,6 +570,69 @@ class TestTheRetargetKeepsTheLockOrder:
         mock_event_publisher.publish.assert_not_awaited()
 
 
+class TestADueJournalChangeIsRefusedBeforeAnyLock:
+    """A due-journal edit peeks first, so its refusal comes before every lock.
+
+    Like the retarget: the journals are locked ahead of the task row, so an
+    archived list's task is refused from the plain read — the resend of the
+    journal it already has included — and nothing is locked at all.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "due_journal_id",
+        [NEW_DUE_JOURNAL_ID, None, DUE_JOURNAL_ID],
+        ids=["set", "clear", "resend"],
+    )
+    async def test_an_archived_list_is_refused_before_any_lock(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task_list_repo: AsyncMock,
+        journal_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+        due_journal_id: int | None,
+    ) -> None:
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                due_journal_id=due_journal_id,
+                transaction=mock_transaction,
+            )
+
+        task_list_repo.find_by_id.assert_awaited_once_with(TASK_LIST_ID, USER_ID)
+        journal_repo.find_and_lock_by_ids_for_user.assert_not_awaited()
+        task_repo.find_by_id_for_update.assert_not_awaited()
+        task_repo.save.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_archive_between_the_check_and_the_lock_is_still_refused(
+        self,
+        service: TaskService,
+        task_repo: AsyncMock,
+        task_list_repo: AsyncMock,
+        mock_event_publisher: AsyncMock,
+        mock_transaction: AsyncMock,
+    ) -> None:
+        task_list_repo.find_by_id.return_value = make_task_list(archived=False)
+        task_list_repo.find_by_id_for_share.return_value = make_task_list(archived=True)
+
+        with pytest.raises(TaskListArchivedError):
+            await service.update_task(
+                user_id=USER_ID,
+                task_id=TASK_ID,
+                due_journal_id=NEW_DUE_JOURNAL_ID,
+                transaction=mock_transaction,
+            )
+
+        task_repo.save.assert_not_awaited()
+        task_repo.add_intermediate_journal.assert_not_awaited()
+        mock_event_publisher.publish.assert_not_awaited()
+
+
 class TestNoOpsAreRefusedToo:
     """Read-only means not writable, as Phase 6 decided for an unchanged patch."""
 
