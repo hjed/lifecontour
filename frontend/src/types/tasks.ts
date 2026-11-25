@@ -91,7 +91,10 @@ export interface TaskAttributes {
   due_journal_id: number | null;
   /** Journals it has passed through, oldest link first. Neither anchor appears. */
   intermediate_journal_ids: number[];
-  /** The list the task is on; `null` for a journal-only task. */
+  /**
+   * The list the task is on, or `null` for a journal-only task. A list task's
+   * due journal is a plain date: moving it keeps the status.
+   */
   task_list_id: number | null;
   /**
    * An ISO calendar date (`YYYY-MM-DD`) a list task is due on, or `null`. A

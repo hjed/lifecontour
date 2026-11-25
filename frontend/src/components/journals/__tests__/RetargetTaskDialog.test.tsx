@@ -38,7 +38,7 @@ import {
 import { addDaysToIsoDate, todayIn } from '@/lib/future-journals';
 import { SUCCESS_MESSAGES } from '@/lib/constants';
 import { JournalType } from '@/types/journals';
-import { LapseReason, TaskStatus } from '@/types/tasks';
+import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 import type { JournalTaskResource } from '@/types/tasks';
 
 globalThis.fetch = jest.fn();
@@ -233,7 +233,11 @@ function renderDialog(
   const harness: Harness = {
     retargetResponses: [],
     retargetBodies: [],
-    refusesUnacknowledgedReopen: task.attributes.status === TaskStatus.DONE,
+    // The service asks a done task for the acknowledgement only when it is
+    // journal-only: a task on a list keeps its status, so nothing reopens.
+    refusesUnacknowledgedReopen:
+      task.attributes.status === TaskStatus.DONE &&
+      task.attributes.task_list_id === null,
   };
   routeFetch(harness, journals);
 
@@ -507,10 +511,58 @@ describe('RetargetTaskDialog', () => {
   });
 
   /**
+   * A list task's due journal is a plain date: the move keeps its status, so a
+   * done one is rescheduled with no reopen warning and no confirmation.
+   */
+  describe('a done task on a list due in this journal', () => {
+    const DONE_LIST_TASK = createMockListTask({
+      status: TaskStatus.DONE,
+      due_journal_id: 1,
+      due_journal: createMockTaskJournalRef({ id: 1 }),
+      link_roles: [TaskLinkRole.DUE],
+    });
+
+    it('is offered as a reschedule that keeps its status', async () => {
+      const { user } = renderDialog(DONE_LIST_TASK);
+
+      expect(
+        screen.getByTestId('journal-task-action-retarget')
+      ).toHaveAccessibleName(/reschedule/i);
+      await open(user);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveAccessibleDescription(/keeps its status/i);
+      expect(dialog).not.toHaveTextContent(/reopen/i);
+    });
+
+    it('moves it in one request with no acknowledgement and no confirmation', async () => {
+      const { user, harness } = renderDialog(DONE_LIST_TASK);
+
+      await open(user);
+      await chooseNearJournal(user);
+      await user.click(submitButton());
+
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      );
+      expect(harness.retargetBodies).toEqual([
+        {
+          data: {
+            type: 'task-retarget',
+            attributes: {
+              due_journal_id: NEAR_JOURNAL_ID,
+              acknowledge_reopen: false,
+            },
+          },
+        },
+      ]);
+    });
+  });
+
+  /**
    * A task on a list may have no due journal. The row does not offer this
-   * dialog for one yet (retargeting is journal-only until a list task can be
-   * given a due journal), but the dialog must still render it rather than
-   * crash: there is no journal it is leaving, and none it is already due in.
+   * dialog for one (it is given one through the task’s own edit), but the
+   * dialog must still render it rather than crash: there is no journal it is leaving, and none it is already due in.
    */
   describe('a task with no due journal', () => {
     const UNDATED = createMockListTask({

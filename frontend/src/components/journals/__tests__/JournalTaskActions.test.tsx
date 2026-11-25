@@ -226,8 +226,8 @@ describe('JournalTaskActions', () => {
 
   /**
    * "A done or cancelled list task can be set back to not done, without
-   * retargeting." The service refuses no status change on a list, and refuses
-   * a retarget of a closed one, so the row offers the status and not the date.
+   * retargeting." The service refuses no status change on a list, and its
+   * reschedule keeps the status, so the row offers both, separately.
    */
   describe('a task on a list', () => {
     /** A list task anchored in journals, so only the list rule decides. */
@@ -282,24 +282,16 @@ describe('JournalTaskActions', () => {
       }
     );
 
-    it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
-      'offers a %s list task no retarget, though it has both journals',
+    it.each([TaskStatus.NOT_DONE, TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'offers a %s list task due here the keeps-status reschedule',
       status => {
         renderActions(anchoredListTask(status));
 
         expect(
-          screen.queryByTestId('journal-task-action-retarget')
-        ).not.toBeInTheDocument();
+          screen.getByTestId('journal-task-action-retarget')
+        ).toHaveAccessibleName('Reschedule task onto another due journal');
       }
     );
-
-    it('still offers a not-done list task with both journals a reschedule', () => {
-      renderActions(anchoredListTask(TaskStatus.NOT_DONE));
-
-      expect(
-        screen.getByTestId('journal-task-action-retarget')
-      ).toHaveAccessibleName(/reschedule/i);
-    });
 
     it('tells a list task it stays on its list rather than naming a new due journal', async () => {
       renderActions(anchoredListTask(TaskStatus.NOT_DONE));
@@ -874,9 +866,9 @@ describe('JournalTaskActions', () => {
     });
 
     /**
-     * Retargeting still needs both journals on the server, so a task on a
-     * list missing either is not offered it — the request could only fail.
-     * Its status actions and delete do not depend on a journal, and stay.
+     * A task on a list with no due journal has none to move from here: it is
+     * given one through the task’s own edit. Its status actions and delete do not
+     * depend on a journal, and stay.
      */
     it.each([
       ['no journal at all', createMockListTask()],
@@ -887,14 +879,7 @@ describe('JournalTaskActions', () => {
           creating_journal: createMockTaskJournalRef({ id: 1 }),
         }),
       ],
-      [
-        'only a due journal',
-        createMockListTask({
-          due_journal_id: 1,
-          due_journal: createMockTaskJournalRef({ id: 1 }),
-        }),
-      ],
-    ])('is not offered on a task with %s', (_, task) => {
+    ])('is not offered on a list task with %s', (_, task) => {
       renderActions(task, TaskLinkRole.MENTIONED);
 
       expect(
@@ -910,6 +895,24 @@ describe('JournalTaskActions', () => {
         screen.getByTestId('journal-task-action-delete')
       ).toBeInTheDocument();
     });
+
+    it.each([TaskStatus.NOT_DONE, TaskStatus.DONE, TaskStatus.CANCELLED])(
+      'is offered as a keeps-status reschedule on a %s list task due here',
+      status => {
+        renderActions(
+          createMockListTask({
+            status,
+            due_journal_id: 1,
+            due_journal: createMockTaskJournalRef({ id: 1 }),
+          }),
+          TaskLinkRole.DUE
+        );
+
+        expect(
+          screen.getByTestId('journal-task-action-retarget')
+        ).toHaveAccessibleName('Reschedule task onto another due journal');
+      }
+    );
 
     it('sits after the status actions and before the delete', () => {
       renderActions(createMockJournalTask({ status: TaskStatus.NOT_DONE }));

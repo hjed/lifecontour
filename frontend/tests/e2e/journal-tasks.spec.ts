@@ -625,8 +625,8 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
     await expect(listRow.getByText(/Due in/)).toHaveCount(0);
     await expect(listRow.getByTestId('journal-task-lapsed')).toHaveCount(0);
 
-    // Its status actions stay; retargeting, still journal-only on the server,
-    // is not offered.
+    // Its status actions stay; with no due journal to move from, it is not
+    // offered a reschedule here — it is given one through the task’s own edit.
     const listActions = listRow.getByRole('group', { name: 'Task actions' });
     await expect(
       listActions.getByRole('button', { name: 'Mark done' })
@@ -654,14 +654,14 @@ test.describe('Journal Task Surface — a task with no due journal', () => {
  * A task on a list that is **due** in this journal.
  *
  * The first real task to reach a journal's *Due* group with no creating
- * journal. A list task never lapses, and the web app offers retargeting only
- * to a task holding both journals, so the row must offer neither — only its
- * direct status actions.
+ * journal. A list task never lapses, and its due journal is a plain date, so
+ * the row offers a reschedule that keeps its status — never a resurrect or a
+ * reopen — beside its direct status actions.
  */
 test.describe('Journal Task Surface — a task on a list due here', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('shows a list task due here under Due, never lapsed, with no retarget, and marks it done', async ({
+  test('shows a list task due here under Due, never lapsed, offers a keeps-status reschedule, and marks it done', async ({
     authenticatedPage,
     testCleanup,
   }) => {
@@ -699,8 +699,10 @@ test.describe('Journal Task Surface — a task on a list due here', () => {
 
     const actions = row.getByRole('group', { name: 'Task actions' });
     await expect(
-      actions.getByTestId('journal-task-action-retarget')
-    ).toHaveCount(0);
+      actions.getByRole('button', {
+        name: 'Reschedule task onto another due journal',
+      })
+    ).toBeVisible();
 
     // The row flips optimistically, so the write itself is awaited before the
     // reload: navigating away first could cut the PATCH off.
@@ -798,16 +800,18 @@ test.describe('Journal Task Surface — an overdue task on a list', () => {
     await expect(row.getByText('Cancelled', { exact: true })).toBeVisible();
     await expect(overdue).toHaveCount(0);
 
-    // Reopened by its status, not by a new due journal: the server refuses a
-    // retarget of a closed list task, so none is offered.
+    // Reopened by its status. A new due journal would keep it cancelled: a
+    // list task's reschedule is a plain date change, still offered here.
     const reopen = actions.getByRole('button', { name: 'Return to not done' });
     await expect(reopen).toBeVisible();
     await expect(
       actions.getByRole('button', { name: 'Mark done' })
     ).toBeVisible();
     await expect(
-      actions.getByTestId('journal-task-action-retarget')
-    ).toHaveCount(0);
+      actions.getByRole('button', {
+        name: 'Reschedule task onto another due journal',
+      })
+    ).toBeVisible();
     // A control this phase adds, held to the phone touch-target minimum.
     const reopenBox = await reopen.boundingBox();
     expect(reopenBox?.height).toBeGreaterThanOrEqual(44);
@@ -828,6 +832,104 @@ test.describe('Journal Task Surface — an overdue task on a list', () => {
     await expect(row.getByTestId('journal-task-lapsed')).toHaveCount(0);
 
     await expectFitsPhoneWithoutErrors(page, pageErrors);
+  });
+
+  test('reschedules a done list task to another journal, and it stays done', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => {
+      await dataManager.cleanup();
+    });
+
+    const fromJournal = await dataManager.createFutureJournal({
+      title: taskText('Beach weekend'),
+      daysAhead: 2,
+    });
+    const toJournal = await dataManager.createFutureJournal({
+      title: taskText('Long weekend'),
+      daysAhead: 5,
+    });
+    const list = await dataManager.createTaskList(taskText('Beach packing'));
+    const text = taskText('Pack the tent');
+    const listTask = await dataManager.createListTask({
+      taskListId: list.id,
+      text,
+      dueJournalId: fromJournal.id,
+    });
+    await dataManager.setTaskStatus(listTask.id, 'done');
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', error => pageErrors.push(error));
+
+    await openJournal(page, fromJournal);
+
+    const dueRow = page
+      .getByTestId('journal-tasks-group-due')
+      .getByTestId(`journal-task-${listTask.id}`);
+    await expect(dueRow.getByText('Done', { exact: true })).toBeVisible();
+
+    const trigger = dueRow.getByRole('button', {
+      name: 'Reschedule task onto another due journal',
+    });
+    // The trigger is the row's shared size='sm' action button, which this
+    // change reuses rather than adds; its 32px height is a known gap shared by
+    // every row action, recorded in the iteration doc rather than asserted.
+    await trigger.click();
+
+    const dialog = page.getByRole('dialog', {
+      name: 'Move this task to another journal',
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleDescription(/keeps its status/i);
+    await expect(dialog.getByTestId('retarget-task-text')).toHaveText(text);
+
+    const retargetWrite = page.waitForResponse(
+      response =>
+        response.url().endsWith(`/api/tasks/${listTask.id}/retarget`) &&
+        response.request().method() === 'POST'
+    );
+    await chooseDueJournal(dialog, toJournal);
+    await submitRetarget(dialog);
+    expect((await retargetWrite).ok()).toBe(true);
+
+    // No reopen confirmation: a list task's date never reopens it, so the
+    // dialog closes on the first submit without asking.
+    await expect(page.getByTestId('retarget-reopen-confirm')).toHaveCount(0);
+    await expect(dialog).toBeHidden();
+
+    // Gone from Due here, and kept as a mention — still done.
+    await expect(
+      page
+        .getByTestId('journal-tasks-group-due')
+        .getByTestId(`journal-task-${listTask.id}`)
+    ).toHaveCount(0);
+    const mentionedRow = page
+      .getByTestId('journal-tasks-group-mentioned')
+      .getByTestId(`journal-task-${listTask.id}`);
+    await expect(mentionedRow.getByTestId('journal-task-text')).toHaveText(
+      text
+    );
+    await expect(mentionedRow.getByText('Done', { exact: true })).toBeVisible();
+
+    // And due in the journal it moved to, done.
+    await openJournal(page, toJournal);
+    const movedRow = page
+      .getByTestId('journal-tasks-group-due')
+      .getByTestId(`journal-task-${listTask.id}`);
+    await expect(movedRow.getByTestId('journal-task-text')).toHaveText(text);
+    await expect(movedRow.getByText('Done', { exact: true })).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true);
+    expect(pageErrors).toEqual([]);
   });
 });
 

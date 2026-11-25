@@ -354,9 +354,41 @@ describe('retargetAction', () => {
 });
 
 /**
- * Retargeting is the journal-only operation: the service narrows on both
- * anchors, so a task missing either would be refused with a server error.
- * Asserted over every combination, because the rule is "both", not "due".
+ * A list task's due journal is a plain date: changing it keeps the status, so
+ * it is one offer whatever the status, and never worded as a reopen or a
+ * resurrection — a list task neither lapses nor reopens on a date change.
+ */
+describe('retargetAction for a task on a list', () => {
+  it.each(Object.values(TaskStatus))(
+    'offers the same keeps-status reschedule for a %s task',
+    status => {
+      const offer = retargetAction(status, false, true);
+
+      expect(offer.label).toBe('Reschedule');
+      expect(offer.dialogDescription).toMatch(/keeps its status/i);
+      expect(offer.dialogDescription).not.toMatch(/reopen/i);
+      expect(offer.accessibleName.toLowerCase()).toContain('reschedule');
+    }
+  );
+
+  it('ignores the lapse flag, which a list task never carries', () => {
+    expect(retargetAction(TaskStatus.NOT_DONE, true, true)).toBe(
+      retargetAction(TaskStatus.NOT_DONE, false, true)
+    );
+  });
+
+  it('is worded differently from the journal-only reschedule', () => {
+    expect(retargetAction(TaskStatus.NOT_DONE, false, true)).not.toBe(
+      retargetAction(TaskStatus.NOT_DONE, false)
+    );
+  });
+});
+
+/**
+ * Which tasks a journal page offers the dialog to. A journal-only task needs
+ * both anchors, as it always has. A task on a list needs only a due journal to
+ * move from: one with none is set from its details panel, not from a journal
+ * page where it is only mentioned.
  */
 describe('canRetarget', () => {
   it.each([
@@ -365,65 +397,27 @@ describe('canRetarget', () => {
     [1, null, false],
     [null, null, false],
   ])(
-    'creating journal %p and due journal %p → %p',
+    'a journal-only task with creating journal %p and due journal %p → %p',
     (creating_journal_id, due_journal_id, expected) => {
       expect(
-        canRetarget({
-          creating_journal_id,
-          due_journal_id,
-          task_list_id: null,
-          status: TaskStatus.NOT_DONE,
-        })
+        canRetarget({ creating_journal_id, due_journal_id, task_list_id: null })
       ).toBe(expected);
     }
   );
 
-  /**
-   * A journal-only task is retargeted out of every status — that is how a
-   * cancelled one comes back — so the closed-list rule must not reach it.
-   */
-  it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
-    'still offers a %s journal-only task the retarget',
-    status => {
+  it.each([
+    [1, 2, true],
+    [null, 2, true],
+    [1, null, false],
+    [null, null, false],
+  ])(
+    'a list task with creating journal %p and due journal %p → %p',
+    (creating_journal_id, due_journal_id, expected) => {
       expect(
-        canRetarget({
-          creating_journal_id: 1,
-          due_journal_id: 2,
-          task_list_id: null,
-          status,
-        })
-      ).toBe(true);
+        canRetarget({ creating_journal_id, due_journal_id, task_list_id: 9 })
+      ).toBe(expected);
     }
   );
-
-  /**
-   * The service refuses to retarget a done or cancelled list task — it is
-   * reopened by its status, not its date — so the row must not offer it.
-   */
-  it.each([TaskStatus.DONE, TaskStatus.CANCELLED])(
-    'withholds the retarget from a %s list task, anchors or not',
-    status => {
-      expect(
-        canRetarget({
-          creating_journal_id: 1,
-          due_journal_id: 2,
-          task_list_id: 7,
-          status,
-        })
-      ).toBe(false);
-    }
-  );
-
-  it('offers a not-done list task with both anchors the retarget', () => {
-    expect(
-      canRetarget({
-        creating_journal_id: 1,
-        due_journal_id: 2,
-        task_list_id: 7,
-        status: TaskStatus.NOT_DONE,
-      })
-    ).toBe(true);
-  });
 });
 
 describe('overdueWording', () => {

@@ -70,6 +70,22 @@ describe('taskEntryDescription', () => {
       expect(description).not.toContain('4');
     });
 
+    it.each([
+      [null, '4', 'Due journal set'],
+      ['3', null, 'Due journal cleared'],
+    ])(
+      'words a due journal %p → %p as "%s", without the ids',
+      (old_value, new_value, expected) => {
+        const description = taskEntryDescription(
+          taskRow('due_journal_id', old_value, new_value),
+          'task'
+        );
+
+        expect(description).toBe(expected);
+        expect(description).not.toMatch(/\d/);
+      }
+    );
+
     it('words the creating journal moving, which only a merge can do', () => {
       // The specification calls the creating journal set once and never
       // changed; a journal merge is its one exception, so this row exists and
