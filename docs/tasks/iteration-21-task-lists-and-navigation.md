@@ -2128,18 +2128,93 @@ there is no acknowledgement, and the status is kept.
 - *ITER21-002 (details panel):* send `due_date` on the same `PATCH`. The history wording is already
   in place, and `frontend/src/types/tasks.ts` still lacks `due_date` (Phase 21's note).
 
-#### Phase 23: Change a list task's due journal
+#### Phase 23: Change a list task's due journal ✅ DONE
+
+**Status:** ✅ DONE
 
 **Prerequisites:** Phase 20.
 **Estimated diff:** ~120 production → **~1,200 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] Set, change, clear; the replaced journal becomes intermediate.
-- [ ] Lifts Phase 20's closed-list-task retarget refusal: a done or cancelled task on a list can have its due journal changed, keeping its status and asking for no acknowledgement; `TaskListTaskClosedError` and `TASK_LIST_TASK_CLOSED` are removed and Phase 20's refusal tests rewritten to assert the change (see Phase 20's notes).
-- [ ] Lifts Phase 22's due-journal refusal: setting a due date on a list task due in a journal replaces the journal, which becomes intermediate (the spec's "replaced … by a due date"); Phase 22's `test_a_task_due_in_a_journal_takes_no_due_date` tests (unit, service integration, REST, MCP) are rewritten to assert it (user decision in Phase 22's plan review).
-- [ ] Lifts Phase 20's not-due-in-a-journal retarget refusal: an undated or due-date list task can be given a due journal; `TaskListTaskNotDueInJournalError` and `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are removed, and a journal delete racing the change still ends cleanly (see Phase 20's notes).
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Set, change, clear; the replaced journal becomes intermediate.
+- [x] Lifts Phase 20's closed-list-task retarget refusal: a done or cancelled task on a list can have its due journal changed, keeping its status and asking for no acknowledgement; `TaskListTaskClosedError` and `TASK_LIST_TASK_CLOSED` are removed and Phase 20's refusal tests rewritten to assert the change (see Phase 20's notes).
+- [x] Lifts Phase 22's due-journal refusal: setting a due date on a list task due in a journal replaces the journal, which becomes intermediate (the spec's "replaced … by a due date"); Phase 22's `test_a_task_due_in_a_journal_takes_no_due_date` tests (unit, service integration, REST, MCP) are rewritten to assert it (user decision in Phase 22's plan review).
+- [x] Lifts Phase 20's not-due-in-a-journal retarget refusal: an undated or due-date list task can be given a due journal; `TaskListTaskNotDueInJournalError` and `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are removed, and a journal delete racing the change still ends cleanly (see Phase 20's notes).
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Actual diff:** ~811 production lines added / ~335 removed (much of it docstrings stating the new rules), ~47 / 26 docs, **~4,230 / 695 tracked in total** with tests, against the ~1,200 estimate. Over the estimate because the user widened the scope in plan review: journal-only tasks take `due_journal_id` on `PATCH`/`update_task` too, and the journal-page Reschedule for list tasks (Phase 12's note) was included.
+
+**Delivered:**
+
+- `TaskService.update_task` / `update_task_with_trail` take `due_journal_id` (`int | None | UNSET`) and `acknowledge_reopen`.
+  - A **list task**'s due journal is a plain edit: set, changed or cleared, the status kept, no acknowledgement. Setting a due date or a due journal clears the other in one `replace`, and the journal left is retained as an intermediate journal.
+  - A **journal-only task**'s new due journal is a retarget under the existing rules (shared helper `_retarget_journal_only`): it lands not done, a done one needs `acknowledge_reopen` or `status=not_done`, and it cannot be cleared.
+- `retarget_due_journal` applies the list rules to a list task from its locked read: the status is kept, an undated or dated task gains the journal, and a task detached by a racing journal delete simply gains the new one. `TaskListTaskClosedError` / `TASK_LIST_TASK_CLOSED` and `TaskListTaskNotDueInJournalError` / `TASK_LIST_TASK_NOT_DUE_IN_JOURNAL` are deleted.
+- Lock order stays peek → journals `FOR KEY SHARE` (ascending id, through the generalised `_lock_date_journals`) → task `FOR UPDATE` → list `FOR SHARE`. Edits naming no journal and setting no date keep the single locking read.
+- REST `PATCH /api/tasks/{id}`: `due_journal_id` (strict int, or `null`) and `acknowledge_reopen`. MCP `update_task`: `due_journal_id` (`JsonIntOnly`), `clear_due_journal` and `acknowledge_reopen`. Server guidance and all docstrings updated.
+- Events:
+  - a list task publishes `TaskJournalLinked(origin=RETARGET)`, only when a link row is written, then one `TaskUpdated` with the `due_journal_id` (and replaced `due_date`) pairs;
+  - a journal-only task publishes what retarget publishes, plus a `TaskUpdated` only for a text, flag or icon change beside it.
+- Web app:
+  - `canRetarget` offers the journal-page dialog to a list task that has a due journal;
+  - `retargetAction(status, lapsed, onList)` gives it a **Reschedule** that says it keeps its status;
+  - `TaskAttributes` gains `task_list_id`;
+  - history reads *Due journal set / changed / cleared*.
+- Docs: `api-design.md` (the PATCH and retarget rows, the clash rule replacing "not a field on the PATCH", MCP `update_task`), `domain-architecture.md` (events), `frontend-design.md` (the offer).
+
+**Decisions (user, plan review):**
+
+- `due_journal_id` is a `PATCH`/`update_task` field for every task. A body with two answers is a 400 `TASK_VALIDATION_ERROR`:
+  - a date and a journal together → `meta.field=due_date`;
+  - a journal-only task's new journal beside a status other than `not_done` → `meta.field=status`;
+  - a journal-only task's clear → `meta.field=due_journal_id`.
+- The journal-page Reschedule for list tasks is included.
+- `status: "not_done"` beside a journal-only task's new journal counts as the reopen acknowledgement; MCP has no `status`, so there it is `acknowledge_reopen`.
+
+**Tests:**
+
+- **Unit:**
+  - new `test_task_service_due_journal.py`, including peek/lock disagreements: a resend or clear that became a change, detached, moved onto a list;
+  - the retarget closed / not-due classes rewritten;
+  - `takes_no_due_date` rewritten as a replacement;
+  - archived-list due-journal refusals;
+  - schema, tool-schema, server-guidance, summary-invalidation and history-projection cases.
+- **Integration:**
+  - new service suite with `overlap` delete races of the new and the old journal;
+  - merge lock-order cases for replace and clear in both orderings;
+  - event-completeness paths, with the multi-event rule widened to writes that retain a journal;
+  - summary invalidation and history projection;
+  - rewritten `TestAJournalDeleteRacingARetarget`;
+  - new REST and MCP suites, each with rejection and second-user isolation tests;
+  - REST and MCP retarget / due-date / archived rewrites.
+- **Jest:** `task-display`, `history-display`, `JournalTaskActions`, `RetargetTaskDialog`.
+- **E2E:** `journal-tasks.spec.ts` "reschedules a done list task to another journal, and it stays done" (Firefox + Mobile Chrome, `--repeat-each=5`); the list-task-due-here test now asserts the keeps-status Reschedule.
+
+**Gates run locally:**
+
+- **Backend:** ruff format/check and mypy; 6,240 unit tests; the full integration suite in four chunks, all passing.
+- **core_shared:** ruff and mypy; 924 tests.
+- **Frontend:** `pnpm quality:check`; jest 3,444.
+- **E2E:** the spec on both projects.
+- **pre-commit:** over the changed files.
+
+Two unrelated E2E tests and one run of the new one stalled on the auth "Loading" screen and passed on re-run (environmental).
+
+**Forward notes resolved here:**
+
+- Phase 12's `canRetarget` note.
+- Phase 20's docstring and api-design retarget-row notes.
+- Phase 22's replacement.
+- Phase 11/13's "narrows on both anchors": retarget reads only the due journal; no change needed.
+
+**Notes for later phases:**
+
+- *ITER21-002 (task details):* set or clear a list task's due journal through `PATCH due_journal_id`. The journal page only offers the move to a task already due there.
+- *Touch targets:* the journal row's action buttons, the Reschedule trigger included, are the shared `size='sm'` (32px), short of 44px. This is pre-existing (Phase 12) and was not widened here.
+- *Residual windows:* stated in `update_task`'s docstring. Both need a third concurrent writer between the peek and the task lock:
+  - a journal the peek did not show is locked after the task row;
+  - a journal-only clash is refused from the peek.
 
 #### Phase 24: Direct reopen of list tasks ✅ DONE
 

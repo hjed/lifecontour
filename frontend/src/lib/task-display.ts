@@ -293,7 +293,24 @@ const REOPEN: TaskRetargetOffer = {
 };
 
 /**
+ * A task on a list, in any status: its due journal is a plain date, so moving
+ * it keeps the status — nothing is reopened, resurrected or confirmed.
+ */
+const LIST_RESCHEDULE: TaskRetargetOffer = {
+  key: 'retarget',
+  label: 'Reschedule',
+  accessibleName: 'Reschedule task onto another due journal',
+  dialogTitle: 'Move this task to another journal',
+  dialogDescription:
+    'Choose the future journal this task should be due in. It keeps its status, and this journal keeps it as a mention.',
+  submitLabel: 'Move task',
+};
+
+/**
  * How this task's retarget is offered and explained.
+ *
+ * A **task on a list** has one offer whatever its status: the service keeps
+ * its status, and a list task never lapses.
  *
  * A **cancelled** task answers regardless of `lapsed`: the read model never
  * reports a cancelled task as lapsed — a commitment called off cannot then be
@@ -302,8 +319,10 @@ const REOPEN: TaskRetargetOffer = {
  */
 export function retargetAction(
   status: TaskStatus,
-  lapsed: boolean
+  lapsed: boolean,
+  onList = false
 ): TaskRetargetOffer {
+  if (onList) return LIST_RESCHEDULE;
   if (status === TaskStatus.CANCELLED) return RESURRECT_CANCELLED;
   if (status === TaskStatus.DONE) return REOPEN;
   return lapsed ? RESURRECT_LAPSED : RESCHEDULE;
@@ -312,29 +331,21 @@ export function retargetAction(
 /**
  * Whether a task can be offered the retarget dialog at all.
  *
- * Retargeting is still the **journal-only** operation: the service narrows on
- * both anchors — the due journal it is leaving and the creating journal it
- * re-validates — so a task on a list missing either would be answered with a
- * server error rather than a refusal. Both, not just the due journal, for that
- * reason.
- *
- * A **done or cancelled task on a list** is refused a retarget outright: it is
- * reopened by its status, not its date, so the row offers that instead (see
- * {@link statusActions}). A rule rather than an inline check for the same
- * reason as the offer tables beside it, so the phase that changes how a list
- * task is given a due journal changes it in one place.
+ * A **journal-only** task needs both anchors: the service re-validates the due
+ * journal it is leaving and holds the creating one, and a task missing either
+ * is not one the journal page can show coherently. A **task on a list** needs
+ * only a due journal to move from — the dialog is offered where the task is
+ * due. One with no due journal is not offered it from a journal page, where it
+ * is merely mentioned; it is given a due journal through the task's own edit.
  */
 export function canRetarget(
   task: Pick<
     TaskAttributes,
-    'creating_journal_id' | 'due_journal_id' | 'task_list_id' | 'status'
+    'creating_journal_id' | 'due_journal_id' | 'task_list_id'
   >
 ): boolean {
-  const anchored =
-    task.creating_journal_id !== null && task.due_journal_id !== null;
-  const closedOnList =
-    task.task_list_id !== null && task.status !== TaskStatus.NOT_DONE;
-  return anchored && !closedOnList;
+  if (task.task_list_id !== null) return task.due_journal_id !== null;
+  return task.creating_journal_id !== null && task.due_journal_id !== null;
 }
 
 /**

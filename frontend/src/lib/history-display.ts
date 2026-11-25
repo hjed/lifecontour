@@ -94,8 +94,13 @@ export function taskEntryDescription(
   }
 
   // The values are journal ids, which name nothing a reader can use: the
-  // journal the task moved to is on the row itself, not in its history.
-  if (field_name === 'due_journal_id') return 'Due journal changed';
+  // journal the task moved to is on the row itself, not in its history. A
+  // list task's due journal can be set or cleared, so the line says which.
+  if (field_name === 'due_journal_id') {
+    if (old_value === null) return 'Due journal set';
+    if (new_value === null) return 'Due journal cleared';
+    return 'Due journal changed';
+  }
 
   // Only a journal merge produces this row. The creating journal is set once
   // and never changed by any task operation, so a merge absorbing it is the

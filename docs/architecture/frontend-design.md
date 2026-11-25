@@ -520,21 +520,21 @@ only exit, since the service refuses both status calls out of cancelled for it
 (a list task is reopened by its status instead) — and reopening a **done**
 task, which the UI must warn about before it happens. The trigger's label, the
 heading and the explanation are chosen per case by `retargetAction(status,
-lapsed)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**, **Reopen**.
+lapsed, onList)` in `lib/task-display.ts`: **Resurrect**, **Reschedule**,
+**Reopen** — and, for a task on a list in any status, a **Reschedule** that
+says it keeps its status, since a list task's due journal is a plain date.
 
 - **The retarget affordance is not in the status offer table**, and that is a
   statement rather than an oversight. `statusActions` is the *transitions* a row
   offers; a retarget writes a journal link, forces the status to *not done*
   whatever it was, and is refused on grounds the status matrix knows nothing
   about. It is offered in **every** status, including cancelled, where it is the
-  only thing on the row besides delete — but only on a task holding **both**
-  journals (`canRetarget` in `lib/task-display.ts`). The service still
-  retargets journal-only tasks alone and narrows on both anchors, so on a task
-  on a list missing either the request could only fail; the rule changes when a
-  list task can be given a due journal. A **done or cancelled list task** is
-  offered no retarget either, anchors or not: the service refuses it
-  (`TASK_LIST_TASK_CLOSED`) because such a task is reopened by its status, which
-  its row offers instead.
+  only thing on the row besides delete. `canRetarget` in `lib/task-display.ts`
+  offers it to a journal-only task holding **both** journals, and to a task on
+  a list that has a due journal to move from; a list task with none is given
+  one through the task’s own edit (`PATCH`), not from a journal page where it is only
+  mentioned. A list task's move never reopens it, so the server never asks for
+  the confirmation below.
 - **Journal task action buttons are at least 44px square on a phone**
   (`max-sm:*:min-h-11 max-sm:*:min-w-11` on the action group, so the retarget
   and detach controls, which render their own buttons, are held to it too).

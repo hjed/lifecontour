@@ -1642,6 +1642,27 @@ export class TestDataManager {
     }
   }
 
+  /**
+   * Set a task's status through the API, so a test starts from a closed task
+   * without driving the status buttons it is not about.
+   */
+  async setTaskStatus(
+    taskId: string,
+    status: 'not_done' | 'done' | 'cancelled'
+  ): Promise<void> {
+    const response = await this.page.request.patch(`/api/tasks/${taskId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: { type: 'tasks', id: taskId, attributes: { status } },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to set task ${taskId} to ${status}: ${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
   async createTask(taskData: TaskCreateRequest): Promise<TestTask> {
     console.debug(
       `📋 [Data Manager] Creating task "${taskData.text}" in journal ${taskData.creatingJournalId}`

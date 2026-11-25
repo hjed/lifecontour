@@ -116,8 +116,8 @@ export function RetargetTaskDialog({
   task,
   disabled = false,
 }: RetargetTaskDialogProps) {
-  const { status, lapsed, text, due_journal } = task.attributes;
-  const offer = retargetAction(status, lapsed);
+  const { status, lapsed, text, due_journal, task_list_id } = task.attributes;
+  const offer = retargetAction(status, lapsed, task_list_id !== null);
 
   const [open, setOpen] = useState(false);
   const [awaitingReopenConfirmation, setAwaitingReopenConfirmation] =

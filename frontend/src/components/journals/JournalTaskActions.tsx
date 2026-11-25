@@ -25,10 +25,10 @@
  * not a status transition, and it is offered in **every** status: on a live
  * task it extends a deadline, on a lapsed or cancelled one it is the
  * resurrection the specification names, and on a done one it is a reopen the
- * dialog confirms first. It shares this group's in-flight guard, because it is
- * a write against the same task. It is withheld from a task on a list that
- * lacks either journal, and from a done or cancelled list task, which is
- * reopened by its status (`canRetarget`): the service would refuse either.
+ * dialog confirms first. On a task on a list it is a plain reschedule that
+ * keeps the status. It shares this group's in-flight guard, because it is a
+ * write against the same task. It is withheld from a list task with no due
+ * journal, and from a journal-only task missing either anchor (`canRetarget`).
  *
  * The remove-a-mention affordance is mounted here too, between the retarget
  * and the delete, and only on a row whose link role `linkRemovable` permits.
