@@ -7,7 +7,9 @@ holds it to three promises:
 - **positions** — a new list joins the bottom of its owner's lists, and lists
   read back in ``(position, id)`` order, with an archived filter;
 - **owner scoping** — every statement filters on ``user_id``, so no method can
-  read, change or delete another user's list.
+  read, change or delete another user's list;
+- **the associated journal** — saved, changed and cleared through ``save``, and
+  carried by every read.
 
 Owner scoping is asserted against a second owner's *real* rows rather than an
 absent id: a query that forgot its ``user_id`` filter still finds nothing for
@@ -37,6 +39,7 @@ from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
+    create_list_task,
     make_task_container,
 )
 
@@ -47,6 +50,15 @@ ARCHIVED_LATER = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
 
 _SELECT_ROW = text("SELECT name, icon, position FROM task_lists WHERE id = :list_id")
 _COUNT_BY_ID = text("SELECT COUNT(*) FROM task_lists WHERE id = :list_id")
+_SELECT_ASSOCIATION = text(
+    "SELECT associated_journal_id FROM task_lists WHERE id = :list_id"
+)
+_INSERT_JOURNAL = text("""
+    INSERT INTO journals (title, content, user_id,
+        event_date_range_start, event_date_range_end)
+    VALUES (:title, '', :user_id, '2026-12-01', '2026-12-01')
+    RETURNING id
+""")
 # The fixture runs every test in one transaction, so ``now()`` is the same
 # instant throughout. Back-dating the row is what lets a test see the update
 # path move ``updated_at`` and leave ``created_at`` alone.
@@ -90,6 +102,19 @@ async def set_position(
 
 def ids(task_lists: list[TaskList]) -> list[int | None]:
     return [task_list.id for task_list in task_lists]
+
+
+async def insert_journal(conn: AsyncConnection, title: str = "Trip") -> int:
+    """A journal row for a list to name; its dates are irrelevant here."""
+    result = await conn.execute(_INSERT_JOURNAL, {"title": title, "user_id": USER_ID})
+    return int(result.scalar_one())
+
+
+async def stored_association(conn: AsyncConnection, task_list: TaskList) -> int | None:
+    """The association as the row holds it, read past the repository."""
+    result = await conn.execute(_SELECT_ASSOCIATION, {"list_id": task_list.id})
+    association: int | None = result.scalar_one()
+    return association
 
 
 class TestInsert:
@@ -744,6 +769,101 @@ class TestReposition:
         await repository.reposition(USER_ID, [])
 
         assert ids(await repository.list_for_user(USER_ID)) == [mine.id]
+
+
+class TestAssociatedJournal:
+    """A list's associated journal goes through ``save`` and every read.
+
+    Every update caller starts from the locked stored row, so an update writes
+    back whatever association that row holds — a rename keeps it.
+    """
+
+    async def test_an_insert_stores_the_association_and_reads_it_back(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await insert_journal(async_connection)
+
+        saved = await repository.save(
+            TaskList(user_id=USER_ID, name="Packing", associated_journal_id=journal_id)
+        )
+        assert saved.id is not None
+
+        assert saved.associated_journal_id == journal_id
+        assert await stored_association(async_connection, saved) == journal_id
+        found = await repository.find_by_id(saved.id, USER_ID)
+        assert found is not None
+        assert found.associated_journal_id == journal_id
+
+    async def test_a_list_saved_without_one_is_unassociated(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        saved = await save_list(repository, "Packing")
+
+        assert saved.associated_journal_id is None
+        assert await stored_association(async_connection, saved) is None
+
+    async def test_an_update_sets_changes_and_clears_it(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection, "Trip")
+        meeting = await insert_journal(async_connection, "Meeting")
+        stored = await save_list(repository, "Packing")
+
+        associated = await repository.save(replace(stored, associated_journal_id=trip))
+        assert associated.associated_journal_id == trip
+        assert await stored_association(async_connection, stored) == trip
+
+        changed = await repository.save(
+            replace(associated, associated_journal_id=meeting)
+        )
+        assert changed.associated_journal_id == meeting
+        assert await stored_association(async_connection, stored) == meeting
+
+        cleared = await repository.save(replace(changed, associated_journal_id=None))
+        assert cleared.associated_journal_id is None
+        assert await stored_association(async_connection, stored) is None
+
+    async def test_an_update_from_the_stored_row_keeps_it(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        """A rename or archive passes the stored association straight through."""
+        journal_id = await insert_journal(async_connection)
+        stored = await repository.save(
+            TaskList(user_id=USER_ID, name="Packing", associated_journal_id=journal_id)
+        )
+
+        renamed = await repository.save(
+            replace(stored, name="Packing for the trip", archived_at=ARCHIVED_LATER)
+        )
+
+        assert renamed.associated_journal_id == journal_id
+        assert await stored_association(async_connection, stored) == journal_id
+
+    async def test_every_read_carries_it(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await insert_journal(async_connection)
+        stored = await repository.save(
+            TaskList(user_id=USER_ID, name="Packing", associated_journal_id=journal_id)
+        )
+        assert stored.id is not None
+        task_id = await create_list_task(async_connection, task_list_id=stored.id)
+
+        listed = await repository.list_for_user(USER_ID)
+        by_ids = await repository.find_by_ids([stored.id], USER_ID)
+        for_tasks = await repository.find_for_tasks([task_id], USER_ID)
+        for_update = await repository.find_by_id_for_update(stored.id, USER_ID)
+        for_share = await repository.find_by_id_for_share(stored.id, USER_ID)
+        locked = await repository.list_for_user_for_update(USER_ID)
+
+        assert [task_list.associated_journal_id for task_list in listed] == [journal_id]
+        assert by_ids[stored.id].associated_journal_id == journal_id
+        assert for_tasks[task_id].associated_journal_id == journal_id
+        assert for_update is not None
+        assert for_update.associated_journal_id == journal_id
+        assert for_share is not None
+        assert for_share.associated_journal_id == journal_id
+        assert [task_list.associated_journal_id for task_list in locked] == [journal_id]
 
 
 class TestDependencyInjection:

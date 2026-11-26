@@ -42,6 +42,7 @@ class TestTaskListConstruction:
         assert task_list.icon is None
         assert task_list.position is None
         assert task_list.archived_at is None
+        assert task_list.associated_journal_id is None
         assert task_list.id is None
         assert task_list.created_at is None
         assert task_list.updated_at is None
@@ -55,6 +56,9 @@ class TestTaskListConstruction:
         assert task_list.position == 3
         assert task_list.archived_at == ARCHIVED_AT
         assert task_list.id == 7
+
+    def test_a_list_carries_its_associated_journal(self) -> None:
+        assert _task_list(associated_journal_id=12).associated_journal_id == 12
 
     def test_position_zero_is_the_top(self) -> None:
         assert _task_list(position=0).position == 0
@@ -120,6 +124,15 @@ class TestTaskListValidation:
 
         assert exc_info.value.field == "position"
 
+    @pytest.mark.parametrize("journal_id", [0, -1])
+    def test_an_associated_journal_must_be_a_real_journal_id(
+        self, journal_id: int
+    ) -> None:
+        with pytest.raises(TaskListValidationError) as exc_info:
+            _task_list(associated_journal_id=journal_id)
+
+        assert exc_info.value.field == "associated_journal_id"
+
 
 @pytest.mark.unit
 class TestTaskListValidationError:
@@ -153,3 +166,12 @@ class TestEnsureWritable:
         assert exc_info.value.status_code == 409
         assert exc_info.value.task_list_id == 7
         assert "unarchive" in exc_info.value.message
+
+    def test_an_archived_list_keeps_its_journal_and_stays_read_only(self) -> None:
+        """An archived list still shows, marked archived, on its journal's page,
+        so archiving never drops the association — but it still refuses writes."""
+        archived = _task_list(id=7, archived_at=ARCHIVED_AT, associated_journal_id=12)
+
+        assert archived.associated_journal_id == 12
+        with pytest.raises(TaskListArchivedError):
+            archived.ensure_writable()

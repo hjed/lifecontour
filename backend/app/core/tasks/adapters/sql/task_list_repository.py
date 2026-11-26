@@ -30,6 +30,7 @@ _TASK_LIST_COLUMNS = ", ".join(
         "icon",
         "position",
         "archived_at",
+        "associated_journal_id",
         "created_at",
         "updated_at",
     )
@@ -43,7 +44,9 @@ _TASK_LIST_COLUMNS = ", ".join(
 # keeps the order total, which is why positions are not unique.
 _INSERT = text(
     f"""
-    INSERT INTO task_lists (user_id, name, icon, position, archived_at)
+    INSERT INTO task_lists (
+        user_id, name, icon, position, archived_at, associated_journal_id
+    )
     VALUES (
         :user_id,
         :name,
@@ -55,20 +58,24 @@ _INSERT = text(
             -- would deduce ``text`` beside the column's ``varchar``.
             WHERE user_id = CAST(:user_id AS VARCHAR)
         ),
-        :archived_at
+        :archived_at,
+        :associated_journal_id
     )
     RETURNING {_TASK_LIST_COLUMNS}
     """
 )
 
 # ``position`` and ``created_at`` are deliberately absent: only reordering moves
-# a list, so a rename racing a reorder cannot undo it.
+# a list, so a rename racing a reorder cannot undo it. Every other column is
+# written as given, the association included, so callers update from the row
+# they read under its lock.
 _UPDATE = text(
     f"""
     UPDATE task_lists
     SET name = :name,
         icon = :icon,
         archived_at = :archived_at,
+        associated_journal_id = :associated_journal_id,
         updated_at = now()
     WHERE id = :id AND user_id = :user_id
     RETURNING {_TASK_LIST_COLUMNS}
@@ -227,6 +234,7 @@ def _row_to_task_list(row: Any) -> TaskList:
         icon=None if row.icon is None else TaskIcon(row.icon),
         position=row.position,
         archived_at=row.archived_at,
+        associated_journal_id=row.associated_journal_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -239,6 +247,7 @@ def _write_params(task_list: TaskList) -> dict[str, Any]:
         "name": task_list.name,
         "icon": None if task_list.icon is None else task_list.icon.value,
         "archived_at": task_list.archived_at,
+        "associated_journal_id": task_list.associated_journal_id,
     }
 
 

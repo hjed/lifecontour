@@ -1041,9 +1041,12 @@ class TaskListRepository(ABC):
                 at the bottom of its owner's lists, whatever ``position`` it
                 carries, after taking the same locks a move takes — so a create
                 and a move run one after the other, and the bottom is computed
-                after the move has renumbered. One with an ``id`` has its name, icon and archived
-                state updated in place; its ``position`` and ``created_at`` are
-                left as stored.
+                after the move has renumbered. One with an ``id`` has its name,
+                icon, archived state and associated journal updated in place;
+                its ``position`` and ``created_at`` are left as stored. Every
+                one of those is written as given, so an update must start from
+                the stored row (``replace(stored, …)``), read under its lock: a
+                list built afresh would clear an association it did not mean to.
 
         Returns:
             The persisted list, carrying the database-assigned id, position and

@@ -158,8 +158,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   400 with the field as data exactly as a task refusal does. The entity validates the owner, a
   non-blank name of at most `MAX_TASK_LIST_NAME_LENGTH` (200), the icon and a non-negative
   position; `position` is `None` until the repository places a new list at the bottom on insert,
-  the same way `id` is. Fields are keyword-only, since later phases add the journal association
-  and template columns
+  the same way `id` is. A list may name one `associated_journal_id` (a positive id; owner checked
+  by the service that sets it), which an archived list keeps. Fields are keyword-only, since later
+  phases add the template columns
 - **Domain Enums**: `TaskStatus` — not done (default), done, cancelled
   (`core_shared/core_shared/models/tasks/task_status.py`); `TaskIcon` — the fixed set of icon keys
   a list or task may carry (`core_shared/core_shared/models/tasks/task_icon.py`). The keys are the
