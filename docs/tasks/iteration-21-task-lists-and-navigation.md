@@ -3129,6 +3129,7 @@ calibration says, not from this phase.
 
 #### Phase 2: Icon picker
 
+**Status:** 🚧 IN PROGRESS
 **Prerequisites:** Phase 1.
 **Estimated diff:** ~120 production → **~600 tracked**
 
