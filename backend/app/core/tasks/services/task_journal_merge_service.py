@@ -7,18 +7,23 @@ That write lives in the journal domain, where the merge is. The **event** does
 not: it is about a task, aggregated under a task id, and the tasks domain owns
 what a task announces about itself.
 
-This service is that seam, and it is deliberately one call wide.
-``JournalMergeService`` holds it instead of the repository, so the journal
-domain moves task links by asking the tasks domain to do it rather than by
-constructing task events itself — the ports-and-adapters stance the domain
-architecture document takes, applied to a write instead of a read.
+This service is that seam, and it is deliberately narrow.
+``JournalMergeService`` holds it instead of the repositories, so the journal
+domain moves task links — and list associations — by asking the tasks domain to
+do it rather than by constructing task or list events itself — the
+ports-and-adapters stance the domain architecture document takes, applied to a
+write instead of a read.
 
-**No new ABC.** ``TaskAnchorRepository`` is an abstract port because adapters
-vary; this has one implementation and one consumer, and its single method is
-already the whole of the capability the journal domain is being handed — it can
-move a task's journal links and do nothing else. A second name for the same
-contract would be ceremony, and the class is small enough to read as its own
-interface.
+It has two calls, run in step 0 of the merge one after the other: the task
+links, which lock both journals and then the tasks, and the lists associated
+with the absorbed journal, which follow the survivor and are locked last.
+
+**No new ABC.** ``TaskAnchorRepository`` and ``TaskListRepository`` are
+abstract ports because adapters vary; this has one implementation and one
+consumer, and its two methods are already the whole of the capability the
+journal domain is being handed — it can move what names the absorbed journal
+and do nothing else. A second name for the same contract would be ceremony,
+and the class is small enough to read as its own interface.
 """
 
 import structlog
@@ -26,7 +31,8 @@ from core_shared.models.history import Provenance
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tasks.models.events import TaskJournalLinksRepointed
-from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.models.repositories import TaskAnchorRepository, TaskListRepository
+from app.core.tasks.models.task_list_events import TaskListUpdated
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import transactional
 
@@ -39,9 +45,11 @@ class TaskJournalMergeService:
     def __init__(
         self,
         task_anchor_repo: TaskAnchorRepository,
+        task_list_repo: TaskListRepository,
         event_publisher: OutboxEventPublisher,
     ) -> None:
         self.task_anchor_repo = task_anchor_repo
+        self.task_list_repo = task_list_repo
         self.event_publisher = event_publisher
 
     @transactional
@@ -110,4 +118,62 @@ class TaskJournalMergeService:
                 source_journal_id=source_journal_id,
                 target_journal_id=target_journal_id,
                 task_count=len(repointed),
+            )
+
+    @transactional
+    async def repoint_list_associations(
+        self,
+        *,
+        source_journal_id: int,
+        target_journal_id: int,
+        user_id: str,
+        transaction: AsyncConnection,
+        source: Provenance = Provenance.SYSTEM,
+        changed_by: str = "system",
+    ) -> None:
+        """Move every one of the owner's lists on the absorbed journal to the survivor.
+
+        **One** ``TaskListUpdated`` **per list, in list-id order**, carrying
+        ``associated_journal_id`` ``(absorbed, survivor)``, so each list's
+        history says where its journal went. A system write: archived lists
+        move too, since an archived list keeps its association.
+
+        **Called after** :meth:`repoint_journal_links`, which locks both
+        journals and then the tasks, so the lists are taken last — the order a
+        journal delete takes them in, with the same remaining window against a
+        move or a removal that ``TaskJournalDeletionService.unassociate_lists``
+        describes.
+
+        Args:
+            source_journal_id: The journal being absorbed, about to be deleted.
+            target_journal_id: The surviving journal the lists move onto.
+            user_id: Both journals' owner; only their lists are touched.
+            transaction: The merge's connection, carried onto each event.
+            source: Who performed the merge.
+            changed_by: The actor label recorded against each history row.
+        """
+        moved = await self.task_list_repo.reassociate_journal(
+            source_journal_id=source_journal_id,
+            target_journal_id=target_journal_id,
+            user_id=user_id,
+        )
+        for task_list_id in moved:
+            await self.event_publisher.publish(
+                TaskListUpdated(
+                    task_list_id=task_list_id,
+                    user_id=user_id,
+                    changed_fields={
+                        "associated_journal_id": (source_journal_id, target_journal_id)
+                    },
+                    source=source,
+                    changed_by=changed_by,
+                    transaction=transaction,
+                )
+            )
+        if moved:
+            logger.info(
+                "List associations re-pointed by a merge",
+                source_journal_id=source_journal_id,
+                target_journal_id=target_journal_id,
+                list_count=len(moved),
             )

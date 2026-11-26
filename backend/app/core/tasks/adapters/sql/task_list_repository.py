@@ -251,6 +251,17 @@ _UNASSOCIATE_JOURNAL = text(
     """
 )
 
+# The merge's counterpart: the association follows the surviving journal.
+_REASSOCIATE_JOURNAL = text(
+    """
+    UPDATE task_lists
+    SET associated_journal_id = :target_journal_id,
+        updated_at = now()
+    WHERE associated_journal_id = :source_journal_id AND user_id = :user_id
+    RETURNING id
+    """
+)
+
 _COUNT_ASSOCIATED_WITH_JOURNAL = text(
     """
     SELECT COUNT(*)
@@ -404,6 +415,21 @@ class SqlTaskListRepository(TaskListRepository):
         await self._lock_associated_with_journal(journal_id, user_id)
         result = await self.conn.execute(
             _UNASSOCIATE_JOURNAL, {"journal_id": journal_id, "user_id": user_id}
+        )
+        return sorted(int(row.id) for row in result.fetchall())
+
+    async def reassociate_journal(
+        self, *, source_journal_id: int, target_journal_id: int, user_id: str
+    ) -> list[int]:
+        """Move the owner's lists on the source journal to the target; ids, ascending."""
+        await self._lock_associated_with_journal(source_journal_id, user_id)
+        result = await self.conn.execute(
+            _REASSOCIATE_JOURNAL,
+            {
+                "source_journal_id": source_journal_id,
+                "target_journal_id": target_journal_id,
+                "user_id": user_id,
+            },
         )
         return sorted(int(row.id) for row in result.fetchall())
 

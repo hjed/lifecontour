@@ -298,6 +298,18 @@ class JournalMergeService:
             source=source,
             changed_by=changed_by,
         )
+        # The lists associated with the absorbed journal follow the survivor,
+        # under the journal locks the re-point above has just taken and after
+        # its task locks — journals, tasks, lists, as a journal delete takes
+        # them. Both journals are this owner's, checked above.
+        await self.task_merge_service.repoint_list_associations(
+            source_journal_id=source_id,
+            target_journal_id=target_id,
+            user_id=target.user_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
 
         # What the source was imported from, read before anything moves: the
         # moves below drop whatever link the target cannot take over, and the
@@ -1369,3 +1381,34 @@ class JournalMergeService:
             """),
             {"target_id": target_id, "source_id": source_id, "user_id": user_id},
         )
+
+
+def journal_merge_service_on(
+    connection: AsyncConnection, event_publisher: OutboxEventPublisher
+) -> JournalMergeService:
+    """A ``JournalMergeService`` over real adapters on one connection, outside Dishka.
+
+    For the production paths that build the merge by hand — the MCP merge tool
+    and the inbound sync's duplicate merge — so the tasks domain's half is
+    wired the same way at each, publishing through the caller's publisher.
+    Dishka's ``JournalProvider`` remains the normal route.
+    """
+    from app.core.journal.adapters.sql.journal_repository import (
+        SqlJournalRepository,
+    )
+    from app.core.tasks.adapters.sql.task_anchor_repository import (
+        SqlTaskAnchorRepository,
+    )
+    from app.core.tasks.adapters.sql.task_list_repository import (
+        SqlTaskListRepository,
+    )
+
+    return JournalMergeService(
+        SqlJournalRepository(connection),
+        event_publisher,
+        TaskJournalMergeService(
+            task_anchor_repo=SqlTaskAnchorRepository(connection),
+            task_list_repo=SqlTaskListRepository(connection),
+            event_publisher=event_publisher,
+        ),
+    )

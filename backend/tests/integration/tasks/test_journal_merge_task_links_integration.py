@@ -21,6 +21,7 @@ Each test builds its own journals and tasks, so what exists is never in doubt.
 
 import pytest
 import pytest_asyncio
+from core_shared.models.history import Provenance
 from core_shared.models.tasks import Task, TaskJournalRepointing, TaskStatus
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -37,6 +38,7 @@ from app.core.tasks.services.task_journal_merge_service import (
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.tasks.task_seeding import (
+    ARCHIVED_AT,
     USER_ID,
     create_contact,
     create_journal,
@@ -45,7 +47,9 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     seed_task_list,
     task_events,
+    task_list_events,
 )
+from tests.journal_service_factory import build_task_journal_merge_service
 
 _INTERMEDIATE_IDS = (
     "SELECT journal_id FROM task_intermediate_journals "
@@ -70,9 +74,8 @@ async def task_merge_service(
     async_connection: AsyncConnection,
     task_anchor_repository: SqlTaskAnchorRepository,
 ) -> TaskJournalMergeService:
-    return TaskJournalMergeService(
-        task_anchor_repo=task_anchor_repository,
-        event_publisher=OutboxEventPublisher(async_connection),
+    return build_task_journal_merge_service(
+        async_connection, task_anchor_repo=task_anchor_repository
     )
 
 
@@ -1141,3 +1144,76 @@ class TestListTaskLinksRepointAsToday:
             f"journal:{source_id}": [source_id, None],
             f"journal:{target_id}": [None, target_id],
         }
+
+
+async def _association(conn: AsyncConnection, list_id: int) -> int | None:
+    result = await conn.execute(
+        text("SELECT associated_journal_id FROM task_lists WHERE id = :id"),
+        {"id": list_id},
+    )
+    association: int | None = result.scalar_one()
+    return association
+
+
+@pytest.mark.integration
+class TestListAssociationsMoveToTheSurvivor:
+    """The specification's *Association with a journal*: "If the journal is
+    merged the association moves to the surviving journal." A system write, so
+    an archived list moves too."""
+
+    async def test_lists_on_the_absorbed_journal_follow_the_survivor(
+        self,
+        merge_service: JournalMergeService,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        packing = await seed_task_list(
+            async_connection, "Packing", associated_journal_id=source_id
+        )
+        archived = await seed_task_list(
+            async_connection,
+            "Old packing",
+            associated_journal_id=source_id,
+            archived_at=ARCHIVED_AT,
+        )
+        assert packing.id is not None
+        assert archived.id is not None
+
+        await merge_service.merge_journals(target_id, source_id, async_connection)
+
+        assert await _association(async_connection, packing.id) == target_id
+        assert await _association(async_connection, archived.id) == target_id
+
+    async def test_each_move_is_announced_before_the_journal_events(
+        self,
+        merge_service: JournalMergeService,
+        async_connection: AsyncConnection,
+        merged_pair: tuple[int, int],
+    ):
+        target_id, source_id = merged_pair
+        packing = await seed_task_list(
+            async_connection, "Packing", associated_journal_id=source_id
+        )
+        assert packing.id is not None
+
+        await merge_service.merge_journals(
+            target_id,
+            source_id,
+            async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+
+        (event,) = await task_list_events(async_connection, task_list_id=packing.id)
+        assert event.event_type == "TaskListUpdated"
+        assert event.payload["changed_fields"] == {
+            "associated_journal_id": [source_id, target_id]
+        }
+        assert event.payload["source"] == Provenance.MCP.value
+        assert event.payload["changed_by"] == "mcp"
+        assert await _published_types(async_connection) == [
+            "TaskListUpdated",
+            "JournalUpdated",
+            "JournalDeleted",
+        ]

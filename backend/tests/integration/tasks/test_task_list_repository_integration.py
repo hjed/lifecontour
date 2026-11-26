@@ -996,6 +996,75 @@ class TestUnassociateJournal:
         assert await repository.count_associated_with_journal(trip, OTHER_USER_ID) == 1
 
 
+class TestReassociateJournal:
+    """A journal merge moves every list the owner has on the absorbed journal.
+
+    A system write, so archived lists move too; nothing else is touched.
+    """
+
+    async def test_it_moves_every_owner_list_to_the_survivor(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        absorbed = await insert_journal(async_connection, "Absorbed")
+        survivor = await insert_journal(async_connection, "Survivor")
+        packing = await save_associated(repository, "Packing", absorbed)
+        archived = await save_associated(
+            repository, "Old packing", absorbed, archived_at=ARCHIVED_EARLIER
+        )
+        assert packing.id is not None
+        assert archived.id is not None
+
+        moved = await repository.reassociate_journal(
+            source_journal_id=absorbed, target_journal_id=survivor, user_id=USER_ID
+        )
+
+        assert moved == sorted([packing.id, archived.id])
+        assert await stored_association(async_connection, packing) == survivor
+        assert await stored_association(async_connection, archived) == survivor
+        found = await repository.find_by_id(archived.id, USER_ID)
+        assert found is not None
+        assert found.archived_at == ARCHIVED_EARLIER
+
+    async def test_it_locks_the_lists_in_id_order_before_moving_them(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        """As the delete does, so a merge cannot cross a list create or reorder."""
+        absorbed = await insert_journal(async_connection, "Absorbed")
+        survivor = await insert_journal(async_connection, "Survivor")
+        await save_associated(repository, "Packing", absorbed)
+
+        with recorded_statements(async_connection) as statements:
+            await repository.reassociate_journal(
+                source_journal_id=absorbed, target_journal_id=survivor, user_id=USER_ID
+            )
+
+        lock, update = statements
+        assert "FOR NO KEY UPDATE" in lock
+        assert "ORDER BY id" in lock
+        assert update.lstrip().startswith("UPDATE task_lists")
+
+    async def test_lists_on_other_journals_and_other_users_are_untouched(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        absorbed = await insert_journal(async_connection, "Absorbed")
+        survivor = await insert_journal(async_connection, "Survivor")
+        meeting = await insert_journal(async_connection, "Meeting")
+        agenda = await save_associated(repository, "Agenda", meeting)
+        already = await save_associated(repository, "Already there", survivor)
+        theirs = await save_associated(
+            repository, "Theirs", absorbed, user_id=OTHER_USER_ID
+        )
+
+        moved = await repository.reassociate_journal(
+            source_journal_id=absorbed, target_journal_id=survivor, user_id=USER_ID
+        )
+
+        assert moved == []
+        assert await stored_association(async_connection, agenda) == meeting
+        assert await stored_association(async_connection, already) == survivor
+        assert await stored_association(async_connection, theirs) == absorbed
+
+
 class TestDependencyInjection:
     """The repository is reachable through the container, not just importable."""
 

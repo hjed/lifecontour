@@ -56,7 +56,6 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.core.tasks.services.task_journal_merge_service import TaskJournalMergeService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.tasks.task_seeding import (
     committed_task,
@@ -67,6 +66,7 @@ from tests.integration.tasks.task_seeding import (
     service_on,
     stored_anchors,
 )
+from tests.journal_service_factory import build_task_journal_merge_service
 
 # Long enough that a slow container is not mistaken for a deadlock, short enough
 # that a genuine one is reported rather than waited on.
@@ -87,9 +87,8 @@ def merge_service_on(
     return JournalMergeService(
         journal_repo=SqlJournalRepository(connection),
         event_publisher=OutboxEventPublisher(connection),
-        task_merge_service=TaskJournalMergeService(
-            task_anchor_repo=anchor_repo(connection),
-            event_publisher=OutboxEventPublisher(connection),
+        task_merge_service=build_task_journal_merge_service(
+            connection, task_anchor_repo=anchor_repo(connection)
         ),
     )
 

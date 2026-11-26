@@ -1,4 +1,5 @@
-"""One way for tests to build a real ``JournalService`` by hand.
+"""One way for tests to build a real ``JournalService`` — and the tasks domain's
+half of a journal merge — by hand.
 
 Production resolves the service from Dishka (``JournalProvider``). Tests that
 drive it on their own connection used to spell out its collaborators at every
@@ -25,9 +26,12 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
 )
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.models.repositories import TaskAnchorRepository
+from app.core.tasks.models.repositories import TaskAnchorRepository, TaskListRepository
 from app.core.tasks.services.task_journal_deletion_service import (
     TaskJournalDeletionService,
+)
+from app.core.tasks.services.task_journal_merge_service import (
+    TaskJournalMergeService,
 )
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 
@@ -62,4 +66,23 @@ def build_journal_service(
             task_list_repo=SqlTaskListRepository(connection),
             event_publisher=publisher,
         ),
+    )
+
+
+def build_task_journal_merge_service(
+    connection: AsyncConnection,
+    *,
+    task_anchor_repo: TaskAnchorRepository | None = None,
+    task_list_repo: TaskListRepository | None = None,
+    event_publisher: OutboxEventPublisher | None = None,
+) -> TaskJournalMergeService:
+    """The tasks domain's half of a merge over real adapters on ``connection``.
+
+    Each argument replaces one collaborator, for a test that stages a race or
+    reads what was published; anything left out is the real adapter.
+    """
+    return TaskJournalMergeService(
+        task_anchor_repo=task_anchor_repo or SqlTaskAnchorRepository(connection),
+        task_list_repo=task_list_repo or SqlTaskListRepository(connection),
+        event_publisher=event_publisher or OutboxEventPublisher(connection),
     )

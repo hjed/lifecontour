@@ -519,7 +519,8 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `changed_fields` is `{field: (old, new)}`: archive state travels as `archived_at`, an ISO instant
   or `null` (`(null, ts)` archives, `(ts, null)` unarchives). The journal association travels as
   `associated_journal_id`, an integer journal id or `null`; a journal delete publishes
-  `(deleted, null)` for each list it leaves unassociated (ITER21-005 Phase 2a). Archive and unarchive are idempotent —
+  `(deleted, null)` for each list it leaves unassociated (ITER21-005 Phase 2a) and a journal merge
+  `(absorbed, survivor)` for each list it moves (Phase 2c). Archive and unarchive are idempotent —
   a list already in the asked-for state is answered unchanged and nothing is published.
   **A list's history is projected from these events** (ITER21-001 Phase 7): the
   `history-projection` group subscribes to `TASK_LIST_EVENT_TYPES` and `HistoryService` files the
@@ -1777,7 +1778,14 @@ Journal **merge** is deliberately not guarded: it deletes the absorbed journal t
 specification depends on. Re-pointing task links through a merge is ITER18-002 Phase 3; it needs no
 list-task case, because the re-point's `CASE` leaves a NULL anchor NULL and its referencing query
 already includes mention-only tasks (pinned for list tasks in
-`test_journal_merge_task_links_integration.py`).
+`test_journal_merge_task_links_integration.py`). **Lists associated with the absorbed journal follow the
+survivor** (ITER21-005 Phase 2c): step 0's second call, `TaskJournalMergeService.repoint_list_associations`,
+runs right after the task re-point — under the journal locks it took, and after its task locks, the
+order a delete takes — and calls `TaskListRepository.reassociate_journal`, moving every one of the
+owner's lists, archived ones too, and publishing one `TaskListUpdated`
+`{associated_journal_id: (absorbed, survivor)}` per list with the merger's provenance, ahead of the
+merge's own journal events. The hand-built paths (MCP merge tool, inbound duplicate merge) share
+`journal_merge_service_on`.
 
 ### A contact merge carries the task's people
 

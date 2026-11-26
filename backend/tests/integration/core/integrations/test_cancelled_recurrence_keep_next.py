@@ -27,10 +27,6 @@ from app.core.integrations.journal_outbox_event_processor import (
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_repository import OutboxRepository
 from tests.integration.core.integrations.journal_sync_seeding import (
@@ -50,6 +46,7 @@ from tests.integration.tasks.task_seeding import (
     link_intermediate_journal,
     seed_task_list,
 )
+from tests.journal_service_factory import build_task_journal_merge_service
 
 WEEKS = 5
 
@@ -438,9 +435,8 @@ async def _merge_as_mcp(
     merge_service = JournalMergeService(
         journal_repo=SqlJournalRepository(connection),
         event_publisher=publisher,
-        task_merge_service=TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(connection),
-            event_publisher=publisher,
+        task_merge_service=build_task_journal_merge_service(
+            connection, event_publisher=publisher
         ),
     )
     await merge_service.merge_journals(

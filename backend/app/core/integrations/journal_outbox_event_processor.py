@@ -1302,30 +1302,15 @@ class JournalOutboxEventProcessor:
 
     def _journal_merge_service(self) -> JournalMergeService:
         """A merge service over this connection, built as the merge tool builds it."""
-        from app.core.journal.adapters.sql.journal_repository import (
-            SqlJournalRepository,
-        )
         from app.core.journal.services.journal_merge_service import (
-            JournalMergeService,
-        )
-        from app.core.tasks.adapters.sql.task_anchor_repository import (
-            SqlTaskAnchorRepository,
-        )
-        from app.core.tasks.services.task_journal_merge_service import (
-            TaskJournalMergeService,
+            journal_merge_service_on,
         )
         from app.infrastructure.events.outbox_event_publisher import (
             OutboxEventPublisher,
         )
 
-        publisher = OutboxEventPublisher(self.connection)
-        return JournalMergeService(
-            SqlJournalRepository(self.connection),
-            publisher,
-            TaskJournalMergeService(
-                task_anchor_repo=SqlTaskAnchorRepository(self.connection),
-                event_publisher=publisher,
-            ),
+        return journal_merge_service_on(
+            self.connection, OutboxEventPublisher(self.connection)
         )
 
     async def _link_moved_on(
