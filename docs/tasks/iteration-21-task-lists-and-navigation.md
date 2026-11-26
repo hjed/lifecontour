@@ -3206,15 +3206,47 @@ picker's own behaviour, so they need only test it in context.
   - the picker takes `value`, `onChange` and `disabled` only; add form wiring (`aria-describedby`, `aria-invalid`) on its `RadioGroup` when the first form needs it.
 - *Phase 6:* test the picker in the list dialog as part of that flow. Its search, keyboard, scroll and 390px behaviour are already covered by `task-icon-picker.spec.ts`, so Phase 6's estimate is unchanged. Once a product page covers what the harness does, retire the harness (`testing-strategy.md`).
 
-#### Phase 3: Task row
+#### Phase 3: Task row ✅ DONE
 
-**Status:** 🚧 IN PROGRESS — a native stack of two PRs on top of Phase 2's: (1) the row's parts (flag marker, status checkbox, `ContactAvatarStack`), (2) `TaskRow`.
+**Status:** ✅ DONE — a native stack of two PRs on top of Phase 2's: (1) the row's parts (flag marker, status checkbox, `ContactAvatarStack`), (2) `TaskRow`.
 **Prerequisites:** Phase 1; Phase 2 for the icon glyph (`TaskIconGlyph`), decided in plan review.
-**Estimated diff:** ~130 production → **~650 tracked** · re-estimated in planning at ~1,045 tracked (layers ~530 and ~515).
+**Estimated diff:** ~130 production → **~650 tracked** · re-estimated in planning at ~1,045 tracked (layers ~530 and ~515) · **Actual:** layer 1 753 tracked (607 added, 146 removed, about 130 of them moved code), layer 2 ~450 tracked including this document. Layer 1 ran over its estimate on the moved `MockImage` helper (unplanned) and fuller checkbox tests.
 
 **Acceptance Criteria:**
 
-- [ ] Checkbox, icon, text, flag, due date or due-journal link, overdue marker, contact avatar circles.
+- [x] Checkbox, icon, text, flag, due date or due-journal link, overdue marker, contact avatar circles.
+
+**What landed:**
+- **`components/tasks/TaskRow.tsx`** — one task on a list: checkbox, icon, text, a meta line (overdue marker, due-date chip, due-journal link, *Cancelled*), flag and contacts, in the canvas's order. `TaskRow` itself has no `'use client'`.
+- **`components/tasks/TaskStatusCheckbox.tsx`** — ticks and unticks through `useUpdateTask`, taking the move from the list offer table (`statusActions(…, {onList: true})`), so a done or cancelled list task reopens directly. Held per task by `useTaskWriteInFlight` (`aria-busy`, `aria-disabled`).
+- **`components/tasks/TaskFlagMarker.tsx`** — the filled flag in `text-warning`, an `img` named "Flagged".
+- **`components/contacts/ContactAvatarStack.tsx`** — extracted from `AgendaParticipantStack`, which now maps onto it with the same markup and test id.
+- **`types/tasks.ts`** — `ListTaskReadAttributes`, `ListTaskReadResource` and the `isListTask` guard.
+- **Test support** — `test-utils/tasks.ts` (`createMockTaskRead`, `createMockListTaskRead`), which `createMockJournalTask` now builds on; `test-utils/mock-image.ts`, the Radix avatar image mock moved out of `ContactAvatar.test.tsx`.
+
+**Tests:**
+- **Unit:** `TaskRow.test.tsx` (text, done and cancelled strike-through, *Cancelled* as the checkbox's description, icon present and absent, flag, due date `<time>`, due-journal link and date, cancelled due journal, overdue in place of the due date, overdue beside a due-journal link, no overdue marker on a done task, undated, contacts); `ContactAvatarStack.test.tsx`; `TaskFlagMarker.test.tsx`; `list-task-guard.test.ts`. `AgendaParticipantStack.test.tsx` passes unchanged.
+- **Frontend integration** (`TaskStatusCheckbox.test.tsx`, one real `QueryClient` over a seeded open-tasks cache): the exact `PATCH` body for tick and for untick of a done and a cancelled task (no `acknowledge_reopen`), the optimistic tick, the per-task lock, the rollback on a 404.
+- **E2E:** no spec added — no route mounts the row until Phase 4, which creates `task-lists.spec.ts`. `home-dashboard.spec.ts` *Tags and participants (W15, W16)*, which covers the refactored stack, passed on Firefox and Mobile Chrome.
+- **Gates run locally, on each layer:** `pnpm quality:check` (0 errors), the full Jest suite (268 suites, 3,626 tests on layer 2), pre-commit. No Python changed, so backend ruff, mypy and pytest do not apply.
+
+**Decisions:**
+- **User decision in plan review:** stack on Phase 2 and draw the icon with its `TaskIconGlyph`, rather than this phase writing the map.
+- **The row takes `ListTaskReadResource`,** so a journal-only task, whose reopen needs an acknowledgement, cannot reach it.
+- **The meta line sits under the text at every width** — the *Mobile: list page* artboard's layout, not the desktop *Task row* artboard's inline chips — so one layout fits a 390px phone.
+- **Overdue replaces the due-date chip; a due-journal link stays.** The marker also needs `status === not_done`, as on the journal row, because an optimistic tick shows a done row before the refetch clears `overdue`.
+- **The icon is named for screen readers** (Phase 2's review): the glyph stays `aria-hidden`, and its `TASK_ICON_DISPLAY` label is visually hidden text beside it (*"Paw print icon"*), since the icon a user picked says something the text does not.
+- **A cancelled due journal reads *journal cancelled*** in place of its date (new wording; the canvas does not draw this state).
+- **Contacts are named avatars, not links** — the canvas's `<a role="img">` is an invalid pattern, and 24px links would miss the 44px target. Contacts are acted on from the details panel (Phase 17).
+- **The checkbox's hit area is its own `after:` inset widened to ~44px,** and the due-journal link is `max-sm:min-h-11`.
+- **Free text wraps anywhere** (review): the task text and the due-journal link use `wrap-anywhere`, and the link is `min-w-0 max-w-full`. A flex item's minimum width is its min-content width, which `break-words` does not lower, so a long unbroken journal title pushed the row to 767px at 390px. The fix was measured in Firefox at 390px: the row stays at 390px.
+
+**Notes for later phases:**
+- *Phase 4:* narrow `useTaskListOpenTasks` answers with `isListTask` and render `<TaskRow>` inside a `<ul>`. Its E2E owns the row's phone checks: no horizontal scroll at 390px, and 44px targets for the checkbox and the due-journal link, with one task whose text and due-journal title are long unbroken strings (about 60 lines more on its estimate).
+- *Phases 5, 10, 15:* inline edit, the drag handle and the details affordance join the row; the row's test ids are `task-row-{id}`, `task-row-text`, `task-row-icon`, `task-row-due-date`, `task-row-due-journal`, `task-row-overdue`, `task-row-contacts`, `task-flag`.
+- *Phase 11:* the row already strikes through closed tasks, marks cancelled ones, and reopens on untick.
+- *Phases 13, 19:* a read-only row (archived list) is still to add.
+- *Phase 18:* reuse `TaskFlagMarker` and Phase 2's `TaskIconGlyph` on the journal and dashboard rows.
 
 #### Phase 4: List page: header and open tasks
 
