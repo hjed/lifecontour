@@ -608,7 +608,7 @@ and owner; a second run writes nothing). No E2E: no UI.
   does for deleted tasks; never reach list rows from the contact strategy.
 - *Phase 29 (list delete):* publish a deletion event carrying `user_id` and add a `__deleted__` handler
   under `task_list`; the inventory tests fail until both the handler and the subscription exist.
-- *ITER21-005 (journal association):* a new `TaskListUpdated` key projects through the existing handler
+- *ITER21-005 Phase 2 (journal association):* a new `TaskListUpdated` key projects through the existing handler
   with no code change; only its wording is new.
 - *ITER21-002 Phase 17:* add `taskListEntryDescription` in `frontend/src/lib/history-display.ts`,
   gated on `entity_type === 'task_list'` — the generic `ActivityItem` path would read an archive as
@@ -3418,37 +3418,107 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 - [ ] Association changes appear in the list's history and can be made over MCP.
 - [ ] E2E covers associating a list with next week's journal and seeing the single row on the dashboard, on Firefox and Mobile Chrome.
 
-#### Phase 1: Schema and entity
+#### Phase 1: Schema and entity ✅ DONE
 
 **Prerequisites:** ITER21-001.
-**Estimated diff:** ~70 production → **~400 tracked**
+**Estimated diff:** ~70 production → **~400 tracked** · **Actual:** ~110 production → **~505 tracked**
+(507 insertions, 16 deletions excluding this document: 112 production — migration 76, entity 18,
+repository and its port docstring 18; 376 tests; 19 architecture docs). Production ran ×1.6 on the
+estimate, mostly the migration docstring carrying the decisions below; the ×4 multiplier held
+(measured ×4.5 tracked over production, landing ×1.3 on the tracked estimate).
 
 **Acceptance Criteria:**
 
-- [ ] `associated_journal_id` on lists; at most one journal.
+- [x] `associated_journal_id` on lists; at most one journal.
 
-#### Phase 2: Associate, change, remove
+**Delivered:** migration `0149_add_associated_journal_to_task_lists.py`: nullable
+`task_lists.associated_journal_id`, FK `fk_task_lists_associated_journal_id` → `journals.id`
+`ON DELETE RESTRICT`, partial index `ix_task_lists_associated_journal_id`
+(`WHERE associated_journal_id IS NOT NULL`); the downgrade refuses while any list is associated.
+`TaskList.associated_journal_id: int | None` (keyword-only; a non-positive id is refused with
+`TaskListValidationError` on `associated_journal_id`). `SqlTaskListRepository` reads it on every
+query (`_TASK_LIST_COLUMNS` / `_row_to_task_list`, so `find_for_tasks` too) and `save` writes it on
+insert and update. No REST, MCP or read-schema change: nothing can set an association yet.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_entity.py` (unassociated by default, carries its
+journal, 0 and -1 refused, an archived list keeps it and stays read-only); integration
+`tests/integration/tasks/test_task_list_association_migration.py` (round trip incl. the `RESTRICT`
+delete rule from `information_schema` and the index's partial predicate, downgrade refused while
+associated), `test_task_list_association_constraints.py` (two lists on one journal, list delete leaves
+the journal, unknown journal `23503`, deleting an associated journal `23001`) and
+`test_task_list_repository_integration.py::TestAssociatedJournal` (default, insert round trip, set /
+change / clear, an update from the stored row keeps it, every read — including the locking ones —
+carries it). Gates run locally: ruff
+format/check and mypy (backend, core_shared), backend unit suite (6,308 passed), core_shared (924),
+the full backend integration suite in chunks (5,473 passed, 7 pre-existing skips) and pre-commit. No
+E2E and no frontend tests: no UI. No worker suite: no worker reads `TaskList`.
+
+**Decisions (recorded during implementation):**
+- **Re-split of ITER21-005** (user decision). Journal delete, cancel and merge is now **Phase 2** and
+  *Associate, change, remove* **Phase 3**, so the journal paths learn about associations before any
+  can be written. The old order left a window in which a journal delete failed on an associated
+  list (`RESTRICT`) or a merge silently dropped the association (`SET NULL`). Phases 4, 5, 7 and 10
+  and ITER21-007 Phase 8 now need Phase 3; ITER21-007 Phase 9 needs Phase 2.
+- **`ON DELETE RESTRICT`, not `SET NULL`**, as for the task anchors: the journal services unassociate
+  or re-point lists with history events, and a path that forgot fails rather than dropping the
+  association silently. Only two paths delete journal rows — `JournalService.delete_journal` (REST,
+  MCP, `CancelledRecurrenceTidier`) and `JournalMergeService` (`journal_repo.delete(source_id)`).
+- **No uniqueness and no composite owner key**: a journal holds several lists, and the owner check on
+  the journal is a service rule (as for `tasks.task_list_id`).
+- **`save` writes the association now**, on insert and update, so Phase 2's tests can seed it and
+  Phase 3 needs no repository change. Every update caller passes the locked stored row through
+  (`patch.applied_to(stored)`, `replace(stored, …)`); the port docstring says so.
+- **An archived list keeps its association** (spec *Archiving and deleting*).
+
+**Notes for later phases:**
+- *Phase 2:* unassociate each list inside `JournalService._detach_list_tasks_and_delete`, after
+  `remove_list_task_links` and before `journal_repo.delete`, so the `IntegrityError` retry is covered
+  too and never reaches `RESTRICT` as a raw 500. Running after the detach keeps the delete's lock
+  order journal → lists: `SqlTaskAnchorRepository.detach_list_tasks_from_journal` takes the journal
+  `FOR UPDATE` first, unconditionally (`_LOCK_JOURNAL`); unassociating before it would lock lists
+  first and deadlock against Phase 3. Archived lists are included — a system write that bypasses
+  `ensure_writable`, since an archived list keeps its association; re-point in the merge's step 0 beside the task re-point (before
+  `journal_merge_service.py`'s `journal_repo.delete(source_id)`). One `TaskListUpdated` per list,
+  with the caller's source (the tidier's is the system). Owner-scope the new statements and prove
+  them with a second user. Committed-data cleanups that delete journals (`task_seeding.py`
+  `_DELETE_JOURNAL` and the committed-journal helpers, `committed_journal.py`) must remove or
+  unassociate lists first once a test associates one, or they fail with `23001`.
+- *Phase 3:* owner-check the journal; lock it `FOR KEY SHARE` before the list `FOR NO KEY UPDATE`,
+  the order a journal delete takes. Start from the stored list (`replace(stored,
+  associated_journal_id=…)`); `TaskListMCP` and the REST resource gain the field here — their
+  exact-property schema tests (`test_task_list_tools_schema.py`) will need it.
+- *Phase 5:* read a journal's lists by `associated_journal_id` (served by the partial index), still
+  filtering on `user_id`.
+- *ITER21-007 Phase 1:* new `task_lists` columns go into `_INSERT`, `_UPDATE` and `_write_params` as
+  this one did, with the same "update from the stored row" rule.
+
+#### Phase 2: Journal delete, cancel and merge
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~150 production → **~1,400 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~120 production → **~850 tracked** (re-split by Phase 1: this phase was Phase 3 and
+now lands before any association can be written, so a journal delete or merge is never refused by an
+associated list)
 
 **Acceptance Criteria:**
 
-- [ ] Owner-checked journal; carried on the list-updated event into list history.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [ ] Delete → unassociated; cancel → association kept (not surfacing is proven in Phase 7); merge → moves to the survivor.
+- [ ] Each unassociation and move is a `TaskListUpdated` carrying the association key into list history (the key this phase introduces); the delete runs it inside `JournalService._detach_list_tasks_and_delete`, so the `IntegrityError` retry is covered too, and the merge in step 0 beside the task re-point.
+- [ ] Archived lists are unassociated and re-pointed too: these are system writes that bypass the archived read-only rule, proven with an archived associated list.
+- [ ] Lands before any association can exist: tests seed associations through the repository; the new statements are owner-scoped and proven with a second user.
 
-#### Phase 3: Journal delete, cancel and merge
+#### Phase 3: Associate, change, remove
 
 **Prerequisites:** Phase 2.
-**Estimated diff:** ~90 production → **~700 tracked**
+**Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] Delete → unassociated; cancel → not surfacing; merge → moves to the survivor.
+- [ ] Owner-checked journal; carried on the list-updated event (Phase 2's key) into list history. The journal is locked `FOR KEY SHARE` before the list `FOR NO KEY UPDATE` — the order a journal delete takes, which holds the journal `FOR UPDATE` before it touches any list (see Phase 1's notes).
+- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 4: List page and `/tasks` card: associate and link
 
-**Prerequisites:** Phase 2, ITER21-002 Phase 7.
+**Prerequisites:** Phase 3, ITER21-002 Phase 7.
 **Estimated diff:** ~150 production → **~750 tracked**
 
 **Acceptance Criteria:**
@@ -3457,7 +3527,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 5: A journal's lists
 
-**Prerequisites:** Phase 2.
+**Prerequisites:** Phase 3.
 **Estimated diff:** ~110 production → **~1,000 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -3478,7 +3548,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 7: Surfaced-list rule
 
-**Prerequisites:** Phase 2, ITER21-004 Phase 1.
+**Prerequisites:** Phase 3, ITER21-004 Phase 1.
 **Estimated diff:** ~110 production → **~660 tracked** (×6)
 
 **Acceptance Criteria:**
@@ -3508,7 +3578,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 10: Daily summary and association
 
-**Prerequisites:** Phase 7, ITER21-004 Phase 4.
+**Prerequisites:** Phase 3, Phase 7, ITER21-004 Phase 4.
 **Estimated diff:** ~110 production → **~750 tracked**
 
 **Acceptance Criteria:**
@@ -3741,7 +3811,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 8: Use a template
 
-**Prerequisites:** Phase 4, ITER21-005 Phase 2.
+**Prerequisites:** Phase 4, ITER21-005 Phase 3.
 **Estimated diff:** ~130 production → **~1,200 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
@@ -3751,7 +3821,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 9: Copies for each journal, when it is created
 
-**Prerequisites:** Phase 3.
+**Prerequisites:** Phase 3, ITER21-005 Phase 2.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**

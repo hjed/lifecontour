@@ -580,6 +580,7 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 | From | To | Action | Why |
 |---|---|---|---|
 | `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a **journal-only** task is *blocked*, not cascaded, with an explanatory refusal naming the blocking tasks. A task **on a list** never blocks: the delete service nulls its anchor on the journal first, with a `TaskJournalLinksRemoved` event, so the constraint is only the backstop for a row that races the delete — `SET NULL` would trip `ck_tasks_journal_only_has_both_anchors` for journal-only tasks and publish nothing. **Merge is the exception** — it re-points the anchors onto the survivor first, so it is never blocked (see below). |
+| `task_lists.associated_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal leaves its lists unassociated and merging moves them to the survivor (spec *Association with a journal*), but each of those changes is a list-history event, so the journal delete and merge services unassociate or re-point the lists themselves before the journal row goes (ITER21-005 Phase 2). The constraint is the backstop that makes a path which forgot fail, where `SET NULL` would drop the association silently. Those services land before anything can write an association. PostgreSQL reports the refusal as SQLSTATE `23001`. |
 | `tasks.task_list_id` | `task_lists.id` | **`RESTRICT`** | Deleting a list deletes some of its tasks and turns those holding both journals back into journal-only tasks, each with a domain event, so the list-delete service settles every task first and a raw delete can never destroy tasks silently. PostgreSQL reports the refusal as SQLSTATE `23001` (`restrict_violation`), not `23503`. |
 | `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. A list task's link is deleted explicitly by the delete service first, so its removal is announced; a journal-only task's cascades silently. |
 | `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. **Merge is the exception** — it re-points the links onto the survivor first, because otherwise this cascade destroys them (see below). |
@@ -742,13 +743,24 @@ migration is the schema's source of truth and repositories use raw SQL. (Note th
 
 A task list is a user's named home for tasks — see the
 [Task Lists and Navigation specification](../product-specifications/task-lists-and-navigation-product-specification.md#task-lists).
-Introduced by migration `0145` (create/drop round-trip). Tasks join lists in a later migration;
-the list kind, journal association and template columns arrive with the phases that use them.
+Introduced by migration `0145` (create/drop round-trip). Tasks join lists in migration `0146`; the
+journal association arrives in `0149`; the list kind and template columns arrive with the phases that
+use them.
 
 - `task_lists` — `id` (serial pk), `user_id` (varchar 50), `name` (varchar 200), `icon`
   (varchar 50, nullable), `position` (int), `archived_at` (timestamptz, nullable — NULL means not
-  archived), `created_at` / `updated_at`. Indexed by `(user_id, position)`, which serves both the
-  owner scoping and the list order.
+  archived), `associated_journal_id` (int, nullable, FK → `journals.id` `ON DELETE RESTRICT` —
+  see the foreign-key table above), `created_at` / `updated_at`. Indexed by `(user_id, position)`,
+  which serves both the owner scoping and the list order, and by the partial
+  `ix_task_lists_associated_journal_id` (`WHERE associated_journal_id IS NOT NULL`), which serves the
+  `RESTRICT` check on a journal delete and reading a journal's lists.
+
+**A list names at most one journal; a journal may hold several lists** — one nullable column, no
+uniqueness (migration `0149`, whose downgrade refuses while any list is associated). As with
+`tasks.task_list_id` there is no composite owner key: the service that associates a list must check
+the journal belongs to the list's owner. `SqlTaskListRepository.save` writes the association on both
+insert and update, so an update must start from the stored row read under its lock; an archived list
+keeps its association.
 
 `ck_task_lists_name_not_blank CHECK (btrim(name) <> '')` and
 `ck_task_lists_position_non_negative CHECK (position >= 0)` repeat the `TaskList` entity's rules
