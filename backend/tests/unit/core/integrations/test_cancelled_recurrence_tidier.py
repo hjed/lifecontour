@@ -86,7 +86,7 @@ class TestAListTaskKeepsAContinuation:
     async def test_a_continuation_a_list_task_links_to_is_kept(self) -> None:
         journal_service = AsyncMock()
         journal_service.preview_delete.return_value = JournalDeletePreview(
-            list_tasks_losing_link=1
+            list_tasks_losing_link=1, lists_losing_association=0
         )
         tidier = CancelledRecurrenceTidier(
             AsyncMock(), _unprotected_link_repo(), journal_service
@@ -104,7 +104,7 @@ class TestAListTaskKeepsAContinuation:
     async def test_a_continuation_no_list_task_links_to_is_deleted(self) -> None:
         journal_service = AsyncMock()
         journal_service.preview_delete.return_value = JournalDeletePreview(
-            list_tasks_losing_link=0
+            list_tasks_losing_link=0, lists_losing_association=0
         )
         tidier = CancelledRecurrenceTidier(
             AsyncMock(), _unprotected_link_repo(), journal_service
@@ -125,7 +125,7 @@ async def test_the_journal_is_locked_before_its_list_task_links_are_counted() ->
     link_repo = _unprotected_link_repo()
     journal_service = AsyncMock()
     journal_service.preview_delete.return_value = JournalDeletePreview(
-        list_tasks_losing_link=0
+        list_tasks_losing_link=0, lists_losing_association=0
     )
     calls = MagicMock()
     calls.attach_mock(link_repo.lock_journal, "lock")

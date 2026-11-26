@@ -794,15 +794,23 @@ async def seed_task_list(
     user_id: str = USER_ID,
     icon: TaskIcon | None = None,
     archived_at: datetime | None = None,
+    associated_journal_id: int | None = None,
 ) -> TaskList:
     """Insert a task list through the repository and return it as persisted.
 
     For tests whose subject is something *other* than creating a list — a read,
     a cross-user refusal — so they publish no event and owe nothing to the
-    service under test. A second owner's list is seeded with ``user_id``.
+    service under test. A second owner's list is seeded with ``user_id``, and
+    a list associated with a journal with ``associated_journal_id``.
     """
     return await SqlTaskListRepository(conn).save(
-        TaskList(user_id=user_id, name=name, icon=icon, archived_at=archived_at)
+        TaskList(
+            user_id=user_id,
+            name=name,
+            icon=icon,
+            archived_at=archived_at,
+            associated_journal_id=associated_journal_id,
+        )
     )
 
 

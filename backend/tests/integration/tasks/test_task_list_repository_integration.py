@@ -866,6 +866,136 @@ class TestAssociatedJournal:
         assert [task_list.associated_journal_id for task_list in locked] == [journal_id]
 
 
+async def save_associated(
+    repository: SqlTaskListRepository,
+    name: str,
+    journal_id: int,
+    *,
+    user_id: str = USER_ID,
+    archived_at: datetime | None = None,
+) -> TaskList:
+    """Insert a list associated with a journal, as no service can yet."""
+    return await repository.save(
+        TaskList(
+            user_id=user_id,
+            name=name,
+            archived_at=archived_at,
+            associated_journal_id=journal_id,
+        )
+    )
+
+
+class TestUnassociateJournal:
+    """A journal delete clears the association of every list the owner has on it.
+
+    A system write: archived lists are cleared too, and nothing outside the
+    owner's lists on that journal is touched.
+    """
+
+    async def test_it_clears_every_owner_list_on_the_journal(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection)
+        packing = await save_associated(repository, "Packing", trip)
+        shopping = await save_associated(repository, "Shopping", trip)
+        assert packing.id is not None
+        assert shopping.id is not None
+
+        cleared = await repository.unassociate_journal(trip, USER_ID)
+
+        assert cleared == sorted([packing.id, shopping.id])
+        assert await stored_association(async_connection, packing) is None
+        assert await stored_association(async_connection, shopping) is None
+
+    async def test_it_moves_updated_at(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection)
+        packing = await save_associated(repository, "Packing", trip)
+        result = await async_connection.execute(_BACKDATE, {"list_id": packing.id})
+        _, backdated_updated_at = result.one()
+        assert packing.id is not None
+
+        await repository.unassociate_journal(trip, USER_ID)
+
+        found = await repository.find_by_id(packing.id, USER_ID)
+        assert found is not None
+        assert found.updated_at is not None
+        assert found.updated_at > backdated_updated_at
+
+    async def test_a_list_on_another_journal_is_untouched(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection, "Trip")
+        meeting = await insert_journal(async_connection, "Meeting")
+        agenda = await save_associated(repository, "Agenda", meeting)
+
+        cleared = await repository.unassociate_journal(trip, USER_ID)
+
+        assert cleared == []
+        assert await stored_association(async_connection, agenda) == meeting
+
+    async def test_an_archived_list_is_cleared_and_stays_archived(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection)
+        packing = await save_associated(
+            repository, "Packing", trip, archived_at=ARCHIVED_EARLIER
+        )
+        assert packing.id is not None
+
+        cleared = await repository.unassociate_journal(trip, USER_ID)
+
+        assert cleared == [packing.id]
+        found = await repository.find_by_id(packing.id, USER_ID)
+        assert found is not None
+        assert found.associated_journal_id is None
+        assert found.archived_at == ARCHIVED_EARLIER
+
+    async def test_another_users_list_is_untouched(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection)
+        theirs = await save_associated(
+            repository, "Their packing", trip, user_id=OTHER_USER_ID
+        )
+
+        cleared = await repository.unassociate_journal(trip, USER_ID)
+
+        assert cleared == []
+        assert await stored_association(async_connection, theirs) == trip
+
+    async def test_it_locks_the_lists_in_id_order_before_clearing_them(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        """The order list creation and reordering take, so the delete cannot
+        hold one of the owner's lists while waiting for another they hold."""
+        trip = await insert_journal(async_connection)
+        await save_associated(repository, "Packing", trip)
+
+        with recorded_statements(async_connection) as statements:
+            await repository.unassociate_journal(trip, USER_ID)
+
+        lock, update = statements
+        assert "FOR NO KEY UPDATE" in lock
+        assert "ORDER BY id" in lock
+        assert update.lstrip().startswith("UPDATE task_lists")
+
+    async def test_the_count_is_the_owners_lists_on_the_journal(
+        self, repository: SqlTaskListRepository, async_connection: AsyncConnection
+    ) -> None:
+        trip = await insert_journal(async_connection, "Trip")
+        meeting = await insert_journal(async_connection, "Meeting")
+        await save_associated(repository, "Packing", trip)
+        await save_associated(repository, "Snacks", trip, archived_at=ARCHIVED_EARLIER)
+        await save_associated(repository, "Agenda", meeting)
+        await save_associated(repository, "Theirs", trip, user_id=OTHER_USER_ID)
+
+        assert await repository.count_associated_with_journal(trip, USER_ID) == 2
+        assert await repository.count_associated_with_journal(meeting, USER_ID) == 1
+        assert await repository.count_associated_with_journal(trip, OTHER_USER_ID) == 1
+
+
 class TestDependencyInjection:
     """The repository is reachable through the container, not just importable."""
 

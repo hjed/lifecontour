@@ -447,13 +447,25 @@ class TestListTasksAreDetachedNotBlocking:
     ):
         order = MagicMock()
         order.attach_mock(mock_task_journal_deletion.remove_list_task_links, "detach")
+        order.attach_mock(mock_task_journal_deletion.unassociate_lists, "unassociate")
         order.attach_mock(mock_journal_repo.delete, "delete")
 
         await journal_service.delete_journal(
             DELETED, mock_transaction, changed_by="mcp", source=Provenance.MCP
         )
 
-        assert [call[0] for call in order.mock_calls] == ["detach", "delete"]
+        assert [call[0] for call in order.mock_calls] == [
+            "detach",
+            "unassociate",
+            "delete",
+        ]
+        mock_task_journal_deletion.unassociate_lists.assert_awaited_once_with(
+            journal_id=DELETED,
+            user_id="user123",
+            transaction=mock_transaction,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
         mock_task_journal_deletion.remove_list_task_links.assert_awaited_once_with(
             journal_id=DELETED,
             transaction=mock_transaction,
@@ -536,12 +548,18 @@ class TestDeletePreview:
         self, journal_service, mock_task_journal_deletion
     ):
         mock_task_journal_deletion.count_list_task_links.return_value = 2
+        mock_task_journal_deletion.count_associated_lists.return_value = 1
 
         preview = await journal_service.preview_delete(DELETED)
 
-        assert preview == JournalDeletePreview(list_tasks_losing_link=2)
+        assert preview == JournalDeletePreview(
+            list_tasks_losing_link=2, lists_losing_association=1
+        )
         mock_task_journal_deletion.count_list_task_links.assert_awaited_once_with(
             DELETED
+        )
+        mock_task_journal_deletion.count_associated_lists.assert_awaited_once_with(
+            DELETED, "user123"
         )
 
     @pytest.mark.asyncio

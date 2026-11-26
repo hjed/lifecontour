@@ -21,8 +21,9 @@ Task lists (ITER21-001 Phase 7): a list is a second top-level aggregate in the
 tasks domain, filed under ``("task_list", list_id)`` with the same marker
 convention. ``TaskListCreated`` opens the history with a ``__created__`` row
 carrying the name; ``TaskListUpdated`` projects one row per ``changed_fields``
-key — ``name``, ``icon`` and ``archived_at`` (``[null, ts]`` archived,
-``[ts, null]`` unarchived). Reordering publishes nothing and so projects
+key — ``name``, ``icon``, ``archived_at`` (``[null, ts]`` archived,
+``[ts, null]`` unarchived) and ``associated_journal_id`` (the journal id, or
+null when unassociated). Reordering publishes nothing and so projects
 nothing. List rows carry their owner, as task rows do.
 
 Contacts (ITER12-003 Phase 1): each contact handler reproduces the EXACT rows the
@@ -844,8 +845,8 @@ class HistoryService:
         ``[old, null]``) and ``archived_at``, an ISO instant, where ``[null,
         ts]`` is an archive and ``[ts, null]`` an unarchive. The instant is
         kept rather than rewritten to a flag, so the row says what the event
-        said. A key a later phase adds to the event (the journal association)
-        projects here with no change.
+        said. ``associated_journal_id`` is the journal association, ``[id,
+        null]`` when a journal delete left the list unassociated.
         """
         return self._rows_from_changed_fields(
             event,

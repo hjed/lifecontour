@@ -19,12 +19,15 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskJournalDetachment
 
 from app.core.tasks.models.events import TaskJournalLinksRemoved
+from app.core.tasks.models.task_list_events import TaskListUpdated
 from app.core.tasks.services.task_journal_deletion_service import (
     TaskJournalDeletionService,
 )
 from tests.unit.tasks.task_doubles import DELETED_JOURNAL_ID, TASK_ID, USER_ID
 
 OTHER_TASK_ID = TASK_ID + 1
+LIST_ID = 41
+OTHER_LIST_ID = 42
 
 
 @pytest.fixture
@@ -36,16 +39,25 @@ def anchor_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def list_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.unassociate_journal.return_value = []
+    return repo
+
+
+@pytest.fixture
 def event_publisher() -> AsyncMock:
     return AsyncMock()
 
 
 @pytest.fixture
 def service(
-    anchor_repo: AsyncMock, event_publisher: AsyncMock
+    anchor_repo: AsyncMock, list_repo: AsyncMock, event_publisher: AsyncMock
 ) -> TaskJournalDeletionService:
     return TaskJournalDeletionService(
-        task_anchor_repo=anchor_repo, event_publisher=event_publisher
+        task_anchor_repo=anchor_repo,
+        task_list_repo=list_repo,
+        event_publisher=event_publisher,
     )
 
 
@@ -176,3 +188,76 @@ class TestTheCount:
         anchor_repo.count_list_tasks_linked_to_journal.assert_awaited_once_with(
             DELETED_JOURNAL_ID
         )
+
+
+def published_list_updates(event_publisher: AsyncMock) -> list[TaskListUpdated]:
+    """The list events handed to the publisher, in order."""
+    return [call.args[0] for call in event_publisher.publish.await_args_list]
+
+
+async def unassociate(
+    service: TaskJournalDeletionService,
+    transaction: AsyncMock | None = None,
+    **kwargs: object,
+) -> None:
+    """Unassociate the owner's lists from the shared deleted journal."""
+    await service.unassociate_lists(
+        journal_id=DELETED_JOURNAL_ID,
+        user_id=USER_ID,
+        transaction=transaction or AsyncMock(),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+class TestListsAreUnassociated:
+    """A deleted journal's lists survive, unassociated, and each says so."""
+
+    async def test_it_unassociates_the_owners_lists_through_the_port(
+        self, service: TaskJournalDeletionService, list_repo: AsyncMock
+    ) -> None:
+        await unassociate(service)
+
+        list_repo.unassociate_journal.assert_awaited_once_with(
+            DELETED_JOURNAL_ID, USER_ID
+        )
+
+    async def test_each_list_gets_one_event_in_the_order_reported(
+        self,
+        service: TaskJournalDeletionService,
+        list_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        list_repo.unassociate_journal.return_value = [LIST_ID, OTHER_LIST_ID]
+
+        await unassociate(service)
+
+        events = published_list_updates(event_publisher)
+        assert [event.event_type for event in events] == ["TaskListUpdated"] * 2
+        assert [event.aggregate_id for event in events] == [LIST_ID, OTHER_LIST_ID]
+        assert [event.event_data["user_id"] for event in events] == [USER_ID] * 2
+        assert [event.event_data["changed_fields"] for event in events] == [
+            {"associated_journal_id": (DELETED_JOURNAL_ID, None)}
+        ] * 2
+
+    async def test_a_journal_no_list_names_publishes_nothing(
+        self, service: TaskJournalDeletionService, event_publisher: AsyncMock
+    ) -> None:
+        await unassociate(service)
+
+        event_publisher.publish.assert_not_called()
+
+    async def test_the_deleting_actor_and_transaction_reach_the_event(
+        self,
+        service: TaskJournalDeletionService,
+        list_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        list_repo.unassociate_journal.return_value = [LIST_ID]
+        transaction = AsyncMock()
+
+        await unassociate(service, transaction, source=Provenance.MCP, changed_by="mcp")
+
+        (event,) = published_list_updates(event_publisher)
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
+        assert event.transaction is transaction

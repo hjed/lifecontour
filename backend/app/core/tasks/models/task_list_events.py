@@ -80,27 +80,31 @@ class TaskListCreated(DomainEvent):
         )
 
 
-#: One field's change, ``(old, new)`` positionally, as JSON-ready scalars.
-type TaskListFieldChange = tuple[str | None, str | None]
+#: One field's change, ``(old, new)`` positionally, as JSON-ready scalars: text
+#: for a name, an icon or an instant, an integer for a journal id.
+type TaskListFieldChange = tuple[str | int | None, str | int | None]
 
 
 @dataclass(frozen=True)
 class TaskListUpdated(DomainEvent):
-    """Event raised when a list's own fields change: its name, its icon, or
-    whether it is archived.
+    """Event raised when a list's own fields change: its name, its icon,
+    whether it is archived, or the journal it is associated with.
 
     **One event for one write**, carrying ``changed_fields`` in the
     ``{field: (old, new)}`` shape every updated-event in this codebase uses, so
     a request that renames a list and changes its icon announces one change.
     Archiving and unarchiving are another key of this type rather than a type
     of their own: ``archived_at``, an ISO instant or ``None`` — ``(None, ts)``
-    archives and ``(ts, None)`` unarchives.
+    archives and ``(ts, None)`` unarchives. So is the journal association:
+    ``associated_journal_id``, a journal id or ``None``. A journal delete
+    publishes ``(deleted, None)`` for each list it leaves unassociated.
 
     **Only what actually moved is named**: the service compares each requested
     value with the stored one, and a write that changes nothing publishes
     nothing. The pairs are positional — the history projection reads
     ``change[0]`` as old and ``change[1]`` as new — and hold plain strings
-    (``TaskIcon.value``) or ``None``, because the payload is a wire format.
+    (``TaskIcon.value``), integer journal ids or ``None``, because the payload
+    is a wire format.
     """
 
     def __init__(
