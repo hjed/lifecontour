@@ -1308,6 +1308,44 @@ states how many, read from `GET /api/journals/{id}/delete-preview` through
   nothing, so the blockers view adds how many list tasks will still lose their
   link once the blockers are cleared.
 
+### The List Task Row
+
+`TaskRow` (`components/tasks/TaskRow.tsx`) is one task on a list, as the list
+page, the `/tasks` previews and the *Completed* group draw it (ITER21-002). It
+takes a `ListTaskReadResource` — a read with its list non-null, narrowed with
+`isListTask` — so a journal-only task, whose reopen needs an acknowledgement,
+cannot be handed to it. Journal tasks keep `JournalTaskRow`.
+
+- **Composition.** Checkbox, icon (`TaskIconGlyph`, its glyph hidden and its
+  name, *“House icon”*, as visually hidden text), text, then a
+  meta line under the text, the flag (`TaskFlagMarker`, an `img` named
+  "Flagged" in the warning colour) and the contacts (`ContactAvatarStack`), in
+  the canvas's order. The meta
+  line sits under the text at every width — the *Mobile: list page* artboard's
+  layout rather than the desktop *Task row* artboard's inline chips — so one
+  layout serves a 390px phone without scrolling sideways. Its free text — the
+  task's own and the due journal's title — is `wrap-anywhere`, and the link
+  is `min-w-0 max-w-full`: a flex item will not shrink below its min-content
+  width, which `break-words` leaves at the longest unbroken word.
+- **Dates.** A due date is an outline chip holding a `<time>`; a due journal
+  is a link to the journal with its title and date (or *journal cancelled*,
+  when it is, since a cancelled due journal leaves the task undated). An
+  overdue task shows `overdueWording`'s marker **instead of** its due-date
+  chip; a due-journal link stays beside it, as it is where the task is acted
+  on. The marker needs `status === not_done` as well as `overdue`, because an
+  optimistic tick shows the row done before the refetch clears `overdue`.
+- **Status.** `TaskStatusCheckbox` owns the write: checked means done or
+  cancelled, ticking takes `MARK_DONE` and unticking `RETURN_TO_NOT_DONE` from
+  the list offer table, so a done or cancelled list task is reopened directly.
+  It is held per task (`useTaskWriteInFlight`) with `aria-busy` and
+  `aria-disabled` rather than `disabled`, so focus stays on it mid-write. A
+  cancelled row's visible *Cancelled* marker is the checkbox's description.
+- **Contacts are not links.** The avatars are named images; 24px links would
+  fall short of the 44px touch target. The task's contacts are acted on from
+  its details panel.
+- **Touch targets.** The checkbox's hit area is its own `after:` inset widened
+  to about 44px, and the due-journal link is `max-sm:min-h-11`.
+
 ### TypeScript Integration
 
 - Define interfaces for all component props
