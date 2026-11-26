@@ -118,6 +118,33 @@ class TestAListTaskKeepsAContinuation:
         journal_service.delete_journal.assert_awaited_once()
 
 
+class TestAnAssociatedListKeepsAContinuation:
+    """A list associated with a journal is something the user added to it.
+
+    The delete would not be refused for it — the list would be left
+    unassociated — so without this check a calendar cancellation would drop
+    the association for good, where the specification has it wait for the
+    journal to be un-cancelled.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_continuation_a_list_is_associated_with_is_kept(self) -> None:
+        journal_service = AsyncMock()
+        journal_service.preview_delete.return_value = JournalDeletePreview(
+            list_tasks_losing_link=0, lists_losing_association=1
+        )
+        tidier = CancelledRecurrenceTidier(
+            AsyncMock(), _unprotected_link_repo(), journal_service
+        )
+
+        deleted = await tidier._delete_unless_protected(
+            _continuation(), source=Provenance.GOOGLE_CALENDAR, changed_by="google"
+        )
+
+        assert deleted is False
+        journal_service.delete_journal.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_the_journal_is_locked_before_its_list_task_links_are_counted() -> None:
     """Counted unlocked, a link committed before the delete would be detached by

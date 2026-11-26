@@ -3825,17 +3825,27 @@ skips). No E2E and no frontend tests: no UI. No worker suite: no worker reads th
 - Committed-data tests that associate a list must remove lists before journals (as `racing_owner`
   does) or they fail on `23001`.
 
-#### Phase 2b: Cancelled continuations with an associated list are kept
+#### Phase 2b: Cancelled continuations with an associated list are kept ✅ DONE
 
 **Prerequisites:** Phase 2a.
-**Estimated diff:** ~20 production → **~105 tracked**
+**Estimated diff:** ~20 production → **~105 tracked** · **Actual:** ~20 production → **~90 tracked**
+(20 production, 43 tests, 9 docs, ~16 this document).
 
 **Acceptance Criteria:**
 
-- [ ] Cancel → association kept (not surfacing is proven in Phase 7). The cancellation itself
+- [x] Cancel → association kept (not surfacing is proven in Phase 7). The cancellation itself
   touches no list; the `CancelledRecurrenceTidier`, the one path that deletes a cancelled journal on
   its own, keeps a continuation with an associated list as "added to", as it keeps one a list task
   links to.
+
+**Delivered:** `CancelledRecurrenceTidier._is_protected` also keeps a continuation whose
+`JournalDeletePreview.lists_losing_association` is above zero, counted under the journal lock it
+already takes. A cancellation writes `journal_calendar_info.event_state` only, so no other cancel
+path touches a list.
+
+**Tests:** unit `test_cancelled_recurrence_tidier.py::TestAnAssociatedListKeepsAContinuation`;
+integration `test_cancelled_recurrence_keep_next.py` — `associated_list` joins the parametrised
+"a user addition keeps a continuation cancelled" cases. Gates as for Phase 2a.
 
 #### Phase 2c: Journal merge moves associations to the survivor
 

@@ -308,6 +308,7 @@ it:
 - children, tags, manual contacts, type data or a route;
 - another calendar that still holds the event;
 - a task anchored to it;
+- a task on a list linked to it, or a list associated with it;
 - a change in its history made in the app or through MCP.
 
 A journal merge counts when it changed the journal's title or notes: the merge
