@@ -294,6 +294,12 @@ class TestProtectedContinuations:
                 await link_intermediate_journal(
                     connection, task_id=task_id, journal_id=protected
                 )
+        elif protect == "associated_list":
+            # Deleting the journal would leave the list unassociated, which a
+            # cancellation must not do: the association waits for un-cancelling.
+            await seed_task_list(
+                connection, user_id=USER_ID, associated_journal_id=protected
+            )
         elif protect in ("ui", "mcp"):
             await _record_history(connection, protected, protect)
         elif protect == "second_calendar":
@@ -315,7 +321,15 @@ class TestProtectedContinuations:
 
     @pytest.mark.parametrize(
         "protect",
-        ["tag", "task", "list_task_due", "list_task_mention", "ui", "mcp"],
+        [
+            "tag",
+            "task",
+            "list_task_due",
+            "list_task_mention",
+            "associated_list",
+            "ui",
+            "mcp",
+        ],
     )
     async def test_a_user_addition_keeps_a_continuation_cancelled(
         self, async_connection: AsyncConnection, protect: str

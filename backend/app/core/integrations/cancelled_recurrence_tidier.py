@@ -14,7 +14,10 @@ What counts as "added to":
 - a task anchored to the journal, which the delete guard refuses;
 - a task on a list linked to the journal. The delete would not be refused —
   a list task loses its link instead — so the tidier keeps the journal itself
-  rather than let a calendar sync undate the user's task.
+  rather than let a calendar sync undate the user's task;
+- a list associated with the journal, for the same reason: the delete would
+  leave it unassociated, where a cancelled journal's lists wait for it to be
+  un-cancelled.
 
 Each deletion runs in its own SAVEPOINT, so one that fails takes back only
 its own writes and the rest of the recurrence is still tidied. The recurrence
@@ -156,15 +159,18 @@ class CancelledRecurrenceTidier:
             return True
         if await self.link_repo.has_user_history(linked.journal_id):
             return True
-        # A list task's link is something the user added, but deleting the
-        # journal would not be refused for it — the task would just lose the
-        # link — so the guard's refusal below cannot stand in for this check.
-        # The journal is locked first and stays locked to the delete, so a link
-        # committed after the count cannot be detached by a delete that decided
+        # A list task's link, or a list's association, is something the user
+        # added, but deleting the journal would not be refused for either — the
+        # task would lose the link, the list its journal — so the guard's
+        # refusal below cannot stand in for this check. The journal is locked
+        # first and stays locked to the delete, so a link or an association
+        # committed after the count cannot be undone by a delete that decided
         # there were none.
         await self.link_repo.lock_journal(linked.journal_id)
         preview = await self.journal_service.preview_delete(linked.journal_id)
-        return preview.list_tasks_losing_link > 0
+        return (
+            preview.list_tasks_losing_link > 0 or preview.lists_losing_association > 0
+        )
 
     async def _delete_unless_protected(
         self, linked: SeriesLinkedJournal, *, source: Provenance, changed_by: str
