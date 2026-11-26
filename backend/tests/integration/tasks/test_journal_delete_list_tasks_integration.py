@@ -19,9 +19,13 @@ What is asserted, in order:
 - the preview's count is exactly what the delete then removes;
 - a second user's rows are never touched;
 - a list task that links to the journal after the detach is caught by the
-  existing retry rather than becoming a 500.
+  existing retry rather than becoming a 500;
+- a list associated with the journal survives, unassociated — archived or not,
+  announced once, retried with the delete — and a task write on one of its
+  tasks queues behind the delete rather than deadlocking with it.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, cast
 from uuid import uuid4
@@ -44,11 +48,22 @@ from app.core.journal.services.journal_service import (
     JournalDeletePreview,
     JournalService,
 )
+from app.core.settings.adapters.sql.user_settings_repository import (
+    SqlUserSettingsRepository,
+)
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.infrastructure.unit_of_work import unit_of_work
-from tests.integration.concurrency_helpers import overlap
+from tests.integration.concurrency_helpers import (
+    backend_pid,
+    bounded,
+    overlap,
+    settle,
+    wait_until_blocked_on_a_lock,
+)
 from tests.integration.tasks.task_seeding import (
+    ARCHIVED_AT,
     OTHER_USER_ID,
     USER_ID,
     create_journal,
@@ -56,7 +71,9 @@ from tests.integration.tasks.task_seeding import (
     create_task,
     link_intermediate_journal,
     seed_task_list,
+    service_on,
     task_events,
+    task_list_events,
 )
 from tests.journal_service_factory import build_journal_service
 
@@ -69,6 +86,9 @@ _SELECT_MENTIONS = text(
     " WHERE task_id = :task_id ORDER BY journal_id"
 )
 _COUNT_JOURNAL = text("SELECT COUNT(*) FROM journals WHERE id = :journal_id")
+_SELECT_ASSOCIATION = text(
+    "SELECT associated_journal_id, archived_at FROM task_lists WHERE id = :list_id"
+)
 
 
 async def _task_row(conn: AsyncConnection, task_id: int) -> Any:
@@ -83,6 +103,28 @@ async def _mentions(conn: AsyncConnection, task_id: int) -> list[int]:
 async def _journal_exists(conn: AsyncConnection, journal_id: int) -> bool:
     count = (await conn.execute(_COUNT_JOURNAL, {"journal_id": journal_id})).scalar()
     return bool(count)
+
+
+async def _association(conn: AsyncConnection, list_id: int) -> Any:
+    return (await conn.execute(_SELECT_ASSOCIATION, {"list_id": list_id})).one()
+
+
+async def _associated_list(
+    conn: AsyncConnection, journal_id: int, name: str = "Packing", **kwargs: Any
+) -> int:
+    task_list = await seed_task_list(
+        conn, name, associated_journal_id=journal_id, **kwargs
+    )
+    assert task_list.id is not None
+    return task_list.id
+
+
+async def _list_updates(conn: AsyncConnection, list_id: int) -> list[Any]:
+    return [
+        event
+        for event in await task_list_events(conn, task_list_id=list_id)
+        if event.event_type == "TaskListUpdated"
+    ]
 
 
 @pytest_asyncio.fixture
@@ -388,7 +430,9 @@ class TestThePreviewMatchesTheDelete:
 
         preview = await journal_service.preview_delete(doomed_id)
 
-        assert preview == JournalDeletePreview(list_tasks_losing_link=4)
+        assert preview == JournalDeletePreview(
+            list_tasks_losing_link=4, lists_losing_association=0
+        )
         assert await journal_service.delete_journal(doomed_id, async_connection) == 4
 
     async def test_a_journal_only_task_is_not_counted(
@@ -495,6 +539,70 @@ class TestARacingListTaskIsCaughtByTheRetry:
         assert not await _journal_exists(async_connection, doomed_id)
 
 
+@pytest.mark.integration
+class TestAssociatedListsAreUnassociated:
+    """The specification's *Association with a journal*: "If the journal is
+    deleted the list survives, unassociated." A system write, so an archived
+    list is unassociated too."""
+
+    async def test_the_lists_survive_unassociated_archived_ones_too(
+        self,
+        async_connection: AsyncConnection,
+        journal_service: JournalService,
+        doomed_id: int,
+    ) -> None:
+        packing_id = await _associated_list(async_connection, doomed_id)
+        archived_id = await _associated_list(
+            async_connection, doomed_id, "Old packing", archived_at=ARCHIVED_AT
+        )
+
+        await journal_service.delete_journal(doomed_id, async_connection)
+
+        assert not await _journal_exists(async_connection, doomed_id)
+        packing = await _association(async_connection, packing_id)
+        archived = await _association(async_connection, archived_id)
+        assert packing.associated_journal_id is None
+        assert archived.associated_journal_id is None
+        assert archived.archived_at == ARCHIVED_AT
+
+    async def test_each_list_is_announced_with_the_deleters_provenance(
+        self,
+        async_connection: AsyncConnection,
+        journal_service: JournalService,
+        doomed_id: int,
+    ) -> None:
+        packing_id = await _associated_list(async_connection, doomed_id)
+
+        await journal_service.delete_journal(
+            doomed_id, async_connection, changed_by="ui", source=Provenance.UI
+        )
+
+        (event,) = await _list_updates(async_connection, packing_id)
+        assert event.payload["changed_fields"] == {
+            "associated_journal_id": [doomed_id, None]
+        }
+        assert event.payload["user_id"] == USER_ID
+        assert event.payload["source"] == Provenance.UI.value
+        assert event.payload["changed_by"] == "ui"
+
+    async def test_the_preview_counts_the_owners_associated_lists(
+        self,
+        async_connection: AsyncConnection,
+        journal_service: JournalService,
+        doomed_id: int,
+    ) -> None:
+        await _associated_list(async_connection, doomed_id)
+        await _associated_list(
+            async_connection, doomed_id, "Old packing", archived_at=ARCHIVED_AT
+        )
+
+        preview = await journal_service.preview_delete(doomed_id)
+
+        assert preview == JournalDeletePreview(
+            list_tasks_losing_link=0, lists_losing_association=2
+        )
+
+
 class _DeleteFailsTimes:
     """The real journal repository, except that its first ``n`` deletes fail.
 
@@ -597,13 +705,63 @@ class TestAFailedDeleteTakesTheDetachBack:
         assert await _removed_events(async_connection, task_id) == 1
         assert not await _journal_exists(async_connection, doomed_id)
 
+    async def test_a_delete_that_fails_twice_keeps_the_association(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        doomed_id: int,
+    ) -> None:
+        packing_id = await _associated_list(async_connection, doomed_id)
+        failing = _DeleteFailsTimes(journal_repository, failures=2)
+        service = build_journal_service(
+            async_connection, journal_repo=cast(JournalRepository, failing)
+        )
+
+        with pytest.raises(IntegrityError):
+            await service.delete_journal(doomed_id, async_connection)
+
+        association = await _association(async_connection, packing_id)
+        assert association.associated_journal_id == doomed_id
+        assert await _list_updates(async_connection, packing_id) == []
+
+    async def test_a_retried_delete_announces_each_list_once(
+        self,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        doomed_id: int,
+    ) -> None:
+        packing_id = await _associated_list(async_connection, doomed_id)
+        failing = _DeleteFailsTimes(journal_repository, failures=1)
+        service = build_journal_service(
+            async_connection, journal_repo=cast(JournalRepository, failing)
+        )
+
+        await service.delete_journal(doomed_id, async_connection)
+
+        association = await _association(async_connection, packing_id)
+        assert association.associated_journal_id is None
+        assert len(await _list_updates(async_connection, packing_id)) == 1
+        assert not await _journal_exists(async_connection, doomed_id)
+
 
 @pytest_asyncio.fixture
 async def racing_owner(async_engine: AsyncEngine) -> AsyncIterator[str]:
-    """A one-off owner whose committed rows are deleted after the test."""
+    """A one-off owner whose committed rows are deleted after the test.
+
+    Lists go before journals, so a list still associated with a journal never
+    holds the journal's delete up on its ``RESTRICT`` key; the events a test
+    committed go with the owner's rows.
+    """
     owner = f"race-{uuid4()}"
     yield owner
     async with async_engine.connect() as cleanup:
+        await cleanup.execute(
+            text(
+                "DELETE FROM outbox_events"
+                " WHERE event_data::jsonb ->> 'user_id' = :owner"
+            ),
+            {"owner": owner},
+        )
         for table in ("tasks", "task_lists", "journals"):
             await cleanup.execute(
                 text(f"DELETE FROM {table} WHERE user_id = :owner"),
@@ -743,3 +901,98 @@ class TestTheDetachReportsOnlyWhatItRemoved:
         assert detachment == TaskJournalDetachment(
             task_id=task_id, user_id=USER_ID, due_anchor_removed=True
         )
+
+
+class _GatedShareLock(SqlTaskListRepository):
+    """A list repository that pauses at a task write's list lock until let go.
+
+    A task write locks its task first and its list second, so the pause is the
+    moment it holds the task and has not yet asked for the list. Each test
+    subclasses it with events of its own.
+    """
+
+    reached: asyncio.Event
+    release: asyncio.Event
+
+    async def find_by_id_for_share(self, task_list_id: int, user_id: str) -> Any:
+        if not self.reached.is_set():
+            self.reached.set()
+            await self.release.wait()
+        return await super().find_by_id_for_share(task_list_id, user_id)
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestATaskWriteQueuesBehindTheDelete:
+    """The delete takes the journal, then its list tasks, then its lists.
+
+    A task write takes its task, then its list ``FOR SHARE``. Staged here: the
+    write holds the task, the delete takes the journal and waits for the task,
+    then the write asks for the list. Were the delete to take the list before
+    the tasks, it would already hold the list the write now wants, and the two
+    would deadlock; taking it last, it holds nothing the write waits for.
+    """
+
+    async def test_both_finish(
+        self, async_engine: AsyncEngine, racing_owner: str
+    ) -> None:
+        async with async_engine.connect() as setup:
+            journal_id = await create_journal(
+                SqlJournalRepository(setup), title="Trip", user_id=racing_owner
+            )
+            list_id = await _associated_list(setup, journal_id, user_id=racing_owner)
+            task_id = await create_list_task(
+                setup,
+                task_list_id=list_id,
+                due_journal_id=journal_id,
+                user_id=racing_owner,
+            )
+            await setup.commit()
+
+        class Gated(_GatedShareLock):
+            reached = asyncio.Event()
+            release = asyncio.Event()
+
+        async def completing(connection: AsyncConnection) -> None:
+            async with unit_of_work(connection):
+                await service_on(
+                    connection,
+                    SqlUserSettingsRepository(connection),
+                    task_list_repo=Gated,
+                ).set_status(
+                    user_id=racing_owner,
+                    task_id=task_id,
+                    status=TaskStatus.DONE,
+                    transaction=connection,
+                )
+
+        async def deleting(connection: AsyncConnection) -> None:
+            async with unit_of_work(connection):
+                await build_journal_service(connection).delete_journal(
+                    journal_id, connection
+                )
+
+        async with async_engine.connect() as one, async_engine.connect() as two:
+            deleter_pid = await backend_pid(two)
+            started: list[asyncio.Task[None]] = []
+            try:
+                started.append(asyncio.create_task(completing(one)))
+                await bounded(Gated.reached.wait())
+                started.append(asyncio.create_task(deleting(two)))
+                await wait_until_blocked_on_a_lock(async_engine, deleter_pid)
+                Gated.release.set()
+
+                outcomes = await bounded(
+                    asyncio.gather(*started, return_exceptions=True)
+                )
+            finally:
+                Gated.release.set()
+                await settle(*started)
+
+        assert outcomes == [None, None]
+        async with async_engine.connect() as check:
+            task = await _task_row(check, task_id)
+            assert task.status == TaskStatus.DONE.value
+            assert task.due_journal_id is None
+            assert (await _association(check, list_id)).associated_journal_id is None
+            assert not await _journal_exists(check, journal_id)

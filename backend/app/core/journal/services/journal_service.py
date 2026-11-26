@@ -58,9 +58,12 @@ class JournalDeletePreview:
         list_tasks_losing_link: How many list tasks link to the journal — as
             its creating or due journal, or by mention — and would lose that
             link. A list task due there would become undated.
+        lists_losing_association: How many of the owner's lists are associated
+            with the journal and would be left unassociated.
     """
 
     list_tasks_losing_link: int
+    lists_losing_association: int
 
 
 class JournalService:
@@ -515,7 +518,11 @@ class JournalService:
         try:
             async with savepoint(transaction):
                 list_tasks_unlinked = await self._detach_list_tasks_and_delete(
-                    journal_id, transaction, source=source, changed_by=changed_by
+                    journal_id,
+                    transaction,
+                    user_id=journal.user_id,
+                    source=source,
+                    changed_by=changed_by,
                 )
         except IntegrityError:
             # Tasks anchored now? Then that is the explanation.
@@ -530,7 +537,11 @@ class JournalService:
             # untouched.
             async with savepoint(transaction):
                 list_tasks_unlinked = await self._detach_list_tasks_and_delete(
-                    journal_id, transaction, source=source, changed_by=changed_by
+                    journal_id,
+                    transaction,
+                    user_id=journal.user_id,
+                    source=source,
+                    changed_by=changed_by,
                 )
 
         # Publish deletion event
@@ -559,12 +570,25 @@ class JournalService:
         journal_id: int,
         transaction: AsyncConnection,
         *,
+        user_id: str,
         source: Provenance,
         changed_by: str,
     ) -> int:
-        """Detach the list tasks, then delete the journal row; one attempt."""
+        """Detach the list tasks, unassociate the lists, then delete the row.
+
+        One attempt. The lists come after the tasks because the detach locks
+        the journal and its tasks first; see
+        ``TaskJournalDeletionService.unassociate_lists`` for the order.
+        """
         unlinked = await self.task_journal_deletion.remove_list_task_links(
             journal_id=journal_id,
+            transaction=transaction,
+            source=source,
+            changed_by=changed_by,
+        )
+        await self.task_journal_deletion.unassociate_lists(
+            journal_id=journal_id,
+            user_id=user_id,
             transaction=transaction,
             source=source,
             changed_by=changed_by,
@@ -573,22 +597,29 @@ class JournalService:
         return unlinked
 
     async def preview_delete(self, journal_id: int) -> JournalDeletePreview:
-        """What deleting this journal would do to tasks on a list, without doing it.
+        """What deleting this journal would do to tasks and lists, without doing it.
 
         The confirmation's number: how many list tasks would lose their link to
         the journal. Journal-only blockers are not part of it — the delete names
-        those itself, in its refusal. A read, so no transaction; unscoped like
+        those itself, in its refusal. Beside it, how many of the owner's lists
+        would be left unassociated. A read, so no transaction; unscoped like
         the delete, whose callers check ownership first.
 
         Raises:
             JournalNotFoundError: If journal doesn't exist
         """
-        if await self.journal_repo.find_by_id(journal_id) is None:
+        journal = await self.journal_repo.find_by_id(journal_id)
+        if journal is None:
             raise JournalNotFoundError(journal_id)
         return JournalDeletePreview(
             list_tasks_losing_link=(
                 await self.task_journal_deletion.count_list_task_links(journal_id)
-            )
+            ),
+            lists_losing_association=(
+                await self.task_journal_deletion.count_associated_lists(
+                    journal_id, journal.user_id
+                )
+            ),
         )
 
     async def _refuse_if_tasks_are_anchored(self, journal_id: int) -> None:
@@ -1147,6 +1178,9 @@ def journal_service_on(
     from app.core.tasks.adapters.sql.task_anchor_repository import (
         SqlTaskAnchorRepository,
     )
+    from app.core.tasks.adapters.sql.task_list_repository import (
+        SqlTaskListRepository,
+    )
 
     task_anchor_repo = SqlTaskAnchorRepository(connection)
     return JournalService(
@@ -1155,6 +1189,8 @@ def journal_service_on(
         contact_relationship_repo=contact_relationship_repo,
         task_anchor_repo=task_anchor_repo,
         task_journal_deletion=TaskJournalDeletionService(
-            task_anchor_repo=task_anchor_repo, event_publisher=event_publisher
+            task_anchor_repo=task_anchor_repo,
+            task_list_repo=SqlTaskListRepository(connection),
+            event_publisher=event_publisher,
         ),
     )

@@ -3718,7 +3718,7 @@ E2E and no frontend tests: no UI. No worker suite: no worker reads `TaskList`.
   *Associate, change, remove* **Phase 3**, so the journal paths learn about associations before any
   can be written. The old order left a window in which a journal delete failed on an associated
   list (`RESTRICT`) or a merge silently dropped the association (`SET NULL`). Phases 4, 5, 7 and 10
-  and ITER21-007 Phase 8 now need Phase 3; ITER21-007 Phase 9 needs Phase 2.
+  and ITER21-007 Phase 8 now need Phase 3; ITER21-007 Phase 9 needs Phase 2 (since re-split into 2a–2c).
 - **`ON DELETE RESTRICT`, not `SET NULL`**, as for the task anchors: the journal services unassociate
   or re-point lists with history events, and a path that forgot fails rather than dropping the
   association silently. Only two paths delete journal rows — `JournalService.delete_journal` (REST,
@@ -3752,28 +3752,112 @@ E2E and no frontend tests: no UI. No worker suite: no worker reads `TaskList`.
 - *ITER21-007 Phase 1:* new `task_lists` columns go into `_INSERT`, `_UPDATE` and `_write_params` as
   this one did, with the same "update from the stored row" rule.
 
-#### Phase 2: Journal delete, cancel and merge
+#### Phase 2: Journal delete, cancel and merge — re-split into 2a, 2b and 2c
+
+Planned as one phase of ~850 tracked lines. Planning measured ~1,375: a cancelled-continuation
+tidier that would otherwise delete an associated journal, a lock-order overlap test, and a shared
+merge-service factory replacing 13 hand-built test sites. So it is re-split (user decision) into
+three phases, one PR each, every one safe alone because nothing can write an association before
+Phase 3. The delete, the tidier and the merge each learn about associations in their own phase.
+
+#### Phase 2a: Journal delete unassociates lists ✅ DONE
 
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~120 production → **~850 tracked** (re-split by Phase 1: this phase was Phase 3 and
-now lands before any association can be written, so a journal delete or merge is never refused by an
-associated list)
+**Estimated diff:** ~200 production → **~750 tracked** · **Actual:** ~220 production → **~940 tracked**
+(220 production — repository and port 60, deletion service 75, journal service 45, wiring and
+docstrings 40; 578 tests; 33 architecture docs; ~110 this document). Tests ran ×1.3 on the
+estimate, mostly the staged overlap test, the retry pair and the delete's call-order test.
 
 **Acceptance Criteria:**
 
-- [ ] Delete → unassociated; cancel → association kept (not surfacing is proven in Phase 7); merge → moves to the survivor.
-- [ ] Each unassociation and move is a `TaskListUpdated` carrying the association key into list history (the key this phase introduces); the delete runs it inside `JournalService._detach_list_tasks_and_delete`, so the `IntegrityError` retry is covered too, and the merge in step 0 beside the task re-point.
-- [ ] Archived lists are unassociated and re-pointed too: these are system writes that bypass the archived read-only rule, proven with an archived associated list.
-- [ ] Lands before any association can exist: tests seed associations through the repository; the new statements are owner-scoped and proven with a second user.
+- [x] Delete → the list survives, unassociated, archived lists included (a system write that bypasses
+  the archived read-only rule).
+- [x] Each unassociation is a `TaskListUpdated` carrying `associated_journal_id` `(deleted, null)`
+  into list history (the key this phase introduces), published inside
+  `JournalService._detach_list_tasks_and_delete`, so the `IntegrityError` retry is covered too.
+- [x] Lists are taken after the delete's journal and task locks (journal → tasks → lists), so a task
+  write on a list task — task, then its list — queues against the delete instead of deadlocking.
+- [x] Lands before any association can exist: tests seed associations through the repository; the new
+  statements are owner-scoped and proven with a second user.
+
+**Delivered:** `TaskListRepository.unassociate_journal(journal_id, user_id)` (one owner-scoped
+`UPDATE … RETURNING id`, ids ascending, `updated_at` moved, no archived check) and
+`count_associated_with_journal`. `TaskJournalDeletionService` takes a required `task_list_repo` and
+gains `unassociate_lists` (one `TaskListUpdated` per list with the deleter's provenance, one info log)
+and `count_associated_lists`; `JournalService._detach_list_tasks_and_delete` calls it after
+`remove_list_task_links` and before the row delete, with the journal's owner. `JournalDeletePreview`
+gains `lists_losing_association` (not serialised by REST or MCP yet). `TaskListFieldChange` admits
+integer ids. Wiring: `JournalProvider` builds `SqlTaskListRepository` on the request connection (it
+stays self-sufficient), as do `journal_service_on` and `tests/journal_service_factory.py`. History,
+MCP `get_task_list_history` and REST list-history docstrings name `associated_journal_id`.
+
+**Tests:** unit `test_task_journal_deletion_service.py::TestListsAreUnassociated`,
+`test_task_list_events.py` (integer pair), `test_journal_delete_guard.py` (preview); integration
+`test_task_list_repository_integration.py::TestUnassociateJournal` (owner lists, ids ascending,
+backdated `updated_at`, other journal, archived, second user, count),
+`test_journal_delete_list_tasks_integration.py::TestAssociatedListsAreUnassociated` (survives incl.
+archived, event and provenance, preview), the retry pair in `TestAFailedDeleteTakesTheDetachBack`
+(fails twice → kept and silent; once → announced once), the slow
+`TestATaskWriteQueuesBehindTheDelete` (a status write holding the task while the delete waits for it;
+checked to deadlock under a lists-first order), and
+`test_task_list_history_projection_e2e.py::TestAJournalDeleteIsInTheListsHistory` (read back through
+`TaskListHistoryService`). Gates run locally: ruff format/check, mypy (backend, core_shared), backend
+unit suite (6,313 passed), the full backend integration suite in chunks (5,484 passed, 7 MeiliSearch
+skips). No E2E and no frontend tests: no UI. No worker suite: no worker reads these.
+
+**Decisions (recorded during implementation):**
+- **Lists last.** No single order suits both kinds of list-task writer: task writes take task → list;
+  moves, removals, task reorders and list deletes take list → tasks. Lists-first would deadlock against
+  the frequent ones (ticking off a task due in the journal); lists-last leaves one of the others, on a
+  list associated with the journal over a task linked to it, able to meet the delete in a deadlock
+  PostgreSQL aborts (`40P01`, not retried). Accepted, and recorded in `domain-architecture.md` beside
+  the removal's lock order; a retry on deadlock would be a change to the delete's retry, not made here.
+- **Owner scope is the journal's owner**; production cannot associate another user's list (Phase 3
+  owner-checks the journal), so the second user is proven at the repository.
+
+**Notes for later phases:**
+- *Phase 2b:* the tidier reads `JournalDeletePreview.lists_losing_association` under the journal lock
+  it already takes.
+- *Phase 3 / 4:* the preview's list count is ready for the delete confirmation to state.
+- *Phase 10 and ITER21-008 Phase 3:* a journal delete publishes `TaskListUpdated`
+  `{associated_journal_id: (deleted, null)}` (and Phase 2c's merge `(absorbed, survivor)`); the
+  summary and search freshness must react to those as well as to Phase 3's writes.
+- Committed-data tests that associate a list must remove lists before journals (as `racing_owner`
+  does) or they fail on `23001`.
+
+#### Phase 2b: Cancelled continuations with an associated list are kept
+
+**Prerequisites:** Phase 2a.
+**Estimated diff:** ~20 production → **~105 tracked**
+
+**Acceptance Criteria:**
+
+- [ ] Cancel → association kept (not surfacing is proven in Phase 7). The cancellation itself
+  touches no list; the `CancelledRecurrenceTidier`, the one path that deletes a cancelled journal on
+  its own, keeps a continuation with an associated list as "added to", as it keeps one a list task
+  links to.
+
+#### Phase 2c: Journal merge moves associations to the survivor
+
+**Prerequisites:** Phase 2a.
+**Estimated diff:** ~120 production → **~520 tracked**
+
+**Acceptance Criteria:**
+
+- [ ] Merge → each list associated with the absorbed journal moves to the survivor, archived lists
+  included.
+- [ ] Each move is a `TaskListUpdated` carrying `associated_journal_id` `(absorbed, survivor)` into
+  list history, made in step 0 beside the task re-point, after the journals and tasks are locked.
+- [ ] The new statement is owner-scoped and proven with a second user.
 
 #### Phase 3: Associate, change, remove
 
-**Prerequisites:** Phase 2.
+**Prerequisites:** Phases 2a, 2b and 2c.
 **Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together
 
 **Acceptance Criteria:**
 
-- [ ] Owner-checked journal; carried on the list-updated event (Phase 2's key) into list history. The journal is locked `FOR KEY SHARE` before the list `FOR NO KEY UPDATE` — the order a journal delete takes, which holds the journal `FOR UPDATE` before it touches any list (see Phase 1's notes).
+- [ ] Owner-checked journal; carried on the list-updated event (Phase 2a's key) into list history. The journal is locked `FOR KEY SHARE` before the list `FOR NO KEY UPDATE` — the order a journal delete takes, which holds the journal `FOR UPDATE` before it touches any list (see Phase 1's notes).
 - [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
 
 #### Phase 4: List page and `/tasks` card: associate and link
@@ -4081,7 +4165,7 @@ associated list)
 
 #### Phase 9: Copies for each journal, when it is created
 
-**Prerequisites:** Phase 3, ITER21-005 Phase 2.
+**Prerequisites:** Phase 3, ITER21-005 Phases 2a–2c.
 **Estimated diff:** ~170 production → **~1,300 tracked**
 
 **Acceptance Criteria:**

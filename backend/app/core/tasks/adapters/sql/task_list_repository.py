@@ -225,6 +225,41 @@ _FIND_FOR_TASKS = text(
 )
 
 
+# The owner's lists on a journal, locked in ``id`` order — the order
+# ``_LOCK_OWNER_LISTS`` takes — before a journal delete or merge rewrites their
+# association, so it cannot cross a create or reorder holding some of them. A
+# bare UPDATE would lock them in scan order instead.
+_LOCK_ASSOCIATED_WITH_JOURNAL = text(
+    """
+    SELECT id
+    FROM task_lists
+    WHERE associated_journal_id = :journal_id AND user_id = :user_id
+    ORDER BY id
+    FOR NO KEY UPDATE
+    """
+)
+
+# A system write on behalf of a journal delete: no archived check, every one of
+# the owner's lists on the journal.
+_UNASSOCIATE_JOURNAL = text(
+    """
+    UPDATE task_lists
+    SET associated_journal_id = NULL,
+        updated_at = now()
+    WHERE associated_journal_id = :journal_id AND user_id = :user_id
+    RETURNING id
+    """
+)
+
+_COUNT_ASSOCIATED_WITH_JOURNAL = text(
+    """
+    SELECT COUNT(*)
+    FROM task_lists
+    WHERE associated_journal_id = :journal_id AND user_id = :user_id
+    """
+)
+
+
 def _row_to_task_list(row: Any) -> TaskList:
     """Map a ``task_lists`` row to a :class:`TaskList` entity."""
     return TaskList(
@@ -363,6 +398,30 @@ class SqlTaskListRepository(TaskListRepository):
         if locked is None:
             raise TaskListNotFoundError(task_list_id)
         await self.conn.execute(_DELETE, params)
+
+    async def unassociate_journal(self, journal_id: int, user_id: str) -> list[int]:
+        """Clear every one of the owner's lists on the journal; their ids, ascending."""
+        await self._lock_associated_with_journal(journal_id, user_id)
+        result = await self.conn.execute(
+            _UNASSOCIATE_JOURNAL, {"journal_id": journal_id, "user_id": user_id}
+        )
+        return sorted(int(row.id) for row in result.fetchall())
+
+    async def count_associated_with_journal(self, journal_id: int, user_id: str) -> int:
+        """How many of the owner's lists name the journal."""
+        result = await self.conn.execute(
+            _COUNT_ASSOCIATED_WITH_JOURNAL,
+            {"journal_id": journal_id, "user_id": user_id},
+        )
+        return int(result.scalar_one())
+
+    async def _lock_associated_with_journal(
+        self, journal_id: int, user_id: str
+    ) -> None:
+        await self.conn.execute(
+            _LOCK_ASSOCIATED_WITH_JOURNAL,
+            {"journal_id": journal_id, "user_id": user_id},
+        )
 
     async def _lock_owner_lists(self, user_id: str) -> None:
         await self.conn.execute(_LOCK_OWNER_LISTS, {"user_id": user_id})

@@ -1182,6 +1182,23 @@ class TaskListRepository(ABC):
         """
 
     @abstractmethod
+    async def unassociate_journal(self, journal_id: int, user_id: str) -> list[int]:
+        """Clear the association of every one of the user's lists on the journal.
+
+        For a journal delete: the lists survive, unassociated. A system write,
+        so archived lists are cleared too. Each list is locked by the update;
+        the caller has already locked the journal and its tasks, which is the
+        order a journal delete takes them in (journal, tasks, lists).
+
+        Returns:
+            The ids of the lists it cleared, ascending.
+        """
+
+    @abstractmethod
+    async def count_associated_with_journal(self, journal_id: int, user_id: str) -> int:
+        """How many of the user's lists, archived ones included, name the journal."""
+
+    @abstractmethod
     async def delete(self, task_list_id: int, user_id: str) -> None:
         """Hard-delete one of the user's lists.
 

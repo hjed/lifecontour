@@ -158,8 +158,10 @@ async def get_task_list_history(
 
     Each entry names the field that changed and its value on both sides:
     ``__created__`` (the list's name), ``name`` (a rename), ``icon`` (set,
-    changed or cleared) and ``archived_at`` — an archive moves it from null to
-    the instant, an unarchive from the instant back to null. Each carries its
+    changed or cleared), ``archived_at`` — an archive moves it from null to
+    the instant, an unarchive from the instant back to null — and
+    ``associated_journal_id``, the associated journal's id (null when
+    unassociated, as a journal delete leaves the list). Each carries its
     provenance and actor, in the shape the task and journal feeds use. Wording
     belongs to the client; these field names are the contract.
 

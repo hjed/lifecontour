@@ -392,7 +392,9 @@ the *creating* journal where it arose and the *due* journal where it matters.
   and only a task holding both may leave (`TASK_LIST_REMOVAL_NEEDS_JOURNALS`, 409). A removal places
   nothing, so it never takes its list exclusively, and since it never holds a task while waiting for
   a list it cannot close a cycle with a move and a journal delete (`TestARemovalAMoveAndAJournalDelete`
-  deadlocks under a task-first order). Lapse is derived, so the surfaces answer with the read model.
+  deadlocks under a task-first order) — unless the journal deleted is one the removed task's list is
+  associated with (as for a move, a reorder or a list delete), when the delete's list update comes after its task locks (see *The journal delete guard* below,
+  ITER21-005 Phase 2a). Lapse is derived, so the surfaces answer with the read model.
   **A write that retains a due journal publishes two events, and is the only kind that publishes
   more than one.** A journal-only task's retarget — by `retarget_due_journal` or by `update_task`
   naming its new due journal — publishes `TaskDueJournalRetargeted`, carrying the due-journal pair
@@ -515,14 +517,17 @@ the *creating* journal where it arose and the *due* journal where it matters.
   `name`, `icon`) plus provenance; position is left out because reordering announces nothing.
   Renaming, changing the icon, archiving and unarchiving all publish `TaskListUpdated`, whose
   `changed_fields` is `{field: (old, new)}`: archive state travels as `archived_at`, an ISO instant
-  or `null` (`(null, ts)` archives, `(ts, null)` unarchives). Archive and unarchive are idempotent —
+  or `null` (`(null, ts)` archives, `(ts, null)` unarchives). The journal association travels as
+  `associated_journal_id`, an integer journal id or `null`; a journal delete publishes
+  `(deleted, null)` for each list it leaves unassociated (ITER21-005 Phase 2a). Archive and unarchive are idempotent —
   a list already in the asked-for state is answered unchanged and nothing is published.
   **A list's history is projected from these events** (ITER21-001 Phase 7): the
   `history-projection` group subscribes to `TASK_LIST_EVENT_TYPES` and `HistoryService` files the
   rows under `entity_type='task_list'`, keyed on the list id — never `task`, since a list id can
   equal a task id. The vocabulary is `__created__` (carrying the name; the icon is not itemised),
   then one row per `changed_fields` key: `name` (renamed), `icon` (set, changed, or cleared as
-  `[old, null]`) and `archived_at` (`[null, ts]` archived, `[ts, null]` unarchived). Rows carry
+  `[old, null]`), `archived_at` (`[null, ts]` archived, `[ts, null]` unarchived) and
+  `associated_journal_id` (the journal id, `null` when unassociated). Rows carry
   their owner in `field_history.user_id`, as task rows do, because lists are hard-deleted too.
   The startup `TaskHistoryBackfill` re-projects the list types as well, so lists created before
   the subscription landed recover their history from the retained outbox. Wording these rows for
@@ -1668,7 +1673,27 @@ handled by the delete's other half:
   `changed_fields` in the merge's vocabulary, every pair `(deleted, None)` — which the history
   projection writes through `_project_task_updated`. Journal-only tasks' mentions keep the silent
   cascade.
-- **Order:** guard → savepoint(detach → events → `DELETE`). A refused delete detaches nothing; a failed
+- **A list associated with the journal survives, unassociated** (ITER21-005 Phase 2a). The same
+  service's `unassociate_lists` calls `TaskListRepository.unassociate_journal`, which clears
+  `associated_journal_id` on every one of the journal owner's lists naming it — archived ones too,
+  a system write that bypasses the read-only rule — and publishes one **`TaskListUpdated`**
+  `{associated_journal_id: (deleted, null)}` per list, with the deleter's provenance. The preview's
+  `JournalDeletePreview.lists_losing_association` counts them (not yet serialised by REST or MCP).
+  `task_lists.associated_journal_id` is `ON DELETE RESTRICT`, so a path that forgot fails.
+- **Lock order: journal → list tasks → lists.** The detach locks the journal `FOR UPDATE` and then its
+  linked list tasks; the lists are updated last, locked first in `id` order — the order list
+  creation and reordering take (`_LOCK_OWNER_LISTS`) — so the delete cannot cross one of those. A
+  task write takes its task and then its list `FOR SHARE`, so it never holds a task the delete wants
+  while waiting for a list the delete holds (`TestATaskWriteQueuesBehindTheDelete`, which deadlocks
+  under a lists-first order). A move, a
+  removal, a reorder of the list's tasks (`reorder_task`, `reorder_list_tasks`) and a list delete take
+  the list before its tasks, so one of those on a list associated with the journal, over a task linked
+  to it, can still meet the delete in a deadlock, which PostgreSQL resolves by aborting one side
+  (`40P01`; the delete's retry is for `IntegrityError` only, so the caller sees an error). No single
+  order avoids both kinds of writer: the task writes are the frequent kind, and the overlap needs one
+  user acting on a list while deleting its journal. Accepted, as `_lock_journals` accepts its creation
+  window; a merge has the same window.
+- **Order:** guard → savepoint(detach → events → unassociate → events → `DELETE`). A refused delete detaches nothing; a failed
   `DELETE` rolls the detach and its outbox rows back with it, and the `IntegrityError` retry re-runs the
   guard and then the detach, so a list task that linked to the journal mid-delete is detached rather
   than causing a 500. The anchors stay `ON DELETE RESTRICT` as that backstop — `SET NULL` would trip the

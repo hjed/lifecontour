@@ -16,6 +16,7 @@ from app.core.tasks.models.task_list_events import (
     TASK_LIST_EVENT_TYPES,
     TaskListCreated,
     TaskListDeleted,
+    TaskListFieldChange,
     TaskListUpdated,
 )
 
@@ -97,12 +98,12 @@ class TestTaskListCreated:
 
 
 def make_updated(
-    changed_fields: dict[str, tuple[str | None, str | None]] | None = None,
+    changed_fields: dict[str, TaskListFieldChange] | None = None,
     *,
     source: Provenance | None = None,
     changed_by: str | None = None,
 ) -> TaskListUpdated:
-    fields: dict[str, tuple[str | None, str | None]] = (
+    fields: dict[str, TaskListFieldChange] = (
         changed_fields if changed_fields is not None else {"name": ("Old", "New")}
     )
     if source is None or changed_by is None:
@@ -156,6 +157,14 @@ class TestTaskListUpdated:
 
         assert event.event_data["changed_fields"] == {
             "icon": (TaskIcon.LUGGAGE.value, None)
+        }
+
+    def test_an_association_carries_journal_ids_as_integers(self) -> None:
+        """A journal id is an id, as it is in every task event's payload."""
+        event = make_updated({"associated_journal_id": (11, None)})
+
+        assert event.event_data["changed_fields"] == {
+            "associated_journal_id": (11, None)
         }
 
     def test_provenance_and_actor_are_carried(self) -> None:

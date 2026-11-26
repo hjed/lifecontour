@@ -9,8 +9,9 @@ Exercises the full async chain a real list write travels:
         -> HistoryProjectionConsumer (-> field_history rows)
 
 and asserts the rows are filed under ``("task_list", list_id)`` with the field
-names the list history read answers — ``__created__``, ``name``, ``icon`` and
-``archived_at`` — and with provenance, owner and event identity intact. Writes
+names the list history read answers — ``__created__``, ``name``, ``icon``,
+``archived_at`` and ``associated_journal_id`` — and with provenance, owner and
+event identity intact. Writes
 that change nothing, and reorders, publish nothing and so must project nothing.
 
 Rows are read with ``get_entity_history``, except in
@@ -18,6 +19,8 @@ Rows are read with ``get_entity_history``, except in
 back through ``TaskListHistoryService`` and the ``"task_list"`` aggregation
 strategy — proving the read matches the rows the projection really writes.
 """
+
+from dataclasses import replace
 
 import pytest
 from core_shared.models.history import Provenance
@@ -49,6 +52,7 @@ from tests.integration.tasks.task_seeding import (
     create_journal,
     create_list_task,
 )
+from tests.journal_service_factory import build_journal_service
 
 LIST_ENTITY_TYPE = "task_list"
 LIST_NAME = "Groceries"
@@ -464,3 +468,51 @@ class TestADeletedListsHistoryIsProjected:
             await reader.get_task_list_history(
                 task_list_id=list_id, user_id=OTHER_USER_ID
             )
+
+
+@pytest.mark.integration
+class TestAJournalDeleteIsInTheListsHistory:
+    @pytest.mark.asyncio
+    async def test_the_unassociation_reads_back_as_the_deleters_change(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Deleting the journal a list is associated with leaves an
+        ``associated_journal_id`` line from the journal to nothing, carrying the
+        deleting actor — the list's own record of why its journal went."""
+        service = _list_service(async_connection)
+        list_id = await _create(service, async_connection)
+        trip_id = await create_journal(journal_repository, title="Trip", days_offset=7)
+        lists = SqlTaskListRepository(async_connection)
+        stored = await lists.find_by_id(list_id, USER_ID)
+        assert stored is not None
+        await lists.save(replace(stored, associated_journal_id=trip_id))
+
+        await build_journal_service(async_connection).delete_journal(
+            trip_id, async_connection, changed_by="ui", source=Provenance.UI
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-list-unassociate"
+        )
+        reader = TaskListHistoryService(
+            history_repo=SqlFieldHistoryRepository(async_connection),
+            task_list_repo=lists,
+        )
+
+        entries = await reader.get_task_list_history(
+            task_list_id=list_id, user_id=USER_ID
+        )
+
+        assert [e.field_name for e in entries] == [
+            "associated_journal_id",
+            "__created__",
+        ]
+        unassociated = entries[0]
+        assert (unassociated.old_value, unassociated.new_value) == (str(trip_id), None)
+        assert unassociated.source == Provenance.UI
+        assert unassociated.changed_by == "ui"
+        assert unassociated.user_id == USER_ID

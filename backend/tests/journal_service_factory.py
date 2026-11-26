@@ -24,6 +24,7 @@ from app.core.journal.services.journal_tag_hierarchy_service import (
     JournalTagHierarchyService,
 )
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.core.tasks.services.task_journal_deletion_service import (
     TaskJournalDeletionService,
@@ -57,6 +58,8 @@ def build_journal_service(
         task_anchor_repo=anchors,
         task_journal_deletion=task_journal_deletion
         or TaskJournalDeletionService(
-            task_anchor_repo=anchors, event_publisher=publisher
+            task_anchor_repo=anchors,
+            task_list_repo=SqlTaskListRepository(connection),
+            event_publisher=publisher,
         ),
     )

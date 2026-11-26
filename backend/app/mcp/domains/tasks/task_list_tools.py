@@ -519,7 +519,9 @@ async def get_task_list_history(
     changed or cleared (an empty side is no icon). ``archived_at`` records
     archiving and unarchiving: ``old_value`` empty and ``new_value`` an ISO
     instant is an **archive**; the instant moving to empty is an **unarchive**.
-    Reordering lists is not recorded. Changes to the tasks on a list are in each
+    ``associated_journal_id`` is the journal the list is associated with: a
+    journal id moving to empty means the list was left unassociated, as a
+    journal delete does. Reordering lists is not recorded. Changes to the tasks on a list are in each
     task's own history (``get_task_history``), not here.
 
     **History is written asynchronously**, a moment behind the change. If you

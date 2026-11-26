@@ -221,6 +221,7 @@ from app.core.journal.services.review_item_service import ReviewItemService
 from app.core.journal.services.route_service import RouteService
 from app.core.settings.models import UserSettingsRepository
 from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
+from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.models.repositories import TaskAnchorRepository
 from app.core.tasks.services.task_journal_deletion_service import (
     TaskJournalDeletionService,
@@ -613,16 +614,20 @@ class JournalProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def task_journal_deletion_service(
         self,
+        connection: AsyncConnection,
         task_anchor_repo: TaskAnchorRepository,
         event_publisher: OutboxEventPublisher,
     ) -> TaskJournalDeletionService:
         """Provide the tasks domain's half of a journal delete.
 
         Provided here rather than by ``TaskProvider`` for the reason the merge's
-        half below is: ``JournalProvider`` stays self-sufficient.
+        half below is: ``JournalProvider`` stays self-sufficient. The list
+        repository is built here on the request's connection rather than asked
+        for, because ``TaskProvider`` is the one that provides it.
         """
         return TaskJournalDeletionService(
             task_anchor_repo=task_anchor_repo,
+            task_list_repo=SqlTaskListRepository(connection),
             event_publisher=event_publisher,
         )
 
