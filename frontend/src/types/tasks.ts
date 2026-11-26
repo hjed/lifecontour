@@ -164,6 +164,24 @@ export interface TaskReadResource {
   links?: JsonApiLinks | null;
 }
 
+/** A task on a list, as a list's own read surfaces return it. */
+export interface ListTaskReadAttributes extends TaskReadAttributes {
+  task_list_id: number;
+  task_list: TaskListRef;
+}
+
+export interface ListTaskReadResource extends TaskReadResource {
+  attributes: ListTaskReadAttributes;
+}
+
+export function isListTask<T extends TaskReadResource>(
+  task: T
+): task is T & ListTaskReadResource {
+  return (
+    task.attributes.task_list_id !== null && task.attributes.task_list !== null
+  );
+}
+
 export interface JournalTaskResource {
   type: string;
   id: string;

@@ -1773,7 +1773,9 @@ elements are numbered **W1**–**W33**.
     time as the calendar views render it, with `· location` beside it
     (**W13**), or an uppercase **ALL DAY** marker in its place (**W12**); tags
     as `outline` badges with the tag's colour on border and text (**W15**);
-    and `AgendaParticipantStack` — up to three `ContactAvatar`s ringed in the
+    and `AgendaParticipantStack` (a mapping onto the shared
+    `ContactAvatarStack`) — up to three
+    `ContactAvatar`s ringed in the
     background colour, then a `+N` whose accessible label names the hidden
     participants (**W16**, gap 18). A cancelled entry is dimmed, its accent
     muted, its title struck through and badged **CANCELLED** in visible text

@@ -3208,8 +3208,9 @@ picker's own behaviour, so they need only test it in context.
 
 #### Phase 3: Task row
 
-**Prerequisites:** Phase 1.
-**Estimated diff:** ~130 production → **~650 tracked**
+**Status:** 🚧 IN PROGRESS — a native stack of two PRs on top of Phase 2's: (1) the row's parts (flag marker, status checkbox, `ContactAvatarStack`), (2) `TaskRow`.
+**Prerequisites:** Phase 1; Phase 2 for the icon glyph (`TaskIconGlyph`), decided in plan review.
+**Estimated diff:** ~130 production → **~650 tracked** · re-estimated in planning at ~1,045 tracked (layers ~530 and ~515).
 
 **Acceptance Criteria:**
 
