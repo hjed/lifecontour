@@ -1343,6 +1343,11 @@ Conventions this surface pins down:
   which fails when a `{list_id}` route is mounted without an ownership test.
 - **A new list's place is not the client's to choose**: `position` is refused
   on create (`extra="forbid"`), and a new list is never archived.
+- **Page the completed tasks (and the history) by `meta`, not by `links`.**
+  `links` are absolute URLs built from the backend's own base URL, which need
+  not be the origin a client reaches it through, and `next` is `null` on the
+  last page. The web client asks for `current_page + 1` while
+  `current_page < page_count`.
 - **The listing is unpaginated** — the lists a user keeps are a sidebar-sized
   set; paging arrives with the archived lists page.
 - **Only the listing carries `open_task_count`.** It is one owner-scoped count

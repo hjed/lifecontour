@@ -29,6 +29,7 @@ import React, { ReactNode } from 'react';
 import { taskHistoryKeys, taskKeys, useUpdateTask } from '../tasks';
 import { taskListHistoryKeys, taskListKeys } from '../task-list-keys';
 import { useUpdateTaskList } from '../task-lists';
+import { useMoveTaskToList } from '../list-tasks';
 import { TaskStatus } from '@/types/tasks';
 import { mockApiResponse } from '@/test-utils';
 import {
@@ -417,5 +418,42 @@ describe('lists and tasks refresh each other across their roots', () => {
       expect(queryClient.getQueryState(detail)?.isInvalidated).toBe(true);
     });
     expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("a list's tasks refresh with the task data they embed", () => {
+  it('a journal write reaches the tasks shown on a list', async () => {
+    // A list task due in that journal embeds its title and date.
+    const onList = taskKeys.openOnList('3');
+    queryClient.setQueryData(onList, { data: [], meta: { total: 0 } });
+
+    const { result } = renderHook(() => useUpdateJournal('1'), {
+      wrapper: createWrapper,
+    });
+    result.current.mutate({ title: 'Moved to next week' });
+
+    await waitFor(
+      () => {
+        expect(queryClient.getQueryState(onList)?.isInvalidated).toBe(true);
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it('moving a task refreshes the list it left and the list it joined', async () => {
+    const left = taskKeys.openOnList('3');
+    const joined = taskKeys.openOnList('5');
+    queryClient.setQueryData(left, { data: [], meta: { total: 0 } });
+    queryClient.setQueryData(joined, { data: [], meta: { total: 0 } });
+
+    const { result } = renderHook(() => useMoveTaskToList(), {
+      wrapper: createWrapper,
+    });
+    result.current.mutate({ taskId: '1', taskListId: '5' });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(left)?.isInvalidated).toBe(true);
+    });
+    expect(queryClient.getQueryState(joined)?.isInvalidated).toBe(true);
   });
 });
