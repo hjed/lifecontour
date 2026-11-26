@@ -421,6 +421,28 @@ clients keep working; don't add session handling to other tests.
 - Test responsive design across different screen sizes
 - Include accessibility testing in E2E flows
 
+### E2E Harness Routes
+
+A shared component that no product page renders yet is tested in the browser on
+a page of its own under `frontend/src/app/e2e-harness/` (first:
+`/e2e-harness/task-icon-picker`, which shows the picker beside an `<output>` of
+the value it last handed back).
+
+- The page calls `await connection()` and then `notFound()` unless the server's
+  runtime env has `E2E_TEST_ROUTES=true`. Only `playwright.config.ts` sets it
+  (`webServer.env`), so a deployment answers 404. It is a server variable, not
+  `NEXT_PUBLIC_*`, so it is read per request even in CI's production build and
+  never reaches the client bundle. A unit test beside each page pins the gate.
+- The harness holds its own state, so its spec needs no seeded data. It marks
+  itself `data-hydrated="true"` once React owns the page, and the spec waits for
+  that before acting, since a click on server-rendered markup is lost.
+- `PLAYWRIGHT_REUSE_EXISTING_SERVER=true` against a server started without
+  `E2E_TEST_ROUTES=true` makes every harness test a 404; start that server with
+  the flag.
+- Once a product page embeds the component, that page's own E2E covers it in
+  context; keep the harness only while it tests something the product page does
+  not.
+
 ### The AI Daily Summary in E2E
 
 The e2e stack has no Gemini key. It sets `ENABLE_TEST_DAILY_SUMMARY_STUB=true` (`.env.test`,
