@@ -8,9 +8,9 @@
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JournalType, type JournalResource } from '@/types/journals';
+import { PACKING_LIST, createMockTaskRead } from '@/test-utils/tasks';
 import {
   TaskLinkRole,
-  TaskStatus,
   type JournalTaskAttributes,
   type JournalTaskResource,
   type TaskJournalRef,
@@ -181,33 +181,16 @@ export function createMockTaskJournalRef(
 export function createMockJournalTask(
   partial?: Partial<JournalTaskAttributes> & { id?: string }
 ): JournalTaskResource {
-  const { id = '1', ...attributes } = partial ?? {};
+  const { link_roles = [TaskLinkRole.DUE], ...readAttributes } = partial ?? {};
+  const { id, attributes } = createMockTaskRead({
+    creating_journal_id: 1,
+    due_journal_id: 1,
+    creating_journal: createMockTaskJournalRef(),
+    due_journal: createMockTaskJournalRef(),
+    ...readAttributes,
+  });
 
-  return {
-    type: 'tasks',
-    id,
-    attributes: {
-      text: 'Print the permit',
-      status: TaskStatus.NOT_DONE,
-      creating_journal_id: 1,
-      due_journal_id: 1,
-      intermediate_journal_ids: [],
-      task_list_id: null,
-      due_date: null,
-      flagged: false,
-      icon: null,
-      creating_journal: createMockTaskJournalRef(),
-      due_journal: createMockTaskJournalRef(),
-      intermediate_journals: [],
-      task_list: null,
-      contacts: [],
-      lapsed: false,
-      lapse_reason: null,
-      overdue: false,
-      link_roles: [TaskLinkRole.DUE],
-      ...attributes,
-    },
-  };
+  return { type: 'tasks', id, attributes: { ...attributes, link_roles } };
 }
 
 /**
@@ -221,8 +204,8 @@ export function createMockListTask(
   partial?: Partial<JournalTaskAttributes> & { id?: string }
 ): JournalTaskResource {
   return createMockJournalTask({
-    task_list_id: 7,
-    task_list: { id: 7, name: 'Packing', icon: null, archived: false },
+    task_list_id: PACKING_LIST.id,
+    task_list: PACKING_LIST,
     creating_journal_id: null,
     due_journal_id: null,
     creating_journal: null,
