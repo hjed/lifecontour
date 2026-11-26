@@ -2996,6 +2996,7 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 
 #### Phase 1: Frontend API client for lists and list tasks
 
+**Status:** 🚧 IN PROGRESS — delivered as a stack of two PRs: (1) types and list hooks, (2) list-task hooks.
 **Prerequisites:** ITER21-001.
 **Estimated diff:** ~200 production → **~900 tracked**
 

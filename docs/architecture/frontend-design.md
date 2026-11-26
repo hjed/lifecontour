@@ -250,7 +250,7 @@ send no `If-Match` and share no write scope. A new edit hook:
 
 ### Task Query Keys
 
-`taskKeys` (`frontend/src/lib/api/tasks.ts`) hangs three namespaces off
+`taskKeys` (`frontend/src/lib/api/tasks.ts`) hangs four namespaces off
 `['tasks']` as **siblings**, never nesting one inside another:
 
 | Factory | Key | Feeds |
@@ -258,6 +258,7 @@ send no `If-Match` and share no write scope. A new edit hook:
 | `detail(taskId)` | `['tasks', 'detail', id]` | a single task read whole |
 | `journalList(journalId, role?)` | `['tasks', 'journal', id, role \| null]` | a journal's task section |
 | `upcomingWindow(days)` | `['tasks', 'upcoming', days]` | the home dashboard's task section — **reserved, with no hook yet**: the listing endpoint landed in ITER18-001 Phase 14, but nothing reads it until the dashboard is built (ITER18-004) |
+| `openOnList(listId)`, `completedOnList(listId, limit)` (under `onLists()` / `onList(listId)`) | `['tasks', 'list', id, 'open' \| 'completed', …]` | a list's open tasks and its *Completed* group (ITER21-002) |
 
 - **The sibling arrangement is the contract**, not an accident of naming: a
   journal's task list and the dashboard's task section must be invalidatable
@@ -286,11 +287,86 @@ send no `If-Match` and share no write scope. A new edit hook:
   the point: a task's own write does make its history stale, and nothing else
   should be able to throw it away by accident. Pinned in both directions by
   `task-cache-freshness.test.ts`.
+- **Lists have a root of their own; a list's tasks do not.** A key root is a
+  resource type here (`contactKeys`, `journalKeys`, `taskHistoryKeys`), so a
+  filter on a root is a statement about one kind of payload. `taskKeys.all` is
+  what every task write cancels and patches as task resources, and what every
+  journal, contact and timezone write invalidates because those writes change
+  embedded task data. A list is a different aggregate, so `taskListKeys`
+  (`lib/api/task-list-keys.ts`) is `['task-lists']` and `taskListHistoryKeys`
+  is `['task-list-history']`, following `taskHistoryKeys`: under `taskKeys.all`
+  a status tick would cancel the sidebar's listing, a journal rename would
+  refetch every list, and the task patcher would run over list payloads (whose
+  ids share no space with tasks'). A list's **tasks** are task resources, so
+  they are the fourth sibling above and a status tick patches them like any
+  other surface. `taskListKeys.listing({archived})` takes an object so later
+  filters extend it.
+- **Lists and tasks name each other where one can change the other**, and
+  nowhere else:
+  - a task write that can move a list's `open_task_count` — a status change, a
+    create, a delete, a retarget — invalidates `taskListKeys.listings()`
+    beside the journals' due counts; a contact or mention link does not;
+  - every task refresh names `taskKeys.onLists()`, because a list's tasks embed
+    what any task read does;
+  - a list write (rename, icon, archive, unarchive, delete) invalidates
+    `taskKeys.all`, the home dashboard and the contact history (`historyKeys`),
+    which all embed `task_list {id, name, icon, archived}`, and the list's own
+    history. A delete also refreshes task history and journal due counts, and
+    *removes* the list's detail and `onList(listId)` rather than refetching
+    them into a 404.
+  - Rename, icon, archive and unarchive answers are stored as the list's
+    detail, never into a listing (only the listing carries `open_task_count`),
+    and only after cancelling a detail read already in flight, which would
+    otherwise land afterwards and put the old name or archived state back.
+    Overlapping writes to one list are sequenced like moves
+    (`move-sequence.ts`): only the newest write's answer is stored, and if
+    writes overlapped the list is re-read once the last settles, since a
+    rename answering after an archive it committed before would otherwise
+    store `archived: false` over it. A delete takes part in the same sequence,
+    so a write still out when the list is deleted is no longer the newest and
+    its late answer cannot recreate the deleted detail.
+- **A list move is optimistic and answered by the new order.**
+  `useMoveTaskList` moves the list in the cached active listing at once, then
+  takes the answer's order and each list's new `position` — and nothing else,
+  since a rename landing while the move was out is newer than its answer —
+  with no refetch. Overlapping moves settle together
+  (`lib/api/move-sequence.ts`): nothing is decided until the **last** pending
+  move settles, and only if that one succeeded *and* is the **newest** is its
+  answer taken. If moves overlapped at all, the newest answer is shown and
+  then confirmed by a re-read: the order the answers arrived in says nothing
+  about the order the server applied the moves in. Anything else — a failure, or an older move settling
+  after a newer one — re-reads the listing, because each move's snapshot may
+  hold another's unconfirmed order and no snapshot can be trusted to restore;
+  a lone failed move puts its order back at once before the re-read lands.
+  Pending moves are counted per scope by the helper rather than read from
+  `isMutating`, which two answers landing in the same tick would each see as
+  "the other is still out". The listing is also re-read when the answer names
+  other lists than the cache, when a move's `cancelQueries` cut short a
+  refresh already in flight, or when a read started *during* the move is still
+  running as it settles: that read may hold the order from before the move,
+  so it is cancelled (`cancelReadInFlight`) before the answer is applied, and
+  the re-read replaces it. The lists' details are invalidated too, since a
+  move renumbers `position`. The helpers in `lib/api/cached-order.ts` move row
+  objects and never rebuild them, so a field patched meanwhile survives a
+  move, a re-sort and a rollback alike.
+- **Icon keys** (`types/task-icons.ts`, `TASK_ICONS`) are copied from the
+  backend `TaskIcon` enum, as every mirrored backend enum is; the set is
+  add-only.
+- **A task update settling behind another task write still refreshes its own
+  detail and history.** The shared surfaces are left to the last writer
+  (`isLastTaskWrite`), but that writer refreshes only its own task's detail, and
+  a due date or due journal is not patched optimistically.
 - Task failures throw `TaskApiError`, whose `message` is `errors[0].detail` as
   every other client's is, **plus** the JSON:API `status`, `code` and `meta`
   beside it. Surfaces branch on the code — `TASK_REOPEN_NOT_ACKNOWLEDGED` is a
-  confirmation to ask for, not an error to report, and `useRetargetTask` raises
-  no toast for it.
+  confirmation to ask for, not an error to report, and neither `useRetargetTask`
+  nor `useUpdateTask` (whose `due_journal_id` is a retarget on a journal-only
+  task) raises a toast for it. `TaskUpdateInput` takes `flagged`, `icon`,
+  `due_date` and `due_journal_id` beside `text` and `status` — `null` clears,
+  absent keeps — and the flag and icon are patched optimistically; a date is
+  not, because `overdue` depends on the user's day boundary. List refusals
+  (`TASK_LIST_ARCHIVED`, `TASK_LIST_CHANGED`, `TASK_LIST_NOT_FOUND`) use the
+  same error, exported from `lib/api/task-lists.ts`.
 - **Task mutations opt out of the app-wide `retry: 1`** (`lib/providers.tsx`).
   Creating a task is not idempotent, so a retried `POST` whose first response was
   merely lost records the commitment twice; and a refusal here is often the
