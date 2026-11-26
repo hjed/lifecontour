@@ -24,10 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.core.integrations.journal_sync_seeding import (
     USER_ID,
@@ -37,6 +33,7 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     journal_exists,
     sync_event,
 )
+from tests.journal_service_factory import build_task_journal_merge_service
 
 pytestmark = pytest.mark.integration
 
@@ -1339,10 +1336,7 @@ class TestFlaggingDuplicatesThatAlreadyExist:
         merge_service = JournalMergeService(
             journal_repo=SqlJournalRepository(async_connection),
             event_publisher=OutboxEventPublisher(async_connection),
-            task_merge_service=TaskJournalMergeService(
-                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
-                event_publisher=OutboxEventPublisher(async_connection),
-            ),
+            task_merge_service=build_task_journal_merge_service(async_connection),
         )
         await merge_service.merge_journals(
             target_id=first, source_id=second, transaction=async_connection

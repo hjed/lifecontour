@@ -634,6 +634,7 @@ class JournalProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def task_journal_merge_service(
         self,
+        connection: AsyncConnection,
         task_anchor_repo: TaskAnchorRepository,
         event_publisher: OutboxEventPublisher,
     ) -> TaskJournalMergeService:
@@ -645,10 +646,13 @@ class JournalProvider(Provider):
         supplies would force every container registering one to register the
         other — eleven test containers, when this was last measured. It needs
         only the anchor repository this provider already builds and the
-        request's outbox publisher, so ``JournalProvider`` stays self-sufficient.
+        request's outbox publisher, so ``JournalProvider`` stays self-sufficient;
+        the list repository is built on the request's connection for the same
+        reason.
         """
         return TaskJournalMergeService(
             task_anchor_repo=task_anchor_repo,
+            task_list_repo=SqlTaskListRepository(connection),
             event_publisher=event_publisher,
         )
 

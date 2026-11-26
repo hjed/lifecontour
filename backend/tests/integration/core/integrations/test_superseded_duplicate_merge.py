@@ -29,6 +29,7 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     sync_event,
 )
 from tests.integration.tasks.task_seeding import create_task
+from tests.journal_service_factory import build_task_journal_merge_service
 
 pytestmark = pytest.mark.integration
 
@@ -351,12 +352,6 @@ async def test_a_manual_merge_keeps_a_private_description_private(
         SqlJournalRepository,
     )
     from app.core.journal.services.journal_merge_service import JournalMergeService
-    from app.core.tasks.adapters.sql.task_anchor_repository import (
-        SqlTaskAnchorRepository,
-    )
-    from app.core.tasks.services.task_journal_merge_service import (
-        TaskJournalMergeService,
-    )
     from app.infrastructure.events.outbox_event_publisher import (
         OutboxEventPublisher,
     )
@@ -373,10 +368,7 @@ async def test_a_manual_merge_keeps_a_private_description_private(
     await JournalMergeService(
         SqlJournalRepository(async_connection),
         publisher,
-        TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
-            event_publisher=publisher,
-        ),
+        build_task_journal_merge_service(async_connection, event_publisher=publisher),
     ).merge_journals(
         target_id=sibling,
         source_id=old,

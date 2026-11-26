@@ -37,6 +37,7 @@ from app.core.history.services.task_list_history_service import (
     TaskListHistoryService,
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
@@ -52,7 +53,10 @@ from tests.integration.tasks.task_seeding import (
     create_journal,
     create_list_task,
 )
-from tests.journal_service_factory import build_journal_service
+from tests.journal_service_factory import (
+    build_journal_service,
+    build_task_journal_merge_service,
+)
 
 LIST_ENTITY_TYPE = "task_list"
 LIST_NAME = "Groceries"
@@ -516,3 +520,60 @@ class TestAJournalDeleteIsInTheListsHistory:
         assert unassociated.source == Provenance.UI
         assert unassociated.changed_by == "ui"
         assert unassociated.user_id == USER_ID
+
+
+@pytest.mark.integration
+class TestAJournalMergeIsInTheListsHistory:
+    @pytest.mark.asyncio
+    async def test_the_move_reads_back_as_the_mergers_change(
+        self,
+        test_stream_name: str,
+        async_connection: AsyncConnection,
+        stream_client: StreamClient,
+        redis_client: Redis,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Merging the journal a list is associated with leaves an
+        ``associated_journal_id`` line from the absorbed journal to the
+        survivor, carrying the merging actor."""
+        service = _list_service(async_connection)
+        list_id = await _create(service, async_connection)
+        survivor_id = await create_journal(journal_repository, title="Survivor")
+        absorbed_id = await create_journal(journal_repository, title="Absorbed")
+        lists = SqlTaskListRepository(async_connection)
+        stored = await lists.find_by_id(list_id, USER_ID)
+        assert stored is not None
+        await lists.save(replace(stored, associated_journal_id=absorbed_id))
+        merge = JournalMergeService(
+            journal_repo=journal_repository,
+            event_publisher=OutboxEventPublisher(async_connection),
+            task_merge_service=build_task_journal_merge_service(async_connection),
+        )
+
+        await merge.merge_journals(
+            survivor_id,
+            absorbed_id,
+            async_connection,
+            source=Provenance.MCP,
+            changed_by="mcp",
+        )
+        await relay_and_project(
+            stream_client, test_stream_name, async_connection, "test-list-merge"
+        )
+        reader = TaskListHistoryService(
+            history_repo=SqlFieldHistoryRepository(async_connection),
+            task_list_repo=lists,
+        )
+
+        entries = await reader.get_task_list_history(
+            task_list_id=list_id, user_id=USER_ID
+        )
+
+        moved = entries[0]
+        assert moved.field_name == "associated_journal_id"
+        assert (moved.old_value, moved.new_value) == (
+            str(absorbed_id),
+            str(survivor_id),
+        )
+        assert moved.source == Provenance.MCP
+        assert moved.changed_by == "mcp"

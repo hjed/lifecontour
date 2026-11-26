@@ -1244,6 +1244,30 @@ class TestTaskLinkRepointing:
         )
 
     @pytest.mark.asyncio
+    async def test_merge_moves_the_owners_list_associations_to_the_survivor(
+        self,
+        merge_service,
+        mock_journal_repo,
+        mock_task_merge_service,
+        mock_transaction,
+    ):
+        """The owner's lists follow the survivor, carrying the merging actor."""
+        self._arrange(mock_journal_repo)
+
+        await merge_service.merge_journals(
+            1, 2, mock_transaction, source=Provenance.UI, changed_by="ui"
+        )
+
+        mock_task_merge_service.repoint_list_associations.assert_awaited_once_with(
+            source_journal_id=2,
+            target_journal_id=1,
+            user_id="user123",
+            transaction=mock_transaction,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+    @pytest.mark.asyncio
     async def test_the_merging_actor_reaches_the_tasks_that_moved(
         self,
         merge_service,
@@ -1299,12 +1323,15 @@ class TestTaskLinkRepointing:
             return record_call
 
         mock_task_merge_service.repoint_journal_links.side_effect = record("repoint")
+        mock_task_merge_service.repoint_list_associations.side_effect = record(
+            "repoint_lists"
+        )
         mock_journal_repo.save.side_effect = record("save_target")
         mock_journal_repo.delete.side_effect = record("delete_source")
 
         await merge_service.merge_journals(1, 2, mock_transaction)
 
-        assert order == ["repoint", "save_target", "delete_source"]
+        assert order == ["repoint", "repoint_lists", "save_target", "delete_source"]
 
     @pytest.mark.asyncio
     async def test_merge_touches_nothing_else_on_a_task(
@@ -1314,19 +1341,19 @@ class TestTaskLinkRepointing:
         mock_task_merge_service,
         mock_transaction,
     ):
-        """Merge re-points links and stops there — it never changes a status.
+        """Merge re-points links and associations and stops there — it never
+        changes a task's status.
 
-        Asserted as "no other repository method was called" rather than "status
-        is unchanged". The anchor port cannot change a status at all, so this
-        also pins that the service has not quietly grown a second task
-        dependency that could.
+        Asserted as "no other method was called" rather than "status is
+        unchanged". Neither call can change a status at all, so this also pins
+        that the service has not quietly grown a task dependency that could.
         """
         self._arrange(mock_journal_repo)
 
         await merge_service.merge_journals(1, 2, mock_transaction)
 
         called = {name for name, _args, _kwargs in mock_task_merge_service.mock_calls}
-        assert called == {"repoint_journal_links"}
+        assert called == {"repoint_journal_links", "repoint_list_associations"}
 
     @pytest.mark.asyncio
     async def test_merge_is_not_blocked_by_tasks(

@@ -521,7 +521,8 @@ async def get_task_list_history(
     instant is an **archive**; the instant moving to empty is an **unarchive**.
     ``associated_journal_id`` is the journal the list is associated with: a
     journal id moving to empty means the list was left unassociated, as a
-    journal delete does. Reordering lists is not recorded. Changes to the tasks on a list are in each
+    journal delete does; one journal id moving to another means that journal
+    was merged into the other. Reordering lists is not recorded. Changes to the tasks on a list are in each
     task's own history (``get_task_history``), not here.
 
     **History is written asynchronously**, a moment behind the change. If you

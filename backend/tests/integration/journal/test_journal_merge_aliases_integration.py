@@ -38,13 +38,8 @@ from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.tasks.adapters.sql.task_anchor_repository import (
-    SqlTaskAnchorRepository,
-)
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
+from tests.journal_service_factory import build_task_journal_merge_service
 
 USER_ID = "merge-alias-user"
 
@@ -53,10 +48,7 @@ def _merge_service(connection: AsyncConnection) -> JournalMergeService:
     return JournalMergeService(
         journal_repo=SqlJournalRepository(connection),
         event_publisher=OutboxEventPublisher(connection),
-        task_merge_service=TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(connection),
-            event_publisher=OutboxEventPublisher(connection),
-        ),
+        task_merge_service=build_task_journal_merge_service(connection),
     )
 
 

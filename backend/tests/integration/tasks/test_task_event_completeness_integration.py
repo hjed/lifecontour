@@ -71,7 +71,6 @@ from app.core.journal.adapters.sql.journal_contact_relationship_repository impor
 )
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
@@ -85,9 +84,6 @@ from app.core.tasks.models.repositories import (
 )
 from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
-)
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
 )
 from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
@@ -107,7 +103,10 @@ from tests.integration.tasks.task_seeding import (
     stored_anchors,
     task_events,
 )
-from tests.journal_service_factory import build_journal_service
+from tests.journal_service_factory import (
+    build_journal_service,
+    build_task_journal_merge_service,
+)
 
 TASK_TEXT = "book the belay course"
 UPDATED_TEXT = "book the belay course and the refresher"
@@ -971,10 +970,7 @@ def fixtures(
         merges=JournalMergeService(
             journal_repo=journal_repository,
             event_publisher=OutboxEventPublisher(async_connection),
-            task_merge_service=TaskJournalMergeService(
-                task_anchor_repo=SqlTaskAnchorRepository(async_connection),
-                event_publisher=OutboxEventPublisher(async_connection),
-            ),
+            task_merge_service=build_task_journal_merge_service(async_connection),
         ),
         contact_merges=ContactMergeService(
             contact_repo=SqlContactRepository(async_connection),

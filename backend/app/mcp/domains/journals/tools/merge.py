@@ -17,11 +17,7 @@ from app.core.journal.services.journal_enrichment_service import (
 from app.core.journal.services.journal_external_link_service import (
     JournalExternalLinkService,
 )
-from app.core.journal.services.journal_merge_service import JournalMergeService
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
+from app.core.journal.services.journal_merge_service import journal_merge_service_on
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.mcp.domains.journals.converters import (
     JournalConverter,
@@ -126,18 +122,11 @@ async def merge_journals(
     if not source or source.user_id != user_id:
         raise JournalNotFoundError(merge_request.source_journal_id)
 
-    # The tasks domain's merge service is built here rather than added to the
+    # The tasks domain's merge half is built here rather than added to the
     # shared journal tool repositories: merge is the only journal tool that
-    # touches task links. It owns the anchor repository and publishes an event
-    # per task the merge moves, so the journal domain never constructs one.
-    merge_service = JournalMergeService(
-        repos.journal_repo,
-        event_publisher,
-        TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(db_connection),
-            event_publisher=event_publisher,
-        ),
-    )
+    # touches task links and list associations, and it publishes an event per
+    # task and list it moves, so the journal domain never constructs one.
+    merge_service = journal_merge_service_on(db_connection, event_publisher)
 
     merged_journal = await merge_service.merge_journals(
         target_id=target_journal_id,

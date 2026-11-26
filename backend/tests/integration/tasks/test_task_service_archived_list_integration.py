@@ -43,7 +43,6 @@ from app.core.journal.adapters.sql.journal_repository import SqlJournalRepositor
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
@@ -51,9 +50,6 @@ from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListReposito
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
-)
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
 )
 from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
@@ -74,6 +70,7 @@ from tests.integration.tasks.task_seeding import (
     task_exists,
     task_state,
 )
+from tests.journal_service_factory import build_task_journal_merge_service
 
 pytestmark = pytest.mark.integration
 
@@ -285,10 +282,7 @@ class TestOtherDomainsStillMoveTheLinks:
     ) -> None:
         survivor_id = await create_journal(journal_repository, title="Survivor")
 
-        await TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(async_connection),
-            event_publisher=OutboxEventPublisher(async_connection),
-        ).repoint_journal_links(
+        await build_task_journal_merge_service(async_connection).repoint_journal_links(
             source_journal_id=seeded.intermediate_journal_id,
             target_journal_id=survivor_id,
             transaction=async_connection,

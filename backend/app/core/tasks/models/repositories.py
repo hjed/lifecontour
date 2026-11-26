@@ -1195,6 +1195,21 @@ class TaskListRepository(ABC):
         """
 
     @abstractmethod
+    async def reassociate_journal(
+        self, *, source_journal_id: int, target_journal_id: int, user_id: str
+    ) -> list[int]:
+        """Move every one of the user's lists on the source journal to the target.
+
+        For a journal merge: the association follows the surviving journal. A
+        system write, so archived lists move too. The caller has already locked
+        both journals and their tasks, the order a merge takes them in
+        (journals, tasks, lists).
+
+        Returns:
+            The ids of the lists it moved, ascending.
+        """
+
+    @abstractmethod
     async def count_associated_with_journal(self, journal_id: int, user_id: str) -> int:
         """How many of the user's lists, archived ones included, name the journal."""
 

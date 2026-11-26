@@ -39,12 +39,8 @@ from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.infrastructure.events.projection_harness import (
@@ -60,7 +56,10 @@ from tests.integration.tasks.task_seeding import (
     seed_task_list,
     task_events,
 )
-from tests.journal_service_factory import build_journal_service
+from tests.journal_service_factory import (
+    build_journal_service,
+    build_task_journal_merge_service,
+)
 from tests.task_event_inventory import task_event_types
 
 TASK_TEXT = "Book the venue"
@@ -97,10 +96,7 @@ def _merge_service(conn: AsyncConnection) -> JournalMergeService:
     return JournalMergeService(
         journal_repo=SqlJournalRepository(conn),
         event_publisher=OutboxEventPublisher(conn),
-        task_merge_service=TaskJournalMergeService(
-            task_anchor_repo=SqlTaskAnchorRepository(conn),
-            event_publisher=OutboxEventPublisher(conn),
-        ),
+        task_merge_service=build_task_journal_merge_service(conn),
     )
 
 

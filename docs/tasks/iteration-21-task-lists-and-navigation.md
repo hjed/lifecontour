@@ -3880,18 +3880,42 @@ path touches a list.
 integration `test_cancelled_recurrence_keep_next.py` — `associated_list` joins the parametrised
 "a user addition keeps a continuation cancelled" cases. Gates as for Phase 2a.
 
-#### Phase 2c: Journal merge moves associations to the survivor
+#### Phase 2c: Journal merge moves associations to the survivor ✅ DONE
 
 **Prerequisites:** Phase 2a.
-**Estimated diff:** ~120 production → **~520 tracked**
+**Estimated diff:** ~120 production → **~520 tracked** · **Actual:** ~235 production → **~775 tracked**
+(234 production — repository and port 45, merge service 75, step 0 15, the shared
+`journal_merge_service_on` factory and its three callers 88, history docstrings 11; 495 tests, of
+which ~190 are the 13 hand-built test sites moved onto `build_task_journal_merge_service` and ~60
+the merge's list-history read-back; 14 architecture docs; ~33 this document).
+Production ran ×1.8: the factory refactor, which removed more lines than it added, counts both ways.
 
 **Acceptance Criteria:**
 
-- [ ] Merge → each list associated with the absorbed journal moves to the survivor, archived lists
+- [x] Merge → each list associated with the absorbed journal moves to the survivor, archived lists
   included.
-- [ ] Each move is a `TaskListUpdated` carrying `associated_journal_id` `(absorbed, survivor)` into
+- [x] Each move is a `TaskListUpdated` carrying `associated_journal_id` `(absorbed, survivor)` into
   list history, made in step 0 beside the task re-point, after the journals and tasks are locked.
-- [ ] The new statement is owner-scoped and proven with a second user.
+- [x] The new statement is owner-scoped and proven with a second user.
+
+**Delivered:** `TaskListRepository.reassociate_journal(*, source_journal_id, target_journal_id,
+user_id)`. `TaskJournalMergeService` takes a required `task_list_repo` and gains
+`repoint_list_associations` (one `TaskListUpdated` per list with the merger's provenance, one info
+log); `JournalMergeService.merge_journals` calls it in step 0 right after `repoint_journal_links`,
+with the owner. New `journal_merge_service_on(connection, publisher)` beside `journal_service_on`,
+used by the MCP merge tool and the inbound duplicate merge; `JournalProvider` builds the list
+repository on the request connection.
+
+**Tests:** unit `test_task_journal_merge_service.py::TestListAssociationsMove`,
+`test_journal_merge_service.py` (the call, its owner and actor, and the order re-point → lists →
+save → delete); integration `test_task_list_repository_integration.py::TestReassociateJournal`
+(moved incl. archived; other journal, already on the survivor and a second user untouched) and
+`test_journal_merge_task_links_integration.py::TestListAssociationsMoveToTheSurvivor` (moved incl.
+archived; the event, its provenance and its place before the journal events) and
+`test_task_list_history_projection_e2e.py::TestAJournalMergeIsInTheListsHistory` (read back through
+`TaskListHistoryService` with the merger's provenance). Gates run locally on
+this phase: ruff, mypy, backend unit suite, the full backend integration suite in chunks (5,489
+passed, 7 MeiliSearch skips).
 
 #### Phase 3: Associate, change, remove
 

@@ -845,8 +845,9 @@ class HistoryService:
         ``[old, null]``) and ``archived_at``, an ISO instant, where ``[null,
         ts]`` is an archive and ``[ts, null]`` an unarchive. The instant is
         kept rather than rewritten to a flag, so the row says what the event
-        said. ``associated_journal_id`` is the journal association, ``[id,
-        null]`` when a journal delete left the list unassociated.
+        said. ``associated_journal_id`` is the journal association: ``[id,
+        null]`` when a journal delete left the list unassociated, ``[absorbed,
+        survivor]`` when a merge moved it.
         """
         return self._rows_from_changed_fields(
             event,

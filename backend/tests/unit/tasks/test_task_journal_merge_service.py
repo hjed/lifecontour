@@ -19,6 +19,7 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import TaskJournalRepointing
 
 from app.core.tasks.models.events import TaskJournalLinksRepointed
+from app.core.tasks.models.task_list_events import TaskListUpdated
 from app.core.tasks.services.task_journal_merge_service import (
     TaskJournalMergeService,
 )
@@ -30,6 +31,8 @@ from tests.unit.tasks.task_doubles import (
 )
 
 OTHER_TASK_ID = TASK_ID + 1
+LIST_ID = 41
+OTHER_LIST_ID = 42
 
 
 @pytest.fixture
@@ -40,16 +43,25 @@ def anchor_repo() -> AsyncMock:
 
 
 @pytest.fixture
+def list_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.reassociate_journal.return_value = []
+    return repo
+
+
+@pytest.fixture
 def event_publisher() -> AsyncMock:
     return AsyncMock()
 
 
 @pytest.fixture
 def service(
-    anchor_repo: AsyncMock, event_publisher: AsyncMock
+    anchor_repo: AsyncMock, list_repo: AsyncMock, event_publisher: AsyncMock
 ) -> TaskJournalMergeService:
     return TaskJournalMergeService(
-        task_anchor_repo=anchor_repo, event_publisher=event_publisher
+        task_anchor_repo=anchor_repo,
+        task_list_repo=list_repo,
+        event_publisher=event_publisher,
     )
 
 
@@ -282,4 +294,82 @@ class TestTheEventsRideTheMergesTransaction:
         )
 
         (event,) = published(event_publisher)
+        assert event.transaction is transaction
+
+
+def published_list_updates(event_publisher: AsyncMock) -> list[TaskListUpdated]:
+    """The list events handed to the publisher, in order."""
+    return [call.args[0] for call in event_publisher.publish.await_args_list]
+
+
+async def repoint_lists(
+    service: TaskJournalMergeService,
+    transaction: AsyncMock | None = None,
+    **kwargs: object,
+) -> None:
+    """Move the owner's list associations over the shared journal constants."""
+    await service.repoint_list_associations(
+        source_journal_id=ABSORBED_JOURNAL_ID,
+        target_journal_id=SURVIVING_JOURNAL_ID,
+        user_id=USER_ID,
+        transaction=transaction or AsyncMock(),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+class TestListAssociationsMove:
+    """A list associated with the absorbed journal follows the survivor."""
+
+    async def test_it_moves_the_owners_lists_through_the_port(
+        self, service: TaskJournalMergeService, list_repo: AsyncMock
+    ) -> None:
+        await repoint_lists(service)
+
+        list_repo.reassociate_journal.assert_awaited_once_with(
+            source_journal_id=ABSORBED_JOURNAL_ID,
+            target_journal_id=SURVIVING_JOURNAL_ID,
+            user_id=USER_ID,
+        )
+
+    async def test_each_list_gets_one_event_in_the_order_reported(
+        self,
+        service: TaskJournalMergeService,
+        list_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        list_repo.reassociate_journal.return_value = [LIST_ID, OTHER_LIST_ID]
+
+        await repoint_lists(service)
+
+        events = published_list_updates(event_publisher)
+        assert [event.event_type for event in events] == ["TaskListUpdated"] * 2
+        assert [event.aggregate_id for event in events] == [LIST_ID, OTHER_LIST_ID]
+        assert [event.event_data["changed_fields"] for event in events] == [
+            {"associated_journal_id": (ABSORBED_JOURNAL_ID, SURVIVING_JOURNAL_ID)}
+        ] * 2
+
+    async def test_a_merge_moving_no_list_publishes_nothing(
+        self, service: TaskJournalMergeService, event_publisher: AsyncMock
+    ) -> None:
+        await repoint_lists(service)
+
+        event_publisher.publish.assert_not_called()
+
+    async def test_the_merging_actor_and_transaction_reach_the_event(
+        self,
+        service: TaskJournalMergeService,
+        list_repo: AsyncMock,
+        event_publisher: AsyncMock,
+    ) -> None:
+        list_repo.reassociate_journal.return_value = [LIST_ID]
+        transaction = AsyncMock()
+
+        await repoint_lists(
+            service, transaction, source=Provenance.MCP, changed_by="mcp"
+        )
+
+        (event,) = published_list_updates(event_publisher)
+        assert event.event_data["user_id"] == USER_ID
+        assert event.event_data["source"] == "mcp"
+        assert event.event_data["changed_by"] == "mcp"
         assert event.transaction is transaction

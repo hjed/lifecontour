@@ -161,7 +161,8 @@ async def get_task_list_history(
     changed or cleared), ``archived_at`` — an archive moves it from null to
     the instant, an unarchive from the instant back to null — and
     ``associated_journal_id``, the associated journal's id (null when
-    unassociated, as a journal delete leaves the list). Each carries its
+    unassociated, as a journal delete leaves the list; a journal merge moves
+    it from the absorbed journal to the survivor). Each carries its
     provenance and actor, in the shape the task and journal feeds use. Wording
     belongs to the client; these field names are the contract.
 

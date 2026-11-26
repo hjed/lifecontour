@@ -35,10 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.journal.services.journal_patch import JournalPatch
-from app.core.tasks.adapters.sql.task_anchor_repository import SqlTaskAnchorRepository
-from app.core.tasks.services.task_journal_merge_service import (
-    TaskJournalMergeService,
-)
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.concurrency_helpers import (
@@ -50,6 +46,7 @@ from tests.integration.core.integrations.journal_sync_seeding import (
     sync_event,
 )
 from tests.integration.journal.committed_journal import journal_service_on
+from tests.journal_service_factory import build_task_journal_merge_service
 
 EXTERNAL_EVENT_ID = "race-event"
 START = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
@@ -199,9 +196,8 @@ class TestInboundJournalSyncOverlappingAMerge:
                 await JournalMergeService(
                     journal_repo=SqlJournalRepository(connection),
                     event_publisher=publisher,
-                    task_merge_service=TaskJournalMergeService(
-                        task_anchor_repo=SqlTaskAnchorRepository(connection),
-                        event_publisher=publisher,
+                    task_merge_service=build_task_journal_merge_service(
+                        connection, event_publisher=publisher
                     ),
                 ).merge_journals(
                     synced.other_journal_id, synced.journal_id, transaction=connection
