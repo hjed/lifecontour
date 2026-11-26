@@ -61,9 +61,11 @@ from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
     MAX_UPCOMING_DAYS_AHEAD,
+    OVERDUE_DASHBOARD_DAYS,
     UpcomingTasks,
     UpcomingWindow,
     select_upcoming_tasks,
+    upcoming_task_day,
     upcoming_window,
 )
 
@@ -71,6 +73,7 @@ __all__ = [
     "DEFAULT_UPCOMING_DAYS_AHEAD",
     "MAX_TASK_LIST_NAME_LENGTH",
     "MAX_UPCOMING_DAYS_AHEAD",
+    "OVERDUE_DASHBOARD_DAYS",
     "DueJournalDays",
     "JournalTaskGroups",
     "LapseReason",
@@ -126,5 +129,6 @@ __all__ = [
     "list_task_due",
     "reorder_task_lists",
     "select_upcoming_tasks",
+    "upcoming_task_day",
     "upcoming_window",
 ]

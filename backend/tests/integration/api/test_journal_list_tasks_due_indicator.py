@@ -18,6 +18,7 @@ longer be created against — one already in the past, or a cancelled event — 
 the write path exists precisely to refuse those.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -49,16 +50,25 @@ async def seed_due_journal(
     *,
     title: str,
     days_offset: int = 7,
+    days_long: int = 0,
     tasks: int = 1,
     status: TaskStatus = TaskStatus.NOT_DONE,
     event_state: EventState | None = None,
 ) -> int:
-    """A journal with ``tasks`` tasks due in it, and its own creating journal."""
+    """A journal with ``tasks`` tasks due in it, and its own creating journal.
+
+    ``days_long`` makes it a multi-day journal, ending that many days after it
+    starts.
+    """
     creating_id = await create_journal(
         journal_repository, title=f"{title} — where it arose", days_offset=-14
     )
+    start = datetime.now(UTC) + timedelta(days=days_offset)
     due_id = await create_journal(
-        journal_repository, title=title, days_offset=days_offset
+        journal_repository,
+        title=title,
+        start=start,
+        end=start + timedelta(days=days_long, hours=1),
     )
     if event_state is not None:
         await mark_journal_as_event(async_connection, due_id, event_state=event_state)
@@ -214,6 +224,38 @@ class TestTheIndicatorOnTheWire:
         counts = counts_by_journal_id(response.json())
         assert counts[lapsed_id] == 0
         assert counts[live_id] == 1
+
+    async def test_a_journal_under_way_holding_a_live_task_still_counts(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ):
+        """Started two days ago, ends in two days: its tasks have not lapsed.
+
+        They lapse only once the journal's last day has ended, so the badge
+        stays lit for the whole trip; a trip that ended yesterday is dark.
+        """
+        under_way_id = await seed_due_journal(
+            async_connection,
+            journal_repository,
+            title="Coast walk",
+            days_offset=-2,
+            days_long=4,
+        )
+        ended_id = await seed_due_journal(
+            async_connection,
+            journal_repository,
+            title="Last week's trip",
+            days_offset=-5,
+            days_long=3,
+        )
+
+        response = await authenticated_client.get(_WHOLE_PAGE)
+
+        counts = counts_by_journal_id(response.json())
+        assert counts[under_way_id] == 1
+        assert counts[ended_id] == 0
 
     async def test_a_cancelled_event_journal_reports_zero(
         self,

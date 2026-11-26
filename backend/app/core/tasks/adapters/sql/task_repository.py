@@ -692,9 +692,16 @@ class SqlTaskRepository(TaskRepository):
         anchored to somebody else's journal — the service refuses to write one.
         Adding the predicate would suggest it were load-bearing.
 
-        ``BETWEEN`` is inclusive at both ends, which is what makes a task due at
-        any hour of the last day part of the window; the caller supplies that
-        day's final microsecond for exactly that reason.
+        The journal is matched by **overlap** — it starts no later than the
+        window's end and ends no earlier than its start — so a trip under way
+        is included: its tasks are due today until it ends. Both comparisons
+        are inclusive, which is what makes a journal at any hour of the last
+        day part of the window (the caller supplies that day's final
+        microsecond for exactly that reason) and a journal ending at local
+        midnight of today — an all-day journal's stored, inclusive end — still
+        under way. The predicate is the one the daily summary selects a day's
+        journals by. The read model decides lapse, so an edge row this admits
+        is answered correctly above.
 
         The order is the due journal's start, then the task id. The second term
         is what makes it **total**: a day's journal commonly holds several
@@ -709,7 +716,8 @@ class SqlTaskRepository(TaskRepository):
             WHERE t.user_id = :user_id
               AND t.status = :status
               AND t.task_list_id IS NULL
-              AND j.event_date_range_start BETWEEN :window_start AND :window_end
+              AND j.event_date_range_start <= :window_end
+              AND j.event_date_range_end >= :window_start
             ORDER BY j.event_date_range_start, t.id
             """
         )

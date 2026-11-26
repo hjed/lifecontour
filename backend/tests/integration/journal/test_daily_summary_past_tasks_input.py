@@ -511,6 +511,38 @@ class TestTheDayIsItsJournals:
 
         assert texts(assembled) == ["due in the trip"]
 
+    async def test_a_commitment_due_in_a_journal_still_under_way_is_open(
+        self,
+        assembler: DailySummaryInputAssembler,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Yesterday's summary reports the trip's task as still open, not lapsed.
+
+        The trip ends tomorrow, so the task's date has not passed: it lapses
+        only once the trip's last day has ended.
+        """
+        creating = await creating_journal(journal_repository)
+        spanning = await create_journal(
+            journal_repository,
+            title="Three-day trip",
+            start=at(YESTERDAY - timedelta(days=2)),
+            end=at(TODAY + timedelta(days=1)),
+        )
+        await create_task(
+            async_connection,
+            creating_journal_id=creating,
+            due_journal_id=spanning,
+            text="due in the trip",
+        )
+
+        assembled = await assembler.assemble(USER_ID, YESTERDAY, "UTC", now=NOW)
+
+        assert assembled.past_day_tasks is not None
+        (model,) = assembled.past_day_tasks
+        assert model.task.status is TaskStatus.NOT_DONE
+        assert model.lapse_reason is None
+
 
 class TestNothingIsGatheredForAnyOtherDay:
     """A resolution belongs to a day that has been, and to no other."""

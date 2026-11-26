@@ -3339,14 +3339,80 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 - [ ] A summary is refreshed by a due-date change, a task moving on or off a list, and a list being archived or unarchived, as well as by the existing triggers.
 - [ ] E2E covers a dated list task appearing in its week and an overdue one being marked, on Firefox and Mobile Chrome.
 
-#### Phase 1: Selection rules for list tasks
+#### Phase 1: Selection rules for list tasks, and one "date has passed" rule ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** ITER21-001.
-**Estimated diff:** ~120 production → **~720 tracked** (×6)
+**Estimated diff:** ~120 production → **~720 tracked** (×6) · re-estimated at plan review to ~1,000–1,200 tracked once the journal-only lapse rule joined the phase (user decision below) · **Actual:** ~250 production → **~1,250 tracked** (1,249 insertions, 186 deletions excluding this document: about 250 production — `upcoming.py` 123, the lapse rule and its readers 45, the summary refresh targets 26, the listing query 12, `tasks_section` 7, schema/controller/MCP wording 37; about 940 tests, 87 of them E2E; about 60 spec and architecture docs). Production ran ×2.1 on the original estimate — the lapse rule joining the phase, and docstrings carrying each rule's reason; tracked landed at ×5 production, inside the ×6 band.
 
 **Acceptance Criteria:**
 
-- [ ] Pure: dated list tasks in the window; overdue for seven days; overdue first, oldest first; exclusions.
+- [x] Pure: dated list tasks in the window; overdue for seven days; overdue first, oldest first; exclusions.
+- [x] A journal-only task lapses only once its due journal's **last** day has ended; creating or retargeting still needs a due journal that starts in the future.
+- [x] While a due journal is in progress its open tasks are on the dashboard, `/tasks/upcoming` and `list_upcoming_tasks` as due today; the journal list's tasks-due badge stays lit; a change to such a task refreshes today's summary.
+- [x] E2E: a journal-only task due in an in-progress multi-day journal shows as Today on the dashboard and is not marked lapsed on its journal page, on Firefox and Mobile Chrome.
+
+**Delivered:** one rule for when a task's date has passed, and the dashboard selection built on it.
+- **Lapse waits for the last day.** `derive_task_date_state` (`list_dates.py`) passes the due journal's **last** day to `derive_lapse_reason`, whose parameter is now `due_journal_last_day`; the journal list's badge (`TaskReadService._lapses_its_tasks`) reads `journal_last_day`. Every reader takes lapse from those two, so task reads (REST, MCP), journal pages, the badge, the remove-from-list and list-delete answers and the daily summary all follow. `is_future_dated` (create, retarget) still asks about the **first** day.
+- **One selection rule** (`core_shared/models/tasks/upcoming.py`). `select_upcoming_tasks` admits a not-done, not-lapsed task that is dated and not on an archived list. Then:
+  - an **overdue** task stays for `OVERDUE_DASHBOARD_DAYS` (7), counted from `overdue_after`, and is placed on its date;
+  - any other task is placed by `upcoming_task_day(model, today)` on `max(date, today)`, so a task under way is due today, and is kept if that day is in the window;
+  - order: overdue first, oldest first, then by placed day, ties by task id across both kinds.
+
+  The function's signature and `UpcomingTasks` are unchanged; the new pieces are exported from `core_shared.models.tasks`.
+- **The listing matches by overlap.** `find_upcoming_tasks` uses `event_date_range_start <= :window_end AND event_date_range_end >= :window_start`, the daily summary's day predicate, and is still journal-only (`task_list_id IS NULL`).
+- **`days_away` counts to the placed day** (`tasks_section._row`), so a task under way reads `0` → the existing Today chip; no frontend code changed.
+- **Today's briefing refreshes for a journal under way, and says "today" with today's date.** `targets_for_task_due_span` returns `[first_day, today]` for a span that crosses today, and today alone for one starting inside the window. The prompt's task line dates a task by `upcoming_task_day` rather than its due journal's first day, so it never reads "Due 24 Nov (today)" on the 26th (found by the phase's independent review).
+- Specs corrected: task-lists §*Which day counts*, the *Dates* table, the *Tasks card* table and *Superseded behaviour*; home-dashboard §*Lapsed tasks*. `domain-architecture.md` and `api-design.md` updated; REST field descriptions and MCP tool docs say "ended".
+
+**Tests:**
+- **Unit:**
+  - `test_task_upcoming_window.py`: `TestDatedListTasksInTheWindow` (replaces `TestListTasksAreLeftOut`), `TestInProgressDueJournal`, `TestOverdueListTasks`, `TestListTaskExclusions`, `TestMixedOrdering`, `TestUpcomingTaskDay`; the journal-only classes unchanged.
+  - `test_list_task_dates.py`: the first-day lapse test rewritten; last-day, ended and cancelled-in-progress cases added.
+  - `test_task_read_model.py`: one test rewritten to the new rule.
+  - `test_task_due_counts.py`: an in-progress journal counts; one that ended yesterday doesn't.
+  - `test_tasks_section.py`: a task under way gives `days_away == 0`.
+  - `test_daily_summary_invalidation_targets.py`: the crossing-today test rewritten; ending-today and ended-yesterday cases added.
+  - `test_task_lapse_derivation.py`: keyword renamed.
+  - `test_daily_summary_prompt_builder.py`: a task in a journal under way is dated today on the briefing.
+- **Integration:**
+  - upcoming listing: repository overlap, both ways; the service lists a task under way, not lapsed and ahead of tomorrow's; a journal that ended yesterday is absent; due-date and overdue due-date list tasks are still absent (the safe-alone guard);
+  - the journal-list badge;
+  - `GET /api/tasks/upcoming` and `GET /api/tasks/{id}`;
+  - the home-dashboard `days_away: 0`;
+  - MCP `list_upcoming_tasks`;
+  - the past-day summary reports a task under way as open.
+  - Four timezone tests (Sydney/Kiritimati) relied on `create_journal`'s default one-hour end running past local midnight. They now seed a point-in-time journal, keeping the case they were written for.
+- **E2E:** `home-dashboard.spec.ts` › *keeps a task due in a journal under way on the card as due today, not lapsed*, at 390px, using the new `TestDataManager.moveJournalToInProgress`. It was shown red against the pre-phase backend.
+- **Gates run locally:**
+  - ruff format/check and mypy (backend, core_shared);
+  - backend unit (6,344) and core_shared (924);
+  - every backend integration directory;
+  - `pnpm quality:check`; jest (3,474);
+  - `home-dashboard.spec.ts` and `journal-tasks.spec.ts` on Firefox and Mobile Chrome (115 passed), the new test also with `--repeat-each 3`.
+
+**Decisions (recorded during planning and implementation):**
+- **One rule for when a date has passed** (user decision: "the spec is clearly wrong", then "shouldn't it be the same rule?"). A task due in a journal is late only once the journal's last day has ended — a journal-only task lapses, a list task is overdue — and while the journal is under way it is due today. The spec's earlier first-day lapse is superseded; it is fixed in this phase rather than a later one, since it is one rule.
+- **The seven overdue days count from `overdue_after`** (user decision), so a multi-day trip's leftover gets its full week.
+- **Overdue "oldest first" orders by the task's date**; the overdue lookback does not depend on `days_ahead`.
+- **The archived check is the selection's own**: `derive_task_date_state` ignores archiving, so an archived list's past task still reads overdue.
+- **`upcoming_task_day` takes `today`** (the plan named it with one argument): placing a task under way needs the day, and the window's first day is passed so the row and the order share it.
+- **The visible "Lapsed: the date of this task's due journal has passed." copy is kept** (plan default, unchallenged at approval).
+
+**Notes for later phases:**
+- *Phase 3:*
+  - lift `task_list_id IS NULL` in `find_upcoming_tasks`;
+  - LEFT JOIN the due journal and add a `due_date` predicate;
+  - add a lower bound of `OVERDUE_DASHBOARD_DAYS` before the window, on the due date or the due journal's end;
+  - widen `DashboardTask.due_journal` to nullable; `_row` narrows it with `require_journal("due")` today.
+
+  The selection and `days_away` are ready. Rewrite `TestListTasksAreLeftOut` (unit service guard and integration).
+- *Phase 4:* `daily_summary_prompt_builder.py` narrows with `require_journal("due")` on "journal-only by selection" (two places); a due-date list task has none.
+- *Phase 6:* a due-date list task has no `due_journal_id`, so `_targets_for_task_event` finds no target for it.
+- *Phase 2 (card rows):* `DashboardTaskRow`'s chip is a `<time dateTime={due_journal.date}>`. For a task under way, that date is the journal's start, while the label reads Today. If the row should carry the placed day, it needs the anchor (`meta.anchor.date` plus `days_away`).
+- *Phase 5 (past-day summaries):* a past day's summary generated while its journal is still under way says "still not done". Nothing invalidates it when the journal ends, because lapse is derived and has no event. This is within the spec's "status at generation time"; revisit if past days should say "lapsed" once over.
+- *ITER21-002 Phase 16 (task details: move and remove):* the remove-from-list warning ("if its due journal is already past it is immediately lapsed") must use the journal's **last** day. Take it from the read model or a backend answer, not the journal's date.
+- `TaskReadService._lapses_its_tasks` (the journal list's badge) now keeps a multi-day journal lit until it ends. Phase 15's open note stands: after that, a journal holding an overdue list task shows no badge.
 
 #### Phase 2: Tasks card renders list-task rows
 

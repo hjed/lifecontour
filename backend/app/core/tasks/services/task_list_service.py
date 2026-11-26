@@ -273,7 +273,7 @@ class TaskListService:
         **What survives.** A task holding both a creating and a due journal
         stays, as a journal-only task: off the list, with no position and no due
         date, everything else as it was. Its lapse is derived on read, so it
-        reads as lapsed if its due journal has passed. Every other task on the
+        reads as lapsed if its due journal has ended. Every other task on the
         list — open or closed — is deleted, its contact and intermediate links
         with it.
 

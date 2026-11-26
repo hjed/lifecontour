@@ -41,7 +41,7 @@ def lapse(
     """The rule, with today pinned so each call reads as its own case."""
     return derive_lapse_reason(
         status=status,
-        due_journal_date=due_journal_date,
+        due_journal_last_day=due_journal_date,
         due_journal_cancelled=cancelled,
         today=TODAY,
     )

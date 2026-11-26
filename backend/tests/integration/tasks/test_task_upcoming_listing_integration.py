@@ -640,6 +640,9 @@ class TestTimezoneAnchoring:
             journal_repository,
             title="Their yesterday evening",
             start=datetime(2026, 8, 11, 9, 0, tzinfo=UTC),
+            # A moment, not the fixture's default hour: an hour would run past
+            # local midnight, and a task lapses only once its journal has ended.
+            end=datetime(2026, 8, 11, 9, 0, tzinfo=UTC),
         )
         their_today = await create_journal(
             journal_repository,
@@ -904,6 +907,67 @@ class TestTheRepositoryOnItsOwnTerms:
 
         assert [task.id for task in found] == [wanted]
 
+    async def test_a_journal_under_way_is_fetched(
+        self,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """A trip that started yesterday and ends tomorrow overlaps the window.
+
+        It starts before the window opens, so a start-in-window predicate would
+        miss it; its tasks are due today until it ends, so the statement
+        matches on overlap.
+        """
+        creating = await creating_journal(journal_repository)
+        trip = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=at(TODAY - timedelta(days=1)),
+            end=at(TODAY + timedelta(days=1), hour=17),
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=trip
+        )
+
+        found = await task_repository.find_upcoming_tasks(
+            USER_ID,
+            window_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+            window_end=datetime.combine(
+                TODAY + timedelta(days=7), datetime.max.time(), tzinfo=UTC
+            ),
+        )
+
+        assert [task.id for task in found] == [task_id]
+
+    async def test_a_journal_that_ended_yesterday_is_not_fetched(
+        self,
+        task_repository: SqlTaskRepository,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Overlap, not "started recently": once it is over it is out."""
+        creating = await creating_journal(journal_repository)
+        trip = await create_journal(
+            journal_repository,
+            title="Last week's trip",
+            start=at(TODAY - timedelta(days=4)),
+            end=at(TODAY - timedelta(days=1), hour=17),
+        )
+        await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=trip
+        )
+
+        found = await task_repository.find_upcoming_tasks(
+            USER_ID,
+            window_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+            window_end=datetime.combine(
+                TODAY + timedelta(days=7), datetime.max.time(), tzinfo=UTC
+            ),
+        )
+
+        assert found == []
+
     async def test_another_users_task_is_not_fetched(
         self,
         task_repository: SqlTaskRepository,
@@ -953,6 +1017,87 @@ class TestTheRepositoryOnItsOwnTerms:
         )
 
         assert found == []
+
+
+class TestAJournalUnderWay:
+    """A task due in a journal that is under way is due today.
+
+    Its date is the journal's first day, behind the window, but it has not
+    lapsed: it lapses only once the journal's last day has ended.
+    """
+
+    async def test_its_task_is_listed_not_lapsed(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Started yesterday, ends tomorrow: on the listing, and live."""
+        creating = await creating_journal(journal_repository)
+        trip = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=at(TODAY - timedelta(days=1)),
+            end=at(TODAY + timedelta(days=1), hour=17),
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=trip
+        )
+
+        upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert listed_ids(upcoming) == [task_id]
+        assert upcoming.tasks[0].lapsed is False
+
+    async def test_it_sorts_with_todays_tasks(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Placed on today: ahead of tomorrow's task, though it started first."""
+        creating = await creating_journal(journal_repository)
+        tomorrow = await create_journal(
+            journal_repository, title="Dentist", start=at(TODAY + timedelta(days=1))
+        )
+        trip = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=at(TODAY - timedelta(days=2)),
+            end=at(TODAY + timedelta(days=2), hour=17),
+        )
+        tomorrows_task = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=tomorrow
+        )
+        trip_task = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=trip
+        )
+
+        upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert listed_ids(upcoming) == [trip_task, tomorrows_task]
+
+    async def test_once_it_has_ended_its_task_is_gone(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Ended yesterday: lapsed, and off the listing."""
+        creating = await creating_journal(journal_repository)
+        trip = await create_journal(
+            journal_repository,
+            title="Last week's trip",
+            start=at(TODAY - timedelta(days=4)),
+            end=at(TODAY - timedelta(days=1), hour=17),
+        )
+        await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=trip
+        )
+
+        upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert listed_ids(upcoming) == []
 
 
 class TestListTasksAreLeftOut:
@@ -1017,6 +1162,42 @@ class TestListTasksAreLeftOut:
     ) -> None:
         """Read through the whole listing, the list task is absent."""
         journal_only, _ = await self.seed_both(async_connection, journal_repository)
+
+        upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
+
+        assert listed_ids(upcoming) == [journal_only]
+
+    async def test_due_date_list_tasks_are_left_out_too(
+        self,
+        read_service: TaskReadService,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+    ) -> None:
+        """Due tomorrow, and overdue since yesterday, by their own dates.
+
+        The selection rule admits both; the statement does not fetch them yet,
+        so no surface shows a list task until the listing learns to.
+        """
+        creating = await creating_journal(journal_repository)
+        due = await create_journal(
+            journal_repository,
+            title="Permit Meeting",
+            start=at(TODAY + timedelta(days=2)),
+        )
+        journal_only = await create_task(
+            async_connection, creating_journal_id=creating, due_journal_id=due
+        )
+        task_list = await seed_task_list(async_connection)
+        assert task_list.id is not None
+        for position, due_date in enumerate(
+            (TODAY + timedelta(days=1), TODAY - timedelta(days=1))
+        ):
+            await create_list_task(
+                async_connection,
+                task_list_id=task_list.id,
+                position=position,
+                due_date=due_date,
+            )
 
         upcoming = await read_service.read_models_for_upcoming_window(USER_ID, now=NOW)
 

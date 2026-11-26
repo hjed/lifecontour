@@ -652,6 +652,9 @@ class TestTimezoneAnchoring:
             journal_repository,
             title="Sydney evening",
             start=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
+            # A moment, not the fixture's default hour: an hour would run past
+            # local midnight, and a task lapses only once its journal has ended.
+            end=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
         )
         await create_task(
             async_connection, creating_journal_id=viewed, due_journal_id=due
@@ -680,6 +683,9 @@ class TestTimezoneAnchoring:
             journal_repository,
             title="Sydney evening",
             start=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
+            # A moment, not the fixture's default hour: an hour would run past
+            # local midnight, and a task lapses only once its journal has ended.
+            end=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
         )
         await create_task(
             async_connection, creating_journal_id=viewed, due_journal_id=due

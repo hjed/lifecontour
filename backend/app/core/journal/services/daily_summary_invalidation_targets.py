@@ -15,12 +15,11 @@ zone.
 
 **A task's days follow its due journal, and the two halves are different
 questions.** The current day's prompt lists the not-done tasks whose due journal
-*starts* inside ``[today, today + 7]`` (``find_upcoming_tasks`` filters on the
-start instant); a past day's prompt lists what was due in *that day's* journals,
-which is the overlap set again. So a due span behind the user invalidates the
-days it covers, and one ahead of the user invalidates **today** — never both,
-because a span starting before today cannot start inside a window that opens on
-it.
+*overlaps* ``[today, today + 7]`` and has not ended (``find_upcoming_tasks``
+matches on overlap, and a task lapses only once its journal's last day is over);
+a past day's prompt lists what was due in *that day's* journals, which is the
+overlap set again. So a due span behind the user invalidates the days it covers,
+one ahead of the user invalidates **today**, and one under way invalidates both.
 
 The result is a set of **ranges** rather than dates on purpose: invalidation is
 one guarded ``UPDATE`` per range over rows that already exist, so an unbounded
@@ -162,14 +161,30 @@ def targets_for_task_due_span(
 
     Returns:
         At most one target. The past half is the span clipped to the days behind
-        the user; the forward half is today itself, and only when the due
-        journal *starts* inside the window — which is the predicate
-        ``find_upcoming_tasks`` applies, rather than an overlap, so a journal
-        that began last week and runs into this one is in no upcoming listing.
+        the user; the forward half is today itself, whenever the due journal
+        has not ended and starts no later than the window's last day — the
+        overlap ``find_upcoming_tasks`` applies, since a task due in a journal
+        under way is on today's briefing until the journal ends. A journal
+        under way has both halves, and they are one run of days, so they are
+        one range.
     """
     past = due_span.clipped_before(today)
+    on_todays_briefing = (
+        due_span.last_day >= today and due_span.first_day <= window.last_day
+    )
+    if past is not None and on_todays_briefing:
+        # Under way: the days behind the user and today itself, which run on
+        # into one another, so one range covers both.
+        return frozenset(
+            {
+                InvalidationTarget(
+                    user_id=user_id,
+                    span=DaySpan(first_day=past.first_day, last_day=today),
+                )
+            }
+        )
     if past is not None:
         return frozenset({InvalidationTarget(user_id=user_id, span=past)})
-    if window.contains(due_span.first_day):
+    if on_todays_briefing:
         return frozenset({InvalidationTarget.for_day(user_id, today)})
     return frozenset()

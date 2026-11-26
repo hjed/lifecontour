@@ -932,7 +932,8 @@ class TaskReadAttributes(TaskAttributes):
         ...,
         description=(
             "Whether the commitment has been let slide: still not done, and its "
-            "due journal has either passed or been cancelled. Only a task with no "
+            "due journal has either ended (its last day is behind you) or been "
+            "cancelled. Only a task with no "
             "list lapses; a task on a list is never lapsed. Derived on every "
             "read and never stored."
         ),

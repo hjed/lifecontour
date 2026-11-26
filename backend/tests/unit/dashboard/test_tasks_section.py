@@ -54,6 +54,7 @@ def make_model(
     task_id: int,
     *,
     due_date: datetime.date,
+    last_day: datetime.date | None = None,
     text: str | None = None,
     title: str | None = None,
     status: TaskStatus = TaskStatus.NOT_DONE,
@@ -68,7 +69,7 @@ def make_model(
         id=900 + task_id,
         title=title if title is not None else f"journal {task_id}",
         date=due_date,
-        last_day=due_date,
+        last_day=last_day or due_date,
         cancelled=False,
     )
     return build_task_read_model(
@@ -245,6 +246,26 @@ class TestDaysAway:
 
         (row,) = section.tasks
         assert row.days_away == expected
+
+    def test_a_task_in_a_journal_under_way_is_due_today(self) -> None:
+        """A trip that started two days ago and ends tomorrow reads ``0``.
+
+        Not ``-2``: the task is not late until the trip ends, so the chip says
+        Today rather than counting back to a start day the user is past.
+        """
+        section = tasks_section_for(
+            selected(
+                make_model(
+                    1,
+                    due_date=TODAY - datetime.timedelta(days=2),
+                    last_day=TODAY + datetime.timedelta(days=1),
+                )
+            )
+        )
+
+        (row,) = section.tasks
+        assert row.days_away == 0
+        assert row.due_journal.date == TODAY - datetime.timedelta(days=2)
 
     def test_it_is_counted_from_the_window_and_not_from_the_machines_today(
         self,

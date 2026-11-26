@@ -193,7 +193,7 @@ the *creating* journal where it arose and the *due* journal where it matters.
     anchors a task with no list requires; whether the due journal exists, is owned by the acting user and is
     future-dated **at the moment it is set** needs journal data and the user's timezone, so it is
     enforced in the service layer where REST and MCP both inherit it
-  - *Lapsed* is derived, never stored — a not-done task whose due journal has passed or been cancelled
+  - *Lapsed* is derived, never stored — a not-done task whose due journal has ended or been cancelled
   - **Contact links are a plain reference.** They carry no relationship type, no role and no
     attendance status — unlike journal-contact relationships, which carry all three — and nothing
     parses contacts out of the task text. They are editable in **any** status, so no status is read
@@ -1058,8 +1058,10 @@ asks each of those surfaces for "the task text, its status, its linked contacts,
 tasks — a clear lapsed marker", so the shape is defined once rather than per controller.
 
 **Lapsed is derived on every read and never stored.** A task is lapsed when it is still *not done*
-and either its due journal's date has **passed** in the acting user's timezone or that journal is a
-**cancelled** event. A stored flag would need something to notice midnight passing in every user's
+and either its due journal has **ended** — its *last* day is behind today in the acting user's
+timezone — or that journal is a **cancelled** event. It waits for the last day, not the first, for
+the reason a list task's overdue does: a multi-day trip's commitments are live until the trip is
+over, and while it is under way they are due today. One rule for when any task's date has passed. A stored flag would need something to notice midnight passing in every user's
 zone and would be wrong until it next ran, for a property that costs one date comparison. This is
 also why the future-dated invariant is only a *write-time* rule: nothing re-validates it on read,
 which is exactly what keeps a lapsed task loadable.
@@ -1067,8 +1069,9 @@ which is exactly what keeps a lapsed task loadable.
 The pieces:
 
 - **`LapseReason`** (`core_shared/models/tasks/lapse.py`) — `DATE_PASSED` or
-  `DUE_JOURNAL_CANCELLED`, with `derive_lapse_reason(status, due_journal_date,
-  due_journal_cancelled, today)` beside it. Pure, and it takes **dates rather than journals or a
+  `DUE_JOURNAL_CANCELLED`, with `derive_lapse_reason(status, due_journal_last_day,
+  due_journal_cancelled, today)` beside it — the parameter named for the day it is, so no caller
+  passes the journal's first day out of habit. Pure, and it takes **dates rather than journals or a
   timezone**, so a caller deriving this for many tasks resolves the timezone once. The *reason* is
   returned rather than a boolean because "the day went by" and "the meeting was cancelled" ask the
   user for different things; the wording is the UI's, and ITER18-002 Phase 4 pins the cancellation
@@ -1082,7 +1085,7 @@ The pieces:
   (`core_shared/models/tasks/read_model.py`), built by the pure `build_task_read_model(...)`. A
   journal ref carries a resolved **`date`** and **`last_day`**, not instants, so no surface can
   re-derive them in the browser's zone and disagree with the rule that judged the task; `last_day`
-  is what the overdue rule waits out and is not put on the wire. The model carries `lapse_reason`
+  is what lapse and overdue wait out and is not put on the wire. The model carries `lapse_reason`
   and `overdue` from `derive_task_date_state` — the due ref becomes `DueJournalDays` through
   `TaskJournalRef.days()` — and `task_list` (`TaskListRef`: id, name, icon, archived), which must be
   the task's own list or the builder raises. `TaskReadModel.lapsed` is defined as "there is a
@@ -1098,8 +1101,9 @@ The pieces:
   journal-only page keeps its statement count; a task naming a list its owner cannot read is
   `TaskListNotFoundError`, as a missing anchor is. The upcoming window and the past-day read
   (`find_upcoming_tasks`, `find_tasks_due_in_journals`) are **journal-only** in SQL
-  (`task_list_id IS NULL`), and `select_upcoming_tasks` states the same rule, so the dashboard,
-  `list_upcoming_tasks` and the daily summary leave list tasks out until they learn to show them.
+  (`task_list_id IS NULL`), so the dashboard, `list_upcoming_tasks` and the daily summary leave
+  list tasks out until they learn to show them; `select_upcoming_tasks` already holds the list-task
+  rule (see *The upcoming window*), so admitting them is the query's change alone.
   The journal list's due-task count does include list tasks. It is **read-only** — no `@transactional`, no lock, no domain event — because
   a read that opened a unit of work would hold a transaction for the length of a page render.
 
@@ -1110,6 +1114,7 @@ Four rules the derivation applies, each a deliberate reading of the specificatio
 | Cancelled **and** past | `DUE_JOURNAL_CANCELLED` | The more specific and more actionable of the two |
 | Cancelled but still **future**-dated | `DUE_JOURNAL_CANCELLED` | The cancellation rule carries no date condition |
 | Due **today** | not lapsed | Mirrors `is_future_dated`'s strictly-after, so the read-time and write-time rules agree about the same journal |
+| Due journal **under way** (started, not ended) | not lapsed | Lapse waits for the last day; the write-time rule still asks about the first, so a task cannot newly be made due in a journal already under way |
 | Task **done** or **cancelled** | not lapsed | A commitment that was met or called off cannot then be let slide |
 
 Only the **due** journal decides it. The creating journal is almost always in the past — that is what
@@ -1193,7 +1198,7 @@ The pieces:
   (`app/core/journal/services/journal_date_resolver.py`) and the batched cancellation lookup.
 - **`list_task_due(due_date, due_journal)` → `ListTaskDue(day, overdue_after)` or `None`.** Two days,
   because they differ for a multi-day journal: the task's **date** (the week it belongs in) is the day
-  the journal starts — a journal's date for every task purpose — while it is only **overdue** once the
+  the journal starts — the journal's date — while it is only **overdue** once the
   journal is over, so a trip's packing list is not overdue on day two. `None` means undated, which a
   cancelled due journal is; un-cancelling restores the date because nothing was stored.
 - **`is_list_task_overdue(status, due, today)`** — not done, and `overdue_after` strictly before
@@ -1207,7 +1212,8 @@ The pieces:
 - **`derive_task_date_state(task, due_journal, today)` → `TaskDateState(lapse_reason, overdue)`** —
   the single answer for *any* task, so no reader branches on "is it on a list?". On a list:
   `lapse_reason` is always `None` (invariant 7) and `overdue` follows the rule above. Journal-only:
-  the unchanged `derive_lapse_reason`, and never overdue. A journal-only task added to a list stops
+  `derive_lapse_reason` against the due journal's **last** day — the same day overdue waits for —
+  and never overdue. A journal-only task added to a list stops
   lapsing from that moment.
 
 **A journal's last day is the local date of its `event_date_range.end`.** The end is stored
@@ -1467,8 +1473,9 @@ yesterday for today is exactly what the dashboard is for.
 `JournalDateResolver.timezone_for` and shared by the window *and* the assembler — `_assemble` takes it
 as a parameter rather than looking it up, so one request cannot straddle a settings change or pay for
 two reads. `local_window` then turns the inclusive date span into local midnight on the first day
-through the final microsecond of the last, and those instants are what the query compares against
-`journals.event_date_range_start`. Pushing the conversion into SQL would put a second definition of
+through the final microsecond of the last, and the query matches a due journal that **overlaps**
+those instants (`event_date_range_start <= end AND event_date_range_end >= start`, the daily
+summary's day predicate), so a journal under way is in it. Pushing the conversion into SQL would put a second definition of
 "a journal's date" in the database, one no unit test could reach.
 
 **A day's last instant is derived from the next day's midnight, and that is not a stylistic choice.**
@@ -1480,12 +1487,18 @@ query and nothing reports it. The following midnight has no such ambiguity, beca
 of a day is unique however the clocks moved. Found by review after the phase had argued that
 disagreement was impossible.
 
-**Three exclusions, and only one of them can actually bite.** The statement filters *status*, so done
-and cancelled tasks never arrive. The pure rule then drops anything `lapsed`, reading the verdict
-`build_task_read_model` derived rather than recomputing it — and inside a *forward* window a
-date-passed lapse is impossible by construction, since the window starts today. So the **cancelled due
-journal** is the only fixture that makes the lapse check non-vacuous, and it is required at every test
-level: remove the check and that one case is the only failure. The excluded task is not lost — it stays
+**One selection rule for both kinds of task.** The statement filters *status*, so done and cancelled
+tasks never arrive. The pure rule then admits a task that is not lapsed, not on an archived list and
+dated — by its due journal, or a list task's due date — reading `lapsed` and `overdue` from the model
+rather than recomputing them. An **overdue** list task stays for `OVERDUE_DASHBOARD_DAYS` (seven)
+after the day it became late (`ListTaskDue.overdue_after`: the due date, or the due journal's last
+day) and is placed on its own date; any other task is placed by `upcoming_task_day` on its date or,
+when that has gone by while its due journal is still under way, on **today**, and is kept if that day
+is in the window. Overdue first, oldest first, then everything else by placed day; task id breaks
+ties across both kinds. The overlap query can over-fetch a journal that ended on an edge, and the
+lapse verdict answers it. The **cancelled due journal** remains the fixture that makes the lapse
+check non-vacuous at every test level. The SQL is still journal-only; the list-task half of the rule
+is proven in unit tests and reaches a surface when the query admits list tasks. The excluded task is not lost — it stays
 on every journal it is linked to, marked and retargetable, which is the pair the specification promises.
 
 **The batched reads are the journal listing's, reused whole.** `find_upcoming_tasks` is one statement —
@@ -1494,8 +1507,10 @@ neither drop nor duplicate a task — and everything after it is `_assemble`. Th
 the same seven statements a journal's does, invariant in the task count, with a floor of **two** for an
 empty window, where every batch below has no ids to ask about.
 
-**Ordering is total, and the pure rule owns it.** By due-journal *date* then task id, matching the
-journal listing exactly so the same tasks read the same way on both surfaces. The query orders too, by
+**Ordering is total, and the pure rule owns it.** By placed day then task id — the due journal's
+*date* for every task not under way, matching the journal listing — so the same tasks read the same
+way on both surfaces. The dashboard row's `days_away` is counted to the same placed day, so a task
+under way reads `0`, Today. The query orders too, by
 the raw timestamp, which is not the same key: two journals on one local day at different hours tie in
 the rule and do not in the query. The rule's order is the one that reaches a client.
 
@@ -1614,7 +1629,7 @@ configured timezone, never UTC's date.
 | `JournalTypeAdded` / `JournalTypeRemoved` | The journal's span | `event_count` is derived from types, and removing EVENT takes the journal off the agenda |
 | `ContactSummaryRefreshRequested` **with a `journal_id`** | That journal's span | Attaching or detaching a contact publishes only this, and the summary's contact names and count come from exactly those rows |
 | Journal **tag** events | None | `AgendaEntry` carries no tags and the prompt renders none — checked, and pinned by a negative test, because the dashboard's agenda *card* does show them (**W15**) |
-| `TaskCreated` / `TaskUpdated` / `TaskDueJournalRetargeted` / `TaskJournalLinksRepointed` / `TaskListMembershipChanged` | The **due** journal's span if it is behind the user, else **today** if that journal starts inside the week ahead | The current day's prompt lists the week's tasks; a past day's lists what was due in *its* journals. A retarget names two journals and so marks both days |
+| `TaskCreated` / `TaskUpdated` / `TaskDueJournalRetargeted` / `TaskJournalLinksRepointed` / `TaskListMembershipChanged` | The **due** journal's span up to today if it is under way; its span if it is behind the user; else **today** if it starts inside the week ahead | The current day's prompt lists the week's tasks; a past day's lists what was due in *its* journals. A retarget names two journals and so marks both days |
 | `TaskDeleted` | **Today** | The payload is deliberately minimal and the row is gone, so no day can be resolved. A past day that named the task keeps doing so — a recorded limitation |
 | `TaskJournalLinked` / `TaskJournalUnlinked` | None | A task's intermediate journals are on the read model and never rendered |
 | `ImportantDateAdded` | **Today**, for each user whose week the date falls in | `update_contact` re-adds every date on every contact save, so without the window test a phone-number edit would cost an AI call for a birthday six months away |

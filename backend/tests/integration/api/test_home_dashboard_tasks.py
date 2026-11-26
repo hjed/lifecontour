@@ -378,6 +378,36 @@ class TestWhatReachesTheSection:
         listed = on_its_journal.json()
         assert [resource["id"] for resource in listed["data"]] == [str(task_id)]
 
+    async def test_a_task_due_in_a_journal_under_way_is_due_today(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ) -> None:
+        """A trip that started two days ago and ends tomorrow.
+
+        Its tasks are not late until it ends, so the row is on the card with
+        ``days_away`` 0 — Today — while still naming the trip it is due in.
+        """
+        creating_id, _ = task_anchors
+        start = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=2)
+        trip_id = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=start,
+            end=start + datetime.timedelta(days=3),
+        )
+        task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=trip_id
+        )
+
+        (row,) = rows_of(await authenticated_client.get(URL))
+
+        assert row["task_id"] == task_id
+        assert row["days_away"] == 0
+        assert row["due_journal"]["id"] == trip_id
+
     async def test_another_users_task_never_reaches_the_section(
         self,
         authenticated_client: AsyncClient,

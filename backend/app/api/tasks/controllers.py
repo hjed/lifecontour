@@ -168,10 +168,14 @@ async def list_upcoming_tasks(
     *become* a deadline, while a deadline landing today is exactly what this
     listing exists to surface.
 
+    **A journal under way counts as today.** A task due in a multi-day journal
+    that has started but not ended is listed, due today: it is not late until
+    the journal's last day is over.
+
     **Done, cancelled and lapsed tasks are absent.** A task lapses when it is
-    still not done and its due journal has passed or been **cancelled**; inside
-    a forward window only the second can happen, so a cancelled meeting is what
-    takes a task off this list. Nothing is lost when it does — the task stays on
+    still not done and its due journal has **ended** — its last day is behind
+    you — or been **cancelled**; inside a forward window only the second can
+    happen, so a cancelled meeting is what takes a task off this list. Nothing is lost when it does — the task stays on
     every journal it is linked to, where `GET /api/journals/{journal_id}/tasks`
     lists it with its lapse marker and the user can **retarget** it onto a new
     future journal.
@@ -213,7 +217,8 @@ async def get_task(
     zone and disagree with the rule that judged the task.
 
     **`lapsed` is derived on every read and never stored.** A task is lapsed
-    when it is still not done and its due journal has either passed or been
+    when it is still not done and its due journal has either ended (its last
+    day is behind you, so a task due in a trip under way is not lapsed) or been
     cancelled. Only a task with no list lapses: a task on a list never does,
     and may also have no journal in either role, in which case that id and ref
     are null. `lapse_reason` says which, because the two ask you for different

@@ -469,9 +469,15 @@ class TestOverdueOnTheModel:
         assert model.overdue is False
         assert model.lapse_reason == LapseReason.DATE_PASSED
 
-    def test_a_journal_only_task_waits_out_no_last_day(self) -> None:
-        """A journal-only task lapses by its due journal's *first* day,
-        unchanged, however long the journal runs."""
+    def test_a_journal_only_task_waits_out_its_due_journals_last_day(self) -> None:
+        """A journal-only task lapses only once its due journal has ended.
+
+        The same day a list task becomes overdue: under way, it is live and
+        neither lapsed nor overdue.
+        """
         trip = journal_ref(DUE_JOURNAL_ID, date=YESTERDAY, last_day=TOMORROW)
 
-        assert build(due=trip).lapse_reason == LapseReason.DATE_PASSED
+        model = build(due=trip)
+
+        assert model.lapse_reason is None
+        assert model.overdue is False

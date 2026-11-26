@@ -65,9 +65,10 @@ def journal_date(journal: Journal, tz: ZoneInfo) -> datetime.date:
 def journal_last_day(journal: Journal, tz: ZoneInfo) -> datetime.date:
     """The journal's last day: the local date its event date range **ends** on.
 
-    The journal's date is still its first day for every task purpose; this is
-    the day a behaviour waits out when it needs the journal to be *over* — a
-    list task due in it turns overdue only once this day has ended.
+    The journal's date is still its first day — the day a task due in it is
+    due, and whether it is "in the future"; this is the day a behaviour waits
+    out when it needs the journal to be *over*: a task due in it lapses, or on
+    a list turns overdue, only once this day has ended.
 
     The end is stored **inclusive**: an all-day journal ends at local midnight
     *of* its last day (the journal form, and the Google sync, which steps

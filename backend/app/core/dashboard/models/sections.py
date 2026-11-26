@@ -203,8 +203,9 @@ class DashboardTask:
             timezone**. ``cancelled`` on it is always false here: a cancelled
             due journal lapses its task, and a lapsed task is not in this
             section.
-        days_away: How many days from the window's first day the due journal
-            falls, ``0`` meaning today. The material the relative chip is drawn
+        days_away: How many days from the window's first day the task is
+            placed — its due journal's date, or today for one whose due
+            journal is under way — ``0`` meaning today. The material the relative chip is drawn
             from (**W25**), published rather than left to be derived: the
             window's first day is the page's anchor, and a browser subtracting
             dates in its own zone can land a day out near midnight.

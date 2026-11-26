@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from core_shared.models.tasks import upcoming_task_day
+
 from app.core.dashboard.models.sections import DashboardTask, TasksSectionData
 
 if TYPE_CHECKING:
@@ -57,15 +59,18 @@ def tasks_section_for(upcoming: UpcomingTasks) -> TasksSectionData:
 def _row(model: TaskReadModel, window: UpcomingWindow) -> DashboardTask:
     """One task as a row draws it — a projection, deciding nothing else.
 
-    The upcoming selection is journal-only, so every task here has a due
+    The upcoming listing is journal-only, so every task here has a due
     journal, and the row narrows to it rather than carrying an optional one.
+    ``days_away`` counts to the day the selection placed the task on, so a
+    task due in a journal already under way reads ``0`` — Today — rather than
+    counting back to a start day the user is past.
     """
     due_journal = model.require_journal("due")
     return DashboardTask(
         task_id=_persisted_task_id(model.task),
         text=model.task.text,
         due_journal=due_journal,
-        days_away=(due_journal.date - window.first_day).days,
+        days_away=(upcoming_task_day(model, window.first_day) - window.first_day).days,
         flagged=model.task.flagged,
         icon=model.task.icon,
         task_list=model.task_list,

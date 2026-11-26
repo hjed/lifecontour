@@ -63,9 +63,10 @@ class TaskJournalRef:
             date rather than an instant, so no surface can re-derive it in the
             browser's zone and disagree with the rule that judged the task.
         last_day: The local date its event range ends on — ``date`` itself for
-            a single-day journal. Only the due journal's is read, by the
-            overdue rule, which waits out a multi-day journal; surfaces do not
-            put it on the wire.
+            a single-day journal. Only the due journal's is read, by the date
+            rule — a task is lapsed or overdue only once its due journal's last
+            day has ended — and by the dashboard placing a task under way on
+            today; surfaces do not put it on the wire.
         cancelled: Whether this is a cancelled event journal. Only meaningful on
             the due journal, where it is a lapse cause, but carried on every ref
             because a surface marks a cancelled journal wherever it shows one.

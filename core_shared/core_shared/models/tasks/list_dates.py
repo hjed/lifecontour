@@ -5,10 +5,12 @@ A task on a list has a **due date**, a **due journal**, or no date at all
 
 - **It never lapses** (invariant 7). Past its date it reads as **overdue** and
   stays open on its list until it is done, cancelled or re-dated. A
-  journal-only task keeps the lapse rule in :mod:`.lapse`, unchanged.
-- **A due journal dates it by the day the journal starts** — the journal's date
-  for every task purpose — but it is only overdue once the journal's **last**
-  day has ended, so a multi-day trip's packing list is not overdue on day two.
+  journal-only task follows the lapse rule in :mod:`.lapse` instead.
+- **A due journal dates it by the day the journal starts** — the day it is due
+  and is placed by — but it is only overdue once the journal's **last** day has
+  ended, so a multi-day trip's packing list is not overdue on day two. A
+  journal-only task lapses on the same day, by the same rule: whatever kind of
+  task it is, a task due in a journal is late only once the journal is over.
 - **While its due journal is cancelled it is undated**: neither dated nor
   overdue. Un-cancelling restores the date, because nothing here is stored.
 - **A due date, when set, must be today or later.** Today counts, unlike a due
@@ -58,7 +60,7 @@ class DueJournalDays:
 
     Attributes:
         first_day: The local date its event date range starts on — the
-            journal's date for every task purpose
+            journal's date: the day a task due in it is due and placed by
         last_day: The local date its event date range ends on; equal to
             ``first_day`` for a single-day or point-in-time journal
         cancelled: Whether the journal is a cancelled event
@@ -219,7 +221,7 @@ def derive_task_date_state(
     return TaskDateState(
         lapse_reason=derive_lapse_reason(
             status=task.status,
-            due_journal_date=due_journal.first_day,
+            due_journal_last_day=due_journal.last_day,
             due_journal_cancelled=due_journal.cancelled,
             today=today,
         ),

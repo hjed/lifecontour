@@ -1,8 +1,11 @@
 """Why a task lapsed, and the rule that decides it.
 
 A task is **lapsed** when the user has let a commitment slide: it is still not
-done, and either the journal it was due in has passed or that journal has been
-cancelled. Lapsed tasks leave the dashboard silently and stay visible on their
+done, and either the journal it was due in has **ended** — its last day is
+behind the user — or that journal has been cancelled. A task due in a journal
+that is still under way has not lapsed: a multi-day trip's commitments stay live
+until the trip is over, exactly as a list task is only overdue once its journal
+has ended. Lapsed tasks leave the dashboard silently and stay visible on their
 journals, marked, where the user can resurrect, cancel or complete them.
 
 **Lapsed is derived on every read and never stored.** There is no column, no
@@ -45,8 +48,8 @@ class LapseReason(StrEnum):
     """Why a task is lapsed.
 
     Values:
-        DATE_PASSED: The due journal's date is behind today in the user's
-            timezone. The ordinary lapse.
+        DATE_PASSED: The due journal's last day is behind today in the user's
+            timezone: the journal has ended. The ordinary lapse.
         DUE_JOURNAL_CANCELLED: The due journal is a cancelled event. The moment
             the commitment was pinned to is not going to happen, whatever its
             date says.
@@ -63,7 +66,7 @@ class LapseReason(StrEnum):
 def derive_lapse_reason(
     *,
     status: TaskStatus,
-    due_journal_date: datetime.date,
+    due_journal_last_day: datetime.date,
     due_journal_cancelled: bool,
     today: datetime.date,
 ) -> LapseReason | None:
@@ -75,7 +78,11 @@ def derive_lapse_reason(
 
     Args:
         status: The task's current status
-        due_journal_date: The due journal's date, in the user's timezone
+        due_journal_last_day: The local date the due journal **ends** on, in
+            the user's timezone — its date itself for a single-day journal.
+            Named for the day it is so no caller passes the journal's first
+            day out of habit: that is the day a task is *due*, not the day it
+            becomes late.
         due_journal_cancelled: Whether the due journal is a cancelled event
         today: Today's date, in the user's timezone
 
@@ -96,12 +103,12 @@ def derive_lapse_reason(
     if due_journal_cancelled:
         return LapseReason.DUE_JOURNAL_CANCELLED
 
-    # Strictly before today, mirroring ``is_future_dated``'s strictly after.
-    # Today is neither future nor passed, so a task due today is outstanding
-    # rather than lapsed — and the read-time rule agrees with the write-time
-    # invariant about the same journal, which an inclusive boundary here would
-    # break the moment a task was created for a journal earlier the same day.
-    if due_journal_date < today:
+    # Strictly before today: a journal whose last day is today has not ended,
+    # so a task due in it is outstanding rather than lapsed. The write-time
+    # invariant (``is_future_dated``) asks about the journal's *first* day, and
+    # the two agree: a journal that may become a deadline cannot already have
+    # ended.
+    if due_journal_last_day < today:
         return LapseReason.DATE_PASSED
 
     return None

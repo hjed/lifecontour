@@ -336,17 +336,54 @@ class TestTaskDateState:
             lapse_reason=LapseReason.DUE_JOURNAL_CANCELLED, overdue=False
         )
 
-    def test_a_journal_only_task_due_in_a_multi_day_journal_lapses_after_its_start(
+    def test_a_journal_only_task_is_live_while_its_due_journal_is_in_progress(
         self,
     ) -> None:
-        """The lapse rule still dates a journal by its first day, unchanged."""
+        """A trip that started yesterday and ends tomorrow has not passed.
+
+        Lapse waits for the journal's **last** day, as overdue does for a list
+        task: one rule for when a task's date has passed, whatever kind of task
+        it is.
+        """
         state = derive_task_date_state(
             task=journal_only_task(),
             due_journal=journal_days(YESTERDAY, TOMORROW),
             today=TODAY,
         )
 
+        assert state == TaskDateState(lapse_reason=None, overdue=False)
+
+    def test_a_journal_only_task_is_live_on_its_due_journals_last_day(self) -> None:
+        """The last day itself is still the journal's; it has not ended."""
+        state = derive_task_date_state(
+            task=journal_only_task(),
+            due_journal=journal_days(TODAY - datetime.timedelta(days=4), TODAY),
+            today=TODAY,
+        )
+
+        assert state.lapse_reason is None
+
+    def test_a_journal_only_task_lapses_the_day_after_its_due_journal_ends(
+        self,
+    ) -> None:
+        """Once the last day has ended the task lapses, as before."""
+        state = derive_task_date_state(
+            task=journal_only_task(),
+            due_journal=journal_days(TODAY - datetime.timedelta(days=5), YESTERDAY),
+            today=TODAY,
+        )
+
         assert state.lapse_reason is LapseReason.DATE_PASSED
+
+    def test_a_cancelled_in_progress_due_journal_still_lapses(self) -> None:
+        """Cancellation lapses a journal-only task whatever its days."""
+        state = derive_task_date_state(
+            task=journal_only_task(),
+            due_journal=journal_days(YESTERDAY, TOMORROW, cancelled=True),
+            today=TODAY,
+        )
+
+        assert state.lapse_reason is LapseReason.DUE_JOURNAL_CANCELLED
 
     def test_a_journal_only_task_added_to_a_list_follows_list_rules(self) -> None:
         """Once on a list it stops lapsing and reads as overdue instead."""
